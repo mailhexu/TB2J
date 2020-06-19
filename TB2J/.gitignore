@@ -1,0 +1,5 @@
+*.o
+*.x
+*.mod
+exchanges.sublime-project
+exchanges.sublime-workspace
