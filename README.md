@@ -27,36 +27,15 @@ The theoretical background for exchanges calculation is described in
 * scipy
 * ASE (atomic simulation environment) 
 * matplotlib  (optional) if you want to plot magnon band structure directly. 
-* tbmodels
 * sisl (optional) for Siesta interface
 
 
-
 ## Installation
-- Download the package, uncompress it, or
-  git clone https://gitlab.abinit.org/xuhe/TB2J/master
-- cd TB2J
-- python setup.py install --user  
-
-    or 
-
-    python setup.py develop --user (if you want to keep the package up to date.)
-
-    The develop option is recommened since the package is still unstable. Changes may be made constantly.
-
-  Note: after installation, the wann2J.py command should be executable. In case it is not, it can be found at script/wann2J.py. Copy it to the system path and chmod +x wann2J.py if necessary.
-
-
-
-## Convention
-
-There are two groups of usual conventions to write Heisenberg hamiltonian as shown in the table below. If you use TB2J to generate the Heisenberg exchange parameters, *MAKE SURE YOU KNOW WHAT THE CONVENTION IS!*  By default, TB2J uses convention 2, which is also used in Multibinit. 
-
-In this table, $H$ is the Heisenberg Hamiltonian, J(LKAG) is the expression of J calculated from the Green's function, and J (mapping) shows another method which is often used to calculate J parameters.
-
-![Selection_080](/home/hexu/Pictures/Selection_080.bmp)
+pip install TB2J
 
 ## Usage
+
+### With Wannier90
 
 * Construct Wannier functions with DFT codes and Wannier90 for both spin channel. Note that all the band related to the exchange should be included in the basis set. For example, in transitional metal oxides, both transition metal $d$ orbitals and oxygen $p$ orbitals should be included.
 
@@ -178,6 +157,16 @@ optional arguments:
   For the use of spin_up and spin_down wannier function, do not use --spinor, and specify --prefix_up, and --prefix_down
 
 
+### With Siesta
+
+For calculating the  parameters  of  the  Heisenberg  Hamiltonian  the localized DFT Hamiltonian  and  the  overlap  matrix  need  to  be  saved. For example,   we can  use the  options  “CDF.Save=True”,  “SaveHS=True”,  and“Write.DMHS.Netcdf=True” in Siesta to enable thesaving of these matrices.
+
+Only a  minimal set of parameters is needed for Siesta: the filename of the input for the siesta calculation and defining the magnetic atomspecies; Most of the other information needed, including whether the calculation has SOC enabled and  the Fermi energy, are readily provided in the Siesta results.  We can get the exchange parameters, with one simple line of command,
+
+```
+siesta2J.py --input -fname=’siesta.fdf’ --element Fe 
+```
+
 ### Output files
 By running wann2J.py, a directory with the name TB2J_results will be generated. 
 The following output files will be inside the directory:
@@ -243,16 +232,9 @@ The examles are in the test folder.
 A tutorial from how to generate wannier function from DFT to calculation of J is in the tutorial directory. 
 
 
-## TODO
-  - [x] The output information is imcomplete and ugly formatted.
-  - [x] add calculation of magnon band structure as an option, which provide the Q-point information for multibinit. 
-  - [x] reduce memory usage
-  - [x] add output format to interface with Tom's ASD code
-  - [x] add interface to spinor wannier function, implement Dzyanoshinskii-Moriya & anistropy terms.
-
 ## Information
 
-The code is under constant modification at this stage. The standard format for multibinit input xml file is yet to be decided.  We encourage the testing of this code.
+The code is not in production at this stage.  We encourage the testing of this code.
 
 If you would like to be informed about the development of this code, please contact me (mailhexu(AT)gmail(DOT)com).  Serious bugs, or new functionality will be informed through email.
 
