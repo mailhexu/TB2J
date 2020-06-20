@@ -24,6 +24,7 @@ class BaseSpinModelParser(object):
         self.spinat = []
         self._exchange = {}
         self._dmi = {}
+        self._bilinear={}
         self._parse(fname)
         self.lattice = Atoms(
             positions=self.positions, masses=self.masses, cell=self.cell)
@@ -247,3 +248,27 @@ class SpinXmlParser(BaseSpinModelParser):
         assert len(
             self._exchange
         ) == n_exch, "Number of exchange terms different from nterms in xml file"
+        dmi = root.find('spin_DMI_list')
+        n_dmi= int(dmi.find('nterms').text)
+        for dm in dmi.findall('spin_DMI_term'):
+            ijR = [int(x) for x in dm.find('ijR').text.strip().split()]
+            i, j, R0, R1, R2 = ijR
+            val = [float(x) for x in dm.find('data').text.strip().split()]
+            self._dmi[(i - 1, j - 1, (R0, R1,
+                                           R2))] = np.array(val) * eV / J
+        assert len(
+            self._dmi
+        ) == n_dmi, f"Number of dmi terms {len(self._dmi)} different from nterms in xml file {n_dmi}"
+ 
+        bil = root.find('spin_bilinear_list')
+        n_bil= int(bil.find('nterms').text)
+        for bi in bil.findall('spin_bilinear_term'):
+            ijR = [int(x) for x in bi.find('ijR').text.strip().split()]
+            i, j, R0, R1, R2 = ijR
+            val = [float(x) for x in bi.find('data').text.strip().split()]
+            self._bil[(i - 1, j - 1, (R0, R1,
+                                           R2))] = np.array(val) * eV / J
+        assert len(
+            self._bil
+        ) == n_bil, f"Number of bilinear terms {len(self._bil)} different from nterms in xml file {n_bil}"
+ 

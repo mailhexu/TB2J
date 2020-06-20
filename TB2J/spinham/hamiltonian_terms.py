@@ -272,6 +272,50 @@ class DMITerm(TwoBodyTerm):
         return self._hessian_ijR
 
 
+class BilinearTerm(TwoBodyTerm):
+    """
+    Bilinear term
+    """
+    def __init__(self, bidict, ms):
+        """
+        J is given as a dict of {(i, j, R): val},
+         where R is a tuple, val is a scalar.
+        """
+        super(BilinearTerm, self).__init__(ms=ms)
+        self.bidict = bidict
+        bimat = defaultdict(float)
+        for key, val in self.bidict.items():
+            i, j, R = key
+            bimat[(i, j)] += np.array(val)
+
+        self.ilist, self.jlist = np.array(tuple(Dmat.keys()), dtype='int').T
+        self.vallist = np.array(tuple(bimat.values()))
+        self.jac = np.zeros((self.nmatoms, 3))
+        self.nij = self.vallist.shape[0]
+        self.Heff = np.zeros((self.nmatoms, 3))
+
+    def jacobian(self, S):
+        return self.hessian().dot(S.reshape(3 * self.nmatoms)).reshape(
+            self.nmatoms, 3)
+
+    def calc_hessian(self):
+        #self._hessian = np.zeros(self.nmatoms * 3, self.nmatoms * 3)
+        self._hessian = ssp.lil_matrix((self.nmatoms * 3, self.nmatoms * 3),
+                                       dtype=float)
+        for i, j, val in zip(self.ilist, self.jlist, self.vallist):
+            self._hessian[i * 3:i * 3 + 3, j * 3:j * 3 + 3] += np.array(val)
+        self._hessian = ssp.csr_matrix(self._hessian)
+        return self._hessian
+
+    def calc_hessian_ijR(self):
+        self._hessian_ijR = {}
+        for key, val in self.bidict.items():
+            i, j, R = key
+            self._hessian_ijR[(i, j, R)] = np.array(val)
+        return self._hessian_ijR
+
+
+
 class DipDip(TwoBodyTerm):
     """
     Dipolar interaction.

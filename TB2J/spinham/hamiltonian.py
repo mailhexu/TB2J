@@ -57,7 +57,7 @@ class SpinHamiltonian(object):
 
         # bilinear term
         self.has_bilinear = False
-        self.bilinear_Jdict = {}
+        self.bilinear_dict = None
 
         # calculation parameters
 
@@ -157,6 +157,13 @@ class SpinHamiltonian(object):
         self.dmi_ddict = dmi_ddict
         DMI = DMITerm(self.dmi_ddict, self.ms)
         self.hamiltonians['DMI'] = DMI
+
+    def set_bi_ijR(self, bilinear_dict):
+        self.has_bilinear= True
+        self.bilinear_dict = bilinear_dict
+        Bi = BilinearTerm(self.bilinear_dict, self.ms)
+        self.hamiltonians['Bilinear'] = Bi
+
 
     def set_dipdip(self):
         """
@@ -260,6 +267,11 @@ class SpinHamiltonian(object):
         if self.has_dmi:
             sc_dmi_ddict = smaker.sc_ijR(self.dmi_ddict, n_basis=len(self.pos))
             sc_ham.set_dmi_ijR(sc_dmi_ddict)
+
+        if self.has_bilinear:
+            sc_bilinear_dict = smaker.sc_ijR(self.bilinear_dict, n_basis=len(self.pos))
+            sc_ham.set_bilinear_ijR(sc_bilinear_dict)
+
 
         return sc_ham
 

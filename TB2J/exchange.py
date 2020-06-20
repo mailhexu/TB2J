@@ -355,8 +355,8 @@ class ExchangeNCL(Exchange):
                 for j in range(3):
                     if i!=j:
                         #Ja[i,j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
-                        #Ja[i,j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])/2.0
-                        Ja[i,j] =  -np.imag(val[i+1, j+1])
+                        Ja[i,j] = -np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])/2.0
+                        #Ja[i,j] =  -np.imag(val[i+1, j+1])
             if is_nonself:
                 self.Jani[keyspin] = Ja
 
