@@ -164,20 +164,11 @@ def plot_magnon_band(ham,
         fig, ax = plt.subplots()
     if knames is None or kvectors is None:
         from ase.cell import Cell
-        #from ase.build.tools import niggli_reduce_cell
-        #rcell, M = niggli_reduce_cell(ham.cell)
-        #fcell = fix_cell(ham.cell, eps=eps)
         if lattice_type is None:
             try:
                 lattice_type = crystal_structure_from_cell(ham.cell, eps=eps, niggli_reduce=False)
             except:
                 raise ValueError("Lattice type cannot be detected.")
-        #labels = parse_path_string(special_paths[lattice_type])
-        #knames = [item for sublist in labels for item in sublist]
-        #kpts, x, X = bandpath(
-        #    special_paths[lattice_type], ham.cell, npoints=npoints, eps=eps)
-
-        #spk = get_special_points(ham.cell,eps=eps)
         bp=Cell(ham.cell).bandpath(npoints=npoints)
         kpts=bp.kpts
         x,X, knames=bp.get_linear_kpoint_axis()
@@ -214,12 +205,13 @@ def plot_magnon_band(ham,
     print("%s\n"%kpts[np.argmin(evals[:,0])])
     print("\n The ground state is:")
     for i, ev in enumerate(evec_min):
-        print("spin %s: %s"%(i, ev/np.linalg.norm(ev)))
+        v=ev.real/np.linalg.norm(ev)
+        print("spin %s: (%.3f, %.3f, %.3f)"%(i, v[0],v[1],v[2]))
 
 
 
     for i in range(nbands):
-        ax.plot(x, (evals[:, i]-emin) / 1.6e-22)
+        ax.plot(x, (evals[:, i]-emin) / 1.6e-22, color='blue')
     ax.set_xlabel('Q-point')
     ax.set_ylabel('Energy (meV)')
     ax.set_xlim(x[0], x[-1])
