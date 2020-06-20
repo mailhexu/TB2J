@@ -19,6 +19,7 @@ class BaseSpinModelParser(object):
         self.spinat = []
         self._exchange = {}
         self._dmi = {}
+        self._bilinear = {}
         self._parse(fname)
         self.lattice = Atoms(
             positions=self.positions, masses=self.masses, cell=self.cell)
@@ -79,3 +80,8 @@ class BaseSpinModelParser(object):
     @property
     def has_dmi(self):
         return bool(len(self._dmi))
+
+    @property
+    def has_bilinear(self):
+        return bool(len(self._bilinear))
+

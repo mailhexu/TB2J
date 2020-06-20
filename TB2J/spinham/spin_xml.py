@@ -79,12 +79,22 @@ class BaseSpinModelParser(object):
         return self._dmi
 
     @property
+    def bilinear(self):
+        return self._bilinear
+
+
+    @property
     def has_exchange(self):
         return bool(len(self._exchange))
 
     @property
     def has_dmi(self):
         return bool(len(self._dmi))
+
+    @property
+    def has_bilinear(self):
+        return bool(len(self._bilinear))
+
 
 
 class SpinXmlWriter(object):
@@ -266,9 +276,9 @@ class SpinXmlParser(BaseSpinModelParser):
             ijR = [int(x) for x in bi.find('ijR').text.strip().split()]
             i, j, R0, R1, R2 = ijR
             val = [float(x) for x in bi.find('data').text.strip().split()]
-            self._bil[(i - 1, j - 1, (R0, R1,
-                                           R2))] = np.array(val) * eV / J
+            self._bilinear[(i - 1, j - 1, (R0, R1,
+                                           R2))] = np.array(val).reshape((3,3)) * eV / J
         assert len(
-            self._bil
+            self._bilinear
         ) == n_bil, f"Number of bilinear terms {len(self._bil)} different from nterms in xml file {n_bil}"
  

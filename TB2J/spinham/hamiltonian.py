@@ -2,7 +2,7 @@
 import numpy as np
 from collections import Iterable, defaultdict
 from .hamiltonian_terms import (ZeemanTerm, UniaxialMCATerm,
-                                              ExchangeTerm, DMITerm)
+                                              ExchangeTerm, DMITerm, BilinearTerm)
 from .constants import mu_B, gyromagnetic_ratio
 from .supercell import SupercellMaker
 
@@ -158,7 +158,7 @@ class SpinHamiltonian(object):
         DMI = DMITerm(self.dmi_ddict, self.ms)
         self.hamiltonians['DMI'] = DMI
 
-    def set_bi_ijR(self, bilinear_dict):
+    def set_bilinear_ijR(self, bilinear_dict):
         self.has_bilinear= True
         self.bilinear_dict = bilinear_dict
         Bi = BilinearTerm(self.bilinear_dict, self.ms)
@@ -330,4 +330,6 @@ def read_spin_ham_from_file(fname):
         ham.set_exchange_ijR(parser.exchange(isotropic=True))
     if parser.has_dmi:
         ham.set_dmi_ijR(parser.dmi)
+    if parser.has_bilinear:
+        ham.set_bilinear_ijR(parser.bilinear)
     return ham

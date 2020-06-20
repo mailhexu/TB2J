@@ -288,7 +288,7 @@ class BilinearTerm(TwoBodyTerm):
             i, j, R = key
             bimat[(i, j)] += np.array(val)
 
-        self.ilist, self.jlist = np.array(tuple(Dmat.keys()), dtype='int').T
+        self.ilist, self.jlist = np.array(tuple(bimat.keys()), dtype='int').T
         self.vallist = np.array(tuple(bimat.values()))
         self.jac = np.zeros((self.nmatoms, 3))
         self.nij = self.vallist.shape[0]
