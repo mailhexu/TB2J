@@ -12,7 +12,12 @@ Welcome to TB2J's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   install.md
+   src/install.md
+   src/wannier.md
+   src/siesta.md
+   src/rotate_and_merge.md
+   src/output.md
+   src/multibinit.md
 
 
 Indices and tables
