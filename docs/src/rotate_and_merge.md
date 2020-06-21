@@ -1,1 +1,1 @@
-# Using rotate and merge in TB2J
+# Use rotate and merge in TB2J
