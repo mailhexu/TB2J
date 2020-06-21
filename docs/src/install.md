@@ -1,4 +1,15 @@
 # Installation
+
+## Dependencies
+* python (>=3.6)
+* numpy 
+* scipy
+* ASE (atomic simulation environment) 
+* matplotlib
+* sisl (optional) for Siesta interface
+* GPAW (optional) For gpaw interface
+
+## How to install
 The most easy way to install TB2J is to use pip:
 ```
 pip install TB2J
@@ -14,3 +25,7 @@ The --user option will help if it is not installed to there is permission proble
 
 It is suggested that it being installed within a virtual environment e.g. pyenv or conda.
 
+By default, TB2J only force the non-optional dependencies to be installed. The
+sisl package which is used to read the Hamiltonian from the Siesta or OpenMX
+output is needed, which can also be installed with pip. The GPAW-TB2J interface is through python
+directly, which of course requires the GPAW python package.  
