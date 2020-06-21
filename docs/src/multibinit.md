@@ -1,4 +1,7 @@
-# Spin model in MULTIBINIT
+# Application: Spin model in MULTIBINIT
+
+The output of TB2J can be directly readed by several atomistic spin dynamics and Monte Carlo code. Here we show how to use MULTIBINIT, a second principles code which can do spin dynamics. 
+It is a part of the ABINIT package since version 9.0. 
 
 ## Build a spin model and run spin dynamics in MULTIBINIT
 
@@ -12,55 +15,8 @@ With this lesson, you will learn to:
   * Determine the critical temperature for a magnetic phase transition
   * Calculate spin canting angles for systems with Dzyaloshinskii-Moriya interaction
 
-The TB2J python package, which can be used to generate a spin model, can be found on the ABINIT gitlab website at https://gitlab.abinit.org/xuhe/TB2J. This package will be included in the ABINIT package in the future.
 
-*Before beginning, you might consider to work in a subdirectory for this tutorial. Why not Work_spindyn?*
-
-[TUTORIAL_README]
-
-## 1 Heisenberg Model formalism
-
-The spin model, as implemented in MULTIBINIT, is defined as a classical Heisenberg model. In the current version of MULTIBINIT, we consider the following interactions: exchange interaction, single ion anisotropy (SIA), Dzyaloshinski-Moriya (DM) interaction, external magnetic fields. The total energy then reads as
-
-$$E = E^{exc}+E^{SIA} + E^{DM}+E^{ext}.$$
-
-The exchange energy $E^{exc}$ can be written as
-
-$$E^{exc} =- \sum_{i\neq j} J_{ij} \vec{S_i}\cdot{\vec{S_j}}$$
-
-A few conventions used in MULTIBINIT should be noted:
-
-- all the $\vec{S}$ are normalized to 1.
-- Both $J_{ij}$ and $J_{ji}$ are in the Hamiltonian.
-- There is a minus sign, which means that the interaction is ferromagnetic for $J_{ij} >0$.
-
-As the sites $i$ and $j$ defined in the model are in a finite cell (often the primitive cell), there are interactions between sites in the same cell and between sites in two different cells. The position vector of a site $j'$ in a different cell than site $i$ is denoted as $\vec{r}_{j'}=\vec{r}_j+\vec{R}$ with $\vec{R}$ being a combination of lattice vectors. For a site $j$ in the same cell as site $i$ the lattice vector $\vec{R}$ is $(0,0,0)$. Due to translation symmetry we can choose the lattice vector for site $i$ to be $\vec{R}=\vec{0}$. Hence, we denote the Heisenberg coefficients as $J_{ij}(\vec{R})$ and drop the prime for the sites in different cells.
-
-The SIA term can be written as
-
-$$E^{SIA}=-k_u \sum_i (\vec{S_i}\cdot \vec{e})^2,$$
-
-where $k_u$ and $\vec{e}$ are the amplitude and direction of the single ion anisotropy.
-
-The DM term can be written as
-
-$$ E^{DM} = \sum_{i\neq j} \vec{D}_{ij}\cdot \vec{S_i}\times{\vec{S_j}},$$
-
-where $\vec{D_{ij}}$ is the amplitude of the DM interaction.
-
-The external magnetic field term can be written as
-
-$$E^{ext}=- \sum_i   m_{i}   \vec{S_i}\cdot \vec{H},$$
-
-where $m_i$ denotes the magnetic moment of site $i$, and $\vec{H}$ is the magnetic field.
-
-
-
-## 2. Build spin model file
-
-One way to calculate the Heisenberg model parameters is to use the spin force theorem (see [[cite:Liechtenstein1983]], [[cite:Katsnelson2000]]), for which one perturbs the system by rotating  localized spins. In ABINIT, the Hamiltonian uses plane waves as a basis set, thus the localized spin is not directly accessible. We can construct localized Wannier functions and rewrite the Hamiltonian in the Wannier basis. Then, the exchange parameters can be calculated from this Hamiltonian ( [[cite:Korotin2015]] ).
-
-## 3. Run spin dynamics
+##  Run spin dynamics
 
 ### Basic: how to use MULTIBINIT to run spin dynamics
 

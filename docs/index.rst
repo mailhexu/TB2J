@@ -13,6 +13,7 @@ Welcome to TB2J's documentation!
    :caption: Contents:
 
    src/install.md
+   src/convention.md
    src/wannier.md
    src/siesta.md
    src/rotate_and_merge.md
