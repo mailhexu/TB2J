@@ -18,6 +18,8 @@ Welcome to TB2J's documentation!
    src/rotate_and_merge.md
    src/output.md
    src/multibinit.md
+   src/extend.md
+   src/Contributors.md
    src/references
 
 
