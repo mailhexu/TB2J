@@ -44,7 +44,7 @@ class Exchange():
         self.nz3 = nz3
         if nz is None:
             self.nz = nz1 + nz2 + nz3
-        self.kmesh = kmesh
+        self._prepare_kmesh(kmesh)
         self.Rcut= Rcut
         self.basis = basis
         self.magnetic_elements = magnetic_elements
@@ -68,6 +68,11 @@ class Exchange():
 
     def set_tbmodels(self, tbmodels):
         pass
+
+    def _prepare_kmesh(self, kmesh):
+        for k in kmesh:
+            self.kmesh=list(map(lambda x: x//2*2+1, kmesh))
+
 
     def _prepare_elist(self, method='semicircle'):
         """
@@ -178,8 +183,7 @@ class Exchange():
                         self.distance_dict[(tuple(R), ispin, jspin)] = (vec,
                                                                     distance)
                         self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
-                        if tuple(R) not in self.short_Rlist:
-                            self.short_Rlist.append(tuple(R))
+        self.short_Rlist=list(self.R_ijatom_dict.keys())
 
 
     def iorb(self, iatom):
@@ -423,7 +427,7 @@ class ExchangeNCL(Exchange):
         """
         Ddict_NJT = {}
         Jdict_NJT = {}
-        for R in self.Rlist:
+        for R in self.short_Rlist:
             N = self.N[tuple(-np.array(R))]  # density matrix
             t = self.tbmodel.get_hamR(R)  # hopping parameter
             for iatom in self.ind_mag_atoms:

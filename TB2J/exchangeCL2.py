@@ -119,7 +119,6 @@ class ExchangeCL2(ExchangeCL):
                         self.Jorb[(Rm, jatom, iatom)] += t * de / (4.0 * np.pi)
                         self.JJ[(Rm, jatom, iatom)] += tmp * de / (4.0 * np.pi)
                         Rij_done.add((Rm,jatom, iatom))
-            
                             
 
     def A_to_Jtensor(self):
@@ -184,8 +183,8 @@ class ExchangeCL2(ExchangeCL):
             bar.update(ie)
             e = self.contour.path[ie]
             de = self.contour.de[ie]
-            GR_up = self.Gup.get_GR(self.Rlist, energy=e)
-            GR_dn = self.Gdn.get_GR(self.Rlist, energy=e)
+            GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
+            GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
             self.get_rho_e(GR_up, GR_dn, de)
             self.get_all_A(GR_up, GR_dn, de)
             if self.ne is not None and self.get_total_charges()>self.ne:
