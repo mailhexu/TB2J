@@ -137,15 +137,17 @@ class ExchangeCL2(ExchangeCL):
                 self.exchange_Jdict[keyspin] = Jij
                 self.exchange_Jdict_orb[keyspin] =Jorbij
 
-    def get_rho_e(self, GR_up, GR_dn, de):
-        GR0_up = GR_up[(0, 0, 0)]
-        GR0_dn = GR_dn[(0, 0, 0)]
-        if self.is_orthogonal:
-            self.rho_up += -1.0 / np.pi * np.imag(GR0_up * de)
-            self.rho_dn += -1.0 / np.pi * np.imag(GR0_dn * de)
-        else:
-            self.rho_up += -1.0 / np.pi * np.imag(self.S0@GR0_up * de)
-            self.rho_dn += -1.0 / np.pi * np.imag(self.S0@GR0_dn * de)
+    def get_rho_e(self, rho_up, rho_dn, de):
+        #GR0_up = GR_up[(0, 0, 0)]
+        #GR0_dn = GR_dn[(0, 0, 0)]
+        #if self.is_orthogonal:
+        #    self.rho_up += -1.0 / np.pi * np.imag(GR0_up * de)
+        #    self.rho_dn += -1.0 / np.pi * np.imag(GR0_dn * de)
+        #else:
+        #    self.rho_up += -1.0 / np.pi * np.imag(self.S0@GR0_up * de)
+        #    self.rho_dn += -1.0 / np.pi * np.imag(self.S0@GR0_dn * de)
+        self.rho_up += -1.0 / np.pi * np.imag(rho_up[(0,0,0)] * de)
+        self.rho_down += -1.0 / np.pi * np.imag(rho_down[(0,0,0)] * de)
 
     def get_rho_atom(self):
         """
@@ -183,12 +185,10 @@ class ExchangeCL2(ExchangeCL):
             bar.update(ie)
             e = self.contour.path[ie]
             de = self.contour.de[ie]
-            GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
-            GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
-            self.get_rho_e(GR_up, GR_dn, de)
+            GR_up, rho_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=True)
+            GR_dn, rho_up = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=True)
+            self.get_rho_e(rho_up, rho_dn, de)
             self.get_all_A(GR_up, GR_dn, de)
-            if self.ne is not None and self.get_total_charges()>self.ne:
-                break
         self.get_rho_atom()
         self.A_to_Jtensor()
         bar.finish()

@@ -102,10 +102,19 @@ class SislWrapper():
         return self.Hk(k, convention=convention)
 
     def Sk(self, k, convention=2):
-        S0=self.ham.Sk(k, format='dense')
+        if convention==1:
+            gauge='r'
+        elif convention==2:
+            gauge='R'
+        S0=self.ham.Sk(k, gauge='R', format='dense')
+        #print(f"shape:{S0.shape}")
+        #print(f"{self.nbasis}")
         if self.spin is None:
-            S=np.hstack([S0[::2,:], S0[1::2,:]])
-            S=np.vstack([S[:,::2], S[:,1::2]])
+            S=np.vstack([S0[::2,:], S0[1::2,:]])
+            S=np.hstack([S[:,::2], S[:,1::2]])
+            #S=np.zeros((self.nbasis, self.nbasis), dtype='complex')
+            #S[:self.norb,:self.norb]=S0
+            #S[self.norb:, self.norb:]=S0
             #S=np.zeros((self.nbasis, self.nbasis), dtype='complex')
             #S[:self.nbasis//2,:self.norb//2]=S0
             #S[self.norb//2:, self.norb//2:]=S0
@@ -139,6 +148,8 @@ class SislWrapper():
         H=[]
         S=[]
         for ik, k in enumerate(kpts):
+            Hk = self.Hk(k, convention=convention)
+            Sk = self.Sk(k, convention=convention)
             H.append(self.Hk(k, convention=convention))
             S.append(self.Sk(k, convention=convention))
             evalue, evec = self.solve(k, convention=convention)

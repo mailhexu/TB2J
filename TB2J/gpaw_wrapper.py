@@ -87,6 +87,7 @@ class GPAWWrapper():
         self.norb=len(self.positions)
         self.nbasis=self.norb*2
 
+
     #def gen_ham(self, k):
     #    H_MM=self.wfs.eigensolver.calculate_hamiltonian_matrix(self.h, self.wfs, k)
     #    tri2full(H_MM*Ha)
@@ -119,11 +120,13 @@ class GPAWWrapper():
         evecs=np.zeros((nkpt, nspin*nbasis, nspin*nbasis),dtype=complex)
         if self.calc.get_spin_polarized():
             H2=np.zeros((nkpt, nspin*nbasis, nspin*nbasis),dtype=complex)
-            H2[:, :nbasis, :nbasis]=H[0]
-            H2[:, nbasis:, nbasis:]=H[1]
+            # spin up
+            H2[:, :nbasis, :nbasis]=H[0].conj()
+            # spin down
+            H2[:, nbasis:, nbasis:]=H[1].conj()
             S2=np.zeros((nkpt, nspin*nbasis, nspin*nbasis),dtype=complex)
-            S2[:, :nbasis, :nbasis]=S
-            S2[:, nbasis:, nbasis:]=S
+            S2[:, :nbasis, :nbasis]=S.conj()
+            S2[:, nbasis:, nbasis:]=S.conj()
 
             for ikpt, k in enumerate(self.calc.get_ibz_k_points()):
                 evals0, evecs0 = eigh(H[0, ikpt,:,:], S[ikpt,:,:])

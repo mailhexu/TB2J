@@ -285,3 +285,4 @@ class SpinXmlParser(BaseSpinModelParser):
                 self._bilinear
             ) == n_bil, f"Number of bilinear terms {len(self._bil)} different from nterms in xml file {n_bil}"
      
+        

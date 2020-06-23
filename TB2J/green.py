@@ -59,9 +59,11 @@ class TBGreen():
         #     self.evals[ik, :], self.evecs[ik, :, :] =self.tbmodel.solve(tuple(k))
         #     self.H0 += Hk / len(self.kpts)
         H,S,self.evals, self.evecs=self.tbmodel.HS_and_eigen(self.kpts)
+        self.H=H
         self.H0=np.sum(H, axis=0)/len(self.kpts)
         if S is not None:
             self.is_orthogonal=False
+            self.S=S
             self.S0=np.sum(S, axis=0)/len(self.kpts)
         else:
             self.is_orthogonal=True
@@ -78,9 +80,10 @@ class TBGreen():
             evecs=self.evecs[ik, :, :],
             efermi=self.efermi,
             energy=energy)
+        #Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
-    def get_GR(self, Rpts, energy):
+    def get_GR(self, Rpts, energy, get_rho=False):
         """ calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
@@ -90,12 +93,22 @@ class TBGreen():
         """
         Rpts = [tuple(R) for R in Rpts]
         GR = defaultdict(lambda: 0.0j)
+        rhoR = defaultdict(lambda: 0.0j)
         for ik, kpt in enumerate(self.kpts):
             Gk = self.get_Gk(ik, energy)
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                GR[R] += Gk * (phase * self.kweights[ik])
-        return GR
+                tmp=Gk * (phase * self.kweights[ik])
+                GR[R] += tmp
+                if get_rho:
+                    if self.is_orthogonal:
+                        rhoR[R]+=tmp
+                    else:
+                        rhoR[R]+=self.S[ik]@tmp
+        if get_rho:
+            return GR, rhoR
+        else:
+            return GR
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """

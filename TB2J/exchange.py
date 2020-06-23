@@ -375,9 +375,9 @@ class ExchangeNCL(Exchange):
             if is_nonself:
                 Si = self.spinat[iatom]
                 Sj = self.spinat[jatom]
-                #Jprime = np.imag(val[0, 0] - val[3, 3]) - 2 * np.sign(
-                #    np.dot(Si, Sj)) * np.imag(val[3, 3])
-                Jprime = np.imag(val[0, 0] - 3*val[3, 3])
+                Jprime = np.imag(val[0, 0] - val[3, 3]) - 2 * np.sign(
+                    np.dot(Si, Sj)) * np.imag(val[3, 3])
+                #Jprime = np.imag(val[0, 0] - 3*val[3, 3])
                 B = np.imag(val[3, 3])
                 self.B[keyspin] = Jprime, B
 
@@ -388,16 +388,18 @@ class ExchangeNCL(Exchange):
         for R, G in GR.items():
             self.N[R] += -1.0 / np.pi * np.imag(G * de)
 
-    def get_rho_e(self, GR, de):
+    def get_rho_e(self, rhoR, de):
         """ add component to density matrix from a green's function
         :param GR: Green's funciton in real space.
         :param de: energy step
         """
-        GR0 = GR[(0, 0, 0)]
-        if self.G.is_orthogonal:
-            self.rho += -1.0 / np.pi * np.imag(GR0 * de)
-        else:
-            self.rho += -1.0 / np.pi * np.imag(self.S0@GR0 * de)
+        #GR0 = GR[(0, 0, 0)]
+        #if self.G.is_orthogonal:
+        #    self.rho += -1.0 / np.pi * np.imag(GR0 * de)
+        #else:
+        #    self.rho += -1.0 / np.pi * np.imag(self.S0@GR0 * de)
+        self.rho += -1.0 / np.pi * np.imag(rhoR[0,0,0] * de)
+        
 
     def get_total_charges(self):
         return np.sum(np.real(np.diag(self.rho)))
@@ -490,8 +492,8 @@ class ExchangeNCL(Exchange):
             #    continue
             e = self.contour.path[ie]
             de = self.contour.de[ie]
-            GR = self.G.get_GR(self.short_Rlist, energy=e)
-            self.get_rho_e(GR, de)
+            GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
+            self.get_rho_e(rhoR, de)
             self.get_all_A(GR, de)
             if self.calc_NJt:
                 self.get_N_e(GR, de)
