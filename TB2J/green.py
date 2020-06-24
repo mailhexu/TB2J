@@ -96,15 +96,17 @@ class TBGreen():
         rhoR = defaultdict(lambda: 0.0j)
         for ik, kpt in enumerate(self.kpts):
             Gk = self.get_Gk(ik, energy)
+            if get_rho:
+                if self.is_orthogonal:
+                    rhok = Gk
+                else:
+                    rhok=self.S[ik]@Gk
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
                 tmp=Gk * (phase * self.kweights[ik])
                 GR[R] += tmp
                 if get_rho:
-                    if self.is_orthogonal:
-                        rhoR[R]+=tmp
-                    else:
-                        rhoR[R]+=self.S[ik]@tmp
+                    rhoR[R]+=rhok*(phase * self.kweights[ik])
         if get_rho:
             return GR, rhoR
         else:
