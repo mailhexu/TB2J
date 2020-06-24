@@ -59,7 +59,6 @@ class TBGreen():
         #     self.evals[ik, :], self.evecs[ik, :, :] =self.tbmodel.solve(tuple(k))
         #     self.H0 += Hk / len(self.kpts)
         H,S,self.evals, self.evecs=self.tbmodel.HS_and_eigen(self.kpts)
-        self.H=H
         self.H0=np.sum(H, axis=0)/len(self.kpts)
         if S is not None:
             self.is_orthogonal=False
@@ -80,6 +79,7 @@ class TBGreen():
             evecs=self.evecs[ik, :, :],
             efermi=self.efermi,
             energy=energy)
+        # A slower version. For test.
         #Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
