@@ -147,7 +147,7 @@ class ExchangeCL2(ExchangeCL):
         #    self.rho_up += -1.0 / np.pi * np.imag(self.S0@GR0_up * de)
         #    self.rho_dn += -1.0 / np.pi * np.imag(self.S0@GR0_dn * de)
         self.rho_up += -1.0 / np.pi * np.imag(rho_up[(0,0,0)] * de)
-        self.rho_down += -1.0 / np.pi * np.imag(rho_down[(0,0,0)] * de)
+        self.rho_dn += -1.0 / np.pi * np.imag(rho_dn[(0,0,0)] * de)
 
     def get_rho_atom(self):
         """
@@ -186,7 +186,7 @@ class ExchangeCL2(ExchangeCL):
             e = self.contour.path[ie]
             de = self.contour.de[ie]
             GR_up, rho_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=True)
-            GR_dn, rho_up = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=True)
+            GR_dn, rho_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=True)
             self.get_rho_e(rho_up, rho_dn, de)
             self.get_all_A(GR_up, GR_dn, de)
         self.get_rho_atom()
