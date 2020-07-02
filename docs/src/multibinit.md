@@ -7,7 +7,7 @@ It is a part of the ABINIT package since version 9.0.
 
 This lesson aims at showing how to build a spin model and run a spin dynamics calculation.
 
-**Before beginning, it is important to know the theory of spin dynamics, which can be found in the literature (e.g.[[cite: Evans2014]], [[cite: Eriksson2017]] ).**
+**Before beginning, it is important to know the theory of spin dynamics, which can be found in the literature 
 
 With this lesson, you will learn to:
 
@@ -260,22 +260,8 @@ It shows that the the spins have anti-parallel alignment along the easy axis (x)
 
 
 
-## 5. Postprocessing
-
-<!-- TODO: agate -->
-
-### Tips:
-
-* Anti-ferromagnetic/ spin spiral structure.
-
-  In the example above, the magnetic structure is anti-ferromagnetic,  where the unit cell is a multiple of the spin period. Sometimes the unit cell used does not contain the full period of spin, e.g. in a simple cubic AFM lattice with only one atom in the primitive cell.  We can use the magnetic wave vector to calculate the staggered magnetic moment. This is also useful for spin spiral structures, etc.
-
-  ```
-  spin_projection_qpoint = 0.5 0.5 0.5
-  ```
 
 
-#####
 
 
 

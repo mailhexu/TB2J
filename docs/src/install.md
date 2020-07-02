@@ -25,7 +25,7 @@ The --user option will help if there is permission problem.
 
 It is suggested that it being installed within a virtual environment using e.g. pyenv or conda.
 
-By default, TB2J only force the non-optional dependencies to be installed automatically. The
+By default, TB2J only forces the non-optional dependencies to be installed automatically. The
 sisl package which is used to read the Hamiltonian from the Siesta or OpenMX
 output is needed, which can also be installed with pip. The GPAW-TB2J interface is through python
-directly, which of course requires the GPAW python package.  
+directly, which of course requires the gpaw python package. The sisl and gpaw python package can be installed via pip, too.

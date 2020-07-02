@@ -2,8 +2,8 @@
 The main contributors to the TB2J package are:
 - Xu He (mailhexu@gmail.com)
 - Nicole Helbig
-- Matthieu Verstraete (ULG)
-- Eric Bousquet (ULG)
+- Matthieu Verstraete
+- Eric Bousquet
 
 We welcome contributions. You can help us with
 - extend the input format to other codes, e.g. first principles or tight binding code.

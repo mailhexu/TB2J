@@ -36,8 +36,8 @@ For a detailed explanation of the input variables for Wannier90 please see [Wann
 # write the postitions of WF
 write_xyz = true
 
-# write the WF Hamiltonian (Note for W90 version>2.1, it is write_hr)
-hr_plot = true                 
+# write the WF Hamiltonian (Note for W90 version<2.1, it is hr_plot)
+write_hr = true                 
  
 ```
 
@@ -92,12 +92,12 @@ Usually, 3d orbitals have a spread of less than 1 $\AA$, and the O 2p orbitals h
 
 ### Step 2: Run TB2J
 
-Before running TB2J, an extra file, which contains the atomic structure, needs to be prepared. It can be either a cif file, or a VASP POSCAR file. (For abinit, the abinit.in file is also fine if no fancy feature is used, like use of *, or units. cif or POSCAR files are recommended because they are simple.)
+Before running TB2J, an extra file, which contains the atomic structure, needs to be prepared. It can be either a VASP POSCAR file. (For abinit, the abinit.in file is also fine if no fancy feature is used, like use of *, or units.  POSCAR files are recommended because they are simple.)
 
 With the WF Hamiltonian generated, we can calculate the exchange parameters now. In the scripts directory inside your TB2J directory you find the wann2J.py script. Please make sure that it is executable and issue the command
 
 ```
-wann2J.py --efermi 6.15 --kmesh 4 4 4 --elements Mn --prefix_up abinito_w90_up --prefix_down abinito_w90_down --rrange 1 1 1 --emin -10.0 --emax 0.0 --height 0.1
+wann2J.py --efermi 6.15 --kmesh 4 4 4 --elements Mn --prefix_up abinito_w90_up --prefix_down abinito_w90_down  --emin -10.0 --emax 0.0 
 ```
 
 The parameters are:
@@ -107,7 +107,6 @@ The parameters are:
 * elements: the magnetic elements
 * prefix_up: prefix for spin up channel of the Wannier90 output 
 * prefix_down: prefix for spin down channel of Wannier90 output.
-* rrange: cutoff of supercell box. 1 1 1 means in each direction, 3 units from -1 to 1 will be considered.
 * emin: the lower limit of the electron energy. (in eV, relative to Fermi energy.)
 * emax: the upper limit of the electron energy. Should be close to zero.
 * height:  the smearing
@@ -116,9 +115,7 @@ Now we should have the files containing the J parameters in the TB2J_results dir
 
 ```
 TB2J_results/
-├── exchange_distance.txt
-├── exchange.out
-├── exchange.xml
+├── exchange.txt
 ├── Multibinit
 │   ├── exchange.xml
 │   ├── mb.files
@@ -126,11 +123,6 @@ TB2J_results/
 ├── TomASD
 │   ├── exchange.exch
 │   └── exchange.ucf
-├── UppASD
-│   ├── input
-│   ├── jASD1
-│   ├── momfile
-│   └── posfile
 └── Vampire
     ├── input
     ├── vampire.mat

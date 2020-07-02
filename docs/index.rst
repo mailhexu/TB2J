@@ -18,6 +18,7 @@ Welcome to TB2J's documentation!
    src/siesta.md
    src/rotate_and_merge.md
    src/output.md
+   src/magnon_band.md
    src/multibinit.md
    src/extend.md
    src/Contributors.md

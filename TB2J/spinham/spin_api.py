@@ -26,9 +26,9 @@ class SpinModel():
     def ham(self, ham):
         self._ham = ham
 
-    @property
-    def S(self):
-        return self.mover.s
+    #@property
+    #def S(self):
+    #    return self.mover.s
 
     @property
     def nspin(self):
@@ -39,27 +39,26 @@ class SpinModel():
 
     def set(self, **kwargs):
         self.params.set(**kwargs)
-        self.mover.set(
-            time_step=self.params.time_step,
-            temperature=self.params.temperature,
-            total_time=self.params.total_time,
-        )
+        # self.mover.set(
+        #     time_step=self.params.time_step,
+        #     temperature=self.params.temperature,
+        #     total_time=self.params.total_time,
+        # )
 
     def make_supercell(self, sc_matrix=None, supercell_maker=None):
         self._ham = self._ham.make_supercell(
             sc_matrix=sc_matrix, supercell_maker=supercell_maker)
-        self.mover = SpinMover(self._ham)
+        #self.mover = SpinMover(self._ham)
         return self
 
-    def run_one_step(self):
-        self.mover.run_one_step()
+    # def run_one_step(self):
+    #     self.mover.run_one_step()
 
-    def run_time(self):
-        self.mover.run()
+    # def run_time(self):
+    #     self.mover.run()
 
     def plot_magnon_band(
             self,
-            lattice_type=None,
             kvectors=np.array([[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0],
                                [0, 0, 0], [.5, .5, .5]]),
             knames=['$\Gamma$', 'X', 'M', '$\Gamma$', 'R'],
@@ -70,7 +69,6 @@ class SpinModel():
             kpath_fname=None,
     ):
         self._ham.plot_magnon_band(
-            lattice_type=lattice_type,
             kvectors=kvectors,
             knames=knames,
             supercell_matrix=supercell_matrix,

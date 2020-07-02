@@ -1,13 +1,18 @@
 #!/usr/bin/env python
 import numpy as np
 from collections import Iterable, defaultdict
-from .hamiltonian_terms import (ZeemanTerm, UniaxialMCATerm,
-                                              ExchangeTerm, DMITerm, BilinearTerm)
+import matplotlib.pyplot as plt
+from ase.dft.kpoints import bandpath, monkhorst_pack
+from .hamiltonian_terms import (ZeemanTerm, UniaxialMCATerm, ExchangeTerm,
+                                DMITerm, BilinearTerm)
 from .constants import mu_B, gyromagnetic_ratio
 from .supercell import SupercellMaker
-
 from .spin_xml import SpinXmlParser, SpinXmlWriter
-from .plot import plot_magnon_band
+#from .plot import plot_magnon_band
+from ase.cell import Cell
+#from minimulti.spin.hamiltonian import SpinHamiltonian
+#from minimulti.spin.mover import SpinMover
+from .qsolver import QSolver
 
 
 class SpinHamiltonian(object):
@@ -21,10 +26,10 @@ class SpinHamiltonian(object):
                  iprim=None):
         if xcart is None:
             self.xcart = np.dot(pos, cell)
-            self.pos=pos
+            self.pos = pos
         elif pos is None:
-            self.pos = np.dot( xcart, np.linalg.inv(cell))
-            self.xcart=xcart
+            self.pos = np.dot(xcart, np.linalg.inv(cell))
+            self.xcart = xcart
         self.cell = cell
         self.xcart = pos
         self.spinat = spinat
@@ -137,9 +142,6 @@ class SpinHamiltonian(object):
         if gyro_ratio is not None:
             self.gyro_ratio = np.array(gyro_ratio)
 
-    def randomize_spin(self):
-        raise NotImplementedError("not yet implemented")
-
     def set_exchange_ijR(self, exchange_Jdict):
         """
         J: [(i,j, R, J_{ijR})] J_{ijR} is a scalar
@@ -159,11 +161,10 @@ class SpinHamiltonian(object):
         self.hamiltonians['DMI'] = DMI
 
     def set_bilinear_ijR(self, bilinear_dict):
-        self.has_bilinear= True
+        self.has_bilinear = True
         self.bilinear_dict = bilinear_dict
         Bi = BilinearTerm(self.bilinear_dict, self.ms)
         self.hamiltonians['Bilinear'] = Bi
-
 
     def set_dipdip(self):
         """
@@ -235,13 +236,12 @@ class SpinHamiltonian(object):
 
         sc_spinat = np.array(smaker.sc_trans_invariant(self.spinat))
 
-        sc_ham = SpinHamiltonian(
-            cell=sc_cell,
-            pos=sc_pos,
-            spinat=sc_spinat,
-            zion=sc_zion,
-            Rlist=sc_Rlist,
-            iprim=sc_iprim)
+        sc_ham = SpinHamiltonian(cell=sc_cell,
+                                 pos=sc_pos,
+                                 spinat=sc_spinat,
+                                 zion=sc_zion,
+                                 Rlist=sc_Rlist,
+                                 iprim=sc_iprim)
 
         sc_gyro_ratio = np.array(smaker.sc_trans_invariant(self.gyro_ratio))
         sc_ham.gyro_ratio = sc_gyro_ratio
@@ -260,8 +260,8 @@ class SpinHamiltonian(object):
             sc_ham.set_uniaxial_mca(sc_k1, np.array(sc_k1dir))
 
         if self.has_exchange:
-            sc_Jdict = smaker.sc_ijR(
-                self.exchange_Jdict, n_basis=len(self.pos))
+            sc_Jdict = smaker.sc_ijR(self.exchange_Jdict,
+                                     n_basis=len(self.pos))
             sc_ham.set_exchange_ijR(exchange_Jdict=sc_Jdict)
 
         if self.has_dmi:
@@ -269,15 +269,15 @@ class SpinHamiltonian(object):
             sc_ham.set_dmi_ijR(sc_dmi_ddict)
 
         if self.has_bilinear:
-            sc_bilinear_dict = smaker.sc_ijR(self.bilinear_dict, n_basis=len(self.pos))
+            sc_bilinear_dict = smaker.sc_ijR(self.bilinear_dict,
+                                             n_basis=len(self.pos))
             sc_ham.set_bilinear_ijR(sc_bilinear_dict)
-
 
         return sc_ham
 
     def calc_total_HijR(self):
-        self._total_hessian_ijR = defaultdict(lambda: np.zeros((3, 3),
-                                                               dtype=float))
+        self._total_hessian_ijR = defaultdict(lambda: np.zeros(
+            (3, 3), dtype=float))
         for tname, term in self.hamiltonians.items():
             if term.is_twobody_term():
                 for key, val in term.hessian_ijR().items():
@@ -289,8 +289,51 @@ class SpinHamiltonian(object):
             self.calc_total_HijR()
         return self._total_hessian_ijR
 
+    def solve_k(self, kpts):
+        """
+        Get the eigenvalues and eigenvectors for the kpoints
+        """
+        qsolver = QSolver(hamiltonian=self)
+        evals, evecs = qsolver.solve_all(kpts, eigen_vectors=True)
+        return evals, evecs
+
+    def write_magnon_info(self, kpts, evals, evecs, fname, special_kpoints={}):
+        """
+        kpts: the list of kpoints
+        evals: eigen values
+        evecs: eigen vectors
+        fname: the name of the output file
+        spk: special kpoints
+        """
+        imin = np.argmin(evals[:, 0])
+        #emin = np.min(evals[:, 0])
+        nspin = evals.shape[1] // 3
+        evec_min = evecs[imin, :, 0].reshape(nspin, 3)
+
+        # write information to file
+        if fname is not None:
+            with open(fname, 'w') as myfile:
+                myfile.write("K-points:\n")
+                for name, k in spk.items():
+                    myfile.write("%s: %s\n" % (name, k))
+                myfile.write("\nThe energy minimum is at:")
+                myfile.write("%s\n" % kpts[np.argmin(evals[:, 0])])
+                for i, ev in enumerate(evec_min):
+                    myfile.write("spin %s: %s \n" %
+                                 (i, ev / np.linalg.norm(ev)))
+        print("\nThe energy minimum is at:")
+        print("%s\n" % kpts[np.argmin(evals[:, 0])])
+        print("\n The ground state is:")
+        for i, ev in enumerate(evec_min):
+            v = ev.real / np.linalg.norm(ev)
+            print("spin %s: (%.3f, %.3f, %.3f)" % (i, v[0], v[1], v[2]))
+
+    def find_ground_state_from_kmesh(self, kmesh):
+        kpts = monkhorst_pack(kmesh)
+        evals, evecs = self.solve_k(kpts)
+        self.write_magnon_info(self, kpts, e)
+
     def plot_magnon_band(self,
-                         lattice_type=None,
                          kvectors=np.array([[0, 0, 0], [0.5, 0, 0],
                                             [0.5, 0.5, 0], [0, 0, 0],
                                             [.5, .5, .5]]),
@@ -300,16 +343,39 @@ class SpinHamiltonian(object):
                          color='red',
                          kpath_fname=None,
                          ax=None):
-        plot_magnon_band(
-            self,
-            lattice_type=lattice_type,
-            kvectors=kvectors,
-            knames=knames,
-            supercell_matrix=supercell_matrix,
-            npoints=npoints,
-            color=color,
-            kpath_fname=kpath_fname,
-            ax=ax)
+        if ax is None:
+            fig, ax = plt.subplots()
+        if knames is None and kvectors is None:
+            bp = Cell(self.cell).bandpath(npoints=npoints)
+            kpts = bp.kpts
+            x, X, knames = bp.get_linear_kpoint_axis()
+            spk = bp.special_points
+        elif knames is not None:
+            bp = Cell(self.cell).bandpath(knames, npoints=npoints)
+            kpts = bp.kpts
+            x, X, knames = bp.get_linear_kpoint_axis()
+        else:
+            kpts, x, X = bandpath(kvectors, self.cell, npoints)
+            spk = dict(zip(knames, kvectors))
+
+        if supercell_matrix is not None:
+            kvectors = [np.dot(k, supercell_matrix) for k in kvectors]
+
+        evals, evecs = self.solve_k(kpts)
+        # Plot band structure
+        nbands = evals.shape[1]
+        emin = np.min(evals[:, 0])
+        for i in range(nbands):
+            ax.plot(x, (evals[:, i] - emin) / 1.6e-22, color=color)
+        ax.set_xlabel('Q-point')
+        ax.set_ylabel('Energy (meV)')
+        ax.set_xlim(x[0], x[-1])
+        ax.set_ylim(0)
+        ax.set_xticks(X)
+        ax.set_xticklabels(knames)
+        for x in X:
+            ax.axvline(x, linewidth=0.6, color='gray')
+        return ax
 
     def write_xml(self, fname):
         writer = SpinXmlWriter()
@@ -318,14 +384,12 @@ class SpinHamiltonian(object):
 
 def read_spin_ham_from_file(fname):
     parser = SpinXmlParser(fname)
-    ham = SpinHamiltonian(
-        cell=parser.cell,
-        xcart=parser.spin_positions,
-        spinat=parser.spin_spinat,
-        zion=parser.spin_zions)
-    ham.set(
-        gilbert_damping=parser.spin_damping_factors,
-        gyro_ratio=parser.spin_gyro_ratios)
+    ham = SpinHamiltonian(cell=parser.cell,
+                          xcart=parser.spin_positions,
+                          spinat=parser.spin_spinat,
+                          zion=parser.spin_zions)
+    ham.set(gilbert_damping=parser.spin_damping_factors,
+            gyro_ratio=parser.spin_gyro_ratios)
     if parser.has_exchange:
         ham.set_exchange_ijR(parser.exchange(isotropic=True))
     if parser.has_dmi:
