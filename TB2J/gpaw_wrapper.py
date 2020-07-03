@@ -176,5 +176,3 @@ def test():
     print(V.shape)
 
 
-if __name__=='__main__':
-    test_Ham()

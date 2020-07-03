@@ -17,6 +17,7 @@ Welcome to TB2J's documentation!
    src/tutorial.rst
    src/applications.rst
    src/extend.rst
+   src/faq.rst
    src/Contributors.rst
    src/references
    src/ReleaseNotes.rst
