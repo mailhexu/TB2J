@@ -1,0 +1,33 @@
+
+prt_model = 0
+
+#--------------------------------------------------------------
+#Monte carlo / molecular dynamics
+#--------------------------------------------------------------
+dynamics =  0    ! disable molecular dynamics
+
+ncell =   16 16 16  ! size of supercell. 
+#-------------------------------------------------------------
+#Spin dynamics
+#------------------------------------------------------------
+spin_dynamics=1  ! enable spin dynamics
+spin_mag_field= 0.0 0.0 0.0   ! external magnetic field
+spin_ntime_pre =10000          ! warming up steps. 
+spin_ntime =10000             ! number of steps. 
+spin_nctime=100               ! number of time steps between two nc file write
+spin_dt=5e-16 s               ! time step. 
+spin_init_state = 2           ! FM initial state. May cause some trouble
+
+spin_temperature=0.0
+
+spin_var_temperature=1        ! switch on variable temperature calculation
+spin_temperature_start=0      ! starting point of temperature
+spin_temperature_end=500      ! ending point of temperature. 
+spin_temperature_nstep=6      ! number of temperature steps.
+
+spin_sia_add = 1              ! add a single ion anistropy (SIA) term?
+spin_sia_k1amp = 1e-6         ! amplitude of SIA (in Ha), how large should be used?
+spin_sia_k1dir = 0.0 0.0 1.0  ! direction of SIA
+
+spin_calc_thermo_obs = 1      ! calculate thermodynamics related observables
+        
