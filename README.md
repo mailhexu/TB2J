@@ -1,6 +1,6 @@
-## Description
-
 [![Documentation Status](https://readthedocs.org/projects/tb2j/badge/?version=latest)](https://tb2j.readthedocs.io/en/latest/?badge=latest)
+
+## Description
 
 TB2J is a open source python package for calculating the magnetic interaction parameters in Heisenberg models from DFT. It use the magnetic force theorem and take the local rigid spin rotation as a perturbation in the Green's function method. 
 
