@@ -12,16 +12,15 @@ Welcome to TB2J's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   src/install.md
-   src/convention.md
-   src/wannier.md
-   src/siesta.md
-   src/rotate_and_merge.md
-   src/output.md
-   src/multibinit.md
-   src/extend.md
-   src/Contributors.md
+   src/install.rst
+   src/convention.rst
+   src/tutorial.rst
+   src/applications.rst
+   src/extend.rst
+   src/faq.rst
+   src/Contributors.rst
    src/references
+   src/ReleaseNotes.rst
 
 
 Indices and tables

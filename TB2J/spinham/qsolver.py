@@ -8,7 +8,7 @@ class QSolver(object):
         self.ham = hamiltonian
         self.nspin = self.ham.nspin
         M = linalg.norm(self.ham.spinat, axis=1)
-        self.M_mat=np.einsum('i,j->ij', M, M)
+        self.M_mat=np.kron(np.sqrt(np.einsum('i,j->ij', M, M)), np.ones((3,3)))
 
     def solve_k(self, kpt, eigen_vectors=True):
         mat = np.zeros((3 * self.nspin, 3 * self.nspin), dtype=complex)
@@ -16,7 +16,7 @@ class QSolver(object):
             i, j, R = key
             mat[i * 3:i * 3 + 3, j * 3:j * 3 + 3] -= val * np.exp(
                2.0j * math.pi * np.dot(kpt, R))
-        mat=mat*8.0/self.M_mat
+        mat=mat*4.0/self.M_mat
         if eigen_vectors:
             evals, evecs = linalg.eigh(mat)
             return evals, evecs

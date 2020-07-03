@@ -6,7 +6,7 @@ from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.utils import read_basis, auto_assign_basis_name
 from ase.io import read
 from TB2J.sisl_wrapper import SislWrapper
-from TB2J.gpaw_wrapper import GPAWWrapper
+#from TB2J.gpaw_wrapper import GPAWWrapper
 
 def gen_exchange(path,
                  colinear=True,
@@ -152,7 +152,7 @@ def gen_exchange_siesta(
         raise ImportError("sisl cannot be imported. Please install sisl first.")
     fdf = sisl.get_sile(fdf_fname)
     H = fdf.read_hamiltonian()
-    if H.spin.is_colinear and 0:
+    if H.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
         tbmodel_up = SislWrapper(H, spin=0)
         tbmodel_dn = SislWrapper(H, spin=1)
@@ -180,7 +180,7 @@ def gen_exchange_siesta(
         print("\n")
         print("All calculation finsihed. The results are in TB2J_results directory.")
 
-    elif H.spin.is_colinear and 1:
+    elif H.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin. Treat as non-colinear")
         tbmodel = SislWrapper(H, spin='merge')
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
