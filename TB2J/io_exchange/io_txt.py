@@ -101,8 +101,8 @@ def write_exchange_section(cls, myfile, order = 'distance', write_experimental:b
     else:
         l = keys
 
-    myfile.write("{:11s} {:9s} {:15s} {:7s} {:24s} {:11s} \n".format(
-        "    i", "    j", "      R", "  J_iso(meV)", "         vector",
+    myfile.write("{:6s} {:5s} {:15s} {:7s} {:24s} {:11s} \n".format(
+        "    i", "    j", "         R", "  J_iso(meV)", "         vector",
         "distance(A)"))
 
     for ll in l:
@@ -111,8 +111,8 @@ def write_exchange_section(cls, myfile, order = 'distance', write_experimental:b
         J = cls.exchange_Jdict[ll]
         vec, distance = cls.distance_dict[ll]
         myfile.write(
-            "{:4d}({:5s}) {:4d}({:5s}) ({:3d}, {:3d}, {:3d}) {:7.4f} ({:6.3f}, {:6.3f}, {:6.3f}) {:6.3f} \n"
-            .format(i, sns[cls.ind_atoms[i]], j, sns[cls.ind_atoms[j]], R[0],
+            "   {:5s} {:5s} ({:3d}, {:3d}, {:3d}) {:7.4f}   ({:6.3f}, {:6.3f}, {:6.3f}) {:6.3f} \n"
+            .format(sns[cls.ind_atoms[i]], sns[cls.ind_atoms[j]], R[0],
                     R[1], R[2], J * 1e3, vec[0], vec[1], vec[2], distance))
 
         Jiso = cls.exchange_Jdict[ll] * 1e3

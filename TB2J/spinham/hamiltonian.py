@@ -289,12 +289,12 @@ class SpinHamiltonian(object):
             self.calc_total_HijR()
         return self._total_hessian_ijR
 
-    def solve_k(self, kpts):
+    def solve_k(self, kpts, Jq=False):
         """
         Get the eigenvalues and eigenvectors for the kpoints
         """
         qsolver = QSolver(hamiltonian=self)
-        evals, evecs = qsolver.solve_all(kpts, eigen_vectors=True)
+        evals, evecs = qsolver.solve_all(kpts, eigen_vectors=True, Jq=Jq)
         return evals, evecs
 
     def write_magnon_info(self, kpts, evals, evecs, fname, special_kpoints={}):
@@ -330,7 +330,7 @@ class SpinHamiltonian(object):
 
     def find_ground_state_from_kmesh(self, kmesh):
         kpts = monkhorst_pack(kmesh)
-        evals, evecs = self.solve_k(kpts)
+        evals, evecs = self.solve_k(kpts, Jq=True)
         self.write_magnon_info(self, kpts, e)
 
     def plot_magnon_band(self,
@@ -342,6 +342,7 @@ class SpinHamiltonian(object):
                          npoints=100,
                          color='red',
                          kpath_fname=None,
+                         Jq=False,
                          ax=None):
         if ax is None:
             fig, ax = plt.subplots()
@@ -361,16 +362,15 @@ class SpinHamiltonian(object):
         if supercell_matrix is not None:
             kvectors = [np.dot(k, supercell_matrix) for k in kvectors]
 
-        evals, evecs = self.solve_k(kpts)
+        evals, evecs = self.solve_k(kpts,Jq=Jq)
         # Plot band structure
         nbands = evals.shape[1]
         emin = np.min(evals[:, 0])
         for i in range(nbands):
-            ax.plot(x, (evals[:, i] - emin) / 1.6e-22, color=color)
-        ax.set_xlabel('Q-point')
+            ax.plot(x, (evals[:, i]) / 1.6e-22, color=color)
         ax.set_ylabel('Energy (meV)')
         ax.set_xlim(x[0], x[-1])
-        ax.set_ylim(0)
+        #ax.set_ylim(0)
         ax.set_xticks(X)
         ax.set_xticklabels(knames)
         for x in X:

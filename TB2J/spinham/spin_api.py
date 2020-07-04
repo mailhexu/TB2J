@@ -67,6 +67,7 @@ class SpinModel():
             color='red',
             ax=None,
             kpath_fname=None,
+            Jq=False,
     ):
         self._ham.plot_magnon_band(
             kvectors=kvectors,
@@ -75,4 +76,5 @@ class SpinModel():
             npoints=npoints,
             color=color,
             ax=ax,
+            Jq=Jq,
             kpath_fname=kpath_fname)

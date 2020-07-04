@@ -1,2 +1,4 @@
-Use rotate and merge in TB2J
+.. _amp-lable:
+
+Averaging multiple parameters
 ============================
