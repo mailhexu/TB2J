@@ -347,8 +347,8 @@ class ExchangeNCL(Exchange):
             Dtmp = np.zeros(3, dtype=float)
             # Heisenberg like J.
             for i in range(3):
-                #Jiso[i, i] += np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
-                Jiso[i, i] += np.imag(val[0, 0] - val[3, 3])
+                Jiso[i, i] += np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
+                #Jiso[i, i] += np.imag(val[0, 0] - val[3, 3])
                                      
 
             if is_nonself:
