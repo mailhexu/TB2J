@@ -297,41 +297,10 @@ class SpinHamiltonian(object):
         evals, evecs = qsolver.solve_all(kpts, eigen_vectors=True, Jq=Jq)
         return evals, evecs
 
-    def write_magnon_info(self, kpts, evals, evecs, fname, special_kpoints={}):
-        """
-        kpts: the list of kpoints
-        evals: eigen values
-        evecs: eigen vectors
-        fname: the name of the output file
-        spk: special kpoints
-        """
-        imin = np.argmin(evals[:, 0])
-        #emin = np.min(evals[:, 0])
-        nspin = evals.shape[1] // 3
-        evec_min = evecs[imin, :, 0].reshape(nspin, 3)
-
-        # write information to file
-        if fname is not None:
-            with open(fname, 'w') as myfile:
-                myfile.write("K-points:\n")
-                for name, k in spk.items():
-                    myfile.write("%s: %s\n" % (name, k))
-                myfile.write("\nThe energy minimum is at:")
-                myfile.write("%s\n" % kpts[np.argmin(evals[:, 0])])
-                for i, ev in enumerate(evec_min):
-                    myfile.write("spin %s: %s \n" %
-                                 (i, ev / np.linalg.norm(ev)))
-        print("\nThe energy minimum is at:")
-        print("%s\n" % kpts[np.argmin(evals[:, 0])])
-        print("\n The ground state is:")
-        for i, ev in enumerate(evec_min):
-            v = ev.real / np.linalg.norm(ev)
-            print("spin %s: (%.3f, %.3f, %.3f)" % (i, v[0], v[1], v[2]))
-
-    def find_ground_state_from_kmesh(self, kmesh):
+    def find_ground_state_from_kmesh(self, kmesh, myfile):
         kpts = monkhorst_pack(kmesh)
         evals, evecs = self.solve_k(kpts, Jq=True)
-        self.write_magnon_info(self, kpts, e)
+        #write_magnon_info(self, kpts, evals, evecs, myfile)
 
     def plot_magnon_band(self,
                          kvectors=np.array([[0, 0, 0], [0.5, 0, 0],

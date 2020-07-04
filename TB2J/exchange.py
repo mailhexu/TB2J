@@ -515,6 +515,7 @@ class ExchangeNCL(Exchange):
             else:
                 self.index_spin.append(-1)
 
+
     def write_output(self, path='TB2J_results'):
         self._prepare_index_spin()
         output = SpinIO(

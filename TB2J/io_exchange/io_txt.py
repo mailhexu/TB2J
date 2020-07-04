@@ -9,6 +9,7 @@ from itertools import groupby
 from TB2J import __version__
 from TB2J.utils import symbol_number
 from numpy import array_str
+from TB2J.spinham.spin_api import SpinModel
 import pickle
 
 
@@ -141,6 +142,37 @@ def write_exchange_section(cls, myfile, order = 'distance', write_experimental:b
                 np.array_str(cls.exchange_Jdict_orb[ll] * 1e3,
                              precision=3,
                              suppress_small=True)))
+
+def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
+    """
+    kpts: the list of kpoints
+    evals: eigen values
+    evecs: eigen vectors
+    fname: the name of the output file
+    spk: special kpoints
+    """
+    symnum = symbol_number(cls.atoms)
+    sns = list(symnum.keys())
+    imin = np.argmin(evals[:, 0])
+    #emin = np.min(evals[:, 0])
+    nspin = evals.shape[1] // 3
+    evec_min = evecs[imin, :, 0].reshape(nspin, 3)
+
+    # write information to file
+    if myfile is not None:
+        myfile.write("\nThe energy minimum is at the q-point:")
+        myfile.write("%s\n" % kpts[np.argmin(evals[:, 0])])
+        myfile.write("The eigenstate at the energy minimum is:\n")
+        for i, ev in enumerate(evec_min):
+            v = ev.real / np.linalg.norm(ev)
+            myfile.write(" > %s: (%.3f, %.3f, %.3f)\n" % (sns[cls.ind_atoms[i]], v[0], v[1], v[2]))
+    print("\nThe energy minimum is at:")
+    print("%s\n" % kpts[np.argmin(evals[:, 0])])
+    print("The eigenstate at the energy minimum is:\n")
+    for i, ev in enumerate(evec_min):
+        v = ev.real / np.linalg.norm(ev)
+        print("spin %s: (%.3f, %.3f, %.3f)" % (sns[cls.ind_atoms[i]], v[0], v[1], v[2]))
+
 
 
 def write_txt(cls,

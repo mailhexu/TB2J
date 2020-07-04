@@ -13,9 +13,10 @@ import pickle
 def write_vampire(cls, path='TB2J_results/Vampire'):
     if not os.path.exists(path):
         os.makedirs(path)
-    cls.write_vampire_unitcell_file(os.path.join(path, 'vampire.UCF'))
-    cls.write_vampire_mat_file(os.path.join(path, 'vampire.mat'))
-    cls.write_vampire_inp_file(os.path.join(path, 'input'))
+    write_vampire_unitcell_file(cls, os.path.join(path, 'vampire.UCF'))
+    write_vampire_mat_file(cls, os.path.join(path, 'vampire.mat'))
+    write_vampire_inp_file(cls, os.path.join(path, 'input'))
+
 
 def write_vampire_unitcell_file(cls, fname):
     with open(fname, 'w') as myfile:
@@ -52,15 +53,15 @@ def write_vampire_unitcell_file(cls, fname):
         for key, val in cls.exchange_Jdict.items():
             counter += 1  # starts at 0
             myfile.write(
-                "{IID} {i} {j} {Rx} {Ry} {Rz} {Jij} 0 0 0 {Jij} 0 0 0 {Jij}\n"
-                .format(
-                    IID=counter,
-                    i=key[1],
-                    j=key[2],
-                    Rx=key[0][0],
-                    Ry=key[0][1],
-                    Rz=key[0][2],
-                    Jij=val / Joule))
+                "{IID} {i} {j} {Rx} {Ry} {Rz} {Jij} 0 0 0 {Jij} 0 0 0 {Jij}\n".
+                format(IID=counter,
+                       i=key[1],
+                       j=key[2],
+                       Rx=key[0][0],
+                       Ry=key[0][1],
+                       Rz=key[0][2],
+                       Jij=val / J))
+
 
 def write_vampire_mat_file(cls, fname):
     mat_tmpl = """#---------------------------------------------------
@@ -96,16 +97,16 @@ material[{id}]:uniaxial-anisotropy-direction = {k1dir}
                     k1 = 0.0
                     k1dir = '0.0 , 0.0, 1.0'
 
-                text = mat_tmpl.format(
-                    id=id_spin + 1,
-                    damping=damping,
-                    name=name,
-                    ms=ms,
-                    k1=k1 / Joule,
-                    k1dir=k1dir,
-                    spinat=spin_text)
+                text = mat_tmpl.format(id=id_spin + 1,
+                                       damping=damping,
+                                       name=name,
+                                       ms=ms,
+                                       k1=k1 / J,
+                                       k1dir=k1dir,
+                                       spinat=spin_text)
                 myfile.write(text)
         myfile.write("# Interactions\n")
+
 
 def write_vampire_inp_file(cls, fname):
     text = """#------------------------------------------ 
@@ -154,4 +155,3 @@ output:material-magnetisation
     with open(fname, 'w') as myfile:
         cellpar = cls.atoms.get_cell_lengths_and_angles()
         myfile.write(text.format(a=cellpar[0], b=cellpar[1], c=cellpar[2]))
-
