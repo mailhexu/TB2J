@@ -158,7 +158,7 @@ def gen_exchange_siesta(
         tbmodel_dn = SislWrapper(H, spin=1)
         basis = dict(zip(tbmodel_up.orbs, list(range(tbmodel_up.norb))))
         print("Starting to calculate exchange.")
-        exchange = ExchangeCL(
+        exchange = ExchangeCL2(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
             basis=basis,
