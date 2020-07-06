@@ -42,7 +42,7 @@ spin_ntime_pre =10000          ! warming up steps.
 spin_ntime =10000             ! number of steps. 
 spin_nctime=100               ! number of time steps between two nc file write
 spin_dt=5e-16 s               ! time step. 
-spin_init_state = 2           ! FM initial state. May cause some trouble
+spin_init_state = 1           ! random initial spin
 
 spin_temperature=0.0
 

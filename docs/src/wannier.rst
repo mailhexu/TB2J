@@ -40,7 +40,6 @@ figure below.
 .. figure:: ./SrMnO3_DOS.png
    :alt: SrMnO3_DOS
 
-   SrMnO3_DOS
 
 As we can see, the Mn 3d and O 2p orbitals should be included into the
 WF Hamiltonian. The Sr 4d orbitals are too high in energy, so we exclude
