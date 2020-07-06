@@ -4,7 +4,7 @@ Application: Spin model in MULTIBINIT
 The output of TB2J can be directly readed by several atomistic spin
 dynamics and Monte Carlo code. Here we show how to use MULTIBINIT, a
 second principles code which can do spin dynamics. It is a part of the
-ABINIT package since version 9.0.
+ABINIT package since version 9.0. The 
 
 Build a spin model and run spin dynamics in MULTIBINIT
 ------------------------------------------------------
@@ -13,7 +13,9 @@ This lesson aims at showing how to build a spin model and run a spin
 dynamics calculation.
 
 \**Before beginning, it is important to know the theory of spin
-dynamics, which can be found in the literature
+dynamics, which can be found in the literature,e.g. [Spindyn]_.
+
+.. [Spindyn] Evans et al. Atomistic spin model simulations of magnetic nanomaterials, Journal of Physics: Condensed Matter, 26, 103202, 2014.
 
 With this lesson, you will learn to:
 
@@ -30,13 +32,13 @@ Basic: how to use MULTIBINIT to run spin dynamics
 
 Once we have the spin model xml file, we can run a spin dynamics
 calculation with MULTIBINIT. Example input files can be found at
-~abinit/tests/tutomultibinit/Input/tmulti5_1.\* . There are three files:
+example\Siesta\BiFeO3\* . There are three files:
 
--  “tmulti5_1.files” is the “files” file, which gives the names of the
+-  “mb.files” is the “files” file, which gives the names of the
    input and output files for MULTIBINIT.
--  “tmulti5_1.in” is the main input file containing the parameters for
+-  “mb.in” is the main input file containing the parameters for
    the spin dynamics simulation.
--  “tmulti5_1.xml” is the file containing the Heisenberg model
+-  “exchange.xml” is the file containing the Heisenberg model
    parameters.
 
 You can copy these three files into a directory (e.g. Work_spindyn).

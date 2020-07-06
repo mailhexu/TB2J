@@ -37,7 +37,7 @@ class Exchange():
         self.efermi = efermi
         self.emin = emin
         self.emax = emax
-        self.nz=nz
+        self.nz = nz
         self.height = height
         self.nz1 = nz1
         self.nz2 = nz2
@@ -45,7 +45,7 @@ class Exchange():
         if nz is None:
             self.nz = nz1 + nz2 + nz3
         self._prepare_kmesh(kmesh)
-        self.Rcut= Rcut
+        self.Rcut = Rcut
         self.basis = basis
         self.magnetic_elements = magnetic_elements
         self.exclude_orbs = exclude_orbs
@@ -60,7 +60,7 @@ class Exchange():
 
         # whether to calculate J and DMI with NJt method.
         self.calc_NJt = False
-        self._prepare_NijR()
+        #self._prepare_NijR()
         self.Ddict_NJT = None
         self.Jdict_NJT = None
         self._is_collinear = None
@@ -71,8 +71,7 @@ class Exchange():
 
     def _prepare_kmesh(self, kmesh):
         for k in kmesh:
-            self.kmesh=list(map(lambda x: x//2*2+1, kmesh))
-
+            self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
     def _prepare_elist(self, method='semicircle'):
         """
@@ -81,26 +80,26 @@ class Exchange():
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
         self.contour = Contour(self.emin, self.emax)
-        if method.lower()=='rectangle':
+        if method.lower() == 'rectangle':
             self.contour.build_path_rectangle(height=self.height,
-                                          nz1=self.nz1,
-                                          nz2=self.nz2,
-                                          nz3=self.nz3)
-        elif method.lower()=='semicircle':
+                                              nz1=self.nz1,
+                                              nz2=self.nz2,
+                                              nz3=self.nz3)
+        elif method.lower() == 'semicircle':
             self.contour.build_path_semicircle(npoints=self.nz)
         #self.nen = len(self.elist) - 1
         #self.elistc = list(range(nz1 + nz2, nz))
         #self.new_efermi = None
 
-    def _prepare_elistc(self, ie):
-        if not self.has_elistc:
-            nz1, nz2, nz3 = self.nz1, self.nz2, self.nz3
-            nz = self.nz
-            self.elist[nz1 + nz2:nz] = np.real(
-                self.elist[ie]) + self.height * 1j + np.linspace(
-                    0, -self.height, nz3, endpoint=False) * 1j
-            self.elist[-1] = np.real(self.elist[ie])
-            self.new_efermi = np.real(self.elist[ie])
+    # def _prepare_elistc(self, ie):
+    #     if not self.has_elistc:
+    #         nz1, nz2, nz3 = self.nz1, self.nz2, self.nz3
+    #         nz = self.nz
+    #         self.elist[nz1 + nz2:nz] = np.real(
+    #             self.elist[ie]) + self.height * 1j + np.linspace(
+    #                 0, -self.height, nz3, endpoint=False) * 1j
+    #         self.elist[-1] = np.real(self.elist[ie])
+    #         self.new_efermi = np.real(self.elist[ie])
 
     def _prepare_Rlist(self):
         """
@@ -108,11 +107,6 @@ class Exchange():
         [-Rx, Rx] * [-Ry, Ry] * [-Rz, Rz]
         """
         self.Rlist = kmesh_to_R(self.kmesh)
-        #else:
-        #    for i in range(-self.Rmesh[0], self.Rmesh[0] + 1):
-        #        for j in range(-self.Rmesh[1], self.Rmesh[1] + 1):
-        #            for k in range(-self.Rmesh[2], self.Rmesh[2] + 1):
-        #                self.Rlist.append((i, j, k))
 
     def _prepare_basis(self):
         if self.basis is None:
@@ -168,8 +162,8 @@ class Exchange():
 
     def _prepare_distance(self):
         self.distance_dict = {}
-        self.short_Rlist=[]
-        self.R_ijatom_dict=defaultdict(lambda: [])
+        self.short_Rlist = []
+        self.R_ijatom_dict = defaultdict(lambda: [])
         ind_matoms = self.ind_mag_atoms
         for ispin, iatom in enumerate(ind_matoms):
             for jspin, jatom in enumerate(ind_matoms):
@@ -180,11 +174,10 @@ class Exchange():
                     vec = pos_jR - pos_i
                     distance = np.sqrt(np.sum(vec**2))
                     if self.Rcut is None or distance < self.Rcut:
-                        self.distance_dict[(tuple(R), ispin, jspin)] = (vec,
-                                                                    distance)
+                        self.distance_dict[(tuple(R), ispin,
+                                            jspin)] = (vec, distance)
                         self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
-        self.short_Rlist=list(self.R_ijatom_dict.keys())
-
+        self.short_Rlist = list(self.R_ijatom_dict.keys())
 
     def iorb(self, iatom):
         """
@@ -288,7 +281,7 @@ class ExchangeNCL(Exchange):
                 Gij = self.GR_atom(GR, iatom, jatom)
                 # GijR , I, x, y, z component.
                 Gij_Ixyz = pauli_block_all(Gij)
-    
+
                 # G(j, i, -R)
                 Rm = tuple(-x for x in R)
                 GRm = G[Rm]
@@ -324,7 +317,7 @@ class ExchangeNCL(Exchange):
         J_{anisotropic}_uv = Tr Im (2A)
         DMI =  Tr Re (A^{0z} - A^{z0} )
         """
-        self.Jani= {}
+        self.Jani = {}
         self.DMI = {}
 
         self.Jprime = {}
@@ -347,9 +340,9 @@ class ExchangeNCL(Exchange):
             Dtmp = np.zeros(3, dtype=float)
             # Heisenberg like J.
             for i in range(3):
-                Jiso[i, i] += np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
+                Jiso[i, i] += np.imag(val[0, 0] - val[1, 1] - val[2, 2] -
+                                      val[3, 3])
                 #Jiso[i, i] += np.imag(val[0, 0] - val[3, 3])
-                                     
 
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jiso[0, 0]
@@ -357,9 +350,10 @@ class ExchangeNCL(Exchange):
             # off-diagonal ansiotropic exchange
             for i in range(3):
                 for j in range(3):
-                    if i!=j:
+                    if i != j:
                         #Ja[i,j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
-                        Ja[i,j] = -np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])/2.0
+                        Ja[i, j] = -np.imag(val[i + 1, j + 1] +
+                                            valm[i + 1, j + 1]) / 2.0
                         #Ja[i,j] =  -np.imag(val[i+1, j+1])
             if is_nonself:
                 self.Jani[keyspin] = Ja
@@ -398,8 +392,7 @@ class ExchangeNCL(Exchange):
         #    self.rho += -1.0 / np.pi * np.imag(GR0 * de)
         #else:
         #    self.rho += -1.0 / np.pi * np.imag(self.S0@GR0 * de)
-        self.rho += -1.0 / np.pi * np.imag(rhoR[0,0,0] * de)
-        
+        self.rho += -1.0 / np.pi * np.imag(rhoR[0, 0, 0] * de)
 
     def get_total_charges(self):
         return np.sum(np.real(np.diag(self.rho)))
@@ -515,7 +508,6 @@ class ExchangeNCL(Exchange):
             else:
                 self.index_spin.append(-1)
 
-
     def write_output(self, path='TB2J_results'):
         self._prepare_index_spin()
         output = SpinIO(
@@ -560,7 +552,6 @@ class ExchangeCL(ExchangeNCL):
             dmi_ddict=None,
             NJT_Jdict=None,
             NJT_ddict=None,
-            bilinear_Jdict=None,
             biquadratic_Jdict=self.B,
         )
         output.write_all(path=path)

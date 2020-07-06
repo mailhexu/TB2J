@@ -19,66 +19,90 @@ class AbstractTB():
         raise NotImplementedError()
 
     @property
+    def R2kfactor(self):
+        """
+        The prefactor :math:`\\alpha` used in :math:`H(k)=\sum_R  H(R) \exp( \\alpha k \cdot R)` 
+        Should be :math:`2\pi i` or :math:`-2\pi i`
+        """
+        raise NotImplementedError()
+
+
+    @property
     def nspin(self):
+        """
+        number of spin. 1 for collinear, 2 for spinor.
+        """
+        raise NotImplementedError()
+
+    @property
+    def orb_order(self):
+        """
+        The order of the spinor basis.
+        1: orb1_up, orb2_up,  ... orb1_down, orb2_down,...
+        2: orb1_up, orb1_down, orb2_up, orb2_down,...
+        """
         raise NotImplementedError()
 
     @property
     def norb(self):
+        """
+        number of orbitals. Each orbital can have two spins.
+        """
         raise NotImplementedError()
 
     @property
     def nbasis(self):
+        """
+        nbasis=nspin*norb
+        """
         return self.nspin * self.norb
 
     @property
-    def ndim(self):
-        raise NotImplementedError()
-
-    @property
     def xcart(self):
+        """
+        The array of cartesian coordinate of all basis. shape:nbasis,3
+        """
         raise NotImplementedError()
 
     @property
     def xred(self):
+        """
+        The array of cartesian coordinate of all basis. shape:nbasis,3
+        """
         raise NotImplementedError()
 
-    @property
-    def onsite_energies(self):
+    def get_hamR(self, R):
+        """
+        get the Hamiltonian H(R), array of shape (nbasis, nbasis)
+        """
         raise NotImplementedError()
 
-    def get_onsite_SOC(self):
+    def get_orbs(self):
+        """
+        returns the orbitals.
+        """
         raise NotImplementedError()
 
-    def gen_ham(self, kpts, convention=2):
+    def HS_and_eigen(self, kpts):
+        """
+        get Hamiltonian, overlap matrices, eigenvalues, eigen vectors for all kpoints. 
+
+        :param:
+
+        * kpts: list of k points.
+
+        :returns:
+
+        * H, S, eigenvalues, eigenvectors for all kpoints
+        * H: complex array of shape (nkpts, nbasis, nbasis)
+        * S: complex array of shape (nkpts, nbasis, nbasis). S=None if the basis set is orthonormal.
+        * evals: complex array of shape (nkpts, nbands)
+        * evecs: complex array of shape (nkpts, nbasis, nbands)
+        """
         raise NotImplementedError()
 
-    def eigen(self, k, convention=2):
-        """
-        calculate eigen for one k pooint
-        :param k: kpoint.
-        """
-        evals, evecs = np.linalg.eigh(
-            self.gen_ham(tuple(k), convention=convention))
-        return evals, evecs
 
-    def HS_and_eigen(self, kpts, convention=2):
-        """
-        calculate eigens for all kpoints. 
-        :param kpts: list of k points.
-        """
-        nk = len(kpts)
-        hams = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
-        evals = np.zeros((nk, self.nbasis), dtype=float)
-        evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
-        for ik, k in enumerate(kpts):
-            hams[ik]=self.gen_ham(k, convention=convention)
-            evals[ik], evecs[ik] = eigh(ham[ik])
-        return hams, None, evals, evecs
-
-
-
-
-class MyTB():
+class MyTB(AbstractTB):
     def __init__(self,
                  nbasis,
                  data=None,

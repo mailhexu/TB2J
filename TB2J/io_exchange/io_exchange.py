@@ -62,22 +62,22 @@ class SpinIO(object):
         :param write_experimental: write_experimental data to output files
         :param description: add some description into the xml file.
         """
-        self.atoms = atoms
-        self.index_spin = index_spin
-        self.spinat = spinat
-        self.colinear = colinear
+        self.atoms = atoms #: atomic structures, ase.Atoms object
+        self.index_spin = index_spin #: index of spin linked to atoms. -1 if non-magnetic
+        self.spinat = spinat #: spin for each atom. shape of (natom, 3)
+        self.colinear = colinear #: If the calculation is collinear or not
         if self.colinear and self.spinat != []:
             self.magmoms = np.array(self.spinat)[:, 2]
-        self.charges = charges
-        self.distance_dict = distance_dict
-        self.ind_atoms = {}
+        self.charges = charges 
+        self.distance_dict = distance_dict #: A dictionary of distances, the keys are (i,j, R), where i and j are spin index and R is the cell index, a tuple of three integers.
+        self.ind_atoms = {} #: The index of atom for each spin.
         for iatom, ispin in enumerate(self.index_spin):
             if ispin >= 0:
                 self.ind_atoms[ispin] = iatom
 
         if exchange_Jdict is not None:
-            self.has_exchange = True
-            self.exchange_Jdict = exchange_Jdict
+            self.has_exchange = True #: whether there is isotropic exchange
+            self.exchange_Jdict = exchange_Jdict #: The dictionary of :math:`J_{ij}(R)`, the keys are (i,j, R), where R is a tuple, and the value is the isotropic exchange
         else:
             self.has_exchange = False
             self.exchange_Jdict = None
@@ -87,15 +87,15 @@ class SpinIO(object):
         self.dJdx = dJdx
 
         if dmi_ddict is not None:
-            self.has_dmi = True
-            self.dmi_ddict = dmi_ddict
+            self.has_dmi = True #: Whether there is DMI.
+            self.dmi_ddict = dmi_ddict #: The dictionary of DMI. the key is the same as exchange_Jdict, the values are 3-d vectors (Dx, Dy, Dz).
         else:
             self.has_dmi = False
             self.dmi_ddict = None
 
         if Jani_dict is not None:
-            self.has_bilinear = True
-            self.Jani_dict = Jani_dict
+            self.has_bilinear = True #: Whether there is anisotropic exchange term
+            self.Jani_dict = Jani_dict #: The dictionary of anisotropic exchange. The vlaues are matrices of shape (3,3).
         else:
             self.has_bilinear = False
             self.Jani_dict = None
@@ -124,15 +124,15 @@ class SpinIO(object):
             self.NJT_Jdict = NJT_Jdict
 
         natom = len(self.atoms)
-        if gyro_ratio is None:
-            self.gyro_ratio = [1.0] * natom
-        elif isinstance(gyro_ratio, Iterable):
+        if gyro_ratio is None: 
+            self.gyro_ratio = [1.0] * natom #: Gyromagnetic ratio for each atom
+        elif isinstance(gyro_ratio, Iterable): 
             self.gyro_ratio = gyro_ratio
         else:
             self.gyro_ratio = [gyro_ratio] * natom
 
         if damping is None:
-            self.damping = [1.0] * natom
+            self.damping = [1.0] * natom  # damping factor for each atom
         elif isinstance(damping, Iterable):
             self.damping = damping
         else:
@@ -165,6 +165,7 @@ The calculation parameters: Unkown.
         obj = SpinIO(atoms=[], spinat=[], charges=[], index_spin=[])
         obj.__dict__.update(d)
         return obj
+
 
     def write_all(self, path='TB2J_results'):
         self.write_pickle(path=path)
@@ -259,4 +260,3 @@ def test_spin_io():
     sio.write_all()
 
 
-#test_spin_io()

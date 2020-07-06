@@ -36,6 +36,12 @@ def run_wann2J():
                         default=None,
                         type=str,
                         nargs='*')
+    parser.add_argument('--orb_order',
+                        help="In the spinor case, the order of the orbitals have two conventions: (orb1_up, orb2_up,... orb1_down, ...), (orb1_up, orb1_down, orb2_up, ...,). Use 1 in the former case and 2 in the latter case. The default is 1." ,
+                        default=1,
+                        type=int,
+                        )
+
     parser.add_argument(
         '--rcut',
         help=
@@ -114,8 +120,13 @@ def run_wann2J():
     if args.elements is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
+
+    if args.orb_order not in (1,2):
+        print("orb_order should be either 1 or 2.")
+        sys.exit()
     gen_exchange(path=args.path,
                  colinear=(not args.spinor),
+                 orb_order=args.orb_order,
                  posfile=args.posfile,
                  efermi=args.efermi,
                  kmesh=args.kmesh,

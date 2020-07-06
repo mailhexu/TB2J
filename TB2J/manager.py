@@ -10,6 +10,7 @@ from TB2J.sisl_wrapper import SislWrapper
 
 def gen_exchange(path,
                  colinear=True,
+                 orb_order=1,
                  posfile='POSCAR',
                  prefix_up='wannier90.up',
                  prefix_dn='wannier90.dn',
@@ -102,8 +103,13 @@ def gen_exchange(path,
         print("Reading Wannier90 hamiltonian: non-colinear spin.")
         tbmodel = MyTB.read_from_wannier_dir(
             path=path, prefix=prefix_SOC, posfile=posfile, nls=True)
+        if orb_order==1:
+            pass
+        if orb_order==2:
+            tbmodel=tbmodel.reorder()
         if os.path.exists(basis_fname):
-            basis = read_basis(basis_fname)
+            print("The use of basis file is deprecated. It will be ignored.")
+            #basis = read_basis(basis_fname)
         else:
             basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
         print("Starting to calculate exchange.")
@@ -222,10 +228,6 @@ def gen_exchange_siesta(
             emin=emin,
             emax=emax,
             nz=nz,
-            #height=height,
-            #nz1=nz1,
-            #nz2=nz2,
-            #nz3=nz3,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
