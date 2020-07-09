@@ -30,7 +30,10 @@ class SislWrapper():
         if self.ham.spin.is_colinear and (self.spin in [0,1]):
             for ia, a in enumerate(_atoms):
                 symnum=sdict[ia]
-                orb_names=[f"{symnum}|{x.name()}|up" for x in a.orbital]
+                try:
+                    orb_names=[f"{symnum}|{x.name()}|up" for x in a.orbital]
+                except:
+                    orb_names=[f"{symnum}|{x.name()}|up" for x in a.orbitals]
                 self.orbs+=orb_names
                 self.orb_dict[ia]+=orb_names
             self.norb = len(self.orbs)
@@ -40,8 +43,12 @@ class SislWrapper():
                 for ia, a in enumerate(_atoms):
                     symnum=sdict[ia]
                     orb_names=[]
-                    for x in a.orbital:
-                        orb_names.append(f"{symnum}|{x.name()}|{spin}")
+                    try:
+                        for x in a.orbital:  # sisl < v0.10
+                            orb_names.append(f"{symnum}|{x.name()}|{spin}")
+                    except:
+                        for x in a.orbitals:  # sisl >= v0.10
+                            orb_names.append(f"{symnum}|{x.name()}|{spin}")
                     self.orbs+=orb_names
                     self.orb_dict[ia]+=orb_names
             #print(self.orb_dict)

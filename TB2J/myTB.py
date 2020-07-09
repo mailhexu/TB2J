@@ -13,63 +13,31 @@ from functools import lru_cache
 from TB2J.wannier import parse_ham, parse_xyz
 
 
-
 class AbstractTB():
-    def __init__(self):
-        raise NotImplementedError()
+    def __init__(self, R2kfactor, nspin, norb, orb_order=1):
+        #: :math:`\alpha` used in :math:`H(k)=\sum_R  H(R) \exp( \alpha k \cdot R)`,
+        #: Should be :math:`2\pi i` or :math:`-2\pi i`
+        self.R2kfactor = R2kfactor
 
-    @property
-    def R2kfactor(self):
-        """
-        The prefactor :math:`\\alpha` used in :math:`H(k)=\sum_R  H(R) \exp( \\alpha k \cdot R)` 
-        Should be :math:`2\pi i` or :math:`-2\pi i`
-        """
-        raise NotImplementedError()
+        #: number of spin. 1 for collinear, 2 for spinor.
+        self.nspin = nspin
 
+        #:number of orbitals. Each orbital can have two spins.
+        self.norb = norb
 
-    @property
-    def nspin(self):
-        """
-        number of spin. 1 for collinear, 2 for spinor.
-        """
-        raise NotImplementedError()
+        #: nbasis=nspin*norb
+        self.nbasis = nspin * norb
 
-    @property
-    def orb_order(self):
-        """
-        The order of the spinor basis.
-        1: orb1_up, orb2_up,  ... orb1_down, orb2_down,...
-        2: orb1_up, orb1_down, orb2_up, orb2_down,...
-        """
-        raise NotImplementedError()
+        #: The array of cartesian coordinate of all basis. shape:nbasis,3
+        self.xcart = None
 
-    @property
-    def norb(self):
-        """
-        number of orbitals. Each orbital can have two spins.
-        """
-        raise NotImplementedError()
+        #: The array of cartesian coordinate of all basis. shape:nbasis,3
+        self.xred = None
 
-    @property
-    def nbasis(self):
-        """
-        nbasis=nspin*norb
-        """
-        return self.nspin * self.norb
-
-    @property
-    def xcart(self):
-        """
-        The array of cartesian coordinate of all basis. shape:nbasis,3
-        """
-        raise NotImplementedError()
-
-    @property
-    def xred(self):
-        """
-        The array of cartesian coordinate of all basis. shape:nbasis,3
-        """
-        raise NotImplementedError()
+        #: The order of the spinor basis.
+        #: 1: orb1_up, orb2_up,  ... orb1_down, orb2_down,...
+        #: 2: orb1_up, orb1_down, orb2_up, orb2_down,...
+        self.orb_order = orb_order
 
     def get_hamR(self, R):
         """
@@ -123,8 +91,8 @@ class MyTB(AbstractTB):
         if data is not None:
             self.data = data
         else:
-            self.data = defaultdict(lambda: np.zeros((nbasis, nbasis),
-                                                     dtype=complex))
+            self.data = defaultdict(lambda: np.zeros(
+                (nbasis, nbasis), dtype=complex))
         self._nbasis = nbasis
         self._nspin = nspin
         self._norb = nbasis // nspin
@@ -139,8 +107,8 @@ class MyTB(AbstractTB):
         if sparse:
             self._matrix = csr_matrix
         self.atoms = None
-        self.R2kfactor=2.0j*np.pi
-        self.k2Rfactor=-2.0j*np.pi
+        self.R2kfactor = 2.0j * np.pi
+        self.k2Rfactor = -2.0j * np.pi
 
     def set_atoms(self, atoms):
         self.atoms = atoms
@@ -199,13 +167,14 @@ class MyTB(AbstractTB):
         #tbmodel = Model.from_wannier_folder(
         #    folder=path, prefix=prefix)
         #m = MyTB.from_tbmodel(tbmodel)
-        nbasis, data=parse_ham(fname=os.path.join(path, prefix+'_hr.dat'))
-        xcart, _, _=parse_xyz(fname=os.path.join(path, prefix+'_centres.xyz'))
+        nbasis, data = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
+        xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix +
+                                                   '_centres.xyz'))
         atoms = read(os.path.join(path, posfile))
-        cell=atoms.get_cell()
-        xred=cell.scaled_positions(xcart)
+        cell = atoms.get_cell()
+        xred = cell.scaled_positions(xcart)
         ind, positions = auto_assign_basis_name(xred, atoms)
-        m=MyTB(nbasis=nbasis, data=data, positions=xred)
+        m = MyTB(nbasis=nbasis, data=data, positions=xred)
         nm = m.shift_position(positions)
         nm.set_atoms(atoms)
         return nm
@@ -227,12 +196,12 @@ class MyTB(AbstractTB):
         Hk = np.zeros((self.nbasis, self.nbasis), dtype='complex')
         if convention == 2:
             for R, mat in self.data.items():
-                phase = np.exp(self.R2kfactor* np.dot(k, R))
+                phase = np.exp(self.R2kfactor * np.dot(k, R))
                 H = mat * phase
                 Hk += H + H.conjugate().T
         elif convention == 1:
             for R, mat in self.data.items():
-                phase = np.exp(self.R2kfactor* np.dot(k, R + self.rjminusri))
+                phase = np.exp(self.R2kfactor * np.dot(k, R + self.rjminusri))
                 H = mat * phase
                 Hk += H + H.conjugate().T
         else:
@@ -240,9 +209,8 @@ class MyTB(AbstractTB):
         return Hk
 
     def solve(self, k, convention=2):
-        Hk=self.gen_ham(k, convention=convention)
+        Hk = self.gen_ham(k, convention=convention)
         return eigh(Hk)
-
 
     def HS_and_eigen(self, kpts, convention=2):
         """
@@ -252,12 +220,11 @@ class MyTB(AbstractTB):
         nk = len(kpts)
         hams = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
         evals = np.zeros((nk, self.nbasis), dtype=float)
-        evecs = np.zeros((nk, self.nbasis, self.nbasis),dtype=complex)
+        evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
-            hams[ik]=self.gen_ham(tuple(k), convention=convention)
+            hams[ik] = self.gen_ham(tuple(k), convention=convention)
             evals[ik], evecs[ik] = eigh(hams[ik])
         return hams, None, evals, evecs
-
 
     def prepare_phase_rjri(self):
         """
@@ -364,8 +331,8 @@ class MyTB(AbstractTB):
                         d.data[newR][j, i] += v[i, j].conj()
                     elif len(nzR) == 0:
                         newR = sR
-                        d.data[newR][i, j] += v[i, j]*0.5
-                        d.data[newR][j, i] += v[i, j].conj()*0.5
+                        d.data[newR][i, j] += v[i, j] * 0.5
+                        d.data[newR][j, i] += v[i, j].conj() * 0.5
                     else:
                         d.data[sR][i, j] += v[i, j]
         return d
@@ -436,8 +403,9 @@ class MyTB(AbstractTB):
         atom_numbers = root.variables['atom_numbers'][:]
         atom_xred = root.variables['atom_xred'][:]
         atom_cell = root.variables['atom_cell'][:]
-        atoms = Atoms(
-            numbers=atom_numbers, scaled_positions=atom_xred, cell=atom_cell)
+        atoms = Atoms(numbers=atom_numbers,
+                      scaled_positions=atom_xred,
+                      cell=atom_cell)
         m = MyTB(nbasis, nspin=nspin, ndim=ndim, positions=positions)
         m.atoms = copy.deepcopy(atoms)
         root.close()
@@ -501,22 +469,22 @@ class MyTB(AbstractTB):
         # make sure all R are 3d.
         for R in self.data.keys():
             if len(R) != self.ndim:
-                raise ValueError(
-                    "Dimension of R should be ndim %s" % (self.ndim))
+                raise ValueError("Dimension of R should be ndim %s" %
+                                 (self.ndim))
 
 
 def merge_tbmodels_spin(tbmodel_up, tbmodel_dn):
     """
     Merge a spin up and spin down model to one spinor model.
     """
-    tbmodel = MyTB(
-        nbasis=tbmodel_up.nbasis * 2,
-        data=None,
-        positions=np.vstack([tbmodel_up.positions, tbmodel_dn.positions]),
-        sparse=False,
-        ndim=tbmodel_up.ndim,
-        nspin=2,
-        double_site_energy=2.0)
+    tbmodel = MyTB(nbasis=tbmodel_up.nbasis * 2,
+                   data=None,
+                   positions=np.vstack(
+                       [tbmodel_up.positions, tbmodel_dn.positions]),
+                   sparse=False,
+                   ndim=tbmodel_up.ndim,
+                   nspin=2,
+                   double_site_energy=2.0)
     norb = tbmodel.norb
     for R in tbmodel_up.data:
         tbmodel.data[R][:norb, :norb] = tbmodel_up.data[R][:, :]
