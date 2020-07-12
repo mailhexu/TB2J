@@ -24,8 +24,8 @@ class GPAWWrapper():
             atoms, calc=restart(gpw_fname, fixdensity=False,  txt='nscf.txt')
         self.atoms=atoms
         self.calc=calc
-        self.wfs=self.calc.wfs
-        self.h=self.calc.hamiltonian
+        #self.wfs=self.calc.wfs
+        #self.h=self.calc.hamiltonian
         #self.kpt_u = self.wfs.kpt_u
         self.cell = self.atoms.get_cell()
         #self.wann_centers=get_bf_centers(self.atoms)
@@ -66,18 +66,23 @@ class GPAWWrapper():
         self.atoms.get_total_energy()
         #self.kpt_u = self.wfs.kpt_u
         H, S= get_lcao_hamiltonian(self.calc)
-        nspin, nkpt, nbasis, _ = H.shape
-        evals=np.zeros((nkpt, nspin*nbasis), dtype=float)
-        evecs=np.zeros((nkpt, nspin*nbasis, nspin*nbasis),dtype=complex)
+        np.save('kpts.npy', kpts)
+        np.save('H.npy', H)
+        np.save('S.npy', S)
+
+        nspin, nkpt, norb, _ = H.shape
+        nbasis=nspin*norb
+        evals=np.zeros((nkpt, nbasis), dtype=float)
+        evecs=np.zeros((nkpt, nbasis, nbasis),dtype=complex)
         if self.calc.get_spin_polarized():
-            H2=np.zeros((nkpt, nspin*nbasis, nspin*nbasis),dtype=complex)
+            H2=np.zeros((nkpt, nbasis, nbasis),dtype=complex)
             # spin up
-            H2[:, :nbasis, :nbasis]=H[0].conj()
+            H2[:, :nbasis, :nbasis]=H[0]
             # spin down
-            H2[:, nbasis:, nbasis:]=H[1].conj()
-            S2=np.zeros((nkpt, nspin*nbasis, nspin*nbasis),dtype=complex)
-            S2[:, :nbasis, :nbasis]=S.conj()
-            S2[:, nbasis:, nbasis:]=S.conj()
+            H2[:, nbasis:, nbasis:]=H[1]
+            S2=np.zeros((nkpt, nbasis, nbasis),dtype=complex)
+            S2[:, :norb, :orb]=S
+            S2[:, norb:, norb:]=S
 
             for ikpt, k in enumerate(self.calc.get_ibz_k_points()):
                 evals0, evecs0 = eigh(H[0, ikpt,:,:], S[ikpt,:,:])
@@ -90,6 +95,11 @@ class GPAWWrapper():
             H2=H[0]
             for ikpt, k in self.kpt_u:
                 evals[ikpt], evecs[ikpt]= eigh(H[0, ikpt], S[ikpt])
+        np.save('kpts.npy', kpts)
+        np.save('H2.npy', H2)
+        np.save('S2.npy', S2)
+        np.save('evals.npy', evals)
+        np.save('evecs.npy', evecs)
         return H2, S2, evals, evecs
 
     def solve_all(self, kpts, convention=2):
