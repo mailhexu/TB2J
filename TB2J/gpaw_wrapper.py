@@ -13,55 +13,6 @@ from ase.dft.kpoints import monkhorst_pack
 from ase.units import Ha
 import pickle
 
-class GPAWTBWrapper():
-    def __init__(self, calc=None, atoms=None,  gpw_fname=None, pickle_fname=None):
-        if not _has_gpaw:
-            raise ImportError("GPAW was not imported. Please install gpaw.")
-        if pickle_fname is None:
-            if gpw_fname is not None:
-                calc=GPAW(gpw_fname, fixdensity=True, symmetry='off', txt='TB2J_wrapper.log', basis='dzp', mode='lcao')
-                atoms=calc.atoms
-                atoms.calc=calc
-                E = atoms.get_potential_energy()
-            tb=TightBinding(atoms, calc)
-            self.H_NMM, self.S_NMM=tb.h_and_s()
-            self.Rlist=tb.R_cN.T
-        else:
-            with open(fname, 'rb') as myfile:
-                self.H_NMM, self.S_NMM, self.Rlist=pickle.load(myfile)
-        self.nR, self.nbasis, _ = self.H_NMM.shape
-        self.positions=np.zeros((self.nbasis, 3))
-
-    def save_pickle(self, fname):
-        with open(fname, 'wb') as myfile:
-            pickle.dump([self.H_NMM, self.S_NMM, self.Rlist], myfile)
-
-    def solve(self, k):
-        self.Hk=np.zeros((self.nbasis, self.nbasis), dtype='complex')
-        self.Sk=np.zeros((self.nbasis, self.nbasis), dtype='complex')
-        for iR, R in enumerate(self.Rlist):
-            phase=np.exp(-2j*np.pi* np.dot(k, R))
-            self.Hk+=self.H_NMM[iR]*phase
-            self.Sk+=self.S_NMM[iR]*phase
-        self.Sk=np.real((self.Sk+self.Sk.T)/2)
-        return eigh(self.Hk, self.Sk)
-        try:
-            return eigh(self.Hk, self.Sk)
-        except:
-            return np.zeros(self.nbasis), np.zeros((self.nbasis, self.nbasis))
-
-    def solve_all(self, kpts):
-        evals = []
-        evecs = []
-        for ik, k in enumerate(kpts):
-            evalue, evec = self.solve(k)
-            evals.append(evalue)
-            evecs.append(evec)
-        return np.array(evals, dtype=float), np.array(evecs,
-                                                      dtype=complex,
-                                                      order='C')
-
-
 class GPAWWrapper():
     """
     https://gitlab.com/gpaw/gpaw/-/blob/master/gpaw/lcao/tightbinding.py
@@ -144,6 +95,57 @@ class GPAWWrapper():
     def solve_all(self, kpts, convention=2):
         H, evals, evecs=self.H_and_eigen(kpts=kpts, convention=convention)
         return evals, evecs
+
+
+
+class GPAWTBWrapper():
+    def __init__(self, calc=None, atoms=None,  gpw_fname=None, pickle_fname=None):
+        if not _has_gpaw:
+            raise ImportError("GPAW was not imported. Please install gpaw.")
+        if pickle_fname is None:
+            if gpw_fname is not None:
+                calc=GPAW(gpw_fname, fixdensity=True, symmetry='off', txt='TB2J_wrapper.log', basis='dzp', mode='lcao')
+                atoms=calc.atoms
+                atoms.calc=calc
+                E = atoms.get_potential_energy()
+            tb=TightBinding(atoms, calc)
+            self.H_NMM, self.S_NMM=tb.h_and_s()
+            self.Rlist=tb.R_cN.T
+        else:
+            with open(fname, 'rb') as myfile:
+                self.H_NMM, self.S_NMM, self.Rlist=pickle.load(myfile)
+        self.nR, self.nbasis, _ = self.H_NMM.shape
+        self.positions=np.zeros((self.nbasis, 3))
+
+    def save_pickle(self, fname):
+        with open(fname, 'wb') as myfile:
+            pickle.dump([self.H_NMM, self.S_NMM, self.Rlist], myfile)
+
+    def solve(self, k):
+        self.Hk=np.zeros((self.nbasis, self.nbasis), dtype='complex')
+        self.Sk=np.zeros((self.nbasis, self.nbasis), dtype='complex')
+        for iR, R in enumerate(self.Rlist):
+            phase=np.exp(-2j*np.pi* np.dot(k, R))
+            self.Hk+=self.H_NMM[iR]*phase
+            self.Sk+=self.S_NMM[iR]*phase
+        self.Sk=np.real((self.Sk+self.Sk.T)/2)
+        return eigh(self.Hk, self.Sk)
+        try:
+            return eigh(self.Hk, self.Sk)
+        except:
+            return np.zeros(self.nbasis), np.zeros((self.nbasis, self.nbasis))
+
+    def solve_all(self, kpts):
+        evals = []
+        evecs = []
+        for ik, k in enumerate(kpts):
+            evalue, evec = self.solve(k)
+            evals.append(evalue)
+            evecs.append(evec)
+        return np.array(evals, dtype=float), np.array(evecs,
+                                                      dtype=complex,
+                                                      order='C')
+
 
 
 def test_Ham():
