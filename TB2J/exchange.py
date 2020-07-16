@@ -127,10 +127,14 @@ class Exchange():
 
         sdict = symbol_number(self.atoms)
 
-        for i, symbol in enumerate(self.basis):
+        for i, base in enumerate(self.basis):
             if i not in self.exclude_orbs:
                 # e.g. Fe2, dxy, _, _
-                atom_sym, orb_sym = symbol.split('|')[:2]
+                if isinstance(base, str):
+                    atom_sym, orb_sym = base.split('|')[:2]
+                else:
+                    atom_sym, orb_sym = base[:2]
+
                 if atom_sym in adict:
                     adict[atom_sym].append(orb_sym)
                 else:
