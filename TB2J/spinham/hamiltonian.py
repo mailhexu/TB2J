@@ -341,6 +341,7 @@ class SpinHamiltonian(object):
         ax.set_xlim(x[0], x[-1])
         #ax.set_ylim(0)
         ax.set_xticks(X)
+        knames=[x if x!='G' else '$\Gamma$' for x in knames]
         ax.set_xticklabels(knames)
         for x in X:
             ax.axvline(x, linewidth=0.6, color='gray')
