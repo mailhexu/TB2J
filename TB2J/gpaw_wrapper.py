@@ -77,20 +77,20 @@ class GPAWWrapper():
         if self.calc.get_spin_polarized():
             H2=np.zeros((nkpt, nbasis, nbasis),dtype=complex)
             # spin up
-            H2[:, :nbasis, :nbasis]=H[0]
+            H2[:, :norb, :norb]=H[0]
             # spin down
-            H2[:, nbasis:, nbasis:]=H[1]
+            H2[:, norb:, norb:]=H[1]
             S2=np.zeros((nkpt, nbasis, nbasis),dtype=complex)
-            S2[:, :norb, :orb]=S
+            S2[:, :norb, :norb]=S
             S2[:, norb:, norb:]=S
 
             for ikpt, k in enumerate(self.calc.get_ibz_k_points()):
                 evals0, evecs0 = eigh(H[0, ikpt,:,:], S[ikpt,:,:])
                 evals1, evecs1 = eigh(H[1, ikpt,:,:], S[ikpt,:,:])
-                evals[ikpt, :nbasis]=evals0
-                evals[ikpt, nbasis:]=evals1
-                evecs[ikpt, :nbasis, :nbasis]=evecs0
-                evecs[ikpt, nbasis:, nbasis:]=evecs1
+                evals[ikpt, :norb]=evals0
+                evals[ikpt, norb:]=evals1
+                evecs[ikpt, :norb, :norb]=evecs0
+                evecs[ikpt, norb:, norb:]=evecs1
         else:
             H2=H[0]
             for ikpt, k in self.kpt_u:
