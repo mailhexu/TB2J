@@ -364,13 +364,13 @@ class ExchangeNCL(Exchange):
 
             # DMI
             for i in range(3):
-                #Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
+                Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
                 # Dx = Jyz-Jzy
                 # Dy = Jzx-Jxz
                 # Dz = Jxy-Jyx
-                Dtmp[0] = np.imag(val[2, 3] - val[3, 2])
-                Dtmp[1] = np.imag(val[3, 1] - val[1, 3])
-                Dtmp[2] = np.imag(val[1, 2] - val[2, 1])
+                #Dtmp[0] = np.imag(val[2, 3] - val[3, 2])
+                #Dtmp[1] = np.imag(val[3, 1] - val[1, 3])
+                #Dtmp[2] = np.imag(val[1, 2] - val[2, 1])
             if is_nonself:
                 self.DMI[keyspin] = Dtmp
 

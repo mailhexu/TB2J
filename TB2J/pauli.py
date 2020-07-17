@@ -141,8 +141,8 @@ def pauli_block_sigma_norm(M):
     where p is the norm of P.
     """
     MI, Mx, My, Mz = pauli_block_all(M)
-    #nMx = np.linalg.norm(Mx)
-    #nMy = np.linalg.norm(My)
-    #nMz = np.linalg.norm(Mz)
-    #nM = np.sqrt(np.sum((nMx, nMy, nMz)))
-    return (Mz) * np.sign(np.trace(Mz))
+    ex, ey, ez= np.trace(Mx), np.trace(My), np.trace(Mz)
+    evec=np.array([ex, ey, ez])
+    evec = evec/np.linalg.norm(evec)
+    return Mx *evec[0] + My*evec[1]+Mz*evec[2]
+    #return (Mz) * np.sign(np.trace(Mz))
