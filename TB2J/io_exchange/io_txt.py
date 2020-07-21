@@ -137,6 +137,18 @@ def write_exchange_section(cls, myfile, order = 'distance', write_experimental:b
             myfile.write(
                 f"[Experimental!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n")
 
+        if cls.NJT_ddict is not None:
+            DMI = cls.NJT_ddict[ll] * 1e3
+            myfile.write('[Experimental!] DMI_NJt: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                DMI[0], DMI[1], DMI[2]))
+
+        if cls.NJT_Jdict is not None:
+            J = cls.NJT_Jdict[ll] * 1e3
+            myfile.write('[Experimental!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                J[0], J[1], J[2]))
+
+
+
         if cls.exchange_Jdict_orb:
             myfile.write("Orbital contributions:\n {} \n".format(
                 np.array_str(cls.exchange_Jdict_orb[ll] * 1e3,

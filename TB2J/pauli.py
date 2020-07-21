@@ -81,7 +81,7 @@ def pauli_block_y(M, norb):
     y compoenent of a matrix, see pauli_block
     """
     ret = zeros_like(M)
-    tmp = (M[:norb, norb:] * 1j + M[norb:, :norb] * (-1j)) / 2
+    tmp = (M[:norb, norb:] * (-1j) + M[norb:, :norb] * (1j)) / 2
     ret[:norb, norb:] = tmp * (-1j)
     ret[norb:, :norb] = tmp * 1j
     return tmp, ret
@@ -117,7 +117,7 @@ def pauli_block(M, idim):
     elif idim == 1:
         tmp = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2.0
     elif idim == 2:
-        tmp = (M[:norb1, norb2:] * 1j + M[norb1:, :norb2] * (-1j)) / 2.0
+        tmp = (M[:norb1, norb2:] * (-1.0j) + M[norb1:, :norb2] * (1.0j)) / 2.0
     elif idim == 3:
         tmp = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2.0
     else:
@@ -129,7 +129,7 @@ def pauli_block_all(M):
     norb1, norb2 = np.array(M.shape) // 2
     MI = (M[:norb1, :norb2] + M[norb1:, norb2:]) / 2
     Mx = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2
-    My = (M[:norb1, norb2:] * 1j + M[norb1:, :norb2] * (-1j)) / 2
+    My = (M[:norb1, norb2:] * (-1j) + M[norb1:, :norb2] * (1j)) / 2
     Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
     return MI, Mx, My, Mz
 

@@ -117,11 +117,11 @@ class SpinIO(object):
 
         if NJT_ddict is not None:
             self.has_NJT_dmi = True
-            self.NJT_ddict = NJT_ddict
+        self.NJT_ddict = NJT_ddict
 
         if NJT_Jdict is not None:
             self.has_NJT_exchange = True
-            self.NJT_Jdict = NJT_Jdict
+        self.NJT_Jdict = NJT_Jdict
 
         natom = len(self.atoms)
         if gyro_ratio is None: 
