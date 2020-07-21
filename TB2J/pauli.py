@@ -81,7 +81,7 @@ def pauli_block_y(M, norb):
     y compoenent of a matrix, see pauli_block
     """
     ret = zeros_like(M)
-    tmp = (M[:norb, norb:] * 1j + M[norb:, :norb] * (-1j)) / 2
+    tmp = (M[:norb, norb:] * (-1j) + M[norb:, :norb] * (1j)) / 2
     ret[:norb, norb:] = tmp * (-1j)
     ret[norb:, :norb] = tmp * 1j
     return tmp, ret
@@ -117,7 +117,7 @@ def pauli_block(M, idim):
     elif idim == 1:
         tmp = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2.0
     elif idim == 2:
-        tmp = (M[:norb1, norb2:] * 1j + M[norb1:, :norb2] * (-1j)) / 2.0
+        tmp = (M[:norb1, norb2:] * (-1.0j) + M[norb1:, :norb2] * (1.0j)) / 2.0
     elif idim == 3:
         tmp = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2.0
     else:
@@ -129,7 +129,7 @@ def pauli_block_all(M):
     norb1, norb2 = np.array(M.shape) // 2
     MI = (M[:norb1, :norb2] + M[norb1:, norb2:]) / 2
     Mx = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2
-    My = (M[:norb1, norb2:] * 1j + M[norb1:, :norb2] * (-1j)) / 2
+    My = (M[:norb1, norb2:] * (-1j) + M[norb1:, :norb2] * (1j)) / 2
     Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
     return MI, Mx, My, Mz
 
@@ -141,34 +141,8 @@ def pauli_block_sigma_norm(M):
     where p is the norm of P.
     """
     MI, Mx, My, Mz = pauli_block_all(M)
-    #nMx = np.linalg.norm(Mx)
-    #nMy = np.linalg.norm(My)
-    #nMz = np.linalg.norm(Mz)
-    #nM = np.sqrt(np.sum((nMx, nMy, nMz)))
-    return (Mz) * np.sign(np.trace(Mz))
-
-
-def test_norm():
-    a=np.random.random([4,4])
-    a=[[1,0.1, 0.0, 0],
-       [0.1, 1, 0, 0.0],
-       [0.0, 0, 0.3, 0],
-       [0, 0.0, 0, 0.3],
-    ]
-    a=np.array(a)
-    n1=pauli_block_sigma_norm(a)
-
-    MI, Mx, My, Mz = pauli_block_all(a)
-    print(f"{Mx=}")
-    print(f"{My=}")
-    print(f"{Mz=}")
-    print(np.linalg.norm([Mx, My, Mz], axis=0))
-    print(n1)
-    print(s0@s0)
-    print(s1@s1)
-    print(s2@s2)
-    s=pauli_mat(6,0)
-    print(s@s)
-    print(np.linalg.det(s))
-
+    ex, ey, ez= np.trace(Mx), np.trace(My), np.trace(Mz)
+    evec=np.array([ex, ey, ez])
+    evec = evec/np.linalg.norm(evec)
+    return Mx *evec[0] + My*evec[1]+Mz*evec[2]
 

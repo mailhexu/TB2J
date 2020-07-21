@@ -59,7 +59,7 @@ class Exchange():
         self._prepare_distance()
 
         # whether to calculate J and DMI with NJt method.
-        self.calc_NJt = False
+        self.calc_NJt = True 
         #self._prepare_NijR()
         self.Ddict_NJT = None
         self.Jdict_NJT = None
@@ -365,6 +365,12 @@ class ExchangeNCL(Exchange):
             # DMI
             for i in range(3):
                 Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
+                # Dx = Jyz-Jzy
+                # Dy = Jzx-Jxz
+                # Dz = Jxy-Jyx
+                #Dtmp[0] = np.imag(val[2, 3] - val[3, 2])
+                #Dtmp[1] = np.imag(val[3, 1] - val[1, 3])
+                #Dtmp[2] = np.imag(val[1, 2] - val[2, 1])
             if is_nonself:
                 self.DMI[keyspin] = Dtmp
 
@@ -383,6 +389,7 @@ class ExchangeNCL(Exchange):
         """
         calcualte density matrix for all R,i, j
         """
+        self.N=defaultdict(lambda: 0.0)
         for R, G in GR.items():
             self.N[R] += -1.0 / np.pi * np.imag(G * de)
 
@@ -440,10 +447,15 @@ class ExchangeNCL(Exchange):
                     D = np.zeros(3, dtype=float)
                     J = np.zeros(3, dtype=float)
                     for dim in range(3):
+                        #S_i = pauli_mat(ni, dim +
+                        #                1)  #*self.rho[np.ix_(orbi, orbi)]
+                        #S_j = pauli_mat(nj, dim +
+                        #                1)  #*self.rho[np.ix_(orbj, orbj)]
                         S_i = pauli_mat(ni, dim +
-                                        1)  #*self.rho[np.ix_(orbi, orbi)]
+                                        1)  *self.rho[np.ix_(orbi, orbi)]
                         S_j = pauli_mat(nj, dim +
-                                        1)  #*self.rho[np.ix_(orbj, orbj)]
+                                        1)  *self.rho[np.ix_(orbj, orbj)]
+
                         # [S, t]+  = Si tij + tij Sj, where
                         # Si and Sj are the spin operator
                         # Here we do not have L operator, so J-> S
@@ -497,6 +509,7 @@ class ExchangeNCL(Exchange):
 
         self.get_rho_atom()
         self.A_to_Jtensor()
+        #self.calculate_DMI_NJT()
         bar.finish()
 
     def _prepare_index_spin(self):
