@@ -12,4 +12,6 @@ The user has to perform DFT single point energy calculations for these three str
 
   TB2J_merge.py BiFeO3_x BiFeO3_y BiFeO3_z
 
+Note that the whole structure are rotated w.r.t. the laboratory axis but not to the cell axis. Therefore, the k-points should not be changed in both the DFT calculation and the TB2J calculation. 
+
 A new TB2J\_results directory is then made which contains the merged final results. 
