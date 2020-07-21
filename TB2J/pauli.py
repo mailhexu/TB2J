@@ -146,3 +146,29 @@ def pauli_block_sigma_norm(M):
     #nMz = np.linalg.norm(Mz)
     #nM = np.sqrt(np.sum((nMx, nMy, nMz)))
     return (Mz) * np.sign(np.trace(Mz))
+
+
+def test_norm():
+    a=np.random.random([4,4])
+    a=[[1,0.1, 0.0, 0],
+       [0.1, 1, 0, 0.0],
+       [0.0, 0, 0.3, 0],
+       [0, 0.0, 0, 0.3],
+    ]
+    a=np.array(a)
+    n1=pauli_block_sigma_norm(a)
+
+    MI, Mx, My, Mz = pauli_block_all(a)
+    print(f"{Mx=}")
+    print(f"{My=}")
+    print(f"{Mz=}")
+    print(np.linalg.norm([Mx, My, Mz], axis=0))
+    print(n1)
+    print(s0@s0)
+    print(s1@s1)
+    print(s2@s2)
+    s=pauli_mat(6,0)
+    print(s@s)
+    print(np.linalg.det(s))
+
+

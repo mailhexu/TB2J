@@ -32,19 +32,12 @@ class Merger():
             Dydict=self.dat_y.dmi_ddict
             Dzdict=self.dat_z.dmi_ddict
             for key, Dz in Dzdict.items():
-                Dx= Dxdict[key]
-                Dy= Dydict[key]
+                try:
+                    Dx= Dxdict[key]
+                    Dy= Dydict[key]
+                except KeyError as err:
+                    raise KeyError("%s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
                 dmi_ddict[key] = merge_DMI(Dx, Dy, Dz)
-                # if key==((0,1,1), 1,0) and False:
-                #     print("----------------------------")
-                #     print("Dx:", Dx*1000)
-                #     Dx_z = Rxz.apply(Dx)
-                #     print("Dx_z:", Dx_z*1000)
-                #     print("Dy:", Dy*1000)
-                #     Dy_z = Ryz.apply(Dy)
-                #     print("Dy_z:", Dy_z*1000)
-                #     print("Dz:", Dz*1000)
-                #    print("Resulst:", merge_DMI(Dx, Dy, Dz)*1000)
             self.dat.dmi_ddict=dmi_ddict
 
     def write(self, path='TB2J_results'):
