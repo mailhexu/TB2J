@@ -17,7 +17,7 @@ The features include:
  - Versatile API on both the input (DFT Hamiltonian) and the output (Heisenberg model) sides.
 
 For more information, see the documentation on
- <https://tb2j.readthedocs.io/en/latest/src/wannier.html>
+ <https://tb2j.readthedocs.io/en/latest/>
 
 ## Dependencies
 * python (tested for ver 3.6)
