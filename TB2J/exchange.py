@@ -213,7 +213,7 @@ class ExchangeNCL(Exchange):
         self.G = TBGreen(self.tbmodel, self.kmesh, self.efermi)
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
-        self.rho = np.zeros((self.nbasis, self.nbasis), dtype=float)
+        self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         #self.HR0 = self.tbmodel.ham_R0
         self.HR0 = self.G.H0
@@ -327,6 +327,8 @@ class ExchangeNCL(Exchange):
         self.Jprime = {}
         self.B = {}
         self.exchange_Jdict = {}
+        
+        self.debug_dict={'DMI2':{}}
         for key, val in self.A_ijR.items():
             # key:(R, iatom, jatom)
             R, iatom, jatom = key
@@ -342,6 +344,7 @@ class ExchangeNCL(Exchange):
             Jiso = np.zeros((3, 3), dtype=float)
             Ja = np.zeros((3, 3), dtype=float)
             Dtmp = np.zeros(3, dtype=float)
+            Dtmp2 = np.zeros(3, dtype=float)
             # Heisenberg like J.
             for i in range(3):
                 Jiso[i, i] += np.imag(val[0, 0] - val[1, 1] - val[2, 2] -
@@ -368,11 +371,12 @@ class ExchangeNCL(Exchange):
                 # Dx = Jyz-Jzy
                 # Dy = Jzx-Jxz
                 # Dz = Jxy-Jyx
-                #Dtmp[0] = np.imag(val[2, 3] - val[3, 2])
-                #Dtmp[1] = np.imag(val[3, 1] - val[1, 3])
-                #Dtmp[2] = np.imag(val[1, 2] - val[2, 1])
+                Dtmp2[0] = np.imag(val[2, 3] - val[3, 2])
+                Dtmp2[1] = np.imag(val[3, 1] - val[1, 3])
+                Dtmp2[2] = np.imag(val[1, 2] - val[2, 1])
             if is_nonself:
                 self.DMI[keyspin] = Dtmp
+                self.debug_dict['DMI2'][keyspin]=Dtmp2
 
             # isotropic exchange into bilinear and biqudratic parts:
             # Jprime SiSj and B (SiSj)^2
@@ -403,10 +407,10 @@ class ExchangeNCL(Exchange):
         #    self.rho += -1.0 / np.pi * np.imag(GR0 * de)
         #else:
         #    self.rho += -1.0 / np.pi * np.imag(self.S0@GR0 * de)
-        self.rho += -1.0 / np.pi * np.imag(rhoR[0, 0, 0] * de)
+        self.rho += -1.0 / np.pi * rhoR[0, 0, 0] * de
 
     def get_total_charges(self):
-        return np.sum(np.real(np.diag(self.rho)))
+        return np.sum(np.imag(np.diag(self.rho)))
 
     def get_rho_atom(self):
         """
@@ -421,8 +425,8 @@ class ExchangeNCL(Exchange):
             # *2 because there is a 1/2 in the paui_block_all function
             rho[iatom] = np.array(
                 [np.trace(x) * 2 for x in pauli_block_all(tmp)])
-            self.charges[iatom] = np.real(rho[iatom][0])
-            self.spinat[iatom, :] = np.real(rho[iatom][1:])
+            self.charges[iatom] = np.imag(rho[iatom][0])
+            self.spinat[iatom, :] = np.imag(rho[iatom][1:])
         self.rho_dict = rho
         return self.rho_dict
 
@@ -451,6 +455,7 @@ class ExchangeNCL(Exchange):
                         #                1)  #*self.rho[np.ix_(orbi, orbi)]
                         #S_j = pauli_mat(nj, dim +
                         #                1)  #*self.rho[np.ix_(orbj, orbj)]
+                        # TODO: Note that rho is complex, not the imaginary part
                         S_i = pauli_mat(ni, dim +
                                         1)  *self.rho[np.ix_(orbi, orbi)]
                         S_j = pauli_mat(nj, dim +
@@ -540,6 +545,7 @@ class ExchangeNCL(Exchange):
             NJT_ddict=self.Ddict_NJT,
             Jani_dict=self.Jani,
             biquadratic_Jdict=self.B,
+            debug_dict=self.debug_dict,
         )
         output.write_all(path=path)
 

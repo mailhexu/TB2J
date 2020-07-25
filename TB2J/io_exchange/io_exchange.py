@@ -31,6 +31,7 @@ class SpinIO(object):
         dmi_ddict=None,
         Jani_dict=None,
         biquadratic_Jdict=None,
+        debug_dict=None,
         k1=None,
         k1dir=None,
         NJT_Jdict=None,
@@ -137,6 +138,8 @@ class SpinIO(object):
             self.damping = damping
         else:
             self.damping = [damping] * natom
+
+        self.debug_dict=debug_dict
 
         self.write_experimental = write_experimental
 
