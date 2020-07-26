@@ -50,7 +50,7 @@ class Merger():
                     Dy= Dydict[(tuple(keyy), i, j)]
                 except KeyError as err:
                     raise KeyError("Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
-                dmi_ddict[key] = merge_DMI(Dx, Dy, Dz)
+                dmi_ddict[key] = merge_DMI2(Dx, Dy, Dz)
             self.dat.dmi_ddict=dmi_ddict
 
         dmi_ddict={}
