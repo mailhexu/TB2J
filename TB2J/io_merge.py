@@ -17,6 +17,14 @@ def merge_DMI(Dx, Dy, Dz):
          np.array([0.5, 0.5, 0.0]) * Dz)
     return D
 
+def merge_DMI2(Dx, Dy, Dz):
+    Dx_z = Rxz.apply(Dx)
+    Dy_z = Ryz.apply(Dy)
+    D = (np.array([1, 0, 0]) * Dx_z + np.array([0, 1, 0]) * Dy_z +
+         np.array([0,0,1]) * Dz)
+    return D
+
+
 
 class Merger():
     def __init__(self, path_x, path_y, path_z):
@@ -33,12 +41,37 @@ class Merger():
             Dzdict=self.dat_z.dmi_ddict
             for key, Dz in Dzdict.items():
                 try:
-                    Dx= Dxdict[key]
-                    Dy= Dydict[key]
+                    R, i, j =key
+                    #keyx=tuple(map(int, np.round(Rxz.apply(R))))
+                    #keyy=tuple(map(int, np.round(Ryz.apply(R))))
+                    keyx=R
+                    keyy=R
+                    Dx= Dxdict[(tuple(keyx), i, j) ]
+                    Dy= Dydict[(tuple(keyy), i, j)]
                 except KeyError as err:
-                    raise KeyError("%s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
-                dmi_ddict[key] = merge_DMI(Dx, Dy, Dz)
+                    raise KeyError("Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
+                dmi_ddict[key] = merge_DMI2(Dx, Dy, Dz)
             self.dat.dmi_ddict=dmi_ddict
+
+        dmi_ddict={}
+        try:
+            Dxdict=self.dat_x.debug_dict['DMI2']
+            Dydict=self.dat_y.debug_dict['DMI2']
+            Dzdict=self.dat_z.debug_dict['DMI2']
+            for key, Dz in Dzdict.items():
+                try:
+                    R, i, j =key
+                    keyx=R
+                    keyy=R
+                    Dx= Dxdict[(tuple(keyx), i, j) ]
+                    Dy= Dydict[(tuple(keyy), i, j)]
+                except KeyError as err:
+                    raise KeyError("Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
+                dmi_ddict[key] = merge_DMI2(Dx, Dy, Dz)
+            self.dat.debug_dict['DMI2']=dmi_ddict
+        except:
+            pass
+
 
     def write(self, path='TB2J_results'):
         self.dat.write_all(path=path)

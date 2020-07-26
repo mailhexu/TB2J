@@ -131,6 +131,16 @@ def write_exchange_section(cls, myfile, order = 'distance', write_experimental:b
             DMI = cls.dmi_ddict[ll] * 1e3
             myfile.write('[Experimental!] DMI: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
                 DMI[0], DMI[1], DMI[2]))
+                
+        if write_experimental:
+            try:
+                DMI2 = cls.debug_dict['DMI2'][ll] * 1e3
+                myfile.write('[Debug!] DMI2: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                    DMI2[0], DMI2[1], DMI2[2]))
+            except:
+                pass
+
+
 
         if cls.Jani_dict is not None and write_experimental:
             J = cls.Jani_dict[ll] * 1e3
