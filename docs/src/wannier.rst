@@ -105,9 +105,6 @@ Now you can run
 which generates the files below for spin up, and the same set for spin
 down
 
-which generates the files below (for spin up) and the same set for spin
-down
-
 ::
 
    abinito_w90_up_hr.dat abinito_w90_up_centres.xyz   abinito_w90_up.wout
@@ -115,6 +112,13 @@ down
 The .dat file contains the Hamiltonian, the .xyz file contains the
 Wannier centers. The .wout file has a summary of the process of running
 Wannier90 and will be used to calculate the exchange parameters.
+
+If you're using Wannier90 version < 3.0, the spin down files are not 
+automatically generated due to a bug. To get the files, the following command is needed:
+
+::
+
+    wannier90.x abinito_w90_down
 
 To get localized WFs can be tricky sometimes. It is necessary to check
 if the WFs are localized by looking at the .wout file. For example, we
