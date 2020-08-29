@@ -10,14 +10,15 @@ Rxz = Rotation.from_euler('y', -90, degrees=True)
 # Rotation from y to z
 Ryz = Rotation.from_euler('x', -90, degrees=True)
 
-def merge_DMI(Dx, Dy, Dz):
+
+def rot_merge_DMI(Dx, Dy, Dz):
     Dx_z = Rxz.apply(Dx)
     Dy_z = Ryz.apply(Dy)
     D = (np.array([0.0, 0.5, 0.5]) * Dx_z + np.array([0.5, 0.0, 0.5]) * Dy_z +
          np.array([0.5, 0.5, 0.0]) * Dz)
     return D
 
-def merge_DMI2(Dx, Dy, Dz):
+def rot_merge_DMI2(Dx, Dy, Dz):
     Dx_z = Rxz.apply(Dx)
     Dy_z = Ryz.apply(Dy)
     D = (np.array([1, 0, 0]) * Dx_z + np.array([0, 1, 0]) * Dy_z +
@@ -25,13 +26,46 @@ def merge_DMI2(Dx, Dy, Dz):
     return D
 
 
+def merge_DMI(Dx, Dy, Dz):
+    D = (np.array([1, 0, 0]) * Dx + np.array([0, 1, 0]) * Dy +
+         np.array([0,0,1]) * Dz)
+    return D
+
+def merge_Jani(Janix, Janiy, Janiz):
+    Jani= (np.array([[0,0,0],[0,1,1],[0,1,1]]) * Janix
+        +  np.array([[1,0,1],[0,0,0],[1,0,1]]) * Janiy  
+        +  np.array([[1,1,0],[1,1,0],[0,0,0]]) * Janiz)/2.0
+    return Jani
+
+
 
 class Merger():
-    def __init__(self, path_x, path_y, path_z):
+    def __init__(self, path_x, path_y, path_z, method='structure'):
+        assert(method in ['structure', 'spin'])
         self.dat_x=SpinIO.load_pickle(os.path.join(path_x, 'TB2J_results'), 'TB2J.pickle')
         self.dat_y=SpinIO.load_pickle(os.path.join(path_y, 'TB2J_results'), 'TB2J.pickle')
         self.dat_z=SpinIO.load_pickle(os.path.join(path_z, 'TB2J_results'), 'TB2J.pickle')
         self.dat=copy.copy(self.dat_z)
+        self.method=method
+
+    def merge_Jani(self):
+        Jani_dict={}
+        Janixdict=self.dat_x.Jani_dict
+        Janiydict=self.dat_y.Jani_dict
+        Janizdict=self.dat_z.Jani_dict
+        for key, Janiz in Janizdict.items():
+            try:
+                R, i, j =key
+                keyx=R
+                keyy=R
+                Janix= Janixdict[(tuple(keyx), i, j) ]
+                Janiy= Janiydict[(tuple(keyy), i, j)]
+            except KeyError as err:
+                raise KeyError("Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
+            Jani_dict[key] = merge_Jani(Janix, Janiy, Janiz)
+        self.dat.Jani_dict=Jani_dict
+
+       
 
     def merge_DMI(self):
         dmi_ddict={}
@@ -42,15 +76,16 @@ class Merger():
             for key, Dz in Dzdict.items():
                 try:
                     R, i, j =key
-                    #keyx=tuple(map(int, np.round(Rxz.apply(R))))
-                    #keyy=tuple(map(int, np.round(Ryz.apply(R))))
                     keyx=R
                     keyy=R
                     Dx= Dxdict[(tuple(keyx), i, j) ]
                     Dy= Dydict[(tuple(keyy), i, j)]
                 except KeyError as err:
                     raise KeyError("Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
-                dmi_ddict[key] = merge_DMI2(Dx, Dy, Dz)
+                if self.method=='structure':
+                    dmi_ddict[key] = rot_merge_DMI(Dx, Dy, Dz)
+                else:
+                    dmi_ddict[key] = merge_DMI(Dx, Dy, Dz)
             self.dat.dmi_ddict=dmi_ddict
 
         dmi_ddict={}
@@ -67,7 +102,11 @@ class Merger():
                     Dy= Dydict[(tuple(keyy), i, j)]
                 except KeyError as err:
                     raise KeyError("Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."%err)
-                dmi_ddict[key] = merge_DMI2(Dx, Dy, Dz)
+                if self.method=='structure':
+                    dmi_ddict[key] = rot_merge_DMI2(Dx, Dy, Dz)
+                elif self.method=='spin':
+                    dmi_ddict[key] = merge_DMI2(Dx, Dy, Dz)
+
             self.dat.debug_dict['DMI2']=dmi_ddict
         except:
             pass
@@ -78,9 +117,10 @@ class Merger():
 
 
 
-def merge(path_x, path_y, path_z, save=True, path='TB2J_results'):
-    m=Merger(path_x, path_y, path_z)
+def merge(path_x, path_y, path_z, method, save=True, path='TB2J_results'):
+    m=Merger(path_x, path_y, path_z, method)
     m.merge_DMI()
+    m.merge_Jani()
     if save:
         m.write(path=path)
     return m.dat

@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation
 
 def main():
     from TB2J.io_merge import merge
-    merge(sys.argv[1], sys.argv[2], sys.argv[3], save=True)
+    merge(sys.argv[1], sys.argv[2], sys.argv[3],sys.argv[4], save=True)
 
 
 main()
