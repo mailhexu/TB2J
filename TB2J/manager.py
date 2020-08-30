@@ -66,7 +66,7 @@ def gen_exchange(path,
         exchange.run()
         print("All calculation finsihed. The results are in TB2J_results directory.")
 
-    elif colinear and 0:
+    elif colinear and 1:
         print("Reading Wannier90 hamiltonian: spin up.")
         tbmodel_up = MyTB.read_from_wannier_dir(
             path=path, prefix=prefix_up, posfile=posfile, nls=False)
@@ -158,7 +158,7 @@ def gen_exchange_siesta(
         raise ImportError("sisl cannot be imported. Please install sisl first.")
     fdf = sisl.get_sile(fdf_fname)
     H = fdf.read_hamiltonian()
-    if H.spin.is_colinear:
+    if H.spin.is_colinear and False:
         print("Reading Siesta hamiltonian: colinear spin.")
         tbmodel_up = SislWrapper(H, spin=0)
         tbmodel_dn = SislWrapper(H, spin=1)
