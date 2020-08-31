@@ -75,6 +75,7 @@ class Merger():
         self.dat_z = SpinIO.load_pickle(os.path.join(path_z, 'TB2J_results'),
                                         'TB2J.pickle')
         self.dat = copy.copy(self.dat_z)
+        self.paths = [path_x, path_y, path_z]
         self.method = method
 
     def merge_Jani(self):
@@ -150,6 +151,12 @@ class Merger():
             pass
 
     def write(self, path='TB2J_results'):
+        self.dat.description = 'Merged from TB2J results in paths: ' + '\t'.join(
+            self.paths)
+        if self.method=='spin':
+            self.dat.description += ', which are from DFT data with spin along x, y, z orientation'
+        elif self.method=='structure' 
+            self.dat.description += ', which are from DFT data with structure with z axis rotated to x, y, z'
         self.dat.write_all(path=path)
 
 
