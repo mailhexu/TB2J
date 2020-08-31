@@ -151,7 +151,7 @@ class Merger():
             pass
 
     def write(self, path='TB2J_results'):
-        self.dat.description = 'Merged from TB2J results in paths: \n  ' + '\n  '.join(
+        self.dat.description+ = 'Merged from TB2J results in paths: \n  ' + '\n  '.join(
             self.paths)+'\n'
         if self.method=='spin':
             self.dat.description += ', which are from DFT data with spin along x, y, z orientation\n'

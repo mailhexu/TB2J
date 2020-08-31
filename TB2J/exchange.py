@@ -65,6 +65,7 @@ class Exchange():
         self.Jdict_NJT = None
         self._is_collinear = None
         self.has_elistc = False
+        self.description=description
 
     def set_tbmodels(self, tbmodels):
         pass
@@ -545,6 +546,7 @@ class ExchangeNCL(Exchange):
             Jani_dict=self.Jani,
             biquadratic_Jdict=self.B,
             debug_dict=self.debug_dict,
+            description=self.description,
         )
         output.write_all(path=path)
 
@@ -575,5 +577,6 @@ class ExchangeCL(ExchangeNCL):
             NJT_Jdict=None,
             NJT_ddict=None,
             biquadratic_Jdict=self.B,
+            description=self.description,
         )
         output.write_all(path=path)

@@ -209,5 +209,6 @@ class ExchangeCL2(ExchangeCL):
             NJT_ddict=None,
             Jani_dict=None,
             biquadratic_Jdict=None,
+            description=self.description,
         )
         output.write_all()

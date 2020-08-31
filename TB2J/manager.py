@@ -51,9 +51,10 @@ def gen_exchange(path,
             basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Wannier90 data.
-        Tight binding data from {path}, prefix of wannier function files:{prefix_up} and {prefix_dn}.
-        Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
-        """
+ Tight binding data from {path}. 
+ Prefix of wannier function files:{prefix_up} and {prefix_dn}.
+Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
+\n"""
         exchange = ExchangeCL2(tbmodels=(tbmodel_up, tbmodel_dn),
                                atoms=atoms,
                                basis=basis,
@@ -93,9 +94,10 @@ def gen_exchange(path,
         else:
             basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
         description = f""" Input from collinear Wannier90 data.
-        Tight binding data from {path}, prefix of wannier function files:{prefix_up} and {prefix_dn}.
-        Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
-        """
+ Tight binding data from {path}. 
+ Prefix of wannier function files:{prefix_up} and {prefix_dn}.
+Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
+\n"""
         print("Starting to calculate exchange.")
         exchange = ExchangeCL(tbmodels=tbmodel,
                               atoms=atoms,
@@ -134,9 +136,14 @@ def gen_exchange(path,
         else:
             basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
         description = f""" Input from non-collinear Wannier90 data.
-        Tight binding data from {path}, prefix of wannier function files:{prefix_SOC}.
-        Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
-        """
+ Tight binding data from {path}. 
+ Prefix of wannier function files:{prefix_SOC}.
+Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
+ The DMI component parallel to the spin orientation, the Jani which has the component of that orientation should be disregarded
+ e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z component of DMI.
+ If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
+
+\n"""
         print("Starting to calculate exchange.")
         exchange = ExchangeNCL(tbmodels=tbmodel,
                                atoms=atoms,
@@ -192,9 +199,9 @@ def gen_exchange_siesta(
         basis = dict(zip(tbmodel_up.orbs, list(range(tbmodel_up.norb))))
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Siesta data.
-        working directory: {os.getcwd()}
-        fdf_fname: {fdf_fname}.
-        """
+ working directory: {os.getcwd()}
+ fdf_fname: {fdf_fname}.
+\n"""
         exchange = ExchangeCL2(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
@@ -226,9 +233,9 @@ def gen_exchange_siesta(
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Siesta data.
-        working directory: {os.getcwd()}
-        fdf_fname: {fdf_fname}.
-        """
+ working directory: {os.getcwd()}
+ fdf_fname: {fdf_fname}.
+\n"""
         exchange = ExchangeNCL(
             tbmodels=tbmodel,
             atoms=tbmodel.atoms,
@@ -260,12 +267,12 @@ def gen_exchange_siesta(
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
         print("Starting to calculate exchange.")
         description = f""" Input from non-collinear Siesta data.
-        working directory: {os.getcwd()}
-        fdf_fname: {fdf_fname}.
-        Warning: The DMI component parallel to the spin orientation, the Jani which has the component of that orientation should be disregarded
-        e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z component of DMI.
-        If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
-        """
+ working directory: {os.getcwd()}
+ fdf_fname: {fdf_fname}.
+Warning: The DMI component parallel to the spin orientation, the Jani which has the component of that orientation should be disregarded
+ e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z component of DMI.
+ If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
+\n"""
         exchange = ExchangeNCL(tbmodels=tbmodel,
                                atoms=tbmodel.atoms,
                                basis=basis,
