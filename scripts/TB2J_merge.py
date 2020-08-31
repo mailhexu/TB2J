@@ -19,7 +19,7 @@ def main():
     )
     parser.add_argument(
         '--type',
-        metavar='t',
+        '-T',
         type=str,
         help=
         'The type of calculations, either structure of spin, meaning that the three calculations are done by rotating the structure/spin. '

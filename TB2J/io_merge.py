@@ -97,7 +97,7 @@ class Merger():
                 Jani_dict[key] = merge_Jani(Janix, Janiy, Janiz)
             else:
                 Jani_dict[key] = merge_Jani(swap_direction(Janix, (0, 2)),
-                                            swap_direction(Janix, (0, 2)),
+                                            swap_direction(Janiy, (1, 2)),
                                             Janiz)
         self.dat.Jani_dict = Jani_dict
 
