@@ -40,6 +40,7 @@ class SpinIO(object):
         gyro_ratio=None,
         write_experimental=True,
         description=None,
+        warning=None,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -149,6 +150,7 @@ class SpinIO(object):
             self.description = """Generated with TB2J from Wannier function calculation.
 The calculation parameters: Unkown.
 """
+        self.warning=warning
 
     def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
         if not os.path.exists(path):
