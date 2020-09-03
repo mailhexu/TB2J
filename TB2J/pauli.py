@@ -117,7 +117,9 @@ def pauli_block(M, idim):
     elif idim == 1:
         tmp = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2.0
     elif idim == 2:
-        tmp = (M[:norb1, norb2:] * (-1.0j) + M[norb1:, :norb2] * (1.0j)) / 2.0
+        # Note that this is not element wise product with sigma_y but dot product
+        # sigma_y=[[0, -1j],[1j, 0]] 
+        tmp = (M[:norb1, norb2:] * (1.0j) + M[norb1:, :norb2] * (-1.0j)) / 2.0
     elif idim == 3:
         tmp = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2.0
     else:
@@ -129,7 +131,8 @@ def pauli_block_all(M):
     norb1, norb2 = np.array(M.shape) // 2
     MI = (M[:norb1, :norb2] + M[norb1:, norb2:]) / 2
     Mx = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2
-    My = (M[:norb1, norb2:] * (-1j) + M[norb1:, :norb2] * (1j)) / 2
+    # Note that this is not element wise product with sigma_y but dot product
+    My = (M[:norb1, norb2:] * (1j) + M[norb1:, :norb2] * (-1j)) / 2
     Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
     return MI, Mx, My, Mz
 
