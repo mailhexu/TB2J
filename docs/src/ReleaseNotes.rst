@@ -1,6 +1,11 @@
 Release Notes
 =============
 
+v0.3.1 September 3, 2020
+-------------------------
+- A bug in the sign of the magnetization along y in Wannier and OpenMX mode is fixed.
+
+
 v0.3 August 31, 2020
 ------------------------
 - A bug in calculation of anisotropic exchange is fixed.
