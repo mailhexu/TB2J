@@ -2,7 +2,8 @@ from collections import defaultdict, OrderedDict
 import os
 import numpy as np
 from TB2J.green import TBGreen
-from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_mat
+from TB2J.pauli import (pauli_block_all, pauli_block_sigma_norm, pauli_mat, 
+        pauli_block_all_wrongy, pauli_block_sigma_norm_wrongy)
 from TB2J.utils import symbol_number, read_basis, kmesh_to_R
 from TB2J.myTB import MyTB
 from ase.io import read
@@ -230,7 +231,10 @@ class ExchangeNCL(Exchange):
 
     def _prepare_Patom(self):
         for iatom in self.ind_mag_atoms:
-            self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
+            if self.tbmodel.is_siesta:
+                self.Pdict[iatom] = pauli_block_sigma_norm_wrongy(self.get_H_atom(iatom))
+            else:
+                self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
@@ -285,13 +289,19 @@ class ExchangeNCL(Exchange):
             if (iatom, jatom) in self.R_ijatom_dict[R]:
                 Gij = self.GR_atom(GR, iatom, jatom)
                 # GijR , I, x, y, z component.
-                Gij_Ixyz = pauli_block_all(Gij)
-
+                if self.tbmodel.is_siesta:
+                    Gij_Ixyz = pauli_block_all_wrongy(Gij)
+                else:
+                    Gij_Ixyz = pauli_block_all(Gij)
                 # G(j, i, -R)
                 Rm = tuple(-x for x in R)
                 GRm = G[Rm]
                 Gji = self.GR_atom(GRm, jatom, iatom)
-                Gji_Ixyz = pauli_block_all(Gji)
+
+                if self.tbmodel.is_siesta:
+                    Gji_Ixyz = pauli_block_all_wrongy(Gji)
+                else:
+                    Gji_Ixyz = pauli_block_all(Gji)
                 tmp = np.zeros((4, 4), dtype=complex)
                 for a in range(4):
                     for b in range(4):
@@ -423,8 +433,12 @@ class ExchangeNCL(Exchange):
             iorb = self.iorb(iatom)
             tmp = self.rho[np.ix_(iorb, iorb)]
             # *2 because there is a 1/2 in the paui_block_all function
-            rho[iatom] = np.array(
-                [np.trace(x) * 2 for x in pauli_block_all(tmp)])
+            if self.tbmodel.is_siesta:
+                rho[iatom] = np.array(
+                    [np.trace(x) * 2 for x in pauli_block_all_wrongy(tmp)])
+            else:
+                rho[iatom] = np.array(
+                    [np.trace(x) * 2 for x in pauli_block_all(tmp)])
             self.charges[iatom] = np.imag(rho[iatom][0])
             self.spinat[iatom, :] = np.imag(rho[iatom][1:])
         self.rho_dict = rho

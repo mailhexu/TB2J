@@ -6,6 +6,7 @@ from scipy.linalg import eigh
 
 class SislWrapper():
     def __init__(self, sisl_hamiltonian, spin=None):
+        self.is_siesta=True
         self.ham = sisl_hamiltonian
         # k2Rfactor : H(k) = \int_R H(R) * e^(k2Rfactor * k.R)
         self.R2kfactor = -2.0j*np.pi   # 
@@ -133,7 +134,7 @@ class SislWrapper():
             S[self.norb:, self.norb:]=S0
         return S
 
-    def solve_all(self, kpts, orth=True):
+    def solve_all(self, kpts, orth=False):
         evals = []
         evecs = []
         for ik, k in enumerate(kpts):
@@ -150,19 +151,25 @@ class SislWrapper():
         return np.array(evals, dtype=float), np.array(evecs, dtype=complex, order='C')
 
     def HS_and_eigen(self, kpts, convention=2):
-        evals = []
-        evecs = []
-        H=[]
-        S=[]
+        nkpts=len(kpts)
+        evals=np.zeros((nkpts,self.nbasis), dtype=float)
+        evecs=np.zeros((nkpts,self.nbasis, self.nbasis), dtype=complex)
+        H=np.zeros((nkpts,self.nbasis, self.nbasis), dtype=complex)
+        S=np.zeros((nkpts,self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
             Hk = self.Hk(k, convention=convention)
             Sk = self.Sk(k, convention=convention)
-            H.append(self.Hk(k, convention=convention))
-            S.append(self.Sk(k, convention=convention))
+            H[ik]=Hk
+            S[ik]=Sk
             evalue, evec = self.solve(k, convention=convention)
-            evals.append(evalue)
-            evecs.append(evec)
-        return np.array(H), np.array(S), np.array(evals, dtype=float), np.array(evecs, dtype=complex, order='C')
+            #evalue, evec = eigh(Hk, b=Sk)
+            evals[ik]=evalue
+            evecs[ik]=evec
+        #H[:self.norb, self.norb:]=H[:self.norb, self.norb:].conj()
+        #H[self.norb:, :self.norb]=H[self.norb:, :self.norb].conj()
+        #evecs[:self.norb, self.norb:]=evecs[:self.norb, self.norb:].conj()
+        #evecs[self.norb:, :self.norb]=evecs[self.norb:, :self.norb].conj()
+        return H, S, evals, evecs
 
 
     def get_fermi_level(self):

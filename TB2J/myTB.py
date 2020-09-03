@@ -17,6 +17,7 @@ class AbstractTB():
     def __init__(self, R2kfactor, nspin, norb, orb_order=1):
         #: :math:`\alpha` used in :math:`H(k)=\sum_R  H(R) \exp( \alpha k \cdot R)`,
         #: Should be :math:`2\pi i` or :math:`-2\pi i`
+        self.is_siesta = False
         self.R2kfactor = R2kfactor
 
         #: number of spin. 1 for collinear, 2 for spinor.
@@ -109,6 +110,7 @@ class MyTB(AbstractTB):
         self.atoms = None
         self.R2kfactor = 2.0j * np.pi
         self.k2Rfactor = -2.0j * np.pi
+        self.is_siesta=False
 
     def set_atoms(self, atoms):
         self.atoms = atoms
