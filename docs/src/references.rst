@@ -1,5 +1,10 @@
 References
 ==========
+The implementation details of TB2J:
+
+   `Xu He, Nicole Helbig, Matthieu J. Verstraete, Eric Bousquet, 
+   TB2J: a python package for computing magnetic interaction parameters
+   <https://arxiv.org/abs/2009.01910>`__
 
 The theoretical background for exchanges calculation is described in
 
@@ -25,3 +30,4 @@ The theoretical background for exchanges calculation is described in
 
    `Szilva et al, Phys. Rev. Lett. 111,
    127204 <https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.127204>`__
+
