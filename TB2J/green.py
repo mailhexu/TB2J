@@ -79,7 +79,7 @@ class TBGreen():
         self.nkpts = nkpts
         self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         if not self._use_cache:
-            print("Preparing eigen in memory.")
+            #print("Preparing eigen in memory.")
             self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis),
                                   dtype=complex)
             self.H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
@@ -97,7 +97,7 @@ class TBGreen():
                         ik] = self.tbmodel.HSE_k(k, convention=2)
                 self.H0 += self.H[ik] / self.nkpts
         else:  # Use cache
-            print("Preparing eigen in cache.")
+            #print("Preparing eigen in cache.")
             self.evecs = np.memmap(os.path.join(self.cache_path,
                                                     'evecs.dat'),
                                        mode='w+',
