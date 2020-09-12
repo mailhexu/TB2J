@@ -31,6 +31,7 @@ def gen_exchange(path,
                  exclude_orbs=[],
                  Rcut=None,
                  ne=None,
+                 use_cache=False,
                  description=''):
     atoms = read(os.path.join(path, posfile))
     basis_fname = os.path.join(path, 'basis.txt')
@@ -71,6 +72,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
+                               use_cache=use_cache,
                                description=description)
         exchange.run()
         print(
@@ -115,6 +117,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                               exclude_orbs=exclude_orbs,
                               Rcut=Rcut,
                               ne=ne,
+                              use_cache=use_cache,
                               description=description)
         exchange.run()
         print(
@@ -161,6 +164,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
+                              use_cache=use_cache,
                                description=description)
         print("\n")
         exchange.run()
@@ -183,6 +187,7 @@ def gen_exchange_siesta(
     exclude_orbs=[],
     Rcut=None,
     ne=None,
+    use_cache=False,
     description=''):
 
     try:
@@ -219,6 +224,7 @@ def gen_exchange_siesta(
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
+            use_cache=use_cache,
             description=description)
         exchange.run()
         print("\n")
@@ -253,6 +259,7 @@ def gen_exchange_siesta(
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
+            use_cache=use_cache,
             description=description)
         exchange.run()
         print("\n")
@@ -285,6 +292,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
+                               use_cache=use_cache,
                                description=description)
         exchange.run()
         print("\n")
@@ -301,6 +309,7 @@ def gen_exchange_gpaw(gpw_fname,
                       nz=50,
                       exclude_orbs=[],
                       Rcut=None,
+                      use_cache=False,
                       description=''):
     print("Reading from GPAW data and calculate electronic structure.")
     model = GPAWWrapper(gpw_fname=gpw_fname)
@@ -321,6 +330,7 @@ def gen_exchange_gpaw(gpw_fname,
                                nz=nz,
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
+                               use_cache=use_cache,
                                description=description)
         exchange.run()
         print("\n")

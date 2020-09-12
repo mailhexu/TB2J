@@ -18,6 +18,7 @@ class AbstractTB():
         #: :math:`\alpha` used in :math:`H(k)=\sum_R  H(R) \exp( \alpha k \cdot R)`,
         #: Should be :math:`2\pi i` or :math:`-2\pi i`
         self.is_siesta = False
+        self.is_orthogonal = True
         self.R2kfactor = R2kfactor
 
         #: number of spin. 1 for collinear, 2 for spinor.
@@ -50,6 +51,9 @@ class AbstractTB():
         """
         returns the orbitals.
         """
+        raise NotImplementedError()
+
+    def HSE(self, kpt):
         raise NotImplementedError()
 
     def HS_and_eigen(self, kpts):
@@ -110,7 +114,8 @@ class MyTB(AbstractTB):
         self.atoms = None
         self.R2kfactor = 2.0j * np.pi
         self.k2Rfactor = -2.0j * np.pi
-        self.is_siesta=False
+        self.is_siesta = False
+        self.is_orthogonal = True
 
     def set_atoms(self, atoms):
         self.atoms = atoms
@@ -181,7 +186,6 @@ class MyTB(AbstractTB):
         nm.set_atoms(atoms)
         return nm
 
-    @lru_cache(maxsize=1000)
     def gen_ham(self, k, convention=2):
         """
         generate hamiltonian matrix at k point.
@@ -214,6 +218,12 @@ class MyTB(AbstractTB):
         Hk = self.gen_ham(k, convention=convention)
         return eigh(Hk)
 
+    def HSE_k(self, kpt, convention=2):
+        H = self.gen_ham(tuple(kpt), convention=convention)
+        S = None
+        evals, evecs = eigh(H)
+        return H, S, evals, evecs
+
     def HS_and_eigen(self, kpts, convention=2):
         """
         calculate eigens for all kpoints. 
@@ -224,8 +234,8 @@ class MyTB(AbstractTB):
         evals = np.zeros((nk, self.nbasis), dtype=float)
         evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
-            hams[ik] = self.gen_ham(tuple(k), convention=convention)
-            evals[ik], evecs[ik] = eigh(hams[ik])
+            hams[ik], S, evals[ik], evecs[ik] = self.HSE(tuple(k),
+                                                         convention=convention)
         return hams, None, evals, evecs
 
     def prepare_phase_rjri(self):

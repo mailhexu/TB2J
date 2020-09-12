@@ -4,6 +4,7 @@ Exchange from Green's function
 
 from collections import defaultdict
 import os
+import shutil
 import numpy as np
 from TB2J.green import TBGreen
 from TB2J.utils import symbol_number, read_basis
@@ -22,8 +23,8 @@ class ExchangeCL2(ExchangeCL):
         only difference is a colinear tag.
         """
         self.tbmodel_up, self.tbmodel_dn = tbmodels
-        self.Gup = TBGreen(self.tbmodel_up, self.kmesh, self.efermi)
-        self.Gdn = TBGreen(self.tbmodel_dn, self.kmesh, self.efermi)
+        self.Gup = TBGreen(self.tbmodel_up, self.kmesh, self.efermi, use_cache=self._use_cache, cache_path='TB2J_results/cache/spinup')
+        self.Gdn = TBGreen(self.tbmodel_dn, self.kmesh, self.efermi, use_cache=self._use_cache, cache_path='TB2J_results/cache/spindn')
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
         self.rho_up = np.zeros((self.norb, self.norb), dtype=float)
@@ -162,6 +163,13 @@ class ExchangeCL2(ExchangeCL):
             # *2 because there is a 1/2 in the paui_block_all function
             self.charges[iatom] = tup + tdn
             self.spinat[iatom, 2] = tup - tdn
+
+    def finalize(self):
+        self.Gup.clean_cache()
+        self.Gdn.clean_cache()
+        path='TB2J_results/cache'
+        if os.path.exists(path):
+            shutil.rmtree(path)
 
     def calculate_all(self):
         """

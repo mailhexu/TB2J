@@ -2,6 +2,7 @@ import numpy as np
 import scipy.linalg as sl
 from collections import defaultdict
 from ase.dft.kpoints import monkhorst_pack
+from shutil import rmtree
 import os
 
 
@@ -17,22 +18,31 @@ def eigen_to_G(evals, evecs, efermi, energy):
     return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
         evecs.conj().T)
 
+
 class TBGreen():
     def __init__(
-            self,
-            tbmodel,
-            kmesh,  # [ikpt, 3]
-            efermi,  # efermi
-            k_sym=False):
+        self,
+        tbmodel,
+        kmesh,  # [ikpt, 3]
+        efermi,  # efermi
+        k_sym=False,
+        use_cache=False,
+        cache_path='TB2J_results/cache'
+):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
         :param efermi: fermi energy.
         """
         self.tbmodel = tbmodel
-        self.R2kfactor=tbmodel.R2kfactor
-        self.k2Rfactor=-tbmodel.R2kfactor
+        self.is_orthogonal = tbmodel.is_orthogonal
+        self.R2kfactor = tbmodel.R2kfactor
+        self.k2Rfactor = -tbmodel.R2kfactor
         self.efermi = efermi
+        self._use_cache = use_cache
+        self.cache_path = cache_path
+        if use_cache:
+            self._prepare_cache()
         if kmesh is not None:
             self.kpts = monkhorst_pack(size=kmesh)
         else:
@@ -41,8 +51,22 @@ class TBGreen():
         self.kweights = [1.0 / self.nkpts] * self.nkpts
         self.norb = tbmodel.norb
         self.nbasis = tbmodel.nbasis
-        self.k_sym=k_sym
+        self.k_sym = k_sym
         self._prepare_eigen()
+       
+
+    def _prepare_cache(self):
+        path=self.cache_path
+        if not os.path.exists(path):
+            os.makedirs(path)
+        else:
+            rmtree(path)
+            os.makedirs(path)
+
+    def clean_cache(self):
+        if os.path.exists(self.cache_path):
+            rmtree(self.cache_path)
+
 
     def _prepare_eigen(self):
         """
@@ -50,22 +74,94 @@ class TBGreen():
         Note that the convention 2 is used here, where the 
         phase factor is e^(ik.R), not e^(ik.(R+rj-ri))
         """
-        # self.evals = np.zeros((len(self.kpts), self.nbasis), dtype=complex)
-        # self.evecs = np.zeros((len(self.kpts), self.nbasis, self.nbasis),
-        #                       dtype=complex)
-        # self.H0 = 0.0
-        # for ik, k in enumerate(self.kpts):
-        #     Hk = self.tbmodel.gen_ham(tuple(k))
-        #     self.evals[ik, :], self.evecs[ik, :, :] =self.tbmodel.solve(tuple(k))
-        #     self.H0 += Hk / len(self.kpts)
-        H,S,self.evals, self.evecs=self.tbmodel.HS_and_eigen(self.kpts)
-        self.H0=np.sum(H, axis=0)/len(self.kpts)
-        if S is not None:
-            self.is_orthogonal=False
-            self.S=S
-            self.S0=np.sum(S, axis=0)/len(self.kpts)
+        nkpts = len(self.kpts)
+        self.evals = np.zeros((nkpts, self.nbasis), dtype=float)
+        self.nkpts = nkpts
+        self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+        if not self._use_cache:
+            print("Preparing eigen in memory.")
+            self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis),
+                                  dtype=complex)
+            self.H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+            if not self.is_orthogonal:
+                self.S = np.zeros((nkpts, self.nbasis, self.nbasis),
+                                  dtype=complex)
+            else:
+                self.S = None
+            for ik, k in enumerate(self.kpts):
+                if self.is_orthogonal:
+                    self.H[ik], _, self.evals[ik], self.evecs[
+                        ik] = self.tbmodel.HSE_k(k, convention=2)
+                else:
+                    self.H[ik], self.S[ik], self.evals[ik], self.evecs[
+                        ik] = self.tbmodel.HSE_k(k, convention=2)
+                self.H0 += self.H[ik] / self.nkpts
+        else:  # Use cache
+            print("Preparing eigen in cache.")
+            self.evecs = np.memmap(os.path.join(self.cache_path,
+                                                    'evecs.dat'),
+                                       mode='w+',
+                                       shape=(nkpts, self.nbasis, self.nbasis),
+                                       dtype=complex)
+            self.H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
+                                   mode='w+',
+                                   shape=(nkpts, self.nbasis, self.nbasis),
+                                   dtype=complex)
+            if self.is_orthogonal:
+                self.S = None
+            else:
+                self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
+                                       mode='w+',
+                                       shape=(nkpts, self.nbasis, self.nbasis),
+                                       dtype=complex)
+
+            for ik, k in enumerate(self.kpts):
+                Hk, Sk, evalue, evec = self.tbmodel.HSE_k(k)
+                self.H[ik] = Hk
+                self.H0 += Hk / self.nkpts
+                if not self.is_orthogonal:
+                    self.S[ik] = Sk
+                    #self.S.flush()
+                self.evals[ik] = evalue
+                self.evecs[ik] = evec
+                #self.evecs.flush()
+                #self.H.flush()
+            del self.evecs
+            del self.H
+            if not self.is_orthogonal:
+                del self.S
+
+    def get_evecs(self, ik):
+        if self._use_cache:
+            return np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
+                             mode='r',
+                             shape=(self.nkpts, self.nbasis, self.nbasis),
+                             dtype=complex)[ik]
         else:
-            self.is_orthogonal=True
+            return self.evecs[ik]
+
+    def get_evalue(self, ik):
+        return self.evals[ik]
+
+    def get_Hk(self, ik):
+        if self._use_cache:
+            return np.memmap(os.path.join(self.cache_path, 'H.dat'),
+                             mode='r',
+                             shape=(self.nkpts, self.nbasis, self.nbasis),
+                             dtype=complex)[ik]
+        else:
+            return self.evecs[ik]
+
+    def get_Sk(self, ik):
+        if self.is_orthogonal:
+            return None
+        elif self._use_cache:
+            return np.memmap(os.path.join(self.cache_path, 'S.dat'),
+                             mode='r',
+                             shape=(self.nkpts, self.nbasis, self.nbasis),
+                             dtype=complex)[ik]
+        else:
+            return self.S[ik]
 
     def get_Gk(self, ik, energy):
         """ Green's function G(k) for one energy
@@ -74,11 +170,15 @@ class TBGreen():
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
-        Gk = eigen_to_G(
-            evals=self.evals[ik, :],
-            evecs=self.evecs[ik, :, :],
-            efermi=self.efermi,
-            energy=energy)
+        #Gk = eigen_to_G(evals=self.evals[ik, :],
+        #                evecs=self.evecs[ik, :, :],
+        #                efermi=self.efermi,
+        #                energy=energy)
+        Gk = eigen_to_G(evals=self.get_evalue(ik),
+                        evecs=self.get_evecs(ik),
+                        efermi=self.efermi,
+                        energy=energy)
+
         # A slower version. For test.
         #Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
@@ -100,13 +200,14 @@ class TBGreen():
                 if self.is_orthogonal:
                     rhok = Gk
                 else:
-                    rhok=self.S[ik]@Gk
+                    rhok = self.get_Sk(ik) @ Gk
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                tmp=Gk * (phase * self.kweights[ik])
+                tmp = Gk * (phase * self.kweights[ik])
                 GR[R] += tmp
-                if get_rho:
-                    rhoR[R]+=rhok*(phase * self.kweights[ik])
+                # change this if need full rho
+                if get_rho and R==(0,0,0):
+                    rhoR[R] += rhok * (phase * self.kweights[ik])
         if get_rho:
             return GR, rhoR
         else:
@@ -150,8 +251,8 @@ class TBGreen():
             dG = Gk @ dHk @ Gkp
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                GR[R] += Gkp * (phase*self.kweights[ik])
-                dGRdx[R] += dG * (phase*self.kweights[ik])
+                GR[R] += Gkp * (phase * self.kweights[ik])
+                dGRdx[R] += dG * (phase * self.kweights[ik])
         return GR, dGRdx
 
     def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, energy, dHdx, dHdx2):
@@ -174,9 +275,7 @@ class TBGreen():
             dG2 = Gk @ dHk2 @ Gkp
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                GR[R] += Gkp * (phase *self.kweights[ik])
-                dGRdx[R] += dG * (phase*self.kweights[ik])
-                dGRdx2[R] += dG2 * (phase*self.kweights[ik])
+                GR[R] += Gkp * (phase * self.kweights[ik])
+                dGRdx[R] += dG * (phase * self.kweights[ik])
+                dGRdx2[R] += dG2 * (phase * self.kweights[ik])
         return GR, dGRdx, dGRdx2
-
-

@@ -1,6 +1,12 @@
 Release Notes
 =============
 
+v0.3.2 September 12, 2020
+-------------------------
+- add --use_cache option to reduce the memory usage by storing the Hamiltonian 
+    and eigenvectors on disk using memory map.
+
+
 v0.3.1 September 3, 2020
 -------------------------
 - A bug in the sign of the magnetization along y in Wannier and OpenMX mode is fixed.
