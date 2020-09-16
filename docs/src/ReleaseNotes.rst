@@ -1,6 +1,10 @@
 Release Notes
 =============
 
+v0.3.3 September 12, 2020
+-------------------------
+- Use collinear exchange calculator for siesta-collinear calculation, which is faster.
+
 v0.3.2 September 12, 2020
 -------------------------
 - add --use_cache option to reduce the memory usage by storing the Hamiltonian 

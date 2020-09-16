@@ -38,7 +38,7 @@ class ExchangeCL2(ExchangeCL):
             self.is_orthogonal =True
         else:
             self.is_orthogonal = False
-            self.S0=self.Gup.S0
+            #self.S0=self.Gup.S0
         self._is_colinear = True
 
         self.exchange_Jdict = {}
