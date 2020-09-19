@@ -45,6 +45,9 @@ class SpinModel():
         #     total_time=self.params.total_time,
         # )
 
+    def set_ham(self, **kwargs):
+        self._ham.set(**kwargs)
+
     def make_supercell(self, sc_matrix=None, supercell_maker=None):
         self._ham = self._ham.make_supercell(
             sc_matrix=sc_matrix, supercell_maker=supercell_maker)

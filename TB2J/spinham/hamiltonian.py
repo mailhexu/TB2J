@@ -44,7 +44,7 @@ class SpinHamiltonian(object):
         self.zeeman_H = np.zeros(3, dtype='float64')
 
         # uniaxial single ion anisotropy
-        self.has_uniaxial_anistropy = False
+        self.has_uniaxial_anisotropy = False
 
         # cubic Anistropy (Not implemented yet)
         self.has_cubic_anistropy = False
@@ -127,7 +127,9 @@ class SpinHamiltonian(object):
         snorm = np.linalg.norm(self.s, axis=1)
         self.s /= np.expand_dims(snorm, axis=1)
 
-    def set(self, gilbert_damping=None, gyro_ratio=None):
+    def set(self, gilbert_damping=None, gyro_ratio=None, 
+            has_exchange=None, has_dmi=None, has_bilinear=None,
+            has_external_hfield=None, has_uniaxial_anisotropy=None):
         """
         set parameters for simulation:
         args:
@@ -141,6 +143,11 @@ class SpinHamiltonian(object):
             self.gilbert_damping = np.array(gilbert_damping)
         if gyro_ratio is not None:
             self.gyro_ratio = np.array(gyro_ratio)
+        self.has_exchange=self.has_exchange and bool(has_exchange)
+        self.has_dmi=self.has_dmi and bool(has_dmi)
+        self.has_bilinear=self.has_bilinear and bool(has_bilinear)
+        self.has_external_hfield=self.has_external_hfield and bool(has_external_hfield)
+        self.has_uniaxial_anisotropy=self.has_uniaxial_anisotropy and bool(has_uniaxial_anisotropy)
 
     def set_exchange_ijR(self, exchange_Jdict):
         """
@@ -189,7 +196,7 @@ class SpinHamiltonian(object):
         """
         Add homogenoues uniaxial anisotropy
         """
-        self.has_uniaxial_anistropy = True
+        self.has_uniaxial_anisotropy = True
 
         self.k1 = k1
         self.k1dir = k1dir
@@ -254,7 +261,7 @@ class SpinHamiltonian(object):
             sc_Hext = smaker.sc_trans_invariant(self.H_ext)
             sc_ham.set_external_hfield(sc_Hext)
 
-        if self.has_uniaxial_anistropy:
+        if self.has_uniaxial_anisotropy:
             sc_k1 = smaker.sc_trans_invariant(self.k1)
             sc_k1dir = smaker.sc_trans_invariant(self.k1dir)
             sc_ham.set_uniaxial_mca(sc_k1, np.array(sc_k1dir))
@@ -312,7 +319,8 @@ class SpinHamiltonian(object):
                          color='red',
                          kpath_fname=None,
                          Jq=False,
-                         ax=None):
+                         ax=None,
+                         ):
         if ax is None:
             fig, ax = plt.subplots()
         if knames is None and kvectors is None:

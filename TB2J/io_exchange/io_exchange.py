@@ -188,11 +188,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         from TB2J.io_exchange.io_multibinit import write_multibinit
         write_multibinit(self, path=path)
 
-    def write_Jq(self, kmesh, path):
+    def write_Jq(self, kmesh, path,**kwargs):
         from TB2J.spinham.spin_api import SpinModel
         from TB2J.io_exchange.io_txt import write_Jq_info
         m = SpinModel(fname=os.path.join(path, 'Multibinit', 'exchange.xml'))
-        #m.ham.find_ground_state_from_kmesh(kmesh)
+        m.set_ham(**kwargs)
         kpts1 = monkhorst_pack(kmesh)
         bp = Cell(self.atoms.cell).bandpath(npoints=400)
         kpts2 = bp.kpts
