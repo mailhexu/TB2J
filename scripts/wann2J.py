@@ -101,6 +101,12 @@ def run_wann2J():
         type=int,
         nargs='+')
     parser.add_argument(
+        '--use_cache',
+        help="whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce energy usage. Default: False",
+        action='store_true',
+        default=False)
+ 
+    parser.add_argument(
         "--description",
         help=
         "add description of the calculatiion to the xml file. Essential information, like the xc functional, U values, magnetic state should be given.",
@@ -142,6 +148,7 @@ def run_wann2J():
                  nz1=args.nz1,
                  nz2=args.nz2,
                  nz3=args.nz3,
+                 use_cache=args.use_cache,
                  description=args.description,
                  exclude_orbs=args.exclude_orbs)
 

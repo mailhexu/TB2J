@@ -1,6 +1,21 @@
 Release Notes
 =============
 
+v0.3.3 September 12, 2020
+-------------------------
+- Use collinear exchange calculator for siesta-collinear calculation, which is faster.
+
+v0.3.2 September 12, 2020
+-------------------------
+- add --use_cache option to reduce the memory usage by storing the Hamiltonian 
+    and eigenvectors on disk using memory map.
+
+
+v0.3.1 September 3, 2020
+-------------------------
+- A bug in the sign of the magnetization along y in Wannier and OpenMX mode is fixed.
+
+
 v0.3 August 31, 2020
 ------------------------
 - A bug in calculation of anisotropic exchange is fixed.

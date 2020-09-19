@@ -33,7 +33,9 @@ class Exchange():
         exclude_orbs=[],  #
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut. 
+        use_cache=False,
         description=''):
+
         self.atoms = atoms
         self.efermi = efermi
         self.emin = emin
@@ -51,6 +53,7 @@ class Exchange():
         self.magnetic_elements = magnetic_elements
         self.exclude_orbs = exclude_orbs
         self.ne = ne
+        self._use_cache = use_cache
 
         self.set_tbmodels(tbmodels)
         self._prepare_elist()
@@ -212,15 +215,13 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         # TODO: check if tbmodels are really a tbmodel with SOC.
-        self.G = TBGreen(self.tbmodel, self.kmesh, self.efermi)
+        self.G = TBGreen(self.tbmodel, self.kmesh, self.efermi, use_cache=self._use_cache)
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         #self.HR0 = self.tbmodel.ham_R0
         self.HR0 = self.G.H0
-        if not self.G.is_orthogonal:
-            self.S0 = self.G.S0
         self._is_collinear = False
         self.Pdict = {}
 
@@ -412,11 +413,6 @@ class ExchangeNCL(Exchange):
         :param GR: Green's funciton in real space.
         :param de: energy step
         """
-        #GR0 = GR[(0, 0, 0)]
-        #if self.G.is_orthogonal:
-        #    self.rho += -1.0 / np.pi * np.imag(GR0 * de)
-        #else:
-        #    self.rho += -1.0 / np.pi * np.imag(self.S0@GR0 * de)
         self.rho += -1.0 / np.pi * rhoR[0, 0, 0] * de
 
     def get_total_charges(self):
@@ -564,9 +560,13 @@ class ExchangeNCL(Exchange):
         )
         output.write_all(path=path)
 
+    def finalize(self):
+        self.G.clean_cache()
+
     def run(self, path='TB2J_results'):
         self.calculate_all()
         self.write_output(path=path)
+        self.finalize()
 
 
 class ExchangeCL(ExchangeNCL):

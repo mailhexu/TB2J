@@ -37,6 +37,11 @@ def run_siesta2J():
         help='energy maximum above efermi, default 0.0 eV',
         type=float,
         default=0.05)
+    parser.add_argument(
+        '--use_cache',
+        help="whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce energy usage. Default: False",
+        action='store_true',
+        default=False)
     #parser.add_argument(
     #    '--height',
     #    help=
@@ -94,6 +99,7 @@ def run_siesta2J():
         #nz2=args.nz2,
         #nz3=args.nz3,
         description=args.description,
+        use_cache=args.use_cache,
         exclude_orbs=args.exclude_orbs)
 
 

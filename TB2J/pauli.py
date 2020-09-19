@@ -7,7 +7,8 @@ from numpy import zeros_like
 
 s0 = np.array([[1, 0], [0, 1]])
 s1 = np.array([[0, 1], [1, 0]])
-s2 = np.array([[0, -1j], [1j, 0]])
+s2 = np.array([[0, -1j],
+               [1j, 0]])
 s3 = np.array([[1, 0], [0, -1]])
 
 s0T = s0.T
