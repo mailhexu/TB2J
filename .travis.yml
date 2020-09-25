@@ -2,6 +2,18 @@ language: python
 python:
   - "3.7"
 cache: pip
+
+addons:
+  apt:
+    packages: &common_packages
+      - gfortran
+      - libatlas-base-dev
+      - liblapack-dev
+      - libnetcdf-dev
+      - libnetcdff-dev
+      - eatmydata
+      - ccache
+
 install:
   - pip install -r requirements.txt
   - pip install sisl
