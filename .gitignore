@@ -4,7 +4,6 @@ doc/refs/*.pdf
 *.aux
 
 # xyz files
-*.xyz
 
 .DS_Store
 

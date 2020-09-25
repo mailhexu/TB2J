@@ -20,6 +20,6 @@ install:
   - pip install -e .
 script:
   - pwd
-  - ls -lah
   - cd examples/abinit-w90/SrMnO3
+  - ls -lah
   - sh get_J.sh
