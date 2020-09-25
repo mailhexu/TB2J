@@ -19,5 +19,6 @@ install:
   - pip install sisl
   - pip install -e .
 script:
-  - cd examples/abinit-w90/SrMnO3
+  - pwd
+  - cd mailhexu/TB2J/examples/abinit-w90/SrMnO3
   - sh get_J.sh
