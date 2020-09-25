@@ -1,0 +1,11 @@
+language: python
+python:
+  - "3.7"
+cache: pip
+install:
+  - pip install -r requirements.txt
+  - pip install sisl
+  - pip install -e .
+script:
+  - cd examples/abinit-w90/SrMnO3
+  - sh get_J.sh

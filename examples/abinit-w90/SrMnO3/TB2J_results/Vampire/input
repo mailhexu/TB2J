@@ -1,0 +1,42 @@
+#------------------------------------------ 
+# Creation attributes: 
+#------------------------------------------ 
+create:full
+create:periodic-boundaries-x 
+create:periodic-boundaries-y 
+create:periodic-boundaries-z 
+#------------------------------------------
+material:file=vampire.mat
+material:unit-cell-file = "vampire.UCF"
+#------------------------------------------ 
+# System Dimensions: 
+#------------------------------------------ 
+dimensions:unit-cell-size-x = 3.80998462619534
+dimensions:unit-cell-size-y = 3.80998462619534
+dimensions:unit-cell-size-z = 3.80998462619534
+
+dimensions:system-size-x = 15.0 !nm 
+dimensions:system-size-y = 15.0 !nm 
+dimensions:system-size-z = 15.0 !nm 
+#------------------------------------------ 
+# Simulation attributes: 
+#------------------------------------------ 
+sim:temperature=300 
+sim:minimum-temperature=0 
+sim:maximum-temperature=1000
+sim:temperature-increment=25
+sim:time-steps-increment=1 
+sim:equilibration-time-steps=2500 
+sim:loop-time-steps=3000 
+#------------------------------------------ 
+# Program and integrator details 
+#------------------------------------------ 
+sim:program=curie-temperature
+sim:integrator=llg-heun
+#------------------------------------------
+# Data output 
+#------------------------------------------ 
+#output:real-time
+output:temperature
+output:material-magnetisation 
+#output:magnetisation-length 
