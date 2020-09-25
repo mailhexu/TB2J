@@ -20,5 +20,6 @@ install:
   - pip install -e .
 script:
   - pwd
-  - cd mailhexu/TB2J/examples/abinit-w90/SrMnO3
+  - ls -lah
+  - cd examples/abinit-w90/SrMnO3
   - sh get_J.sh
