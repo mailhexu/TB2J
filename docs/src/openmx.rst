@@ -9,6 +9,7 @@ Install TB2J-OpenMX
 --------------------------------------
 
 ::
+
     pip install TB2J-OpenMX
 
 running TB2J
@@ -17,9 +18,10 @@ running TB2J
 In the DFT calculation, the ”HS.fileout on” options should be enabled, so that the Hamiltonian and the overlap matrices are written to a ”.scfout“ file. Then we can run the command openmx2J.py. The necessary input are the path of the calculation, the prefix of the OpenMX files, and the magnetic elements:
 
 ::
+
     openmx2J.py -- prefix openmx --elements Fe
 
 
- openmx2J.py then read the openmx.xyz and the openmx.scfout files from the OpenMX output, and output the results to TB2J_results. 
+openmx2J.py then read the openmx.xyz and the openmx.scfout files from the OpenMX output, and output the results to TB2J_results. 
 
 
