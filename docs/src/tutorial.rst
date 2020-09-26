@@ -6,6 +6,7 @@ Tutorial
 
    wannier.rst
    siesta.rst
+   openmx.rst
    parameters.rst
    rotate_and_merge.rst
    output.rst
