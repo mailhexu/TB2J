@@ -1,1 +1,1 @@
-TB2J_magnon.py --kpath GNPGHN --show
+TB2J_magnon.py --qpath GNPGHN --show

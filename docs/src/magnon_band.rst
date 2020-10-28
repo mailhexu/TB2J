@@ -33,13 +33,13 @@ atomic structure information, using the
 [ASE][https://wiki.fysik.dtu.dk/ase/ase] library. We need to specify a
 path of q-points if the default is not what we want. The default k-path
 and the labels of the special kpoints can be found at `this
-page <https://wiki.fysik.dtu.dk/ase/ase/dft/kpoints.htmldft/kpoints.html>`__.
+page <https://wiki.fysik.dtu.dk/ase/ase/dft/kpoints.html>`__.
 For example, we want a path of “Gamma-N-P-Gamma-H-N” instead of the
 default, it can be given by:
 
 ::
 
-   TB2J_magnon.py --kpath GNPGHN --figfname magnon.png --show
+   TB2J_magnon.py --qpath GNPGHN --figfname magnon.png --show
 
 The magnon band structure is then written to a By using the –show
 parameter, the band structure is shown on screen.
