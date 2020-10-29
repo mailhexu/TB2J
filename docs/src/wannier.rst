@@ -14,8 +14,7 @@ Functions <https://doi.org/10.1103/RevModPhys.84.1419>`__,
 *Before beginning, you might consider to work in a subdirectory for this
 tutorial. Why not Work_tb2j?*
 
-The input files for the tutorial can be found inside
-tutorial/Tutorial_Wannier_SrMnO3/input in your TB2J directory. Please
+The input files for the tutorial can be found inside examples/abinit-w90/SrMnO3 in your TB2J directory. Please
 copy abinit.in, abinit.files and the three pseudopotential files (inside
 the psp directory) to *Work_tb2j*. You also need the two files
 abinito_w90_down.win and abinito_w90_up.win which provide additional
