@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 The script to plot the magnon band structure.
 """
