@@ -11,7 +11,7 @@ from TB2J.gpaw_wrapper import GPAWWrapper
 
 def gen_exchange(path,
                  colinear=True,
-                 orb_order=1,
+                 groupby='spin',
                  posfile='POSCAR',
                  prefix_up='wannier90.up',
                  prefix_dn='wannier90.dn',
@@ -125,14 +125,14 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
         )
     else:
         print("Reading Wannier90 hamiltonian: non-colinear spin.")
+        groupby=groupby.lower().strip()
+        if groupby not in ['spin', 'orbital']:
+            raise ValueError("groupby can only be spin or orbital.")
         tbmodel = MyTB.read_from_wannier_dir(path=path,
                                              prefix=prefix_SOC,
                                              posfile=posfile,
+                                             groupby=groupby,
                                              nls=True)
-        if orb_order == 1:
-            pass
-        if orb_order == 2:
-            tbmodel = tbmodel.reorder()
         if os.path.exists(basis_fname):
             print("The use of basis file is deprecated. It will be ignored.")
             #basis = read_basis(basis_fname)
@@ -164,7 +164,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
-                              use_cache=use_cache,
+                               use_cache=use_cache,
                                description=description)
         print("\n")
         exchange.run()

@@ -30,16 +30,16 @@ def run_wann2J():
     parser.add_argument('--prefix_down',
                         help="prefix to the spin down wannier files",
                         default='wannier90.dn',
-                        type=str)
+                        type=str) 
     parser.add_argument('--elements',
                         help="elements to be considered in Heisenberg model",
                         default=None,
                         type=str,
                         nargs='*')
-    parser.add_argument('--orb_order',
-                        help="In the spinor case, the order of the orbitals have two conventions: (orb1_up, orb2_up,... orb1_down, ...), (orb1_up, orb1_down, orb2_up, ...,). Use 1 in the former case and 2 in the latter case. The default is 1." ,
-                        default=1,
-                        type=int,
+    parser.add_argument('--groupby',
+                        help="In the spinor case, the order of the orbitals have two conventions: 1: group by spin (orb1_up, orb2_up,... orb1_down, ...), 2,group by orbital (orb1_up, orb1_down, orb2_up, ...,). Use 'spin' in the former case and 'orbital' in the latter case. The default is spin." ,
+                        default='spin',
+                        type=str,
                         )
 
     parser.add_argument(

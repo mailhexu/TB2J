@@ -14,7 +14,7 @@ from TB2J.wannier import parse_ham, parse_xyz
 
 
 class AbstractTB():
-    def __init__(self, R2kfactor, nspin, norb, orb_order=1):
+    def __init__(self, R2kfactor, nspin, norb):
         #: :math:`\alpha` used in :math:`H(k)=\sum_R  H(R) \exp( \alpha k \cdot R)`,
         #: Should be :math:`2\pi i` or :math:`-2\pi i`
         self.is_siesta = False
@@ -39,7 +39,6 @@ class AbstractTB():
         #: The order of the spinor basis.
         #: 1: orb1_up, orb2_up,  ... orb1_down, orb2_down,...
         #: 2: orb1_up, orb1_down, orb2_up, orb2_down,...
-        self.orb_order = orb_order
 
     def get_hamR(self, R):
         """
@@ -76,14 +75,16 @@ class AbstractTB():
 
 
 class MyTB(AbstractTB):
-    def __init__(self,
-                 nbasis,
-                 data=None,
-                 positions=None,
-                 sparse=False,
-                 ndim=3,
-                 nspin=1,
-                 double_site_energy=2.0):
+    def __init__(
+        self,
+        nbasis,
+        data=None,
+        positions=None,
+        sparse=False,
+        ndim=3,
+        nspin=1,
+        double_site_energy=2.0,
+    ):
         """
         :param nbasis: number of basis.
         :param data: a dictionary of {R: matrix}. R is a tuple, matrix is a nbasis*nbasis matrix.
@@ -165,7 +166,11 @@ class MyTB(AbstractTB):
         return data
 
     @staticmethod
-    def read_from_wannier_dir(path, prefix, posfile='POSCAR', nls=True):
+    def read_from_wannier_dir(path,
+                              prefix,
+                              posfile='POSCAR',
+                              nls=True,
+                              groupby='spin'):
         """
         read tight binding model from a wannier function directory. 
         :param path: path
@@ -180,6 +185,17 @@ class MyTB(AbstractTB):
         atoms = read(os.path.join(path, posfile))
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
+        if groupby == 'orbital':
+            norb = len(nbasis / 2)
+            xtmp = np.copy(xred)
+            xred[:norb] = xtmp[::2]
+            xred[norb:] = xtmp[1::2]
+            for key, val in data.items():
+                dtmp = copy.deepcopy(val)
+                data[key][:norb, :norb] = dtmp[::2, ::2]
+                data[key][:norb, norb:] = dtmp[::2, 1::2]
+                data[key][norb:, :norb] = dtmp[1::2, ::2]
+                data[key][norb:, norb:] = dtmp[1::2, 1::2]
         ind, positions = auto_assign_basis_name(xred, atoms)
         m = MyTB(nbasis=nbasis, data=data, positions=xred)
         nm = m.shift_position(positions)
