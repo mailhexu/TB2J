@@ -127,12 +127,9 @@ def run_wann2J():
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
 
-    if args.orb_order not in (1,2):
-        print("orb_order should be either 1 or 2.")
-        sys.exit()
     gen_exchange(path=args.path,
                  colinear=(not args.spinor),
-                 orb_order=args.orb_order,
+                 groupby=args.groupby,
                  posfile=args.posfile,
                  efermi=args.efermi,
                  kmesh=args.kmesh,

@@ -186,7 +186,7 @@ class MyTB(AbstractTB):
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
         if groupby == 'orbital':
-            norb = len(nbasis / 2)
+            norb = nbasis // 2
             xtmp = np.copy(xred)
             xred[:norb] = xtmp[::2]
             xred[norb:] = xtmp[1::2]

@@ -151,7 +151,10 @@ Step 2: Run TB2J
 Before running TB2J, an extra file, which contains the atomic structure,
 needs to be prepared. It can be either a VASP POSCAR file. (For abinit,
 the abinit.in file is also fine if no fancy feature is used, like use of
-\*, or units. POSCAR files are recommended because they are simple.)
+\*, or units. POSCAR files are recommended because they are simple. Note that 
+the file extension are used to identify the format, for example, Quantum ESPRESSO
+input should be name with \*.pwi) The supported file format are can be found on the list in:
+https://wiki.fysik.dtu.dk/ase/ase/io/io.html
 
 With the WF Hamiltonian generated, we can calculate the exchange
 parameters now. In the scripts directory inside your TB2J directory you
@@ -160,7 +163,7 @@ issue the command
 
 ::
 
-   wann2J.py --efermi 6.15 --kmesh 4 4 4 --elements Mn --prefix_up abinito_w90_up --prefix_down abinito_w90_down  --emin -10.0 --emax 0.0 
+   wann2J.py --posfile abinit.in --efermi 6.15 --kmesh 4 4 4 --elements Mn --prefix_up abinito_w90_up --prefix_down abinito_w90_down  --emin -10.0 --emax 0.0 
 
 The parameters are:
 
@@ -198,3 +201,18 @@ TB2J_results directory.
    can be used as templates to run spin dynamics in Multibinit.
 -  The input for a few spin dynamics codes (Tom’s ASD, and Vampire) are
    also included.
+
+
+Noncollinear calculation
+----------------------------------
+For calculations with non-collinear spin, the --spinor option should be used. It is also necessary to specify whether in the Hamiltonian the 
+order of the basis, either group by spin (orb1_up, orb2_up, ... orb1_down, orb2_down, ...)  or by orbital (orb1_up, orb1_down, orb2_up, orb2_down,...), with 
+the --groupby option (either spin or orbital). The --prefix_spinor option is used to specify the prefix of the Wannier90 outputs.
+Here is an example of the command:
+
+::
+
+   wann2J.py --spinor --groupby spin --posfile abinit.in --efermi 6.15 --kmesh 4 4 4 --elements Mn --prefix_spinor abinito
+
+
+
