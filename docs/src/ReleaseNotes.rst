@@ -1,6 +1,11 @@
 Release Notes
 =============
 
+v0.3.5 November 3, 2020
+-------------------------
+Add --groupby option in wann2J.py to specify the order of the basis set in the hamiltonian.
+
+
 v0.3.3 September 12, 2020
 -------------------------
 - Use collinear exchange calculator for siesta-collinear calculation, which is faster.
