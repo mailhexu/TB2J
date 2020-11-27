@@ -160,7 +160,6 @@ class ExchangeCL2(ExchangeCL):
             iorb = self.iorb(iatom)
             tup = np.real(np.trace(self.rho_up[np.ix_(iorb, iorb)]))
             tdn = np.real(np.trace(self.rho_dn[np.ix_(iorb, iorb)]))
-            # *2 because there is a 1/2 in the paui_block_all function
             self.charges[iatom] = tup + tdn
             self.spinat[iatom, 2] = tup - tdn
 

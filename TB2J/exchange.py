@@ -92,19 +92,6 @@ class Exchange():
                                               nz3=self.nz3)
         elif method.lower() == 'semicircle':
             self.contour.build_path_semicircle(npoints=self.nz)
-        #self.nen = len(self.elist) - 1
-        #self.elistc = list(range(nz1 + nz2, nz))
-        #self.new_efermi = None
-
-    # def _prepare_elistc(self, ie):
-    #     if not self.has_elistc:
-    #         nz1, nz2, nz3 = self.nz1, self.nz2, self.nz3
-    #         nz = self.nz
-    #         self.elist[nz1 + nz2:nz] = np.real(
-    #             self.elist[ie]) + self.height * 1j + np.linspace(
-    #                 0, -self.height, nz3, endpoint=False) * 1j
-    #         self.elist[-1] = np.real(self.elist[ie])
-    #         self.new_efermi = np.real(self.elist[ie])
 
     def _prepare_Rlist(self):
         """
