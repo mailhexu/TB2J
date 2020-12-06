@@ -125,7 +125,7 @@ def write_exchange_section(cls,
         if cls.has_biquadratic and write_experimental:
             Jprime, B = cls.biquadratic_Jdict[ll]
             myfile.write(
-                f"[Experimental!] Jprime: {Jprime*1e3:.3f},  B: {B*1e3:.3f}\n")
+                f"[Testing!] Jprime: {Jprime*1e3:.3f},  B: {B*1e3:.3f}\n")
 
         if cls.dJdx is not None:
             dJdx = cls.dJdx[ll]
@@ -149,7 +149,7 @@ def write_exchange_section(cls,
         if cls.Jani_dict is not None and write_experimental:
             J = cls.Jani_dict[ll] * 1e3
             myfile.write(
-                f"[Experimental!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
+                f"[Testing!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
             )
 
         if cls.NJT_ddict is not None:
@@ -161,7 +161,7 @@ def write_exchange_section(cls,
         if cls.NJT_Jdict is not None:
             J = cls.NJT_Jdict[ll] * 1e3
             myfile.write(
-                '[Experimental!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                '[Testing!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
                     J[0], J[1], J[2]))
 
         if cls.exchange_Jdict_orb:
