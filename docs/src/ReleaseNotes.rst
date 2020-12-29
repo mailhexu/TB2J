@@ -1,6 +1,12 @@
 Release Notes
 =============
 
+v0.3.8 December 29, 2020
+-------------------------
+Add --output_path option to specify the output path.
+
+
+
 v0.3.6 December 7, 2020
 -------------------------
 Use Simpson's rule instead of Euler for integration.

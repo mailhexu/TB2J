@@ -15,7 +15,7 @@ def main():
         type=str,
         nargs='+',
         help=
-        'The three directories the TB2J calculations are done. Inside each of them, there should be a TB2J_results directory which contains the magnetic interaction parameter files. e.g. Fe_x Fe_y Fe_z'
+        'The three directories the TB2J calculations are done. Inside each of them, there should be a TB2J_results directory which contains the magnetic interaction parameter files. e.g. Fe_x Fe_y Fe_z. Alternatively, it could  be the TB2J results directories.'
     )
     parser.add_argument(
         '--type',
@@ -24,7 +24,6 @@ def main():
         help=
         'The type of calculations, either structure of spin, meaning that the three calculations are done by rotating the structure/spin. '
     )
-    #merge(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], save=True)
     args = parser.parse_args()
     merge(*(args.directories), args.type.strip().lower())
 

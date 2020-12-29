@@ -2,7 +2,7 @@ The output of TB2J
 ==================
 
 
-In the following we describe the output files which TB2J produces. By running wann2J.py or siesta2J.py, a directory with the name TB2J\_results will be generated, which contains the following output files:
+In the following we describe the output files which TB2J produces. By running wann2J.py or siesta2J.py, a directory with the name TB2J\_results (or the directory specified by the --output_path) will be generated, which contains the following output files:
 
 * exchange.out: A human readable output file, which summarizes the results.
 

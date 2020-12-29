@@ -65,15 +65,26 @@ def merge_Jani(Janix, Janiy, Janiz):
     return Jani
 
 
+def read_pickle(path):
+    p1 = os.path.join(path, 'TB2J_results', 'TB2J.pickle')
+    p2 = os.path.join(path, 'TB2J.pickle')
+    if os.path.exists(p1) and os.path.exists(p2):
+        print(f" WARNING!: Both file {p1} and {p2} exist. Use default {p1}.")
+    if os.path.exists(p1):
+        ret = SpinIO.load_pickle(p1)
+    elif os.path.exists(p2):
+        ret = SpinIO.load_pickle(p2)
+    else:
+        raise FileNotFoundError(f"Cannot find either file {p1} or {p2}")
+    return ret
+
+
 class Merger():
     def __init__(self, path_x, path_y, path_z, method='structure'):
         assert (method in ['structure', 'spin'])
-        self.dat_x = SpinIO.load_pickle(os.path.join(path_x, 'TB2J_results'),
-                                        'TB2J.pickle')
-        self.dat_y = SpinIO.load_pickle(os.path.join(path_y, 'TB2J_results'),
-                                        'TB2J.pickle')
-        self.dat_z = SpinIO.load_pickle(os.path.join(path_z, 'TB2J_results'),
-                                        'TB2J.pickle')
+        self.dat_x = read_pickle(path_x)
+        self.dat_y = read_pickle(path_y)
+        self.dat_z = read_pickle(path_z)
         self.dat = copy.copy(self.dat_z)
         self.paths = [path_x, path_y, path_z]
         self.method = method
@@ -152,10 +163,10 @@ class Merger():
 
     def write(self, path='TB2J_results'):
         self.dat.description += 'Merged from TB2J results in paths: \n  ' + '\n  '.join(
-            self.paths)+'\n'
-        if self.method=='spin':
+            self.paths) + '\n'
+        if self.method == 'spin':
             self.dat.description += ', which are from DFT data with spin along x, y, z orientation\n'
-        elif self.method=='structure': 
+        elif self.method == 'structure':
             self.dat.description += ', which are from DFT data with structure with z axis rotated to x, y, z\n'
         self.dat.description += '\n'
         self.dat.write_all(path=path)
