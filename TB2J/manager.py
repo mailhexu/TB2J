@@ -32,6 +32,7 @@ def gen_exchange(path,
                  Rcut=None,
                  ne=None,
                  use_cache=False,
+                 output_path='TB2J_results',
                  description=''):
     atoms = read(os.path.join(path, posfile))
     basis_fname = os.path.join(path, 'basis.txt')
@@ -74,7 +75,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                ne=ne,
                                use_cache=use_cache,
                                description=description)
-        exchange.run()
+        exchange.run(path=output_path)
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
         )
@@ -119,7 +120,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                               ne=ne,
                               use_cache=use_cache,
                               description=description)
-        exchange.run()
+        exchange.run(path=output_path)
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
         )
@@ -167,7 +168,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                use_cache=use_cache,
                                description=description)
         print("\n")
-        exchange.run()
+        exchange.run(path=output_path)
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
         )
@@ -188,6 +189,7 @@ def gen_exchange_siesta(
     Rcut=None,
     ne=None,
     use_cache=False,
+    output_path='TB2J_results',
     description=''):
 
     try:
@@ -226,7 +228,7 @@ def gen_exchange_siesta(
             ne=ne,
             use_cache=use_cache,
             description=description)
-        exchange.run()
+        exchange.run(path=output_path)
         print("\n")
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
@@ -261,7 +263,7 @@ def gen_exchange_siesta(
             ne=ne,
             use_cache=use_cache,
             description=description)
-        exchange.run()
+        exchange.run(path=output_path)
         print("\n")
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
@@ -294,7 +296,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                                ne=ne,
                                use_cache=use_cache,
                                description=description)
-        exchange.run()
+        exchange.run(path=output_path)
         print("\n")
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
@@ -310,6 +312,7 @@ def gen_exchange_gpaw(gpw_fname,
                       exclude_orbs=[],
                       Rcut=None,
                       use_cache=False,
+                      output_path='TB2J_results',
                       description=''):
     print("Reading from GPAW data and calculate electronic structure.")
     model = GPAWWrapper(gpw_fname=gpw_fname)
@@ -332,7 +335,7 @@ def gen_exchange_gpaw(gpw_fname,
                                Rcut=Rcut,
                                use_cache=use_cache,
                                description=description)
-        exchange.run()
+        exchange.run(path=output_path)
         print("\n")
         print(
             "All calculation finsihed. The results are in TB2J_results directory."

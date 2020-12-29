@@ -229,4 +229,4 @@ class ExchangeCL2(ExchangeCL):
             biquadratic_Jdict=None,
             description=self.description,
         )
-        output.write_all()
+        output.write_all(path=path)
