@@ -71,9 +71,9 @@ def read_pickle(path):
     if os.path.exists(p1) and os.path.exists(p2):
         print(f" WARNING!: Both file {p1} and {p2} exist. Use default {p1}.")
     if os.path.exists(p1):
-        ret = SpinIO.load_pickle(p1)
+        ret = SpinIO.load_pickle(os.path.join(path, 'TB2J_results'))
     elif os.path.exists(p2):
-        ret = SpinIO.load_pickle(p2)
+        ret = SpinIO.load_pickle(path)
     else:
         raise FileNotFoundError(f"Cannot find either file {p1} or {p2}")
     return ret
