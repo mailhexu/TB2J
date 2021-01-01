@@ -328,7 +328,7 @@ class SpinHamiltonian(object):
             kpts = bp.kpts
             x, X, knames = bp.get_linear_kpoint_axis()
             spk = bp.special_points
-        elif knames is not None:
+        elif knames is not None and kvectors is None:
             bp = Cell(self.cell).bandpath(knames, npoints=npoints)
             kpts = bp.kpts
             x, X, knames = bp.get_linear_kpoint_axis()

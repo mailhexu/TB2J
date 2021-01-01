@@ -87,8 +87,6 @@ def plot_magnon():
             return not x
 
     if args.write_emin:
-        print(args)
-        print(nonone(args.no_Jani))
         write_emin(has_exchange=nonone(args.no_Jiso),
                    has_dmi=nonone(args.no_dmi),
                    has_bilinear=nonone(args.no_Jani))
