@@ -5,13 +5,17 @@ class Contour():
         self.emin=emin
         self.emax=emax
 
-    def build_path_semicircle(self, npoints):
+    def build_path_semicircle(self, npoints, endpoint=False):
         R0= (self.emin+self.emax)/2.0
         R= (self.emax-self.emin)/2.0
         phi=np.linspace(np.pi, 0, num=npoints+1, endpoint=True)
         p=R0+R*np.exp(1.0j * phi)
-        self.path=(p[:-1]+p[1:])/2
-        self.de=p[1:]-p[:-1]
+        if endpoint:
+            self.path=p
+            self.de=np.diff(p)
+        else:
+            self.path=(p[:-1]+p[1:])/2
+            self.de=p[1:]-p[:-1]
 
     def build_path_rectangle(self, height=0.1, nz1=50, nz2=200, nz3=50):
         """

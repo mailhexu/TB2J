@@ -15,6 +15,7 @@ from TB2J.io_exchange import SpinIO
 import progressbar
 from functools import lru_cache
 from .exchange import ExchangeCL
+from .utils import simpson_nonuniform
 
 
 class ExchangeCL2(ExchangeCL):
@@ -27,8 +28,12 @@ class ExchangeCL2(ExchangeCL):
         self.Gdn = TBGreen(self.tbmodel_dn, self.kmesh, self.efermi, use_cache=self._use_cache, cache_path='TB2J_results/cache/spindn')
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
+        self.rho_up_list=[]
+        self.rho_dn_list=[]
         self.rho_up = np.zeros((self.norb, self.norb), dtype=float)
         self.rho_dn = np.zeros((self.norb, self.norb), dtype=float)
+        self.Jorb_list=defaultdict(lambda:[])
+        self.JJ_list=defaultdict(lambda:[])
         self.JJ = defaultdict(lambda: 0.0j)
         self.Jorb = defaultdict(lambda: 0.0j)
         self.HR0_up = self.Gup.H0
@@ -63,7 +68,7 @@ class ExchangeCL2(ExchangeCL):
         orbj = self.iorb(jatom)
         return GR[np.ix_(orbi, orbj)]
 
-    def get_A_ijR(self, Gup, Gdn, iatom, jatom, de):
+    def get_A_ijR(self, Gup, Gdn, iatom, jatom):
         Rij_done=set()
         for R, ijpairs in self.R_ijatom_dict.items():
             if (iatom, jatom) in ijpairs and (R, iatom, jatom) not in Rij_done:
@@ -83,15 +88,15 @@ class ExchangeCL2(ExchangeCL):
                               np.matmul(self.get_Delta(iatom), Gij_down),
                               np.matmul(self.get_Delta(jatom), Gji_down))
                 tmp = np.sum(t)
-                self.Jorb[(R, iatom, jatom)] += t * de / (4.0 * np.pi)
-                self.JJ[(R, iatom, jatom)] += tmp * de / (4.0 * np.pi)
+                self.Jorb_list[(R, iatom, jatom)].append( t / (4.0 * np.pi))
+                self.JJ_list[(R, iatom, jatom)].append(tmp  / (4.0 * np.pi))
                 Rij_done.add((R,iatom, jatom))
                 if (Rm,jatom, iatom) not in Rij_done:
-                    self.Jorb[(Rm, jatom, iatom)] += t * de / (4.0 * np.pi)
-                    self.JJ[(Rm, jatom, iatom)] += tmp * de / (4.0 * np.pi)
+                    self.Jorb_list[(Rm, jatom, iatom)].append( t / (4.0 * np.pi))
+                    self.JJ_list[(Rm, jatom, iatom)].append(tmp  / (4.0 * np.pi))
                     Rij_done.add((Rm,jatom, iatom))
 
-    def get_all_A(self, Gup, Gdn, de):
+    def get_all_A(self, Gup, Gdn):
         """
         Calculate all A matrix elements
         Loop over all magnetic atoms.
@@ -113,12 +118,12 @@ class ExchangeCL2(ExchangeCL):
                                   np.matmul(self.get_Delta(iatom), Gij_up),
                                   np.matmul(self.get_Delta(jatom), Gji_dn))
                     tmp = np.sum(t)
-                    self.Jorb[(R, iatom, jatom)] += t * de / (4.0 * np.pi)
-                    self.JJ[(R, iatom, jatom)] += tmp * de / (4.0 * np.pi)
+                    self.Jorb_list[(R, iatom, jatom)].append( t/ (4.0 * np.pi))
+                    self.JJ_list[(R, iatom, jatom)].append(tmp/ (4.0 * np.pi))
                     Rij_done.add((R,iatom, jatom))
                     if (Rm,jatom, iatom)  not in Rij_done:
-                        self.Jorb[(Rm, jatom, iatom)] += t * de / (4.0 * np.pi)
-                        self.JJ[(Rm, jatom, iatom)] += tmp * de / (4.0 * np.pi)
+                        self.Jorb_list[(Rm, jatom, iatom)].append(t/(4.0 * np.pi))
+                        self.JJ_list[(Rm, jatom, iatom)].append(tmp/(4.0 * np.pi))
                         Rij_done.add((Rm,jatom, iatom))
                             
 
@@ -138,17 +143,12 @@ class ExchangeCL2(ExchangeCL):
                 self.exchange_Jdict[keyspin] = Jij
                 self.exchange_Jdict_orb[keyspin] =Jorbij
 
-    def get_rho_e(self, rho_up, rho_dn, de):
-        #GR0_up = GR_up[(0, 0, 0)]
-        #GR0_dn = GR_dn[(0, 0, 0)]
-        #if self.is_orthogonal:
-        #    self.rho_up += -1.0 / np.pi * np.imag(GR0_up * de)
-        #    self.rho_dn += -1.0 / np.pi * np.imag(GR0_dn * de)
-        #else:
-        #    self.rho_up += -1.0 / np.pi * np.imag(self.S0@GR0_up * de)
-        #    self.rho_dn += -1.0 / np.pi * np.imag(self.S0@GR0_dn * de)
-        self.rho_up += -1.0 / np.pi * np.imag(rho_up[(0,0,0)] * de)
-        self.rho_dn += -1.0 / np.pi * np.imag(rho_dn[(0,0,0)] * de)
+    def get_rho_e(self, rho_up, rho_dn):
+        #self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))
+        #self.rho_dn_list.append(-1.0 / np.pi * np.imag(rho_dn[(0,0,0)]))
+        self.rho_up_list.append(-1.0 / np.pi * rho_up[(0,0,0)])
+        self.rho_dn_list.append(-1.0 / np.pi * rho_dn[(0,0,0)])
+
 
     def get_rho_atom(self):
         """
@@ -170,6 +170,16 @@ class ExchangeCL2(ExchangeCL):
         if os.path.exists(path):
             shutil.rmtree(path)
 
+    def integrate(self):
+        self.rho_up=np.imag(simpson_nonuniform(self.contour.path, self.rho_up_list))
+        self.rho_dn=np.imag(simpson_nonuniform(self.contour.path, self.rho_dn_list))
+        for R, ijpairs in self.R_ijatom_dict.items():
+            for iatom, jatom in ijpairs:
+                self.Jorb[(R, iatom, jatom)]=simpson_nonuniform(self.contour.path,
+                             self.Jorb_list[(R, iatom, jatom)])
+                self.JJ[(R, iatom, jatom)]=simpson_nonuniform(self.contour.path,
+                    self.JJ_list[(R, iatom, jatom)])
+
     def calculate_all(self):
         """
         The top level.
@@ -186,16 +196,16 @@ class ExchangeCL2(ExchangeCL):
             ') ',
         ]
         bar = progressbar.ProgressBar(
-            maxval=self.contour.npoints, widgets=widgets)
+            maxval=len(self.contour.path), widgets=widgets)
         bar.start()
-        for ie in range(self.contour.npoints):
+        for ie,e in enumerate(self.contour.path):
             bar.update(ie)
             e = self.contour.path[ie]
-            de = self.contour.de[ie]
             GR_up, rho_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=True)
             GR_dn, rho_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=True)
-            self.get_rho_e(rho_up, rho_dn, de)
-            self.get_all_A(GR_up, GR_dn, de)
+            self.get_rho_e(rho_up, rho_dn)
+            self.get_all_A(GR_up, GR_dn)
+        self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()
         bar.finish()
@@ -218,4 +228,4 @@ class ExchangeCL2(ExchangeCL):
             biquadratic_Jdict=None,
             description=self.description,
         )
-        output.write_all()
+        output.write_all(path=path)

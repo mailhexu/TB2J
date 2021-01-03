@@ -37,7 +37,7 @@ class QSolver(object):
         #mat = np.zeros((3 * self.nspin, 3 * self.nspin), dtype=complex)
         Dq = np.zeros_like(Jq)
         #mat=-np.einsum('ij, j-> ij', )
-        mat = - Jq * self.M[None, :] * self.Mab_mat_inv
+        mat =  Jq * self.M[None, :] * self.Mab_mat_inv
         mdiag = np.einsum('ij, j', self.J0, 1.0/self.M)
         np.fill_diagonal(mat, np.diag(mat)+mdiag)
         return 4.0*mat
@@ -47,7 +47,7 @@ class QSolver(object):
         for key, val in self.ham.get_total_hessian_ijR().items():
             i, j, R = key
             mat[i * 3:i * 3 + 3, j * 3:j * 3 + 3] -= val
-        mat = mat * 4.0 / self.M_mat
+        mat = mat * 4.0 * self.Mab_mat_inv
         SZ = np.zeros(self.nspin * 3, dtype=float)
         SZ[2::3] = 1.0
         SZ /= np.linalg.norm(SZ)
@@ -58,7 +58,9 @@ class QSolver(object):
         if self.Eref is None and not Jq:
             self.get_Eref()
         if not Jq:
-            mat = mat * 4.0 / self.M_mat
+            mat = self.dynamic_matrix(kpt)
+        else:
+            mat = self.Jq(kpt)
         if eigen_vectors:
             evals, evecs = linalg.eigh(mat)
             evals = np.real(evals)

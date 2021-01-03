@@ -12,6 +12,7 @@ from TB2J.io_exchange import SpinIO
 import progressbar
 from functools import lru_cache
 from TB2J.contour import Contour
+from TB2J.utils import simpson_nonuniform
 
 
 class Exchange():
@@ -91,7 +92,20 @@ class Exchange():
                                               nz2=self.nz2,
                                               nz3=self.nz3)
         elif method.lower() == 'semicircle':
-            self.contour.build_path_semicircle(npoints=self.nz)
+            self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
+        #self.nen = len(self.elist) - 1
+        #self.elistc = list(range(nz1 + nz2, nz))
+        #self.new_efermi = None
+
+    # def _prepare_elistc(self, ie):
+    #     if not self.has_elistc:
+    #         nz1, nz2, nz3 = self.nz1, self.nz2, self.nz3
+    #         nz = self.nz
+    #         self.elist[nz1 + nz2:nz] = np.real(
+    #             self.elist[ie]) + self.height * 1j + np.linspace(
+    #                 0, -self.height, nz3, endpoint=False) * 1j
+    #         self.elist[-1] = np.real(self.elist[ie])
+    #         self.new_efermi = np.real(self.elist[ie])
 
     def _prepare_Rlist(self):
         """
@@ -206,7 +220,8 @@ class ExchangeNCL(Exchange):
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
+        self.A_ijR_list = defaultdict(lambda: [])
+        self.A_ijR = defaultdict(lambda: np.zeros((4,4), dtype=complex))
         #self.HR0 = self.tbmodel.ham_R0
         self.HR0 = self.G.H0
         self._is_collinear = False
@@ -255,7 +270,7 @@ class ExchangeNCL(Exchange):
         orbj = self.iorb(jatom)
         return GR[np.ix_(orbi, orbj)]
 
-    def get_A_ijR(self, G, iatom, jatom, de):
+    def get_A_ijR(self, G, R, iatom, jatom):
         """ calculate A from G for a energy slice (de).
         It take the
         .. math::
@@ -271,46 +286,43 @@ class ExchangeNCL(Exchange):
         :returns: a matrix of A_ij(u, v), where u, v =(0)0, x(1), y(2), z(3)
         :rtype:  4*4 matrix
         """
-        for R in self.R_ijatom_dict:
-            # G[i, j, R]
-            GR = G[R]
-            if (iatom, jatom) in self.R_ijatom_dict[R]:
-                Gij = self.GR_atom(GR, iatom, jatom)
-                # GijR , I, x, y, z component.
-                if self.tbmodel.is_siesta:
-                    Gij_Ixyz = pauli_block_all_wrongy(Gij)
-                else:
-                    Gij_Ixyz = pauli_block_all(Gij)
-                # G(j, i, -R)
-                Rm = tuple(-x for x in R)
-                GRm = G[Rm]
-                Gji = self.GR_atom(GRm, jatom, iatom)
+        GR = G[R]
+        Gij = self.GR_atom(GR, iatom, jatom)
+        # GijR , I, x, y, z component.
+        if self.tbmodel.is_siesta:
+            Gij_Ixyz = pauli_block_all_wrongy(Gij)
+        else:
+            Gij_Ixyz = pauli_block_all(Gij)
+        # G(j, i, -R)
+        Rm = tuple(-x for x in R)
+        GRm = G[Rm]
+        Gji = self.GR_atom(GRm, jatom, iatom)
 
-                if self.tbmodel.is_siesta:
-                    Gji_Ixyz = pauli_block_all_wrongy(Gji)
-                else:
-                    Gji_Ixyz = pauli_block_all(Gji)
-                tmp = np.zeros((4, 4), dtype=complex)
-                for a in range(4):
-                    for b in range(4):
-                        AijRab = np.matmul(
-                            np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-                            np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
-                        # trace over orb
-                        tmp[a, b] = np.trace(AijRab)
-                # Note: the full complex, rather than Re or Im part is stored into A_ijR.
-                self.A_ijR[(R, iatom, jatom)] += tmp * de / np.pi
+        if self.tbmodel.is_siesta:
+            Gji_Ixyz = pauli_block_all_wrongy(Gji)
+        else:
+            Gji_Ixyz = pauli_block_all(Gji)
+        tmp=np.zeros((4,4),dtype=complex)
+        for a in range(4):
+            for b in range(4):
+                AijRab = np.matmul(
+                    np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
+                    np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
+                # trace over orb
+                tmp[a, b] = np.trace(AijRab)
+        return tmp/np.pi 
 
-    def get_all_A(self, G, de):
+    def get_all_A(self, G):
         """
         Calculate all A matrix elements
         Loop over all magnetic atoms.
         :param G: Green's function.
         :param de: energy step.
         """
-        for iatom in self.ind_mag_atoms:
-            for jatom in self.ind_mag_atoms:
-                self.get_A_ijR(G, iatom, jatom, de)
+        for iR, R in enumerate(self.R_ijatom_dict):
+            for (iatom, jatom) in self.R_ijatom_dict[R]:
+                A=self.get_A_ijR(G, R, iatom, jatom)
+                self.A_ijR_list[(R, iatom,jatom)].append(A)
 
     def A_to_Jtensor(self):
         """
@@ -326,7 +338,6 @@ class ExchangeNCL(Exchange):
         self.Jprime = {}
         self.B = {}
         self.exchange_Jdict = {}
-        
         self.debug_dict={'DMI2':{}}
         for key, val in self.A_ijR.items():
             # key:(R, iatom, jatom)
@@ -395,12 +406,11 @@ class ExchangeNCL(Exchange):
         for R, G in GR.items():
             self.N[R] += -1.0 / np.pi * np.imag(G * de)
 
-    def get_rho_e(self, rhoR, de):
+    def get_rho_e(self, rhoR):
         """ add component to density matrix from a green's function
         :param GR: Green's funciton in real space.
-        :param de: energy step
         """
-        self.rho += -1.0 / np.pi * rhoR[0, 0, 0] * de
+        return -1.0 / np.pi * rhoR[0, 0, 0]
 
     def get_total_charges(self):
         return np.sum(np.imag(np.diag(self.rho)))
@@ -477,6 +487,18 @@ class ExchangeNCL(Exchange):
         self.Ddict_NJT = Ddict_NJT
         return Ddict_NJT
 
+    def integrate(self, rhoRs,AijRs):
+        """
+        AijRs: a list of AijR, 
+        wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
+        """
+        self.rho=simpson_nonuniform(self.contour.path, rhoRs) 
+        for iR, R in enumerate(self.R_ijatom_dict):
+            for (iatom, jatom) in self.R_ijatom_dict[R]:
+                f=self.A_ijR_list[(R, iatom, jatom)]
+                self.A_ijR[(R, iatom, jatom)]=simpson_nonuniform(self.contour.path, f)
+
+
     def calculate_all(self):
         """
         The top level.
@@ -495,19 +517,24 @@ class ExchangeNCL(Exchange):
         bar = progressbar.ProgressBar(maxval=self.contour.npoints,
                                       widgets=widgets)
         bar.start()
-        for ie in range(self.contour.npoints):
+        rhoRs=[]
+        GRs=[]
+        AijRs=[]
+        for ie,e in enumerate(self.contour.path):
             bar.update(ie)
             #if self.ne is not none and self.get_total_charges(
             #) > self.ne and ie not in self.elistc:
             #    self._prepare_elistc(self, ie)
             #    continue
             e = self.contour.path[ie]
-            de = self.contour.de[ie]
             GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
-            self.get_rho_e(rhoR, de)
-            self.get_all_A(GR, de)
-            if self.calc_NJt:
-                self.get_N_e(GR, de)
+            rhoRs.append(self.get_rho_e(rhoR))
+            AijR=self.get_all_A(GR)
+            AijRs.append(AijR)
+            #self.A_ijR[(R, iatom, jatom)] += tmp * de / np.pi
+            #if self.calc_NJt:
+            #    self.get_N_e(GR, de)
+        self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()
         self.A_to_Jtensor()

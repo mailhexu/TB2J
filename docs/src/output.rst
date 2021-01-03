@@ -2,7 +2,7 @@ The output of TB2J
 ==================
 
 
-In the following we describe the output files which TB2J produces. By running wann2J.py or siesta2J.py, a directory with the name TB2J\_results will be generated, which contains the following output files:
+In the following we describe the output files which TB2J produces. By running wann2J.py or siesta2J.py, a directory with the name TB2J\_results (or the directory specified by the --output_path) will be generated, which contains the following output files:
 
 * exchange.out: A human readable output file, which summarizes the results.
 
@@ -37,9 +37,9 @@ In the following we describe the output files which TB2J produces. By running wa
     ----------------------------------------------------------------------------------------
     Fe2         Fe1   (0,   1,   1)  -28.9371 ( 3.934,  0.015,  0.015)  3.934
     J_iso: -28.9371
-    [Experimental!] Jprime: -59.620,  B: -15.342
-    [Experimental!] DMI: (-0.5191  1.3581  0.1090)
-    [Experimental!]J_ani:
+    [Testing!] Jprime: -59.620,  B: -15.342
+    [Testing!] DMI: (-0.5191  1.3581  0.1090)
+    [Testing!] J_ani:
     [[ 0.    -0.002  0.047]
     [-0.002  0.    -0.154]
     [ 0.047 -0.154  0.   ]]
@@ -48,4 +48,4 @@ Here, the charge and magnetic moment of each atom are only integrated with the W
 
 Each pair of atoms is labeled by three parameters, the index :math:`i`, :math:`j` and :math:`R`, where :math:`i` and :math:`j` are the indices in the unit cell. The vector :math:`\vec{R}` specifies the cell the atom :math:`j` is translated to, i.e. the reduced positions of the two atoms are :math:`\vec{r}_i` and :math:`\vec{r}_j+\vec{R}`, respectively. By default, the interaction is calculated within a supercell corresponding to the k-mesh. For example, with a :math:`7\times 7 \times 7` k-mesh, all :math:`ij` pairs will be produced for the spin labeled :math:`i` in the center cell of a :math:`7\times 7 \times 7` supercell. With the ``rcut'' flag, only the parameters for :math:`ij` pairs within a distance of rcut are calculated. The exchange parameters are reported as follows: magnetic atom :math:`i` connected with magnetic atom :math:`j`, :math:`R` is the lattice vector between the unit cells containing :math:`i` and :math:`j`, the value of :math:`J` for this pair of magnetic atoms in meV, the vector connecting them, and the distance between the pair of atoms. If SOC is enabled, the DMI and anisotropic :math:`J^{ani}` parameters are given in addition. The DMI vectors :math:`\vec{D}` and the anisotropic :math:`J^{ani}` are printed as vectors and matrices, respectively.  
 
-Apart from the main exchange.out file, TB2J delivers several other outputs, which provide the input for spin dynamics (SD) and Monte Carlo (MC) simulations. TB2J is interfaced with several SD and MC codes. It has native support to the Multibinit code delivered as part of the Abinit code since version 9.0 . The  TB2J\_results/Multibinit directory contains the templates of input files for this code. One can usually run spin-dynamics with slight or no modification of these files. ``Experimental'' inputs are also generated for Vampire  and Thomas Ostler's GPU-ASD code.
+Apart from the main exchange.out file, TB2J delivers several other outputs, which provide the input for spin dynamics (SD) and Monte Carlo (MC) simulations. TB2J is interfaced with several SD and MC codes. It has native support to the Multibinit code delivered as part of the Abinit code since version 9.0 . The  TB2J\_results/Multibinit directory contains the templates of input files for this code. One can usually run spin-dynamics with slight or no modification of these files. ``Testing'' inputs are also generated for Vampire  and Thomas Ostler's GPU-ASD code.

@@ -1,6 +1,17 @@
 Release Notes
 =============
 
+v0.3.8 December 29, 2020
+-------------------------
+Add --output_path option to specify the output path.
+
+
+
+v0.3.6 December 7, 2020
+-------------------------
+Use Simpson's rule instead of Euler for integration.
+
+
 v0.3.5 November 3, 2020
 -------------------------
 Add --groupby option in wann2J.py to specify the order of the basis set in the hamiltonian.

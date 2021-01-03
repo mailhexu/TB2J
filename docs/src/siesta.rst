@@ -6,9 +6,9 @@ Before running this tutorial, please make sure that the sisl package is installe
 
 Collinear calculation without SOC
 --------------------------------------
-Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory.
+Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 
 
-First, we do a siesta self consistent calculation with the BCC Fe primitive cell of bcc Fe has only one Fe atom. In the example, we use the pseudopotential from the PseudoDojo dataset in the psml format. A default double zeta polarized (DZP) basis set. We need to save the electronic Kohn-Sham Hamiltonian in the atomic orbital basis set with the options:
+First, we do a siesta self consistent calculation with the BCC Fe primitive cell of bcc Fe has only one Fe atom. In the example, we use the pseudopotential from the PseudoDojo dataset in the psml format. Note that at the moment (December 2020) the psml support is not yet in the main branch of Siesta. We provide the .psf pseudopotential converted from the .psml file. To use the psml format, one could find the Siesta psml branch on gitlab (https://gitlab.com/siesta-project/siesta/-/tree/psml-support). A default double zeta polarized (DZP) basis set. We need to save the electronic Kohn-Sham Hamiltonian in the atomic orbital basis set with the options:
 
 ::
 

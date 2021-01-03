@@ -30,17 +30,19 @@ def run_wann2J():
     parser.add_argument('--prefix_down',
                         help="prefix to the spin down wannier files",
                         default='wannier90.dn',
-                        type=str) 
+                        type=str)
     parser.add_argument('--elements',
                         help="elements to be considered in Heisenberg model",
                         default=None,
                         type=str,
                         nargs='*')
-    parser.add_argument('--groupby',
-                        help="In the spinor case, the order of the orbitals have two conventions: 1: group by spin (orb1_up, orb2_up,... orb1_down, ...), 2,group by orbital (orb1_up, orb1_down, orb2_up, ...,). Use 'spin' in the former case and 'orbital' in the latter case. The default is spin." ,
-                        default='spin',
-                        type=str,
-                        )
+    parser.add_argument(
+        '--groupby',
+        help=
+        "In the spinor case, the order of the orbitals have two conventions: 1: group by spin (orb1_up, orb2_up,... orb1_down, ...), 2,group by orbital (orb1_up, orb1_down, orb2_up, ...,). Use 'spin' in the former case and 'orbital' in the latter case. The default is spin.",
+        default='spin',
+        type=str,
+    )
 
     parser.add_argument(
         '--rcut',
@@ -102,10 +104,11 @@ def run_wann2J():
         nargs='+')
     parser.add_argument(
         '--use_cache',
-        help="whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce energy usage. Default: False",
+        help=
+        "whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce energy usage. Default: False",
         action='store_true',
         default=False)
- 
+
     parser.add_argument(
         "--description",
         help=
@@ -117,6 +120,11 @@ def run_wann2J():
                         action="store_true",
                         help="Whether to use spinor wannier function.",
                         default=False)
+    parser.add_argument(
+        "--output_path",
+        help="The path of the output directory, default is TB2J_results",
+        type=str,
+        default="TB2J_results")
 
     args = parser.parse_args()
 
@@ -147,6 +155,7 @@ def run_wann2J():
                  nz3=args.nz3,
                  use_cache=args.use_cache,
                  description=args.description,
+                 output_path=args.output_path,
                  exclude_orbs=args.exclude_orbs)
 
 
