@@ -177,10 +177,10 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
 def gen_exchange_siesta(
     fdf_fname,
     magnetic_elements=[],
-    kmesh=[4, 4, 4],
+    kmesh=[5, 5, 5],
     emin=-12.0,
     emax=0.0,
-    nz=50,
+    nz=100,
     #height=0.2,
     #nz1=50,
     #nz2=200,
@@ -197,6 +197,10 @@ def gen_exchange_siesta(
     except:
         raise ImportError(
             "sisl cannot be imported. Please install sisl first.")
+
+    from packaging import version
+    if version.parse(sisl.__version__)<=version.parse("0.10.0"):
+        raise ImportError(f"sisl version is {sisl.__version__}, but should be larger than 0.10.0.")
     fdf = sisl.get_sile(fdf_fname)
     H = fdf.read_hamiltonian()
     if H.spin.is_colinear:
