@@ -9,11 +9,11 @@ from scipy.linalg import eigh
 
 class SislWrapper():
     def __init__(self, sisl_hamiltonian, spin=None):
-        self.is_siesta = True
+        self.is_siesta = False
         self.is_orthogonal = False
         self.ham = sisl_hamiltonian
         # k2Rfactor : H(k) = \int_R H(R) * e^(k2Rfactor * k.R)
-        self.R2kfactor = -2.0j * np.pi  #
+        self.R2kfactor = 2.0j * np.pi  #
         if spin == 'up':
             spin = 0
         elif spin == 'down':
