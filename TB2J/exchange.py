@@ -222,7 +222,6 @@ class ExchangeNCL(Exchange):
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4,4), dtype=complex))
-        #self.HR0 = self.tbmodel.ham_R0
         self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
@@ -522,10 +521,6 @@ class ExchangeNCL(Exchange):
         AijRs=[]
         for ie,e in enumerate(self.contour.path):
             bar.update(ie)
-            #if self.ne is not none and self.get_total_charges(
-            #) > self.ne and ie not in self.elistc:
-            #    self._prepare_elistc(self, ie)
-            #    continue
             e = self.contour.path[ie]
             GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
             rhoRs.append(self.get_rho_e(rhoR))

@@ -170,10 +170,6 @@ class TBGreen():
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
-        #Gk = eigen_to_G(evals=self.evals[ik, :],
-        #                evecs=self.evecs[ik, :, :],
-        #                efermi=self.efermi,
-        #                energy=energy)
         Gk = eigen_to_G(evals=self.get_evalue(ik),
                         evecs=self.get_evecs(ik),
                         efermi=self.efermi,
