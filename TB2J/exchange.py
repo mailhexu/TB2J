@@ -38,6 +38,7 @@ class Exchange():
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut. 
         use_cache=False,
+        np=1,
         description=''):
 
         self.atoms = atoms
@@ -58,6 +59,7 @@ class Exchange():
         self.exclude_orbs = exclude_orbs
         self.ne = ne
         self._use_cache = use_cache
+        self.np=np
 
         self.set_tbmodels(tbmodels)
         self._prepare_elist()
@@ -533,7 +535,7 @@ class ExchangeNCL(Exchange):
         #with ProcessPoolExecutor(max_workers=1) as executor:
         #with ProcessPoolExecutor(max_workers=1) as executor:
         #    results=executor.map(self.get_AijR_rhoR, self.contour.path)
-        executor=ProcessPool(nodes=3)
+        executor=ProcessPool(nodes=self.np)
         jobs=[]
         for e in self.contour.path:
             jobs.append(executor.apipe(self.get_AijR_rhoR, e))

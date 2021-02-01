@@ -47,7 +47,7 @@ def run_siesta2J():
     parser.add_argument(
         '--use_cache',
         help=
-        "whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce energy usage. Default: False",
+        "whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce memory usage. Default: False",
         action='store_true',
         default=False)
     #parser.add_argument(
@@ -77,6 +77,11 @@ def run_siesta2J():
         default=[],
         type=int,
         nargs='+')
+
+    parser.add_argument('--np',
+                        help='number of cpu cores to use in parallel, default: 1',
+                        default=1,
+                        type=int)
 
     parser.add_argument(
         "--description",
@@ -116,6 +121,7 @@ def run_siesta2J():
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,
+        np=args.np,
         exclude_orbs=args.exclude_orbs)
 
 
