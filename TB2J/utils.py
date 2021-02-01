@@ -248,7 +248,6 @@ def simpson_nonuniform(x, f):
 
     result = 0.0
     for i in range(1, N, 2):
-        print(f"{i=}", len(f), len(h))
         hph = h[i] + h[i - 1]
         result += f[i] * ( h[i]**3 + h[i - 1]**3
                            + 3. * h[i] * h[i - 1] * hph )\

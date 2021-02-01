@@ -534,10 +534,12 @@ class ExchangeNCL(Exchange):
         #with ProcessPoolExecutor(max_workers=1) as executor:
         #    results=executor.map(self.get_AijR_rhoR, self.contour.path)
         executor=ProcessPool(nodes=3)
-        results=executor.map(self.get_AijR_rhoR, self.contour.path)
-        executor.close()
+        jobs=[]
+        for e in self.contour.path:
+            jobs.append(executor.apipe(self.get_AijR_rhoR, e))
         i=0
-        for result in results:
+        for job in jobs:
+            result=job.get()
             i+=1
             bar.update(i)
             #AijRs.append(result[0])
@@ -549,6 +551,7 @@ class ExchangeNCL(Exchange):
                         AijRs[(R, iatom, jatom)]=[]
                         AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
             rhoRs.append(result[1])
+        executor.close()
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()
