@@ -13,7 +13,10 @@ import progressbar
 from functools import lru_cache
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform
-
+#from mpi4py import MPI
+#from mpi4py.futures import MPICommExecutor
+#from concurrent.futures import ProcessPoolExecutor
+from pathos.multiprocessing import ProcessPool
 
 class Exchange():
     def __init__(
@@ -318,10 +321,12 @@ class ExchangeNCL(Exchange):
         :param G: Green's function.
         :param de: energy step.
         """
+        A_ijR_list={}
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
                 A=self.get_A_ijR(G, R, iatom, jatom)
-                self.A_ijR_list[(R, iatom,jatom)].append(A)
+                A_ijR_list[(R, iatom,jatom)]=A
+        return A_ijR_list
 
     def A_to_Jtensor(self):
         """
@@ -494,9 +499,14 @@ class ExchangeNCL(Exchange):
         self.rho=simpson_nonuniform(self.contour.path, rhoRs) 
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
-                f=self.A_ijR_list[(R, iatom, jatom)]
+                f=AijRs[(R, iatom, jatom)]
                 self.A_ijR[(R, iatom, jatom)]=simpson_nonuniform(self.contour.path, f)
 
+    def get_AijR_rhoR(self, e):
+        GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
+        AijR=self.get_all_A(GR)
+      
+        return AijR, self.get_rho_e(rhoR)
 
     def calculate_all(self):
         """
@@ -518,17 +528,27 @@ class ExchangeNCL(Exchange):
         bar.start()
         rhoRs=[]
         GRs=[]
-        AijRs=[]
-        for ie,e in enumerate(self.contour.path):
-            bar.update(ie)
-            e = self.contour.path[ie]
-            GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
-            rhoRs.append(self.get_rho_e(rhoR))
-            AijR=self.get_all_A(GR)
-            AijRs.append(AijR)
-            #self.A_ijR[(R, iatom, jatom)] += tmp * de / np.pi
-            #if self.calc_NJt:
-            #    self.get_N_e(GR, de)
+        AijRs={}
+        #with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
+        #with ProcessPoolExecutor(max_workers=1) as executor:
+        #with ProcessPoolExecutor(max_workers=1) as executor:
+        #    results=executor.map(self.get_AijR_rhoR, self.contour.path)
+        executor=ProcessPool(nodes=3)
+        results=executor.map(self.get_AijR_rhoR, self.contour.path)
+        executor.close()
+        i=0
+        for result in results:
+            i+=1
+            bar.update(i)
+            #AijRs.append(result[0])
+            for iR, R in enumerate(self.R_ijatom_dict):
+                for (iatom, jatom) in self.R_ijatom_dict[R]:
+                    if (R, iatom, jatom) in AijRs:
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
+                    else:
+                        AijRs[(R, iatom, jatom)]=[]
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
+            rhoRs.append(result[1])
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()
