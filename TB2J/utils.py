@@ -51,7 +51,9 @@ def read_basis(fname):
     return bdict
 
 
-def auto_assign_wannier_to_atom(positions, atoms, max_distance=0.1,
+def auto_assign_wannier_to_atom(positions,
+                                atoms,
+                                max_distance=0.1,
                                 half=False):
     """
     assign
@@ -103,8 +105,8 @@ def auto_assign_wannier_to_atom2(positions,
         distance_vecs = []
         for iatom, patom in enumerate(patoms):
             d = porb - patom
-            rd = np.min(
-                np.array([d % 1.0 % 1.0, (1.0 - d) % 1.0 % 1.0]), axis=0)
+            rd = np.min(np.array([d % 1.0 % 1.0, (1.0 - d) % 1.0 % 1.0]),
+                        axis=0)
             rdn = np.linalg.norm(rd)
             distance_vecs.append(rd)
             distances.append(rdn)
@@ -220,13 +222,34 @@ def match_kq_mesh(klist, qlist):
     return ret
 
 
-
 def kmesh_to_R(kmesh):
     k1, k2, k3 = kmesh
     Rlist = [(R1, R2, R3) for R1 in range(-k1 // 2 + 1, k1 // 2 + 1)
              for R2 in range(-k2 // 2 + 1, k2 // 2 + 1)
              for R3 in range(-k3 // 2 + 1, k3 // 2 + 1)]
     return Rlist
+
+
+def trapezoidal_nonuniform(x, f):
+    """
+    trapezoidal rule for irregularly spaced data.
+
+        Parameters
+        ----------
+        x : list or np.array of floats
+                Sampling points for the function values
+        f : list or np.array of floats
+                Function values at the sampling points
+
+        Returns
+        -------
+        float : approximation for the integral
+    """
+    h = np.diff(x)
+    f = np.array(f)
+    avg = (f[:-1] + f[1:]) / 2.0
+    return np.tensordot(avg, h, axes=(0,0))
+
 
 def simpson_nonuniform(x, f):
     """

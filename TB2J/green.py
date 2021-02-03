@@ -18,6 +18,18 @@ def eigen_to_G(evals, evecs, efermi, energy):
     return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
         evecs.conj().T)
 
+def find_energy_ingap(evals, rbound, gap=1.0):
+    """
+    find a energy inside a gap below rbound (right bound), 
+    return the energy gap top - 0.5.
+    """
+    m=np.sort(evals.flatten())
+    m=m[m<rbound]
+    ind=np.where(np.diff(m)>gap)[0]
+    if len(ind)==0:
+        return m[0]-0.5
+    else:
+        return m[ind[-1]+1]-0.5
 
 class TBGreen():
     def __init__(
@@ -27,8 +39,7 @@ class TBGreen():
         efermi,  # efermi
         k_sym=False,
         use_cache=False,
-        cache_path='TB2J_results/cache'
-):
+        cache_path='TB2J_results/cache'):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
@@ -53,10 +64,20 @@ class TBGreen():
         self.nbasis = tbmodel.nbasis
         self.k_sym = k_sym
         self._prepare_eigen()
-       
+
+    def _reduce_eigens(self, evals, evecs, emin, emax):
+        ts = np.logical_and(evals >= emin, evals < emax)
+        ts = np.any(ts, axis=0)
+        ts = np.where(ts)[0]
+        istart, iend = ts[0], ts[-1] + 1
+        print(f"reducing nbands from {evals.shape[1]} to {len(ts)}")
+        return evals[:, istart:iend], evecs[:, :, istart:iend]
+
+    def find_energy_ingap(self, rbound, gap=1.0):
+        return find_energy_ingap(self.evals, rbound, gap)
 
     def _prepare_cache(self):
-        path=self.cache_path
+        path = self.cache_path
         if not os.path.exists(path):
             os.makedirs(path)
         else:
@@ -66,7 +87,6 @@ class TBGreen():
     def clean_cache(self):
         if os.path.exists(self.cache_path):
             rmtree(self.cache_path)
-
 
     def _prepare_eigen(self):
         """
@@ -82,7 +102,7 @@ class TBGreen():
             #print("Preparing eigen in memory.")
             self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis),
                                   dtype=complex)
-            self.H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+            H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
             if not self.is_orthogonal:
                 self.S = np.zeros((nkpts, self.nbasis, self.nbasis),
                                   dtype=complex)
@@ -90,44 +110,45 @@ class TBGreen():
                 self.S = None
             for ik, k in enumerate(self.kpts):
                 if self.is_orthogonal:
-                    self.H[ik], _, self.evals[ik], self.evecs[
+                    H[ik], _, self.evals[ik], self.evecs[
                         ik] = self.tbmodel.HSE_k(k, convention=2)
                 else:
-                    self.H[ik], self.S[ik], self.evals[ik], self.evecs[
+                    H[ik], self.S[ik], self.evals[ik], self.evecs[
                         ik] = self.tbmodel.HSE_k(k, convention=2)
-                self.H0 += self.H[ik] / self.nkpts
+                self.H0 += H[ik] / self.nkpts
+            self.evals, self.evecs = self._reduce_eigens(
+                self.evals,
+                self.evecs,
+                emin=self.efermi - 10.0,
+                emax=self.efermi + 10.1)
         else:  # Use cache
             #print("Preparing eigen in cache.")
-            self.evecs = np.memmap(os.path.join(self.cache_path,
-                                                    'evecs.dat'),
-                                       mode='w+',
-                                       shape=(nkpts, self.nbasis, self.nbasis),
-                                       dtype=complex)
-            self.H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
+            self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)
+            H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
+                          mode='w+',
+                          shape=(nkpts, self.nbasis, self.nbasis),
+                          dtype=complex)
             if self.is_orthogonal:
                 self.S = None
             else:
                 self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
-                                       mode='w+',
-                                       shape=(nkpts, self.nbasis, self.nbasis),
-                                       dtype=complex)
+                                   mode='w+',
+                                   shape=(nkpts, self.nbasis, self.nbasis),
+                                   dtype=complex)
 
             for ik, k in enumerate(self.kpts):
                 Hk, Sk, evalue, evec = self.tbmodel.HSE_k(k)
-                self.H[ik] = Hk
+                #self.H[ik] = Hk
                 self.H0 += Hk / self.nkpts
                 if not self.is_orthogonal:
                     self.S[ik] = Sk
-                    #self.S.flush()
                 self.evals[ik] = evalue
                 self.evecs[ik] = evec
-                #self.evecs.flush()
-                #self.H.flush()
             del self.evecs
-            del self.H
+            #del self.H
             if not self.is_orthogonal:
                 del self.S
 
@@ -202,7 +223,7 @@ class TBGreen():
                 tmp = Gk * (phase * self.kweights[ik])
                 GR[R] += tmp
                 # change this if need full rho
-                if get_rho and R==(0,0,0):
+                if get_rho and R == (0, 0, 0):
                     rhoR[R] += rhok * (phase * self.kweights[ik])
         if get_rho:
             return GR, rhoR

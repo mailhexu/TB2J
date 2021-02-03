@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import sys
-import argparse
 from TB2J.manager import gen_exchange_siesta
 from TB2J.versioninfo import print_license
+import sys
+import argparse
 
 
 def run_siesta2J():

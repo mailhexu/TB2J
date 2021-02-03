@@ -3,5 +3,6 @@ scipy
 matplotlib
 ase
 progressbar
+pathos
 
 

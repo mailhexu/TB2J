@@ -15,7 +15,7 @@ from TB2J.io_exchange import SpinIO
 import progressbar
 from functools import lru_cache
 from .exchange import ExchangeCL
-from .utils import simpson_nonuniform
+from .utils import simpson_nonuniform, trapezoidal_nonuniform
 from pathos.multiprocessing import ProcessPool
 
 
@@ -59,6 +59,20 @@ class ExchangeCL2(ExchangeCL):
         self.exchange_Jdict_orb = {}
 
         self.biquadratic = False
+
+    def _clean_tbmodels(self):
+        del self.tbmodel_up
+        del self.tbmodel_dn
+        del self.Gup.tbmodel
+        del self.Gdn.tbmodel
+
+    def _adjust_emin(self):
+        emin_up = self.Gup.find_energy_ingap(rbound=self.efermi -
+                                             5.0) - self.efermi
+        emin_dn = self.Gdn.find_energy_ingap(rbound=self.efermi -
+                                             5.0) - self.efermi
+        self.emin = min(emin_up, emin_dn)
+        print(f"A gap is found at {self.emin}, set emin to it.")
 
     def get_Delta(self, iatom):
         orbs = self.iorb(iatom)
@@ -186,17 +200,20 @@ class ExchangeCL2(ExchangeCL):
         if os.path.exists(path):
             shutil.rmtree(path)
 
-    def integrate(self):
-        self.rho_up = np.imag(
-            simpson_nonuniform(self.contour.path, self.rho_up_list))
-        self.rho_dn = np.imag(
-            simpson_nonuniform(self.contour.path, self.rho_dn_list))
+    def integrate(self, method="simpson"):
+        if method == "trapezoidal":
+            integrate = trapezoidal_nonuniform
+        elif method == 'simpson':
+            integrate = simpson_nonuniform
+        self.rho_up = np.imag(integrate(self.contour.path, self.rho_up_list))
+        self.rho_dn = np.imag(integrate(self.contour.path, self.rho_dn_list))
         for R, ijpairs in self.R_ijatom_dict.items():
             for iatom, jatom in ijpairs:
-                self.Jorb[(R, iatom, jatom)] = simpson_nonuniform(
+                self.Jorb[(R, iatom, jatom)] = integrate(
                     self.contour.path, self.Jorb_list[(R, iatom, jatom)])
-                self.JJ[(R, iatom, jatom)] = simpson_nonuniform(
-                    self.contour.path, self.JJ_list[(R, iatom, jatom)])
+                self.JJ[(R, iatom,
+                         jatom)] = integrate(self.contour.path,
+                                             self.JJ_list[(R, iatom, jatom)])
 
     def get_AijR_rhoR(self, e):
         GR_up, rho_up = self.Gup.get_GR(self.short_Rlist,

@@ -153,5 +153,6 @@ output:material-magnetisation
 #output:magnetisation-length 
 """
     with open(fname, 'w') as myfile:
-        cellpar = cls.atoms.get_cell_lengths_and_angles()
+        #cellpar = cls.atoms.get_cell_lengths_and_angles()
+        cellpar=cls.atoms.cell.cellpar()
         myfile.write(text.format(a=cellpar[0], b=cellpar[1], c=cellpar[2]))
