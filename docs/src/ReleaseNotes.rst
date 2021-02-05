@@ -3,12 +3,13 @@ Release Notes
 
 v0.4.1 February 2, 2011
 ------------------------
-Use a Legendre path for the integration which is more stable and requires less poles (--nz).
+Use a Legendre path for the integration which is more stable and requires less poles(--nz).
 Memory optimization.
 
 v0.4.0 February 1, 2021
 ------------------------
 Add --np option to specify number of cpu cores in parallel.
+Dependency on pathos is added.
 
 
 v0.3.8 December 29, 2020
