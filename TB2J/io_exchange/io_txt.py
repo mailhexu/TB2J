@@ -134,7 +134,7 @@ def write_exchange_section(cls,
         if cls.dmi_ddict is not None:
             DMI = cls.dmi_ddict[ll] * 1e3
             myfile.write(
-                '[Experimental!] DMI: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                '[Testing!] DMI: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
                     DMI[0], DMI[1], DMI[2]))
 
         if write_experimental:

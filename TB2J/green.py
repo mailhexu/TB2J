@@ -23,11 +23,11 @@ def find_energy_ingap(evals, rbound, gap=1.0):
     find a energy inside a gap below rbound (right bound), 
     return the energy gap top - 0.5.
     """
-    m=np.sort(evals.flatten())
-    m=m[m<rbound]
+    m0=np.sort(evals.flatten())
+    m=m0[m0<rbound]
     ind=np.where(np.diff(m)>gap)[0]
     if len(ind)==0:
-        return m[0]-0.5
+        return m0[0]-0.5
     else:
         return m[ind[-1]+1]-0.5
 
