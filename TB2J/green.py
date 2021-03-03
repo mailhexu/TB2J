@@ -78,21 +78,18 @@ class TBGreen():
 
     def _prepare_cache(self):
         if self.cache_path is None:
-            if 'TMPDIR' in os.environ:
-                self.cache_path=tempfile.TemporaryDirectory(prefix='TB2J', 
-                                                            dir=os.environ['TMPDIR'])
+            if 'TMPDIR' in os.environ and False:
+                rpath=os.environ['TMPDIR']
             else:
-                self.cache_path=tempfile.TemporaryDirectory(prefix='TB2J')
-        path = self.cache_path
-        if not os.path.exists(path):
-            os.makedirs(path)
+                rpath='./TB2J_cache'
         else:
-            rmtree(path)
-            os.makedirs(path)
+            rpath=self.cache_path
+        self.cache_path=tempfile.TemporaryDirectory(prefix='TB2J', dir=rpath)
 
     def clean_cache(self):
-        if os.path.exists(self.cache_path):
-            rmtree(self.cache_path)
+        #if os.path.exists(self.cache_path):
+        #    rmtree(self.cache_path)
+        self.cache_path.cleanup()
 
     def _prepare_eigen(self):
         """
@@ -129,18 +126,18 @@ class TBGreen():
                 emax=self.efermi + 10.1)
         else:  # Use cache
             #print("Preparing eigen in cache.")
-            self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
+            self.evecs = np.memmap(os.path.join(self.cache_path.name, 'evecs.dat'),
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)
-            H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
+            H = np.memmap(os.path.join(self.cache_path.name, 'H.dat'),
                           mode='w+',
                           shape=(nkpts, self.nbasis, self.nbasis),
                           dtype=complex)
             if self.is_orthogonal:
                 self.S = None
             else:
-                self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
+                self.S = np.memmap(os.path.join(self.cache_path.name, 'S.dat'),
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)
