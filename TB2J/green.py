@@ -4,6 +4,7 @@ from collections import defaultdict
 from ase.dft.kpoints import monkhorst_pack
 from shutil import rmtree
 import os
+import tempfile
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
@@ -39,7 +40,7 @@ class TBGreen():
         efermi,  # efermi
         k_sym=False,
         use_cache=False,
-        cache_path='TB2J_results/cache'):
+        cache_path=None):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
@@ -76,6 +77,12 @@ class TBGreen():
         return find_energy_ingap(self.evals, rbound, gap)
 
     def _prepare_cache(self):
+        if self.cache_path is None:
+            if 'TMPDIR' in os.environ:
+                self.cache_path=tempfile.TemporaryDirectory(prefix='TB2J', 
+                                                            dir=os.environ['TMPDIR'])
+            else:
+                self.cache_path=tempfile.TemporaryDirectory(prefix='TB2J')
         path = self.cache_path
         if not os.path.exists(path):
             os.makedirs(path)
