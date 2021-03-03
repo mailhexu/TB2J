@@ -70,7 +70,6 @@ class TBGreen():
         ts = np.any(ts, axis=0)
         ts = np.where(ts)[0]
         istart, iend = ts[0], ts[-1] + 1
-        print(f"reducing nbands from {evals.shape[1]} to {len(ts)}")
         return evals[:, istart:iend], evecs[:, :, istart:iend]
 
     def find_energy_ingap(self, rbound, gap=1.0):
