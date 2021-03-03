@@ -78,18 +78,20 @@ class TBGreen():
 
     def _prepare_cache(self):
         if self.cache_path is None:
-            if 'TMPDIR' in os.environ and False:
+            if 'TMPDIR' in os.environ:
                 rpath=os.environ['TMPDIR']
             else:
                 rpath='./TB2J_cache'
         else:
             rpath=self.cache_path
-        self.cache_path=tempfile.TemporaryDirectory(prefix='TB2J', dir=rpath)
+        if not os.path.exists(rpath):
+            os.makedirs(rpath)
+        self.cache_path=tempfile.mkdtemp(prefix='TB2J', dir=rpath)
+        print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
 
     def clean_cache(self):
-        #if os.path.exists(self.cache_path):
-        #    rmtree(self.cache_path)
-        self.cache_path.cleanup()
+        if os.path.exists(self.cache_path):
+            rmtree(self.cache_path)
 
     def _prepare_eigen(self):
         """
@@ -126,18 +128,18 @@ class TBGreen():
                 emax=self.efermi + 10.1)
         else:  # Use cache
             #print("Preparing eigen in cache.")
-            self.evecs = np.memmap(os.path.join(self.cache_path.name, 'evecs.dat'),
+            self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)
-            H = np.memmap(os.path.join(self.cache_path.name, 'H.dat'),
+            H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
                           mode='w+',
                           shape=(nkpts, self.nbasis, self.nbasis),
                           dtype=complex)
             if self.is_orthogonal:
                 self.S = None
             else:
-                self.S = np.memmap(os.path.join(self.cache_path.name, 'S.dat'),
+                self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)

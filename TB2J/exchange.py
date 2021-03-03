@@ -564,6 +564,8 @@ class ExchangeNCL(Exchange):
                                                                   jatom])
             rhoRs.append(result[1])
         executor.close()
+        executor.join()
+        executor.clear()
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()
