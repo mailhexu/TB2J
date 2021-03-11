@@ -4,7 +4,7 @@ The implementation details of TB2J:
 
    `Xu He, Nicole Helbig, Matthieu J. Verstraete, Eric Bousquet, 
    TB2J: a python package for computing magnetic interaction parameters
-   <https://arxiv.org/abs/2009.01910>`__
+   Computer Physics Communications, 107938 (2021). <https://doi.org/10.1016/j.cpc.2021.107938>`__
 
 The theoretical background for exchanges calculation is described in
 

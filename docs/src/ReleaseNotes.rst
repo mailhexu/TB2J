@@ -1,6 +1,11 @@
 Release Notes
 ===============
 
+v0.4.3 March 11, 2021
+------------------------
+Add Reference to TB2J paper.
+
+
 v0.4.2 March 11, 2021
 ------------------------
 Fix a bug that the atoms scaled positions get wrapped. 
