@@ -258,11 +258,12 @@ class MyTB(AbstractTB):
         """
         The matrix P: P(i, j) = r(j)-r(i)
         """
-        self.rjminusri = np.zeros((self.nbasis, self.nbasis, self.ndim),
-                                  dtype=float)
-        for i in range(self.nbasis):
-            for j in range(self.nbasis):
-                self.rjminusri[i, j] = self.xred[j] - self.xred[i]
+        #self.rjminusri = np.zeros((self.nbasis, self.nbasis, self.ndim),
+        #                          dtype=float)
+        #for i in range(self.nbasis):
+        #    for j in range(self.nbasis):
+        #        self.rjminusri[i, j] = self.xred[j] - self.xred[i]
+        self.rjminusri = self.xred[None, :, :] - self.xred[:, None, :]
 
     def to_sparse(self):
         for key, val in self.data:
@@ -406,7 +407,7 @@ class MyTB(AbstractTB):
 
         if self.atoms is not None:
             atom_numbers[:] = np.array(self.atoms.get_atomic_numbers())
-            atom_xred[:] = np.array(self.atoms.get_scaled_positions())
+            atom_xred[:] = np.array(self.atoms.get_scaled_positions(wrap=False))
             atom_cell[:] = np.array(self.atoms.get_cell())
         root.close()
 

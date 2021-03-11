@@ -62,7 +62,7 @@ def auto_assign_wannier_to_atom(positions,
     ind_atoms: a list of same length of n(orb).
     """
     pos = np.array(positions)
-    atompos = atoms.get_scaled_positions()
+    atompos = atoms.get_scaled_positions(wrap=False)
     ind_atoms = []
     newpos = []
     refpos = []
@@ -98,7 +98,7 @@ def auto_assign_wannier_to_atom2(positions,
         norbs = len(porbs) // 2
         porbs = porbs[:norbs]
     ind_atoms = []
-    patoms = atoms.get_scaled_positions()
+    patoms = atoms.get_scaled_positions(wrap=False)
     shifted_pos = []
     for iorb, porb in enumerate(porbs):
         distances = []
