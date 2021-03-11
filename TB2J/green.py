@@ -90,7 +90,7 @@ class TBGreen():
         print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
 
     def clean_cache(self):
-        if os.path.exists(self.cache_path):
+        if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
 
     def _prepare_eigen(self):
