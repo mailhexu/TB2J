@@ -1,3 +1,4 @@
+import sisl
 import os
 from TB2J.myTB import MyTB, merge_tbmodels_spin
 import numpy as np
@@ -32,6 +33,7 @@ def gen_exchange(path,
                  Rcut=None,
                  ne=None,
                  use_cache=False,
+                 np=1,
                  output_path='TB2J_results',
                  description=''):
     atoms = read(os.path.join(path, posfile))
@@ -73,6 +75,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
+                               np=np,
                                use_cache=use_cache,
                                description=description)
         exchange.run(path=output_path)
@@ -118,6 +121,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                               exclude_orbs=exclude_orbs,
                               Rcut=Rcut,
                               ne=ne,
+                              np=np,
                               use_cache=use_cache,
                               description=description)
         exchange.run(path=output_path)
@@ -165,22 +169,23 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
+                               np=np,
                                use_cache=use_cache,
                                description=description)
         print("\n")
         exchange.run(path=output_path)
         print(
-            "All calculation finsihed. The results are in TB2J_results directory."
+            f"All calculation finsihed. The results are in {output_path} directory."
         )
 
 
 def gen_exchange_siesta(
     fdf_fname,
     magnetic_elements=[],
-    kmesh=[4, 4, 4],
+    kmesh=[5, 5, 5],
     emin=-12.0,
     emax=0.0,
-    nz=50,
+    nz=100,
     #height=0.2,
     #nz1=50,
     #nz2=200,
@@ -188,6 +193,7 @@ def gen_exchange_siesta(
     exclude_orbs=[],
     Rcut=None,
     ne=None,
+    np=1,
     use_cache=False,
     output_path='TB2J_results',
     description=''):
@@ -197,6 +203,10 @@ def gen_exchange_siesta(
     except:
         raise ImportError(
             "sisl cannot be imported. Please install sisl first.")
+
+    from packaging import version
+    if version.parse(sisl.__version__)<=version.parse("0.10.0"):
+        raise ImportError(f"sisl version is {sisl.__version__}, but should be larger than 0.10.0.")
     fdf = sisl.get_sile(fdf_fname)
     H = fdf.read_hamiltonian()
     if H.spin.is_colinear:
@@ -226,12 +236,13 @@ def gen_exchange_siesta(
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
+            np=np,
             use_cache=use_cache,
             description=description)
         exchange.run(path=output_path)
         print("\n")
         print(
-            "All calculation finsihed. The results are in TB2J_results directory."
+            f"All calculation finsihed. The results are in {output_path} directory."
         )
 
     elif H.spin.is_colinear:
@@ -254,19 +265,16 @@ def gen_exchange_siesta(
             emin=emin,
             emax=emax,
             nz=nz,
-            #height=height,
-            #nz1=nz1,
-            #nz2=nz2,
-            #nz3=nz3,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
+            np=np,
             use_cache=use_cache,
             description=description)
         exchange.run(path=output_path)
         print("\n")
         print(
-            "All calculation finsihed. The results are in TB2J_results directory."
+            f"All calculation finsihed. The results are in {output_path} directory."
         )
 
     elif H.spin.is_spinorbit:
@@ -294,12 +302,13 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                ne=ne,
+                               np=np,
                                use_cache=use_cache,
                                description=description)
         exchange.run(path=output_path)
         print("\n")
         print(
-            "All calculation finsihed. The results are in TB2J_results directory."
+            f"All calculation finsihed. The results are in {output_path} directory."
         )
 
 
@@ -338,5 +347,5 @@ def gen_exchange_gpaw(gpw_fname,
         exchange.run(path=output_path)
         print("\n")
         print(
-            "All calculation finsihed. The results are in TB2J_results directory."
+            f"All calculation finsihed. The results are in {output_path} directory."
         )

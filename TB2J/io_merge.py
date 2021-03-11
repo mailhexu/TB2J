@@ -113,6 +113,24 @@ class Merger():
                                             Janiz)
         self.dat.Jani_dict = Jani_dict
 
+    def merge_Jiso(self):
+        Jdict={}
+        Jxdict=self.dat_x.exchange_Jdict
+        Jydict=self.dat_y.exchange_Jdict
+        Jzdict=self.dat_z.exchange_Jdict
+        for key, J in Jzdict.items():
+            try:
+               Jx = Jxdict[key]
+               Jy = Jydict[key]
+               Jz = Jzdict[key]
+            except KeyError as err:
+                raise KeyError(
+                        "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
+                        % err)
+            Jdict[key]=(Jx+Jy+Jz)/3.0
+        self.dat.exchange_Jdict=Jdict
+               
+
     def merge_DMI(self):
         dmi_ddict = {}
         if self.dat_x.has_dmi and self.dat_y.has_dmi and self.dat_z.has_dmi:
@@ -174,6 +192,7 @@ class Merger():
 
 def merge(path_x, path_y, path_z, method, save=True, path='TB2J_results'):
     m = Merger(path_x, path_y, path_z, method)
+    m.merge_Jiso()
     m.merge_DMI()
     m.merge_Jani()
     if save:

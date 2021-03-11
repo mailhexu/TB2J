@@ -2,8 +2,8 @@ from collections import defaultdict, OrderedDict
 import os
 import numpy as np
 from TB2J.green import TBGreen
-from TB2J.pauli import (pauli_block_all, pauli_block_sigma_norm, pauli_mat, 
-        pauli_block_all_wrongy, pauli_block_sigma_norm_wrongy)
+from TB2J.pauli import (pauli_block_all, pauli_block_sigma_norm, pauli_mat,
+                        pauli_block_all_wrongy, pauli_block_sigma_norm_wrongy)
 from TB2J.utils import symbol_number, read_basis, kmesh_to_R
 from TB2J.myTB import MyTB
 from ase.io import read
@@ -12,7 +12,11 @@ from TB2J.io_exchange import SpinIO
 import progressbar
 from functools import lru_cache
 from TB2J.contour import Contour
-from TB2J.utils import simpson_nonuniform
+from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
+#from mpi4py import MPI
+#from mpi4py.futures import MPICommExecutor
+#from concurrent.futures import ProcessPoolExecutor
+from pathos.multiprocessing import ProcessPool
 
 
 class Exchange():
@@ -35,6 +39,7 @@ class Exchange():
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut. 
         use_cache=False,
+        np=1,
         description=''):
 
         self.atoms = atoms
@@ -55,25 +60,36 @@ class Exchange():
         self.exclude_orbs = exclude_orbs
         self.ne = ne
         self._use_cache = use_cache
+        self.np = np
 
         self.set_tbmodels(tbmodels)
-        self._prepare_elist()
+        self._adjust_emin()
+        self._prepare_elist(method='legendre')
         self._prepare_Rlist()
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
 
         # whether to calculate J and DMI with NJt method.
-        self.calc_NJt = True 
+        self.calc_NJt = True
         #self._prepare_NijR()
         self.Ddict_NJT = None
         self.Jdict_NJT = None
         self._is_collinear = None
         self.has_elistc = False
-        self.description=description
+        self.description = description
+        self._clean_tbmodels()
+
+    def _adjust_emin(self):
+        self.emin = self.G.find_energy_ingap(rbound=self.efermi-5.0)-self.efermi
+        #print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
         pass
+
+    def _clean_tbmodels(self):
+        del self.tbmodel
+        del self.G.tbmodel
 
     def _prepare_kmesh(self, kmesh):
         for k in kmesh:
@@ -93,6 +109,8 @@ class Exchange():
                                               nz3=self.nz3)
         elif method.lower() == 'semicircle':
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
+        elif method.lower() == 'legendre':
+            self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
         #self.nen = len(self.elist) - 1
         #self.elistc = list(range(nz1 + nz2, nz))
         #self.new_efermi = None
@@ -216,13 +234,15 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         # TODO: check if tbmodels are really a tbmodel with SOC.
-        self.G = TBGreen(self.tbmodel, self.kmesh, self.efermi, use_cache=self._use_cache)
+        self.G = TBGreen(self.tbmodel,
+                         self.kmesh,
+                         self.efermi,
+                         use_cache=self._use_cache)
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.A_ijR_list = defaultdict(lambda: [])
-        self.A_ijR = defaultdict(lambda: np.zeros((4,4), dtype=complex))
-        #self.HR0 = self.tbmodel.ham_R0
+        self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
@@ -234,10 +254,8 @@ class ExchangeNCL(Exchange):
 
     def _prepare_Patom(self):
         for iatom in self.ind_mag_atoms:
-            if self.tbmodel.is_siesta:
-                self.Pdict[iatom] = pauli_block_sigma_norm_wrongy(self.get_H_atom(iatom))
-            else:
-                self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
+            self.Pdict[iatom] = pauli_block_sigma_norm(
+                    self.get_H_atom(iatom))
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
@@ -289,20 +307,14 @@ class ExchangeNCL(Exchange):
         GR = G[R]
         Gij = self.GR_atom(GR, iatom, jatom)
         # GijR , I, x, y, z component.
-        if self.tbmodel.is_siesta:
-            Gij_Ixyz = pauli_block_all_wrongy(Gij)
-        else:
-            Gij_Ixyz = pauli_block_all(Gij)
+        Gij_Ixyz = pauli_block_all(Gij)
         # G(j, i, -R)
         Rm = tuple(-x for x in R)
         GRm = G[Rm]
         Gji = self.GR_atom(GRm, jatom, iatom)
 
-        if self.tbmodel.is_siesta:
-            Gji_Ixyz = pauli_block_all_wrongy(Gji)
-        else:
-            Gji_Ixyz = pauli_block_all(Gji)
-        tmp=np.zeros((4,4),dtype=complex)
+        Gji_Ixyz = pauli_block_all(Gji)
+        tmp = np.zeros((4, 4), dtype=complex)
         for a in range(4):
             for b in range(4):
                 AijRab = np.matmul(
@@ -310,7 +322,7 @@ class ExchangeNCL(Exchange):
                     np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
                 # trace over orb
                 tmp[a, b] = np.trace(AijRab)
-        return tmp/np.pi 
+        return tmp / np.pi
 
     def get_all_A(self, G):
         """
@@ -319,10 +331,12 @@ class ExchangeNCL(Exchange):
         :param G: Green's function.
         :param de: energy step.
         """
+        A_ijR_list = {}
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
-                A=self.get_A_ijR(G, R, iatom, jatom)
-                self.A_ijR_list[(R, iatom,jatom)].append(A)
+                A = self.get_A_ijR(G, R, iatom, jatom)
+                A_ijR_list[(R, iatom, jatom)] = A
+        return A_ijR_list
 
     def A_to_Jtensor(self):
         """
@@ -338,7 +352,7 @@ class ExchangeNCL(Exchange):
         self.Jprime = {}
         self.B = {}
         self.exchange_Jdict = {}
-        self.debug_dict={'DMI2':{}}
+        self.debug_dict = {'DMI2': {}}
         for key, val in self.A_ijR.items():
             # key:(R, iatom, jatom)
             R, iatom, jatom = key
@@ -368,8 +382,7 @@ class ExchangeNCL(Exchange):
             for i in range(3):
                 for j in range(3):
                     #Ja[i,j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
-                    Ja[i, j] = np.imag(val[i + 1, j + 1] +
-                                         valm[i + 1, j + 1]) 
+                    Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
                     #Ja[i,j] =  -np.imag(val[i+1, j+1])
             if is_nonself:
                 self.Jani[keyspin] = Ja
@@ -385,7 +398,7 @@ class ExchangeNCL(Exchange):
                 Dtmp2[2] = np.imag(val[1, 2] - val[2, 1])
             if is_nonself:
                 self.DMI[keyspin] = Dtmp
-                self.debug_dict['DMI2'][keyspin]=Dtmp2
+                self.debug_dict['DMI2'][keyspin] = Dtmp2
 
             # isotropic exchange into bilinear and biqudratic parts:
             # Jprime SiSj and B (SiSj)^2
@@ -402,7 +415,7 @@ class ExchangeNCL(Exchange):
         """
         calcualte density matrix for all R,i, j
         """
-        self.N=defaultdict(lambda: 0.0)
+        self.N = defaultdict(lambda: 0.0)
         for R, G in GR.items():
             self.N[R] += -1.0 / np.pi * np.imag(G * de)
 
@@ -426,11 +439,7 @@ class ExchangeNCL(Exchange):
             iorb = self.iorb(iatom)
             tmp = self.rho[np.ix_(iorb, iorb)]
             # *2 because there is a 1/2 in the paui_block_all function
-            if self.tbmodel.is_siesta:
-                rho[iatom] = np.array(
-                    [np.trace(x) * 2 for x in pauli_block_all_wrongy(tmp)])
-            else:
-                rho[iatom] = np.array(
+            rho[iatom] = np.array(
                     [np.trace(x) * 2 for x in pauli_block_all(tmp)])
             self.charges[iatom] = np.imag(rho[iatom][0])
             self.spinat[iatom, :] = np.imag(rho[iatom][1:])
@@ -463,10 +472,10 @@ class ExchangeNCL(Exchange):
                         #S_j = pauli_mat(nj, dim +
                         #                1)  #*self.rho[np.ix_(orbj, orbj)]
                         # TODO: Note that rho is complex, not the imaginary part
-                        S_i = pauli_mat(ni, dim +
-                                        1)  *self.rho[np.ix_(orbi, orbi)]
-                        S_j = pauli_mat(nj, dim +
-                                        1)  *self.rho[np.ix_(orbj, orbj)]
+                        S_i = pauli_mat(ni, dim + 1) * self.rho[np.ix_(
+                            orbi, orbi)]
+                        S_j = pauli_mat(nj, dim + 1) * self.rho[np.ix_(
+                            orbj, orbj)]
 
                         # [S, t]+  = Si tij + tij Sj, where
                         # Si and Sj are the spin operator
@@ -487,17 +496,27 @@ class ExchangeNCL(Exchange):
         self.Ddict_NJT = Ddict_NJT
         return Ddict_NJT
 
-    def integrate(self, rhoRs,AijRs):
+    def integrate(self, rhoRs, AijRs, method='simpson'):
         """
         AijRs: a list of AijR, 
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
-        self.rho=simpson_nonuniform(self.contour.path, rhoRs) 
+        if method == "trapezoidal":
+            integrate = trapezoidal_nonuniform
+        elif method=='simpson':
+            integrate = simpson_nonuniform
+
+        self.rho = integrate(self.contour.path, rhoRs)
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
-                f=self.A_ijR_list[(R, iatom, jatom)]
-                self.A_ijR[(R, iatom, jatom)]=simpson_nonuniform(self.contour.path, f)
+                f = AijRs[(R, iatom, jatom)]
+                self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
 
+    def get_AijR_rhoR(self, e):
+        GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
+        AijR = self.get_all_A(GR)
+
+        return AijR, self.get_rho_e(rhoR)
 
     def calculate_all(self):
         """
@@ -517,23 +536,36 @@ class ExchangeNCL(Exchange):
         bar = progressbar.ProgressBar(maxval=self.contour.npoints,
                                       widgets=widgets)
         bar.start()
-        rhoRs=[]
-        GRs=[]
-        AijRs=[]
-        for ie,e in enumerate(self.contour.path):
-            bar.update(ie)
-            #if self.ne is not none and self.get_total_charges(
-            #) > self.ne and ie not in self.elistc:
-            #    self._prepare_elistc(self, ie)
-            #    continue
-            e = self.contour.path[ie]
-            GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
-            rhoRs.append(self.get_rho_e(rhoR))
-            AijR=self.get_all_A(GR)
-            AijRs.append(AijR)
-            #self.A_ijR[(R, iatom, jatom)] += tmp * de / np.pi
-            #if self.calc_NJt:
-            #    self.get_N_e(GR, de)
+        rhoRs = []
+        GRs = []
+        AijRs = {}
+        #with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
+        #with ProcessPoolExecutor(max_workers=1) as executor:
+        #with ProcessPoolExecutor(max_workers=1) as executor:
+        #    results=executor.map(self.get_AijR_rhoR, self.contour.path)
+        executor = ProcessPool(nodes=self.np)
+        jobs = []
+        for e in self.contour.path:
+            jobs.append(executor.apipe(self.get_AijR_rhoR, e))
+        i = 0
+        for job in jobs:
+            result = job.get()
+            i += 1
+            bar.update(i)
+            #AijRs.append(result[0])
+            for iR, R in enumerate(self.R_ijatom_dict):
+                for (iatom, jatom) in self.R_ijatom_dict[R]:
+                    if (R, iatom, jatom) in AijRs:
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
+                                                                  jatom])
+                    else:
+                        AijRs[(R, iatom, jatom)] = []
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
+                                                                  jatom])
+            rhoRs.append(result[1])
+        executor.close()
+        executor.join()
+        executor.clear()
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()

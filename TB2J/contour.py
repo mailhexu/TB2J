@@ -1,14 +1,15 @@
 import numpy as np
+from scipy.special import roots_legendre
 
 class Contour():
     def __init__(self, emin, emax=0.0):
         self.emin=emin
         self.emax=emax
 
-    def build_path_semicircle(self, npoints, endpoint=False):
-        R0= (self.emin+self.emax)/2.0
+    def build_path_semicircle(self, npoints, endpoint=True):
         R= (self.emax-self.emin)/2.0
-        phi=np.linspace(np.pi, 0, num=npoints+1, endpoint=True)
+        R0= (self.emin+self.emax)/2.0
+        phi=np.linspace(np.pi, 0, num=npoints+1, endpoint=endpoint)
         p=R0+R*np.exp(1.0j * phi)
         if endpoint:
             self.path=p
@@ -16,7 +17,25 @@ class Contour():
         else:
             self.path=(p[:-1]+p[1:])/2
             self.de=p[1:]-p[:-1]
-
+    
+    def build_path_legendre(self, npoints, endpoint=True):
+        p=13
+        x,w= roots_legendre(npoints)
+        R= (self.emax-self.emin)/2.0
+        R0= (self.emin+self.emax)/2.0
+        y1 = -np.log(1+np.pi*p)
+        y2 = 0
+        y   = (y2-y1)/2*x+(y2+y1)/2
+        phi = (np.exp(-y)-1)/p
+        path  = R0+R*np.exp(1.0j*phi)
+        #weight= -(y2-y1)/2*np.exp(-y)/p*1j*(path-R0)*w
+        if endpoint:
+            self.path=path
+            self.de=np.diff(path)
+        else:
+            self.path=(path[:-1]+path[1:])/2
+            self.de=path[1:]-path[:-1]
+ 
     def build_path_rectangle(self, height=0.1, nz1=50, nz2=200, nz3=50):
         """
         prepare list of energy for integration.
@@ -48,15 +67,17 @@ class Contour():
         import matplotlib.pyplot as plt
         if ax is None:
             fig,ax=plt.subplots()
-        plt.plot(self.path.real, self.path.imag)
+        plt.plot(self.path.real, self.path.imag, marker='.')
         plt.show()
 
 
 
 def test():
     ct=Contour(emin=-16, emax=0)
-    ct.build_path_semicircle(npoints=100)
+    #ct.build_path_semicircle(npoints=100)
     #ct.build_path_rectangle()
+    ct.build_path_legendre(npoints=50)
+    print(ct.npoints)
     ct.plot()
 if __name__ == '__main__':
     test()

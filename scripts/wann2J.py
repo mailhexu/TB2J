@@ -102,10 +102,17 @@ def run_wann2J():
         default=[],
         type=int,
         nargs='+')
+
+    parser.add_argument('--np',
+                        help='number of cpu cores to use in parallel, default: 1',
+                        default=1,
+                        type=int)
+
+
     parser.add_argument(
         '--use_cache',
         help=
-        "whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce energy usage. Default: False",
+        "whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce memory usage. Default: False",
         action='store_true',
         default=False)
 
@@ -154,6 +161,7 @@ def run_wann2J():
                  nz2=args.nz2,
                  nz3=args.nz3,
                  use_cache=args.use_cache,
+                 np=args.np,
                  description=args.description,
                  output_path=args.output_path,
                  exclude_orbs=args.exclude_orbs)
