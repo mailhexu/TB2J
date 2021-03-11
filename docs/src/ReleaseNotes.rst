@@ -1,7 +1,12 @@
 Release Notes
 ===============
 
-v0.4.1 February 2, 2011
+v0.4.2 March 11, 2021
+------------------------
+Fix a bug that the atoms scaled positions get wrapped. 
+Fix a bug with consecutive parallel run in python mode.
+
+v0.4.1 February 2, 2021
 ------------------------
 Use a Legendre path for the integration which is more stable and requires less poles(--nz).
 Memory optimization.
