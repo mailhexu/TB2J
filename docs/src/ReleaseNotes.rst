@@ -1,6 +1,11 @@
 Release Notes
 ===============
 
+v0.4.4 March 16, 2021
+------------------------
+Allow parallel over k in tight binding eigen solver.
+
+
 v0.4.3 March 11, 2021
 ------------------------
 Add Reference to TB2J paper.
