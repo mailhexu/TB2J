@@ -29,12 +29,14 @@ class ExchangeCL2(ExchangeCL):
                            self.kmesh,
                            self.efermi,
                            use_cache=self._use_cache,
-                           cache_path='TB2J_results/cache/spinup')
+                           cache_path='TB2J_results/cache/spinup',
+                           nproc=self.np)
         self.Gdn = TBGreen(self.tbmodel_dn,
                            self.kmesh,
                            self.efermi,
                            use_cache=self._use_cache,
-                           cache_path='TB2J_results/cache/spindn')
+                           cache_path='TB2J_results/cache/spindn',
+                           nproc=self.np)
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
         self.rho_up_list = []

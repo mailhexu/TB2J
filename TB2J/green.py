@@ -5,6 +5,7 @@ from ase.dft.kpoints import monkhorst_pack
 from shutil import rmtree
 import os
 import tempfile
+from pathos.multiprocessing import ProcessPool
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
@@ -19,18 +20,20 @@ def eigen_to_G(evals, evecs, efermi, energy):
     return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
         evecs.conj().T)
 
+
 def find_energy_ingap(evals, rbound, gap=1.0):
     """
     find a energy inside a gap below rbound (right bound), 
     return the energy gap top - 0.5.
     """
-    m0=np.sort(evals.flatten())
-    m=m0[m0<rbound]
-    ind=np.where(np.diff(m)>gap)[0]
-    if len(ind)==0:
-        return m0[0]-0.5
+    m0 = np.sort(evals.flatten())
+    m = m0[m0 < rbound]
+    ind = np.where(np.diff(m) > gap)[0]
+    if len(ind) == 0:
+        return m0[0] - 0.5
     else:
-        return m[ind[-1]+1]-0.5
+        return m[ind[-1] + 1] - 0.5
+
 
 class TBGreen():
     def __init__(
@@ -40,7 +43,8 @@ class TBGreen():
         efermi,  # efermi
         k_sym=False,
         use_cache=False,
-        cache_path=None):
+        cache_path=None,
+        nproc=1):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
@@ -64,6 +68,7 @@ class TBGreen():
         self.norb = tbmodel.norb
         self.nbasis = tbmodel.nbasis
         self.k_sym = k_sym
+        self.nproc = nproc
         self._prepare_eigen()
 
     def _reduce_eigens(self, evals, evecs, emin, emax):
@@ -79,15 +84,17 @@ class TBGreen():
     def _prepare_cache(self):
         if self.cache_path is None:
             if 'TMPDIR' in os.environ:
-                rpath=os.environ['TMPDIR']
+                rpath = os.environ['TMPDIR']
             else:
-                rpath='./TB2J_cache'
+                rpath = './TB2J_cache'
         else:
-            rpath=self.cache_path
+            rpath = self.cache_path
         if not os.path.exists(rpath):
             os.makedirs(rpath)
-        self.cache_path=tempfile.mkdtemp(prefix='TB2J', dir=rpath)
-        print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
+        self.cache_path = tempfile.mkdtemp(prefix='TB2J', dir=rpath)
+        print(
+            f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}"
+        )
 
     def clean_cache(self):
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
@@ -103,57 +110,53 @@ class TBGreen():
         self.evals = np.zeros((nkpts, self.nbasis), dtype=float)
         self.nkpts = nkpts
         self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        if not self._use_cache:
-            #print("Preparing eigen in memory.")
-            self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis),
-                                  dtype=complex)
-            H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-            if not self.is_orthogonal:
-                self.S = np.zeros((nkpts, self.nbasis, self.nbasis),
-                                  dtype=complex)
+        self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+        H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+        if not self.is_orthogonal:
+            self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+        else:
+            self.S = None
+        executor = ProcessPool(nodes=self.nproc)
+        jobs = []
+
+        print(f"Parallel over k: np={self.nproc}")
+        for ik, k in enumerate(self.kpts):
+            jobs.append(executor.apipe(self.tbmodel.HSE_k, k, 2))
+
+        for ik, job in enumerate(jobs):
+            result = job.get()
+            if self.is_orthogonal:
+                H[ik], _, self.evals[ik], self.evecs[ik] = result
             else:
-                self.S = None
-            for ik, k in enumerate(self.kpts):
-                if self.is_orthogonal:
-                    H[ik], _, self.evals[ik], self.evecs[
-                        ik] = self.tbmodel.HSE_k(k, convention=2)
-                else:
-                    H[ik], self.S[ik], self.evals[ik], self.evecs[
-                        ik] = self.tbmodel.HSE_k(k, convention=2)
-                self.H0 += H[ik] / self.nkpts
-            self.evals, self.evecs = self._reduce_eigens(
-                self.evals,
-                self.evecs,
-                emin=self.efermi - 10.0,
-                emax=self.efermi + 10.1)
-        else:  # Use cache
-            #print("Preparing eigen in cache.")
+                H[ik], self.S[ik], self.evals[ik], self.evecs[ik] = result
+            self.H0 += H[ik] / self.nkpts
+
+        executor.close()
+        executor.join()
+        executor.clear()
+
+        self.evals, self.evecs = self._reduce_eigens(self.evals,
+                                                     self.evecs,
+                                                     emin=self.efermi - 10.0,
+                                                     emax=self.efermi + 10.1)
+        if self._use_cache:
+            evecs = self.evecs
+            self.evecs_shape = self.evecs.shape
             self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
                                    mode='w+',
-                                   shape=(nkpts, self.nbasis, self.nbasis),
+                                   shape=self.evecs.shape,
                                    dtype=complex)
-            H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
-                          mode='w+',
-                          shape=(nkpts, self.nbasis, self.nbasis),
-                          dtype=complex)
+            self.evecs[:, :, :] = evecs[:, :, :]
             if self.is_orthogonal:
                 self.S = None
             else:
+                S = self.S
                 self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)
-
-            for ik, k in enumerate(self.kpts):
-                Hk, Sk, evalue, evec = self.tbmodel.HSE_k(k)
-                #self.H[ik] = Hk
-                self.H0 += Hk / self.nkpts
-                if not self.is_orthogonal:
-                    self.S[ik] = Sk
-                self.evals[ik] = evalue
-                self.evecs[ik] = evec
+                self.S[:] = S[:]
             del self.evecs
-            #del self.H
             if not self.is_orthogonal:
                 del self.S
 
@@ -161,7 +164,7 @@ class TBGreen():
         if self._use_cache:
             return np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
                              mode='r',
-                             shape=(self.nkpts, self.nbasis, self.nbasis),
+                             shape=self.evecs_shape,
                              dtype=complex)[ik]
         else:
             return self.evecs[ik]

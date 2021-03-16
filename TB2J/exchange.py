@@ -81,7 +81,8 @@ class Exchange():
         self._clean_tbmodels()
 
     def _adjust_emin(self):
-        self.emin = self.G.find_energy_ingap(rbound=self.efermi-5.0)-self.efermi
+        self.emin = self.G.find_energy_ingap(rbound=self.efermi -
+                                             5.0) - self.efermi
         #print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
@@ -237,7 +238,8 @@ class ExchangeNCL(Exchange):
         self.G = TBGreen(self.tbmodel,
                          self.kmesh,
                          self.efermi,
-                         use_cache=self._use_cache)
+                         use_cache=self._use_cache,
+                         nproc=self.np)
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
@@ -254,8 +256,7 @@ class ExchangeNCL(Exchange):
 
     def _prepare_Patom(self):
         for iatom in self.ind_mag_atoms:
-            self.Pdict[iatom] = pauli_block_sigma_norm(
-                    self.get_H_atom(iatom))
+            self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
@@ -440,7 +441,7 @@ class ExchangeNCL(Exchange):
             tmp = self.rho[np.ix_(iorb, iorb)]
             # *2 because there is a 1/2 in the paui_block_all function
             rho[iatom] = np.array(
-                    [np.trace(x) * 2 for x in pauli_block_all(tmp)])
+                [np.trace(x) * 2 for x in pauli_block_all(tmp)])
             self.charges[iatom] = np.imag(rho[iatom][0])
             self.spinat[iatom, :] = np.imag(rho[iatom][1:])
         self.rho_dict = rho
@@ -503,7 +504,7 @@ class ExchangeNCL(Exchange):
         """
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
-        elif method=='simpson':
+        elif method == 'simpson':
             integrate = simpson_nonuniform
 
         self.rho = integrate(self.contour.path, rhoRs)
