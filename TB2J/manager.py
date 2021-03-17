@@ -1,4 +1,3 @@
-import sisl
 import os
 from TB2J.myTB import MyTB, merge_tbmodels_spin
 import numpy as np

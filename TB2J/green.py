@@ -119,7 +119,7 @@ class TBGreen():
         executor = ProcessPool(nodes=self.nproc)
         jobs = []
 
-        print(f"Parallel over k: np={self.nproc}")
+        #print(f"Parallel over k: np={self.nproc}")
         for ik, k in enumerate(self.kpts):
             jobs.append(executor.apipe(self.tbmodel.HSE_k, k, 2))
 
