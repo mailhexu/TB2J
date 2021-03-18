@@ -246,17 +246,13 @@ class ExchangeCL2(ExchangeCL):
         bar = progressbar.ProgressBar(maxval=len(self.contour.path),
                                       widgets=widgets)
         bar.start()
-        pool = ProcessPool(nodes=self.np)
-        jobs = []
-        for ie, e in enumerate(self.contour.path):
-            jobs.append(pool.apipe(self.get_AijR_rhoR, e))
-        i = 0
-
-        for job in jobs:
-            result = job.get()
-            i += 1
+        if self.np==1:
+            results=map(self.get_AijR_rhoR, self.contour.path)
+        else:
+            pool = ProcessPool(nodes=self.np)
+            results=pool.map(self.get_AijR_rhoR, self.contour.path)
+        for i, result in enumerate(results):
             bar.update(i)
-            #AijRs.append(result[0])
             rup, rdn, Jorb_list, JJ_list = result
             self.rho_up_list.append(rup)
             self.rho_dn_list.append(rdn)
@@ -265,7 +261,10 @@ class ExchangeCL2(ExchangeCL):
                     key = (R, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
-        pool.close()
+        if self.np>1:
+            pool.close()
+            pool.join()
+            pool.clear()
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()

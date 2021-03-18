@@ -17,8 +17,10 @@ def eigen_to_G(evals, evecs, efermi, energy):
     :returns: Green's function G,
     :rtype:  Matrix with same shape of the Hamiltonian (and eigenvector)
     """
-    return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
-        evecs.conj().T)
+    return np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi))) @ evecs.conj().T 
+    #return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T) 
+    #return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
+    #    evecs.conj().T)
 
 
 def find_energy_ingap(evals, rbound, gap=1.0):
@@ -116,24 +118,22 @@ class TBGreen():
             self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
         else:
             self.S = None
-        executor = ProcessPool(nodes=self.nproc)
-        jobs = []
+        if self.nproc==1:
+            results=map(self.tbmodel.HSE_k, self.kpts)
+        else:
+            executor = ProcessPool(nodes=self.nproc)
+            results=executor.map(self.tbmodel.HSE_k, self.kpts, [2]*len(self.kpts))
+            executor.close()
+            executor.join()
+            executor.clear()
 
-        #print(f"Parallel over k: np={self.nproc}")
-        for ik, k in enumerate(self.kpts):
-            jobs.append(executor.apipe(self.tbmodel.HSE_k, k, 2))
-
-        for ik, job in enumerate(jobs):
-            result = job.get()
+        for ik, result in enumerate(results):
             if self.is_orthogonal:
                 H[ik], _, self.evals[ik], self.evecs[ik] = result
             else:
                 H[ik], self.S[ik], self.evals[ik], self.evecs[ik] = result
             self.H0 += H[ik] / self.nkpts
 
-        executor.close()
-        executor.join()
-        executor.clear()
 
         self.evals, self.evecs = self._reduce_eigens(self.evals,
                                                      self.evecs,

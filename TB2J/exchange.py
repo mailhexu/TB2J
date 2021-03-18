@@ -13,9 +13,6 @@ import progressbar
 from functools import lru_cache
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
-#from mpi4py import MPI
-#from mpi4py.futures import MPICommExecutor
-#from concurrent.futures import ProcessPoolExecutor
 from pathos.multiprocessing import ProcessPool
 
 
@@ -540,20 +537,14 @@ class ExchangeNCL(Exchange):
         rhoRs = []
         GRs = []
         AijRs = {}
-        #with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
-        #with ProcessPoolExecutor(max_workers=1) as executor:
-        #with ProcessPoolExecutor(max_workers=1) as executor:
-        #    results=executor.map(self.get_AijR_rhoR, self.contour.path)
-        executor = ProcessPool(nodes=self.np)
-        jobs = []
-        for e in self.contour.path:
-            jobs.append(executor.apipe(self.get_AijR_rhoR, e))
-        i = 0
-        for job in jobs:
-            result = job.get()
-            i += 1
+        if self.np>1:
+            executor = ProcessPool(nodes=self.np-1)
+            results=executor.map(self.get_AijR_rhoR, self.contour.path)
+        else:
+            results=map(self.get_AijR_rhoR, self.contour.path)
+
+        for i, result in enumerate(results):
             bar.update(i)
-            #AijRs.append(result[0])
             for iR, R in enumerate(self.R_ijatom_dict):
                 for (iatom, jatom) in self.R_ijatom_dict[R]:
                     if (R, iatom, jatom) in AijRs:
@@ -564,14 +555,14 @@ class ExchangeNCL(Exchange):
                         AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
                                                                   jatom])
             rhoRs.append(result[1])
-        executor.close()
-        executor.join()
-        executor.clear()
+        if self.np>1:
+            executor.close()
+            executor.join()
+            executor.clear()
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()
         self.A_to_Jtensor()
-        #self.calculate_DMI_NJT()
         bar.finish()
 
     def _prepare_index_spin(self):
