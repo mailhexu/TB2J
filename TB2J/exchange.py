@@ -158,7 +158,7 @@ class Exchange():
 
         for iatom in range(len(self.atoms)):
             if iatom in self.orb_dict:
-                print(iatom, self.orb_dict[iatom])
+                #print(iatom, self.orb_dict[iatom])
                 self.orb_slice.append(
                     slice(
                         self.orb_dict[iatom][0],
@@ -514,7 +514,7 @@ class ExchangeNCL(Exchange):
     def get_AijR_rhoR(self, e):
         GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
         AijR = self.get_all_A(GR)
-        print("*")
+        print("*", end='')
         return AijR, self.get_rho_e(rhoR)
 
     def calculate_all(self):

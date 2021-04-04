@@ -161,7 +161,7 @@ class ExchangeCLQspace(ExchangeCL2):
                     self.Xq[iq, i, j] = np.imag(
                         integrate(self.contour.path, self.Xqe_list[:, iq, i,
                                                                    j]))
-            print(f"{q=}, {self.Kq[iq]}")
+            #print(f"{q=}, {self.Kq[iq]}")
         return self.Jq
 
     def bruno_renormalize(self):
@@ -171,7 +171,7 @@ class ExchangeCLQspace(ExchangeCL2):
             self.Jnorm_q[iq] = self.Jq[iq] + 0.5 * (
                 M - self.Kq[iq].T) @ np.linalg.inv(
                     self.Xq[iq]) @ (M - self.Kq[iq])
-            print(f"{q}: Jq:{self.Jq[iq]}, Jnorm:{self.Jnorm_q[iq]}")
+            #print(f"{q}: Jq:{self.Jq[iq]}, Jnorm:{self.Jnorm_q[iq]}")
 
     def q_to_r(self):
         self.JR = np.zeros((len(self.Rlist), self.nmagatom, self.nmagatom),
@@ -185,7 +185,7 @@ class ExchangeCLQspace(ExchangeCL2):
                 self.Jnorm_R[iR] += np.real(self.Jnorm_q[iq] * phase) / len(
                     self.qpts)
                 self.KR[iR] += np.real(self.Kq[iq] * phase) / len(self.qpts)
-            print(f"{R}: J={self.JR[iR]}, Jnorm{self.Jnorm_R[iR]}")
+            #print(f"{R}: J={self.JR[iR]}, Jnorm{self.Jnorm_R[iR]}")
             #print(f"{R}: {np.sum(self.KR, axis=0)}")
         return self.JR
 
