@@ -137,17 +137,6 @@ def pauli_block_all(M):
     Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
     return MI, Mx, My, Mz
 
-# This is a hack to the siesta/sisl bug.
-# where the y pauli is wrong.
-def pauli_block_all_wrongy(M):
-    norb1, norb2 = np.array(M.shape) // 2
-    MI = (M[:norb1, :norb2] + M[norb1:, norb2:]) / 2
-    Mx = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2
-    # Note that this is not element wise product with sigma_y but dot product
-    My = (M[:norb1, norb2:] * (-1j) + M[norb1:, :norb2] * (1j)) / 2
-    Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
-    return MI, Mx, My, Mz
-
 
 def pauli_block_sigma_norm(M):
     """
@@ -163,15 +152,4 @@ def pauli_block_sigma_norm(M):
 
 
 
-def pauli_block_sigma_norm_wrongy(M):
-    """
-    M= MI * I + \vec{P} dot \vec{sigma}
-    = MI*I + p * \vec{e} dot \vec{sigma}
-    where p is the norm of P.
-    """
-    MI, Mx, My, Mz = pauli_block_all_wrongy(M)
-    ex, ey, ez= np.trace(Mx), np.trace(My), np.trace(Mz)
-    evec=np.array([ex, ey, ez])
-    evec = evec/np.linalg.norm(evec)
-    return Mx *evec[0] + My*evec[1]+Mz*evec[2]
 

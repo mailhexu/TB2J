@@ -1,6 +1,16 @@
 Release Notes
 ===============
 
+v0.6.0
+--------------------------
+Add TB2J_downfold.py script to deal with ligand spin contribution.
+
+v0.5.0
+-----------------------
+Add Wannier input from banddownfolder package using --wannier_type=banddownfolder.
+Currently only collinear calculation supported.
+
+
 v0.4.4 March 16, 2021
 ------------------------
 Allow parallel over k in tight binding eigen solver.

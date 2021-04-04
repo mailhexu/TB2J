@@ -163,12 +163,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             except:
                 print("Pickle not written.")
 
-    @staticmethod
-    def load_pickle(path='TB2J_resutls', fname='TB2J.pickle'):
+    @classmethod
+    def load_pickle(cls, path='TB2J_resutls', fname='TB2J.pickle'):
         fname = os.path.join(path, fname)
         with open(fname, 'rb') as myfile:
             d = pickle.load(myfile)
-        obj = SpinIO(atoms=[], spinat=[], charges=[], index_spin=[])
+        obj = cls(atoms=[], spinat=[], charges=[], index_spin=[])
         obj.__dict__.update(d)
         return obj
 

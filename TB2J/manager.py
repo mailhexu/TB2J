@@ -3,6 +3,7 @@ from TB2J.myTB import MyTB, merge_tbmodels_spin
 import numpy as np
 from TB2J.exchange import ExchangeCL, ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.exchange_qspace import ExchangeCLQspace
 from TB2J.utils import read_basis, auto_assign_basis_name
 from ase.io import read
 from TB2J.sisl_wrapper import SislWrapper
@@ -34,10 +35,97 @@ def gen_exchange(path,
                  use_cache=False,
                  np=1,
                  output_path='TB2J_results',
+                 wannier_type="wannier90",
+                 qspace=False,
                  description=''):
     atoms = read(os.path.join(path, posfile))
     basis_fname = os.path.join(path, 'basis.txt')
     if colinear:
+        if wannier_type.lower() == "wannier90":
+            print("Reading Wannier90 hamiltonian: spin up.")
+            tbmodel_up = MyTB.read_from_wannier_dir(path=path,
+                                                    prefix=prefix_up,
+                                                    posfile=posfile,
+                                                    nls=False)
+            print("Reading Wannier90 hamiltonian: spin down.")
+            tbmodel_dn = MyTB.read_from_wannier_dir(path=path,
+                                                    prefix=prefix_dn,
+                                                    posfile=posfile,
+                                                    nls=False)
+            if os.path.exists(basis_fname):
+                basis = read_basis(basis_fname)
+            else:
+                basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
+        elif wannier_type.lower() == "banddownfolder":
+            print("Reading Banddownfolder hamiltonian: spin up.")
+            tbmodel_up = MyTB.load_banddownfolder(path=path,
+                                                  prefix=prefix_up,
+                                                  posfile=posfile,
+                                                  nls=False)
+            print("Reading Banddownfolder hamiltonian: spin down.")
+            tbmodel_dn = MyTB.load_banddownfolder(path=path,
+                                                  prefix=prefix_dn,
+                                                  posfile=posfile,
+                                                  nls=False)
+
+            basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
+        else:
+            raise ValueError(
+                "wannier_type should be Wannier90 or banddownfolder.")
+
+        print("Starting to calculate exchange.")
+        description = f""" Input from collinear Wannier90 data.
+ Tight binding data from {path}. 
+ Prefix of wannier function files:{prefix_up} and {prefix_dn}.
+Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
+\n"""
+        if not qspace:
+            exchange = ExchangeCL2(tbmodels=(tbmodel_up, tbmodel_dn),
+                                   atoms=atoms,
+                                   basis=basis,
+                                   efermi=efermi,
+                                   magnetic_elements=magnetic_elements,
+                                   kmesh=kmesh,
+                                   emin=emin,
+                                   emax=emax,
+                                   nz=nz,
+                                   height=height,
+                                   nz1=nz1,
+                                   nz2=nz2,
+                                   nz3=nz3,
+                                   exclude_orbs=exclude_orbs,
+                                   Rcut=Rcut,
+                                   ne=ne,
+                                   np=np,
+                                   use_cache=use_cache,
+                                   description=description)
+        else:
+            exchange = ExchangeCLQspace(tbmodels=(tbmodel_up, tbmodel_dn),
+                                        atoms=atoms,
+                                        basis=basis,
+                                        efermi=efermi,
+                                        magnetic_elements=magnetic_elements,
+                                        kmesh=kmesh,
+                                        emin=emin,
+                                        emax=emax,
+                                        nz=nz,
+                                        height=height,
+                                        nz1=nz1,
+                                        nz2=nz2,
+                                        nz3=nz3,
+                                        exclude_orbs=exclude_orbs,
+                                        Rcut=Rcut,
+                                        ne=ne,
+                                        np=np,
+                                        use_cache=use_cache,
+                                        description=description)
+
+        exchange.run(path=output_path)
+        print(
+            "All calculation finsihed. The results are in TB2J_results directory."
+        )
+
+    elif colinear and wannier_type.lower() == "banddownfolder":
         print("Reading Wannier90 hamiltonian: spin up.")
         tbmodel_up = MyTB.read_from_wannier_dir(path=path,
                                                 prefix=prefix_up,
@@ -48,17 +136,15 @@ def gen_exchange(path,
                                                 prefix=prefix_dn,
                                                 posfile=posfile,
                                                 nls=False)
-        if os.path.exists(basis_fname):
-            basis = read_basis(basis_fname)
-        else:
-            basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
-        print("Starting to calculate exchange.")
-        description = f""" Input from collinear Wannier90 data.
+        tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
+        basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
+        description = f""" Input from collinear BandDownfolder data.
  Tight binding data from {path}. 
  Prefix of wannier function files:{prefix_up} and {prefix_dn}.
 Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
 \n"""
-        exchange = ExchangeCL2(tbmodels=(tbmodel_up, tbmodel_dn),
+        print("Starting to calculate exchange.")
+        exchange = ExchangeCL2(tbmodels=tbmodel,
                                atoms=atoms,
                                basis=basis,
                                efermi=efermi,
@@ -81,55 +167,9 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
         )
-
-    elif colinear and 1:
-        print("Reading Wannier90 hamiltonian: spin up.")
-        tbmodel_up = MyTB.read_from_wannier_dir(path=path,
-                                                prefix=prefix_up,
-                                                posfile=posfile,
-                                                nls=False)
-        print("Reading Wannier90 hamiltonian: spin down.")
-        tbmodel_dn = MyTB.read_from_wannier_dir(path=path,
-                                                prefix=prefix_dn,
-                                                posfile=posfile,
-                                                nls=False)
-        tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
-        if os.path.exists(basis_fname):
-            basis = read_basis(basis_fname)
-        else:
-            basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
-        description = f""" Input from collinear Wannier90 data.
- Tight binding data from {path}. 
- Prefix of wannier function files:{prefix_up} and {prefix_dn}.
-Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
-\n"""
-        print("Starting to calculate exchange.")
-        exchange = ExchangeCL(tbmodels=tbmodel,
-                              atoms=atoms,
-                              basis=basis,
-                              efermi=efermi,
-                              magnetic_elements=magnetic_elements,
-                              kmesh=kmesh,
-                              emin=emin,
-                              emax=emax,
-                              nz=nz,
-                              height=height,
-                              nz1=nz1,
-                              nz2=nz2,
-                              nz3=nz3,
-                              exclude_orbs=exclude_orbs,
-                              Rcut=Rcut,
-                              ne=ne,
-                              np=np,
-                              use_cache=use_cache,
-                              description=description)
-        exchange.run(path=output_path)
-        print(
-            "All calculation finsihed. The results are in TB2J_results directory."
-        )
     else:
         print("Reading Wannier90 hamiltonian: non-colinear spin.")
-        groupby=groupby.lower().strip()
+        groupby = groupby.lower().strip()
         if groupby not in ['spin', 'orbital']:
             raise ValueError("groupby can only be spin or orbital.")
         tbmodel = MyTB.read_from_wannier_dir(path=path,
@@ -178,24 +218,19 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
         )
 
 
-def gen_exchange_siesta(
-    fdf_fname,
-    magnetic_elements=[],
-    kmesh=[5, 5, 5],
-    emin=-12.0,
-    emax=0.0,
-    nz=100,
-    #height=0.2,
-    #nz1=50,
-    #nz2=200,
-    #nz3=50,
-    exclude_orbs=[],
-    Rcut=None,
-    ne=None,
-    np=1,
-    use_cache=False,
-    output_path='TB2J_results',
-    description=''):
+def gen_exchange_siesta(fdf_fname,
+                        magnetic_elements=[],
+                        kmesh=[5, 5, 5],
+                        emin=-12.0,
+                        emax=0.0,
+                        nz=100,
+                        exclude_orbs=[],
+                        Rcut=None,
+                        ne=None,
+                        np=1,
+                        use_cache=False,
+                        output_path='TB2J_results',
+                        description=''):
 
     try:
         import sisl
@@ -204,8 +239,10 @@ def gen_exchange_siesta(
             "sisl cannot be imported. Please install sisl first.")
 
     from packaging import version
-    if version.parse(sisl.__version__)<=version.parse("0.10.0"):
-        raise ImportError(f"sisl version is {sisl.__version__}, but should be larger than 0.10.0.")
+    if version.parse(sisl.__version__) <= version.parse("0.10.0"):
+        raise ImportError(
+            f"sisl version is {sisl.__version__}, but should be larger than 0.10.0."
+        )
     fdf = sisl.get_sile(fdf_fname)
     H = fdf.read_hamiltonian()
     if H.spin.is_colinear:
@@ -254,22 +291,21 @@ def gen_exchange_siesta(
  working directory: {os.getcwd()}
  fdf_fname: {fdf_fname}.
 \n"""
-        exchange = ExchangeNCL(
-            tbmodels=tbmodel,
-            atoms=tbmodel.atoms,
-            basis=basis,
-            efermi=0.0,
-            magnetic_elements=magnetic_elements,
-            kmesh=kmesh,
-            emin=emin,
-            emax=emax,
-            nz=nz,
-            exclude_orbs=exclude_orbs,
-            Rcut=Rcut,
-            ne=ne,
-            np=np,
-            use_cache=use_cache,
-            description=description)
+        exchange = ExchangeNCL(tbmodels=tbmodel,
+                               atoms=tbmodel.atoms,
+                               basis=basis,
+                               efermi=0.0,
+                               magnetic_elements=magnetic_elements,
+                               kmesh=kmesh,
+                               emin=emin,
+                               emax=emax,
+                               nz=nz,
+                               exclude_orbs=exclude_orbs,
+                               Rcut=Rcut,
+                               ne=ne,
+                               np=np,
+                               use_cache=use_cache,
+                               description=description)
         exchange.run(path=output_path)
         print("\n")
         print(

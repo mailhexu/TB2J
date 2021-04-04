@@ -21,8 +21,9 @@ class QSolver(object):
         for key, val in self.ham.get_total_hessian_ijR().items():
             i, j, R = key
             mat[i * 3:i * 3 + 3, j * 3:j * 3 +
-                3] -= val * np.exp(2.0j * math.pi * np.dot(kpt, R))
+                3] = -val * np.exp(2.0j * math.pi * np.dot(kpt, R))
         return mat
+
 
     def dynamic_matrix(self, kpt):
         """

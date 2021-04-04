@@ -31,3 +31,6 @@ The theoretical background for exchanges calculation is described in
    `Szilva et al, Phys. Rev. Lett. 111,
    127204 <https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.111.127204>`__
 
+- Downfold method
+    `I. V. Solovyev, Phys. Rev. B 103, 104428
+    <https://journals.aps.org/prb/abstract/10.1103/PhysRevB.103.104428>`__

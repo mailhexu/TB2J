@@ -77,8 +77,10 @@ class ExchangeCL2(ExchangeCL):
         print(f"A gap is found at {self.emin}, set emin to it.")
 
     def get_Delta(self, iatom):
-        orbs = self.iorb(iatom)
-        return self.Delta[np.ix_(orbs, orbs)]
+        #orbs = self.iorb(iatom)
+        #return self.Delta[np.ix_(orbs, orbs)]
+        s=self.orb_slice[iatom]
+        return self.Delta[s, s]
 
     def GR_atom(self, GR, iatom, jatom):
         """Given a green's function matrix, return the [iatom, jatom] component.
@@ -89,9 +91,10 @@ class ExchangeCL2(ExchangeCL):
         :returns:  G_ij
         :rtype:  complex matrix.
         """
-        orbi = self.iorb(iatom)
-        orbj = self.iorb(jatom)
-        return GR[np.ix_(orbi, orbj)]
+        #orbi = self.iorb(iatom)
+        #orbj = self.iorb(jatom)
+        #return GR[np.ix_(orbi, orbj)]
+        return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, Gup, Gdn, iatom, jatom):
         Rij_done = set()
@@ -103,17 +106,16 @@ class ExchangeCL2(ExchangeCL):
                 Rm = tuple(-x for x in R)
                 Gji_dn = self.GR_atom(Gdn[Rm], jatom, iatom)
                 tmp = 0.0j
-                #t = self.get_Delta(iatom) @ Gij_up @ self.get_Delta(jatom) @ Gji_dn
-                t = np.einsum('ij, ji-> ij',
-                              np.matmul(self.get_Delta(iatom), Gij_up),
-                              np.matmul(self.get_Delta(jatom), Gji_dn))
+                Deltai = self.get_Delta(iatom)
+                Deltaj = self.get_Delta(jatom)
+                t = np.einsum('ij, ji-> ij', np.matmul(Deltai, Gij_up),
+                              np.matmul(Deltaj, Gji_dn))
+
                 if self.biquadratic:
-                    A = np.einsum('ij, ji-> ij',
-                                  np.matmul(self.get_Delta(iatom), Gij_up),
-                                  np.matmul(self.get_Delta(jatom), Gji_up))
-                    C = np.einsum('ij, ji-> ij',
-                                  np.matmul(self.get_Delta(iatom), Gij_down),
-                                  np.matmul(self.get_Delta(jatom), Gji_down))
+                    A = np.einsum('ij, ji-> ij', np.matmul(Deltai, Gij_up),
+                                  np.matmul(Deltaj, Gji_up))
+                    C = np.einsum('ij, ji-> ij', np.matmul(Deltai, Gij_down),
+                                  np.matmul(Deltaj, Gji_down))
                 tmp = np.sum(t)
                 self.Jorb_list[(R, iatom, jatom)].append(t / (4.0 * np.pi))
                 self.JJ_list[(R, iatom, jatom)].append(tmp / (4.0 * np.pi))
@@ -246,11 +248,11 @@ class ExchangeCL2(ExchangeCL):
         bar = progressbar.ProgressBar(maxval=len(self.contour.path),
                                       widgets=widgets)
         bar.start()
-        if self.np==1:
-            results=map(self.get_AijR_rhoR, self.contour.path)
+        if self.np == 1:
+            results = map(self.get_AijR_rhoR, self.contour.path)
         else:
             pool = ProcessPool(nodes=self.np)
-            results=pool.map(self.get_AijR_rhoR, self.contour.path)
+            results = pool.map(self.get_AijR_rhoR, self.contour.path)
         for i, result in enumerate(results):
             bar.update(i)
             rup, rdn, Jorb_list, JJ_list = result
@@ -261,7 +263,7 @@ class ExchangeCL2(ExchangeCL):
                     key = (R, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
-        if self.np>1:
+        if self.np > 1:
             pool.close()
             pool.join()
             pool.clear()

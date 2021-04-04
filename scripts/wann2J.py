@@ -127,11 +127,24 @@ def run_wann2J():
                         action="store_true",
                         help="Whether to use spinor wannier function.",
                         default=False)
+
     parser.add_argument(
         "--output_path",
         help="The path of the output directory, default is TB2J_results",
         type=str,
         default="TB2J_results")
+
+    parser.add_argument(
+        "--wannier_type",
+        help="The type of Wannier function, either Wannier90 or banddownfolder",
+        type=str,
+        default="Wannier90")
+
+    parser.add_argument("--qspace",
+                        action="store_true",
+                        help="Whether to calculate J in qspace first and transform to real space.",
+                        default=False)
+
 
     args = parser.parse_args()
 
@@ -164,7 +177,10 @@ def run_wann2J():
                  np=args.np,
                  description=args.description,
                  output_path=args.output_path,
-                 exclude_orbs=args.exclude_orbs)
+                 exclude_orbs=args.exclude_orbs, 
+                 wannier_type=args.wannier_type,
+                 qspace= args.qspace
+            )
 
 
 if __name__ == "__main__":

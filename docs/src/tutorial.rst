@@ -9,5 +9,6 @@ Tutorial
    openmx.rst
    parameters.rst
    rotate_and_merge.rst
+   downfold.md
    output.rst
 

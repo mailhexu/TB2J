@@ -6,6 +6,7 @@ from shutil import rmtree
 import os
 import tempfile
 from pathos.multiprocessing import ProcessPool
+import sys
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
@@ -17,10 +18,27 @@ def eigen_to_G(evals, evecs, efermi, energy):
     :returns: Green's function G,
     :rtype:  Matrix with same shape of the Hamiltonian (and eigenvector)
     """
-    return np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi))) @ evecs.conj().T 
-    #return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T) 
+    return np.einsum("ij, j-> ij", evecs, 1.0 /
+                     (-evals + (energy + efermi))) @ evecs.conj().T
+    #return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T)
     #return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
     #    evecs.conj().T)
+
+
+MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
+
+
+def fermi(e, mu, width=0.01):
+    """
+    the fermi function.
+     .. math::
+        f=\\frac{1}{\exp((e-\mu)/width)+1}
+
+    :param e,mu,width: e,\mu,width
+    """
+
+    x = (e - mu) / width
+    return np.where(x < MAX_EXP_ARGUMENT, 1 / (1.0 + np.exp(x)), 0.0)
 
 
 def find_energy_ingap(evals, rbound, gap=1.0):
@@ -118,11 +136,12 @@ class TBGreen():
             self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
         else:
             self.S = None
-        if self.nproc==1:
-            results=map(self.tbmodel.HSE_k, self.kpts)
+        if self.nproc == 1:
+            results = map(self.tbmodel.HSE_k, self.kpts)
         else:
             executor = ProcessPool(nodes=self.nproc)
-            results=executor.map(self.tbmodel.HSE_k, self.kpts, [2]*len(self.kpts))
+            results = executor.map(self.tbmodel.HSE_k, self.kpts,
+                                   [2] * len(self.kpts))
             executor.close()
             executor.join()
             executor.clear()
@@ -133,7 +152,6 @@ class TBGreen():
             else:
                 H[ik], self.S[ik], self.evals[ik], self.evecs[ik] = result
             self.H0 += H[ik] / self.nkpts
-
 
         self.evals, self.evecs = self._reduce_eigens(self.evals,
                                                      self.evecs,
@@ -191,6 +209,16 @@ class TBGreen():
                              dtype=complex)[ik]
         else:
             return self.S[ik]
+
+    def get_density_matrix(self):
+        rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+        for ik, _ in enumerate(self.kpts):
+            rho += (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi)
+                    ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
+        return rho
+
+    def get_density(self):
+        return np.real(np.diag(self.get_density_matrix()))
 
     def get_Gk(self, ik, energy):
         """ Green's function G(k) for one energy

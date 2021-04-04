@@ -165,6 +165,7 @@ class MyTB(AbstractTB):
         np.fill_diagonal(data[(0, 0, 0)], 0.0)
         return data
 
+
     @staticmethod
     def read_from_wannier_dir(path,
                               prefix,
@@ -201,6 +202,37 @@ class MyTB(AbstractTB):
         nm = m.shift_position(positions)
         nm.set_atoms(atoms)
         return nm
+
+
+    @staticmethod
+    def load_banddownfolder(path,
+                            prefix,
+                            posfile='POSCAR',
+                            nls=True,
+                            groupby='spin'):
+        from banddownfolder.scdm.lwf import LWF
+        lwf = LWF.load_nc(fname=os.path.join(path, f"{prefix}.nc"))
+        nbasis = lwf.nwann
+        nspin = 1
+        positions = lwf.wann_centers
+        ndim = lwf.ndim
+        H_mnR = defaultdict(lambda: np.zeros((nbasis, nbasis), dtype=complex))
+
+        for iR, R in enumerate(lwf.Rlist):
+            R=tuple(R)
+            val = lwf.HwannR[iR]
+            if np.linalg.norm(R) < 0.001:
+                H_mnR[R] = val/2.0
+                #H_mnR[R] -= np.diag(np.diag(val) / 2.0)
+            else:
+                H_mnR[R] = val/2.0
+        m = MyTB(nbasis,
+                 data=H_mnR,
+                 nspin=nspin,
+                 ndim=ndim,
+                 positions=positions)
+        m.atoms = read(posfile)
+        return m
 
     def gen_ham(self, k, convention=2):
         """
@@ -250,7 +282,7 @@ class MyTB(AbstractTB):
         evals = np.zeros((nk, self.nbasis), dtype=float)
         evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
-            hams[ik], S, evals[ik], evecs[ik] = self.HSE(tuple(k),
+            hams[ik], S, evals[ik], evecs[ik] = self.HSE_k(tuple(k),
                                                          convention=convention)
         return hams, None, evals, evecs
 
@@ -407,9 +439,11 @@ class MyTB(AbstractTB):
 
         if self.atoms is not None:
             atom_numbers[:] = np.array(self.atoms.get_atomic_numbers())
-            atom_xred[:] = np.array(self.atoms.get_scaled_positions(wrap=False))
+            atom_xred[:] = np.array(
+                self.atoms.get_scaled_positions(wrap=False))
             atom_cell[:] = np.array(self.atoms.get_cell())
         root.close()
+
 
     @staticmethod
     def load_MyTB(fname):

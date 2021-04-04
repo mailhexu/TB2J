@@ -2,8 +2,7 @@ from collections import defaultdict, OrderedDict
 import os
 import numpy as np
 from TB2J.green import TBGreen
-from TB2J.pauli import (pauli_block_all, pauli_block_sigma_norm, pauli_mat,
-                        pauli_block_all_wrongy, pauli_block_sigma_norm_wrongy)
+from TB2J.pauli import (pauli_block_all, pauli_block_sigma_norm, pauli_mat)
 from TB2J.utils import symbol_number, read_basis, kmesh_to_R
 from TB2J.myTB import MyTB
 from ase.io import read
@@ -80,7 +79,6 @@ class Exchange():
     def _adjust_emin(self):
         self.emin = self.G.find_energy_ingap(rbound=self.efermi -
                                              5.0) - self.efermi
-        #print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
         pass
@@ -109,19 +107,6 @@ class Exchange():
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
         elif method.lower() == 'legendre':
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
-        #self.nen = len(self.elist) - 1
-        #self.elistc = list(range(nz1 + nz2, nz))
-        #self.new_efermi = None
-
-    # def _prepare_elistc(self, ie):
-    #     if not self.has_elistc:
-    #         nz1, nz2, nz3 = self.nz1, self.nz2, self.nz3
-    #         nz = self.nz
-    #         self.elist[nz1 + nz2:nz] = np.real(
-    #             self.elist[ie]) + self.height * 1j + np.linspace(
-    #                 0, -self.height, nz3, endpoint=False) * 1j
-    #         self.elist[-1] = np.real(self.elist[ie])
-    #         self.new_efermi = np.real(self.elist[ie])
 
     def _prepare_Rlist(self):
         """
@@ -168,6 +153,21 @@ class Exchange():
                 else:
                     self.orb_dict[iatom] += [i]
                     self.labels[iatom] += [orb_sym]
+
+        self.orb_slice = []
+
+        for iatom in range(len(self.atoms)):
+            if iatom in self.orb_dict:
+                print(iatom, self.orb_dict[iatom])
+                self.orb_slice.append(
+                    slice(
+                        self.orb_dict[iatom][0],
+                        self.orb_dict[iatom][-1] + 1,
+                    ))
+            else:
+                self.orb_slice.append(slice(0, 0))
+
+        self.orb_slice = np.array(self.orb_slice)
 
         # index of magnetic atoms
         for i, sym in enumerate(self.atoms.get_chemical_symbols()):
@@ -258,6 +258,7 @@ class ExchangeNCL(Exchange):
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
         return self.HR0[np.ix_(orbs, orbs)]
+        #return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
 
     def get_P_iatom(self, iatom):
         """ Calculate the norm of the Hamiltonian vector.
@@ -285,6 +286,7 @@ class ExchangeNCL(Exchange):
         orbi = self.iorb(iatom)
         orbj = self.iorb(jatom)
         return GR[np.ix_(orbi, orbj)]
+        #return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, G, R, iatom, jatom):
         """ calculate A from G for a energy slice (de).
@@ -303,6 +305,7 @@ class ExchangeNCL(Exchange):
         :rtype:  4*4 matrix
         """
         GR = G[R]
+        # TODO: pauli_block_all before doing that for each ij will be faster?
         Gij = self.GR_atom(GR, iatom, jatom)
         # GijR , I, x, y, z component.
         Gij_Ixyz = pauli_block_all(Gij)
@@ -376,12 +379,10 @@ class ExchangeNCL(Exchange):
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jiso[0, 0]
 
-            # off-diagonal ansiotropic exchange
+            # off-diagonal anisotropic exchange
             for i in range(3):
                 for j in range(3):
-                    #Ja[i,j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
                     Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
-                    #Ja[i,j] =  -np.imag(val[i+1, j+1])
             if is_nonself:
                 self.Jani[keyspin] = Ja
 
@@ -513,7 +514,7 @@ class ExchangeNCL(Exchange):
     def get_AijR_rhoR(self, e):
         GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
         AijR = self.get_all_A(GR)
-
+        print("*")
         return AijR, self.get_rho_e(rhoR)
 
     def calculate_all(self):
@@ -537,11 +538,11 @@ class ExchangeNCL(Exchange):
         rhoRs = []
         GRs = []
         AijRs = {}
-        if self.np>1:
-            executor = ProcessPool(nodes=self.np-1)
-            results=executor.map(self.get_AijR_rhoR, self.contour.path)
+        if self.np > 1:
+            executor = ProcessPool(nodes=self.np)
+            results = executor.map(self.get_AijR_rhoR, self.contour.path)
         else:
-            results=map(self.get_AijR_rhoR, self.contour.path)
+            results = map(self.get_AijR_rhoR, self.contour.path)
 
         for i, result in enumerate(results):
             bar.update(i)
@@ -555,7 +556,7 @@ class ExchangeNCL(Exchange):
                         AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
                                                                   jatom])
             rhoRs.append(result[1])
-        if self.np>1:
+        if self.np > 1:
             executor.close()
             executor.join()
             executor.clear()
