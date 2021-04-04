@@ -80,7 +80,7 @@ class ExchangeCLQspace(ExchangeCL2):
     def nkpts(self):
         return len(self.Gup.kpts)
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def get_ikplusq(self, q):
         return find_index_k(self.kpts, q)
 
