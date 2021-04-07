@@ -8,8 +8,7 @@ from scipy.linalg import svd
 
 s0 = np.array([[1, 0], [0, 1]])
 s1 = np.array([[0, 1], [1, 0]])
-s2 = np.array([[0, -1j],
-               [1j, 0]])
+s2 = np.array([[0, -1j], [1j, 0]])
 s3 = np.array([[1, 0], [0, -1]])
 
 s0T = s0.T
@@ -63,8 +62,8 @@ def pauli_block_I(M, norb):
     I compoenent of a matrix, see pauli_block
     """
     ret = zeros_like(M)
-    tmp = (M[:norb, :norb] + M[norb:, norb:]) / 2
-    ret[:norb, :norb] = ret[norb:, norb:] = tmp
+    tmp = (M[::2, ::2] + M[1::2, 1::2]) / 2
+    ret[::2, ::2] = ret[1::2, 1::2] = tmp
     return ret
 
 
@@ -73,8 +72,8 @@ def pauli_block_x(M, norb):
     x compoenent of a matrix, see pauli_block
     """
     ret = zeros_like(M)
-    tmp = (M[:norb, norb:] + M[norb:, :norb]) / 2
-    ret[:norb, norb:] = ret[norb:, :norb] = tmp
+    tmp = (M[::2, 1::2] + M[1::2, ::2]) / 2
+    ret[::2, 1::2] = ret[1::2, ::2] = tmp
     return ret
 
 
@@ -83,9 +82,9 @@ def pauli_block_y(M, norb):
     y compoenent of a matrix, see pauli_block
     """
     ret = zeros_like(M)
-    tmp = (M[:norb, norb:] * (-1j) + M[norb:, :norb] * (1j)) / 2
-    ret[:norb, norb:] = tmp * (-1j)
-    ret[norb:, :norb] = tmp * 1j
+    tmp = (M[::2, 1::2] * (-1j) + M[1::2, ::2] * (1j)) / 2
+    ret[::2, 1::2] = tmp * (-1j)
+    ret[1::2, ::2] = tmp * 1j
     return tmp, ret
 
 
@@ -97,9 +96,9 @@ def pauli_block_z(M, norb):
     :rtype:
     """
     ret = zeros_like(M)
-    tmp = (M[:norb, :norb] - M[norb:, norb:]) / 2
-    ret[:norb, :norb] = tmp
-    ret[norb:, norb:] = -tmp
+    tmp = (M[::2, ::2] - M[1::2, 1::2]) / 2
+    ret[::2, ::2] = tmp
+    ret[1::2, 1::2] = -tmp
     return tmp, ret
 
 
@@ -113,33 +112,33 @@ def pauli_block(M, idim):
     :rtype: a matrix with shape of M.shape//2
     """
     # ret = zeros_like(M)
-    norb1, norb2 = M.shape // 2
     if idim == 0:
-        tmp = (M[:norb1, :norb2] + M[norb1:, norb2:]) / 2.0
+        tmp = (M[::2, ::2] + M[1::2, 1::2]) / 2.0
     elif idim == 1:
-        tmp = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2.0
+        tmp = (M[::2, 1::2] + M[1::2, ::2]) / 2.0
     elif idim == 2:
         # Note that this is not element wise product with sigma_y but dot product
-        # sigma_y=[[0, -1j],[1j, 0]] 
-        tmp = (M[:norb1, norb2:] * (1.0j) + M[norb1:, :norb2] * (-1.0j)) / 2.0
+        # sigma_y=[[0, -1j],[1j, 0]]
+        tmp = (M[::2, 1::2] * (1.0j) + M[1::2, ::2] * (-1.0j)) / 2.0
     elif idim == 3:
-        tmp = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2.0
+        tmp = (M[::2, ::2] - M[1::2, 1::2]) / 2.0
     else:
         raise NotImplementedError()
     return tmp
 
 
 def pauli_block_all(M):
-    norb1, norb2 = np.array(M.shape) // 2
-    MI = (M[:norb1, :norb2] + M[norb1:, norb2:]) / 2
-    Mx = (M[:norb1, norb2:] + M[norb1:, :norb2]) / 2
+    MI = (M[::2, ::2] + M[1::2, 1::2]) / 2.0
+    Mx = (M[::2, 1::2] + M[1::2, ::2]) / 2.0
     # Note that this is not element wise product with sigma_y but dot product
-    My = (M[:norb1, norb2:] * (1j) + M[norb1:, :norb2] * (-1j)) / 2
-    Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
+    My = (M[::2, 1::2] - M[1::2, ::2]) * 0.5j
+    Mz = (M[::2, ::2] - M[1::2, 1::2]) / 2.0
     return MI, Mx, My, Mz
 
+
 def op_norm(M):
-    return max(svd(M)[1])    
+    return max(svd(M)[1])
+
 
 def pauli_block_sigma_norm(M):
     """
@@ -148,12 +147,8 @@ def pauli_block_sigma_norm(M):
     where p is the norm of P.
     """
     MI, Mx, My, Mz = pauli_block_all(M)
-    ex, ey, ez= np.trace(Mx), np.trace(My), np.trace(Mz)
+    ex, ey, ez = np.trace(Mx), np.trace(My), np.trace(Mz)
     #ex,ey,ez = op_norm(Mx), op_norm(My), op_norm(Mz)
-    evec=np.array([ex, ey, ez])
-    evec = evec/np.linalg.norm(evec)
-    return Mx *evec[0] + My*evec[1]+Mz*evec[2]
-
-
-
-
+    evec = np.array((ex, ey, ez))
+    evec = evec / np.linalg.norm(evec)
+    return Mx * evec[0] + My * evec[1] + Mz * evec[2]

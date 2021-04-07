@@ -257,8 +257,8 @@ class ExchangeNCL(Exchange):
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
-        return self.HR0[np.ix_(orbs, orbs)]
-        #return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
+        #return self.HR0[np.ix_(orbs, orbs)]
+        return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
 
     def get_P_iatom(self, iatom):
         """ Calculate the norm of the Hamiltonian vector.
@@ -285,8 +285,8 @@ class ExchangeNCL(Exchange):
         """
         orbi = self.iorb(iatom)
         orbj = self.iorb(jatom)
-        return GR[np.ix_(orbi, orbj)]
-        #return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
+        #return GR[np.ix_(orbi, orbj)]
+        return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, G, R, iatom, jatom):
         """ calculate A from G for a energy slice (de).

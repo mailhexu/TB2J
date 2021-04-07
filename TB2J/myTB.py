@@ -189,14 +189,14 @@ class MyTB(AbstractTB):
         if groupby == 'orbital':
             norb = nbasis // 2
             xtmp = np.copy(xred)
-            xred[:norb] = xtmp[::2]
-            xred[norb:] = xtmp[1::2]
+            xred[::2] = xtmp[:norb]
+            xred[1::2] = xtmp[norb:]
             for key, val in data.items():
                 dtmp = copy.deepcopy(val)
-                data[key][:norb, :norb] = dtmp[::2, ::2]
-                data[key][:norb, norb:] = dtmp[::2, 1::2]
-                data[key][norb:, :norb] = dtmp[1::2, ::2]
-                data[key][norb:, norb:] = dtmp[1::2, 1::2]
+                data[key][::2, ::2]   = dtmp[:norb, :norb]
+                data[key][::2, 1::2]  = dtmp[:norb, norb:]
+                data[key][1::2, ::2]  = dtmp[norb:, :norb]
+                data[key][1::2, 1::2] = dtmp[norb:, norb:]
         ind, positions = auto_assign_basis_name(xred, atoms)
         m = MyTB(nbasis=nbasis, data=data, positions=xred)
         nm = m.shift_position(positions)
