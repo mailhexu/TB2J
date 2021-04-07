@@ -290,11 +290,6 @@ class MyTB(AbstractTB):
         """
         The matrix P: P(i, j) = r(j)-r(i)
         """
-        #self.rjminusri = np.zeros((self.nbasis, self.nbasis, self.ndim),
-        #                          dtype=float)
-        #for i in range(self.nbasis):
-        #    for j in range(self.nbasis):
-        #        self.rjminusri[i, j] = self.xred[j] - self.xred[i]
         self.rjminusri = self.xred[None, :, :] - self.xred[:, None, :]
 
     def to_sparse(self):
@@ -520,13 +515,6 @@ class MyTB(AbstractTB):
                 ret.data[R][:self.norb, :self.norb] = mat
                 ret.data[R][self.norb:, self.norb:] = mat
         return ret
-
-    #def plot_band(self, kpts, color='green', show=False):
-    #    evals, evecs = self.solve_all(kpts)
-    #    for i in range(self.nbasis):
-    #        plt.plot(evals[:, i], color=color)
-    #    if show():
-    #        plt.show()
 
     def validate(self):
         # make sure all R are 3d.

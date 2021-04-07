@@ -4,6 +4,7 @@ Module about Pauli (and I) matrices.
 
 import numpy as np
 from numpy import zeros_like
+from scipy.linalg import svd
 
 s0 = np.array([[1, 0], [0, 1]])
 s1 = np.array([[0, 1], [1, 0]])
@@ -137,6 +138,8 @@ def pauli_block_all(M):
     Mz = (M[:norb1, :norb2] - M[norb1:, norb2:]) / 2
     return MI, Mx, My, Mz
 
+def op_norm(M):
+    return max(svd(M)[1])    
 
 def pauli_block_sigma_norm(M):
     """
@@ -146,6 +149,7 @@ def pauli_block_sigma_norm(M):
     """
     MI, Mx, My, Mz = pauli_block_all(M)
     ex, ey, ez= np.trace(Mx), np.trace(My), np.trace(Mz)
+    #ex,ey,ez = op_norm(Mx), op_norm(My), op_norm(Mz)
     evec=np.array([ex, ey, ez])
     evec = evec/np.linalg.norm(evec)
     return Mx *evec[0] + My*evec[1]+Mz*evec[2]
