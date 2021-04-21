@@ -171,7 +171,7 @@ class MyTB(AbstractTB):
                               prefix,
                               posfile='POSCAR',
                               nls=True,
-                              groupby='spin'):
+                              groupby=None):
         """
         read tight binding model from a wannier function directory. 
         :param path: path
@@ -186,9 +186,9 @@ class MyTB(AbstractTB):
         atoms = read(os.path.join(path, posfile))
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
-        if groupby == 'orbital':
+        if groupby == 'spin':
             norb = nbasis // 2
-            xtmp = np.copy(xred)
+            xtmp = copy.deepcopy(xred)
             xred[::2] = xtmp[:norb]
             xred[1::2] = xtmp[norb:]
             for key, val in data.items():

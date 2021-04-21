@@ -130,11 +130,13 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
         tbmodel_up = MyTB.read_from_wannier_dir(path=path,
                                                 prefix=prefix_up,
                                                 posfile=posfile,
+                                                groupby=None,
                                                 nls=False)
         print("Reading Wannier90 hamiltonian: spin down.")
         tbmodel_dn = MyTB.read_from_wannier_dir(path=path,
                                                 prefix=prefix_dn,
                                                 posfile=posfile,
+                                                groupby=None,
                                                 nls=False)
         tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
         basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
