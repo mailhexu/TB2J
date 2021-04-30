@@ -1,6 +1,12 @@
 Release Notes
 ===============
 
+v0.6.1
+-------------------------
+Change the internal order of orbitals in noncollinear Tight-binding. 
+
+A script for building docker image has been added (Nikolas Garofil).
+
 v0.6.0
 --------------------------
 Add TB2J_downfold.py script to deal with ligand spin contribution.
