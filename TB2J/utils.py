@@ -113,13 +113,21 @@ def auto_assign_wannier_to_atom2(positions,
         iatom = np.argmin(distances)
         ind_atoms.append(iatom)
         shifted_pos.append(distance_vecs[iatom] + patoms[iatom])
+        shifted_pos=np.array(shifted_pos)
         if min(distances) > max_distance:
             print(
                 "Warning: the minimal distance between wannier function No. %s is large. Check if the MLWFs are well localized."
                 % iorb)
     if half:
-        ind_atoms = np.vstack([ind_atoms, ind_atoms], dtype=int)
-        shifted_pos = np.vstack([shifted_pos, shifted_pos], dtype=float)
+        #ind_atoms = np.vstack([ind_atoms, ind_atoms], dtype=int)
+        #shifted_pos = np.vstack([shifted_pos, shifted_pos], dtype=float)
+        ind_atoms= np.repeat(ind_atoms, 2)
+        shape=shifted_pos.shape
+        shape[0]*=2
+        tmp=copy.deepcopy(shifted_pos)
+        shifted_pos = np.zeros(shape, dtype=float)
+        shifted_pos[::2] = tmp
+        shifted_pos[1::2] = tmp
     return ind_atoms, shifted_pos
 
 
@@ -151,7 +159,7 @@ def shift_positions(p, pref):
 def test_shift_positions():
     a = np.array((0.0, 0.1, 1.8))
     b = np.array((0.1, -1.9, 1.3))
-    print(shift_positions(a, b))
+    #print(shift_positions(a, b))
 
 
 def match_pos(pos, atompos):

@@ -30,6 +30,7 @@ def test_eigh():
     #print(f"VT@V: {evecs.T.conj()@evecs}")
     green_H(H, 1)
     green_H_eig(H, 1)
+    print(f"H: {H}")
 
     S=np.random.random((3,3))+np.random.random((3,3))*1j
     S=S+S.T.conj()
@@ -39,7 +40,9 @@ def test_eigh():
     print(f"VT@V: {evecs.T.conj()@evecs}")
     print(f"VT@S@V: {evecs.T.conj()@S@evecs}")  # I
     print(f"V@S@VT: {evecs@S@evecs.T.conj()}")  # Not I
-    print(f"S@VT@evals@V: {S@evecs.T.conj()@S@evecs}")
+    print(f"S@VT@evals@V: {S@evecs.T.conj()@np.diag(evals)@evecs}")
+    print(f"V@evals@VT: {evecs@np.diag(evals)@evecs.T.conj()}")
+    print(f"VT@evals@V: {evecs.T.conj()@np.diag(evals)@evecs}")
 
     G1=green_H(H, 0.3, S=S)
     #print("G1=", G1)

@@ -91,7 +91,7 @@ class Exchange():
         for k in kmesh:
             self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
-    def _prepare_elist(self, method='semicircle'):
+    def _prepare_elist(self, method='legendre'):
         """
         prepare list of energy for integration.
         The path has three segments:
@@ -107,6 +107,8 @@ class Exchange():
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
         elif method.lower() == 'legendre':
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
+        else:
+            raise ValueError(f"The path cannot be of type {method}.")
 
     def _prepare_Rlist(self):
         """
@@ -257,8 +259,7 @@ class ExchangeNCL(Exchange):
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
-        return self.HR0[np.ix_(orbs, orbs)]
-        #return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
+        return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
 
     def get_P_iatom(self, iatom):
         """ Calculate the norm of the Hamiltonian vector.
@@ -285,8 +286,8 @@ class ExchangeNCL(Exchange):
         """
         orbi = self.iorb(iatom)
         orbj = self.iorb(jatom)
-        return GR[np.ix_(orbi, orbj)]
-        #return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
+        #return GR[np.ix_(orbi, orbj)]
+        return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, G, R, iatom, jatom):
         """ calculate A from G for a energy slice (de).
@@ -305,23 +306,21 @@ class ExchangeNCL(Exchange):
         :rtype:  4*4 matrix
         """
         GR = G[R]
-        # TODO: pauli_block_all before doing that for each ij will be faster?
         Gij = self.GR_atom(GR, iatom, jatom)
-        # GijR , I, x, y, z component.
         Gij_Ixyz = pauli_block_all(Gij)
+
         # G(j, i, -R)
         Rm = tuple(-x for x in R)
         GRm = G[Rm]
         Gji = self.GR_atom(GRm, jatom, iatom)
-
         Gji_Ixyz = pauli_block_all(Gji)
+
         tmp = np.zeros((4, 4), dtype=complex)
         for a in range(4):
+            pGp=self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(jatom)
             for b in range(4):
                 AijRab = np.matmul(
-                    np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-                    np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
-                # trace over orb
+                   pGp , Gji_Ixyz[b])
                 tmp[a, b] = np.trace(AijRab)
         return tmp / np.pi
 
@@ -374,7 +373,6 @@ class ExchangeNCL(Exchange):
             for i in range(3):
                 Jiso[i, i] += np.imag(val[0, 0] - val[1, 1] - val[2, 2] -
                                       val[3, 3])
-                #Jiso[i, i] += np.imag(val[0, 0] - val[3, 3])
 
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jiso[0, 0]
@@ -389,12 +387,13 @@ class ExchangeNCL(Exchange):
             # DMI
             for i in range(3):
                 Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
-                # Dx = Jyz-Jzy
-                # Dy = Jzx-Jxz
-                # Dz = Jxy-Jyx
-                Dtmp2[0] = np.imag(val[2, 3] - val[3, 2])
-                Dtmp2[1] = np.imag(val[3, 1] - val[1, 3])
-                Dtmp2[2] = np.imag(val[1, 2] - val[2, 1])
+
+            # Dx = Jyz-Jzy
+            # Dy = Jzx-Jxz
+            # Dz = Jxy-Jyx
+            Dtmp2[0] = np.imag(val[2, 3] - val[3, 2])
+            Dtmp2[1] = np.imag(val[3, 1] - val[1, 3])
+            Dtmp2[2] = np.imag(val[1, 2] - val[2, 1])
             if is_nonself:
                 self.DMI[keyspin] = Dtmp
                 self.debug_dict['DMI2'][keyspin] = Dtmp2
@@ -514,8 +513,12 @@ class ExchangeNCL(Exchange):
     def get_AijR_rhoR(self, e):
         GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
         AijR = self.get_all_A(GR)
-        print("*", end='')
         return AijR, self.get_rho_e(rhoR)
+
+    def save_AijR(self, AijRs, fname):
+        result=dict(path=self.contour.path, AijRs=AijRs)
+        with open(fname, 'wb') as myfile:
+            pickle.dump(result, myfile)
 
     def calculate_all(self):
         """
@@ -532,6 +535,7 @@ class ExchangeNCL(Exchange):
             progressbar.ETA(),
             ') ',
         ]
+
         bar = progressbar.ProgressBar(maxval=self.contour.npoints,
                                       widgets=widgets)
         bar.start()
@@ -560,6 +564,8 @@ class ExchangeNCL(Exchange):
             executor.close()
             executor.join()
             executor.clear()
+
+        #self.save_AijRs(AijRs)
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()

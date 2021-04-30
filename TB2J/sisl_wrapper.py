@@ -46,21 +46,15 @@ class SislWrapper():
             self.norb = len(self.orbs)
             self.nbasis = self.norb
         elif self.ham.spin.is_spinorbit or self.spin == 'merge':
-            for spin in {'up', 'down'}:
-                for ia, a in enumerate(_atoms):
-                    symnum = sdict[ia]
-                    orb_names = []
-                    try:
-                        for x in a.orbital:  # sisl < v0.10
-                            orb_names.append(f"{symnum}|{x.name()}|{spin}")
-                    except:
-                        for x in a.orbitals:  # sisl >= v0.10
-                            orb_names.append(f"{symnum}|{x.name()}|{spin}")
-                    self.orbs += orb_names
-                    self.orb_dict[ia] += orb_names
-            #print(self.orb_dict)
+            for ia, a in enumerate(_atoms):
+                symnum = sdict[ia]
+                orb_names = []
+                for x in a.orbitals: 
+                    for spin in {'up', 'down'}:
+                        orb_names.append(f"{symnum}|{x.name()}|{spin}")
+                self.orbs += orb_names
+                self.orb_dict[ia] += orb_names
             self.norb = len(self.orbs) // 2
-            #print(f"Norb: {self.norb}")
             self.nbasis = len(self.orbs)
         else:
             raise ValueError(
@@ -82,8 +76,6 @@ class SislWrapper():
                                          gauge=gauge)
         elif self.spin is None:
             evals, evecs = self.ham.eigh(k=k, eigvals_only=False, gauge=gauge)
-            # reorder the first (basis) dimension so that it is 1up,1down, 2up, 2down...
-            evecs = np.vstack([evecs[::2, :], evecs[1::2, :]])
         elif self.spin == 'merge':
             evals0, evecs0 = self.ham.eigh(k=k,
                                            spin=0,
@@ -95,10 +87,11 @@ class SislWrapper():
                                            gauge=gauge)
             evals = np.zeros(self.nbasis, dtype=float)
             evecs = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-            evals[:self.norb] = evals0
-            evals[self.norb:] = evals1
-            evecs[:self.norb, :self.norb] = evecs0
-            evecs[self.norb:, self.norb:] = evecs1
+            evals[::2] = evals0
+            evals[1::2] = evals1
+            evecs[::2, ::2] = evecs0
+            evecs[1::2, 1::2] = evecs1
+
         return evals, evecs
 
     def Hk(self, k, convention=2):
@@ -108,17 +101,15 @@ class SislWrapper():
             gauge = 'R'
         if self.spin is None:
             H = self.ham.Hk(k, gauge=gauge, format='dense')
-            H = np.vstack([H[::2, :], H[1::2, :]])
-            H = np.hstack([H[:, ::2], H[:, 1::2]])
         elif self.spin in [0, 1]:
             H = self.ham.Hk(k, spin=self.spin, gauge=gauge, format='dense')
         elif self.spin == 'merge':
             H = np.zeros((self.nbasis, self.nbasis), dtype='complex')
-            H[:self.norb, :self.norb] = self.ham.Hk(k,
+            H[::2, ::2] = self.ham.Hk(k,
                                                     spin=0,
                                                     gauge=gauge,
                                                     format='dense')
-            H[self.norb:, self.norb:] = self.ham.Hk(k,
+            H[1::2, 1::2] = self.ham.Hk(k,
                                                     spin=1,
                                                     gauge=gauge,
                                                     format='dense')
@@ -136,23 +127,14 @@ class SislWrapper():
         elif convention == 2:
             gauge = 'R'
         S0 = self.ham.Sk(k, gauge='R', format='dense')
-        #print(f"shape:{S0.shape}")
-        #print(f"{self.nbasis}")
         if self.spin is None:
-            S = np.vstack([S0[::2, :], S0[1::2, :]])
-            S = np.hstack([S[:, ::2], S[:, 1::2]])
-            #S=np.zeros((self.nbasis, self.nbasis), dtype='complex')
-            #S[:self.norb,:self.norb]=S0
-            #S[self.norb:, self.norb:]=S0
-            #S=np.zeros((self.nbasis, self.nbasis), dtype='complex')
-            #S[:self.nbasis//2,:self.norb//2]=S0
-            #S[self.norb//2:, self.norb//2:]=S0
+            S = S0
         elif self.spin in [0, 1]:
             S = S0
         elif self.spin == 'merge':
             S = np.zeros((self.nbasis, self.nbasis), dtype='complex')
-            S[:self.norb, :self.norb] = S0
-            S[self.norb:, self.norb:] = S0
+            S[::2, ::2] = S0
+            S[1::2, 1::2] = S0
         return S
 
     def solve_all(self, kpts, orth=False):
@@ -206,9 +188,6 @@ class SislWrapper():
                                    mode='w+',
                                    shape=(nkpts, self.nbasis, self.nbasis),
                                    dtype=complex)
-            #Hk = self.Hk(k, convention=convention)
-            #Sk = self.Sk(k, convention=convention)
-            #evalue, evec = self.solve(k, convention=convention)
             self.H[ik] = Hk
             self.S[ik] = Sk
             self.evals[ik] = evalue
@@ -217,10 +196,6 @@ class SislWrapper():
                 del self.evecs
                 del self.H
                 del self.S
-        #H[:self.norb, self.norb:]=H[:self.norb, self.norb:].conj()
-        #H[self.norb:, :self.norb]=H[self.norb:, :self.norb].conj()
-        #evecs[:self.norb, self.norb:]=evecs[:self.norb, self.norb:].conj()
-        #evecs[self.norb:, :self.norb]=evecs[self.norb:, :self.norb].conj()
         return self.H, self.S, self.evals, self.evecs
 
 
