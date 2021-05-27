@@ -169,7 +169,8 @@ class MyTB(AbstractTB):
     @staticmethod
     def read_from_wannier_dir(path,
                               prefix,
-                              posfile='POSCAR',
+                              #posfile='POSCAR',
+                              atoms=None,
                               nls=True,
                               groupby=None):
         """
@@ -183,7 +184,7 @@ class MyTB(AbstractTB):
         nbasis, data = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
         xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix +
                                                    '_centres.xyz'))
-        atoms = read(os.path.join(path, posfile))
+        #atoms = read(os.path.join(path, posfile))
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
         if groupby == 'spin':
@@ -207,7 +208,8 @@ class MyTB(AbstractTB):
     @staticmethod
     def load_banddownfolder(path,
                             prefix,
-                            posfile='POSCAR',
+                            #posfile='POSCAR',
+                            atoms=None,
                             nls=True,
                             groupby='spin'):
         from banddownfolder.scdm.lwf import LWF
@@ -231,7 +233,7 @@ class MyTB(AbstractTB):
                  nspin=nspin,
                  ndim=ndim,
                  positions=positions)
-        m.atoms = read(posfile)
+        m.atoms = atoms
         return m
 
     def gen_ham(self, k, convention=2):
