@@ -13,6 +13,7 @@ from functools import lru_cache
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
 from pathos.multiprocessing import ProcessPool
+import pickle
 
 
 class Exchange():
@@ -36,7 +37,9 @@ class Exchange():
         Rcut=None,  # Rcut. 
         use_cache=False,
         np=1,
-        description=''):
+        description='',
+        orb_decomposition=False,
+        output_path='TB2J_results'):
 
         self.atoms = atoms
         self.efermi = efermi
@@ -57,6 +60,7 @@ class Exchange():
         self.ne = ne
         self._use_cache = use_cache
         self.np = np
+        self.output_path = output_path
 
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
@@ -65,16 +69,29 @@ class Exchange():
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
+        self._prepare_Jorb_file()
 
         # whether to calculate J and DMI with NJt method.
         self.calc_NJt = True
-        #self._prepare_NijR()
         self.Ddict_NJT = None
         self.Jdict_NJT = None
         self._is_collinear = None
         self.has_elistc = False
         self.description = description
+        self.orb_decomposition = orb_decomposition
         self._clean_tbmodels()
+
+    def _prepare_Jorb_file(self):
+        os.makedirs(self.output_path, exist_ok=True)
+        self.orbpath = os.path.join(self.output_path, 'OrbResolve')
+        os.makedirs(self.orbpath, exist_ok=True)
+        #fname = os.path.join(self.output_path, "temp", "AijR_orb")
+        #npoint = self.contour.npoints
+        #npair = len(self.Rij_list)
+        #self.AijR_orb = np.memmap(fname,
+        #                          dtype=complex,
+        #                          mode='w+',
+        #                          shape=(npair, npoint, 4, 4))
 
     def _adjust_emin(self):
         self.emin = self.G.find_energy_ingap(rbound=self.efermi -
@@ -160,7 +177,6 @@ class Exchange():
 
         for iatom in range(len(self.atoms)):
             if iatom in self.orb_dict:
-                #print(iatom, self.orb_dict[iatom])
                 self.orb_slice.append(
                     slice(
                         self.orb_dict[iatom][0],
@@ -206,6 +222,11 @@ class Exchange():
                                             jspin)] = (vec, distance)
                         self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
         self.short_Rlist = list(self.R_ijatom_dict.keys())
+
+        self.Rij_list = []
+        for iR, R in enumerate(self.R_ijatom_dict):
+            for (iatom, jatom) in self.R_ijatom_dict[R]:
+                self.Rij_list.append([R, iatom, jatom])
 
     def iorb(self, iatom):
         """
@@ -258,7 +279,7 @@ class ExchangeNCL(Exchange):
             self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
 
     def get_H_atom(self, iatom):
-        orbs = self.iorb(iatom)
+        #orbs = self.iorb(iatom)
         return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
 
     def get_P_iatom(self, iatom):
@@ -284,8 +305,8 @@ class ExchangeNCL(Exchange):
         :rtype:  complex matrix.
 
         """
-        orbi = self.iorb(iatom)
-        orbj = self.iorb(jatom)
+        #orbi = self.iorb(iatom)
+        #orbj = self.iorb(jatom)
         #return GR[np.ix_(orbi, orbj)]
         return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
@@ -315,14 +336,28 @@ class ExchangeNCL(Exchange):
         Gji = self.GR_atom(GRm, jatom, iatom)
         Gji_Ixyz = pauli_block_all(Gji)
 
+        ni, nj = Gij.shape
+
         tmp = np.zeros((4, 4), dtype=complex)
-        for a in range(4):
-            pGp=self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(jatom)
-            for b in range(4):
-                AijRab = np.matmul(
-                   pGp , Gji_Ixyz[b])
-                tmp[a, b] = np.trace(AijRab)
-        return tmp / np.pi
+
+        if self.orb_decomposition:
+            torb = np.zeros((4, 4, ni, nj), dtype=complex)
+            for a in range(4):
+                piGij = self.get_P_iatom(iatom) @ Gij_Ixyz[a]
+                for b in range(4):
+                    pjGji = self.get_P_iatom(jatom) @ Gji_Ixyz[b]
+                    torb[a, b] = np.einsum('ij, ji -> ij', piGij, pjGji)/np.pi
+                    tmp[a, b] = np.sum(torb)
+
+        else:
+            for a in range(4):
+                pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
+                    jatom)
+                for b in range(4):
+                    AijRab = np.matmul(pGp, Gji_Ixyz[b])
+                    tmp[a, b] = np.trace(AijRab)/np.pi
+            torb = None
+        return tmp, torb 
 
     def get_all_A(self, G):
         """
@@ -332,11 +367,13 @@ class ExchangeNCL(Exchange):
         :param de: energy step.
         """
         A_ijR_list = {}
+        Aorb_ijR_list = {}
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
-                A = self.get_A_ijR(G, R, iatom, jatom)
+                A, A_orb = self.get_A_ijR(G, R, iatom, jatom)
                 A_ijR_list[(R, iatom, jatom)] = A
-        return A_ijR_list
+                Aorb_ijR_list[(R, iatom, jatom)] = A_orb
+        return A_ijR_list, Aorb_ijR_list
 
     def A_to_Jtensor(self):
         """
@@ -465,11 +502,6 @@ class ExchangeNCL(Exchange):
                     D = np.zeros(3, dtype=float)
                     J = np.zeros(3, dtype=float)
                     for dim in range(3):
-                        #S_i = pauli_mat(ni, dim +
-                        #                1)  #*self.rho[np.ix_(orbi, orbi)]
-                        #S_j = pauli_mat(nj, dim +
-                        #                1)  #*self.rho[np.ix_(orbj, orbj)]
-                        # TODO: Note that rho is complex, not the imaginary part
                         S_i = pauli_mat(ni, dim + 1) * self.rho[np.ix_(
                             orbi, orbi)]
                         S_j = pauli_mat(nj, dim + 1) * self.rho[np.ix_(
@@ -494,29 +526,29 @@ class ExchangeNCL(Exchange):
         self.Ddict_NJT = Ddict_NJT
         return Ddict_NJT
 
-    def integrate(self, rhoRs, AijRs, method='simpson'):
+    def integrate(self, rhoRs, AijRs, Aorb_ijRs=None, method='simpson'):
         """
         AijRs: a list of AijR, 
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
-        if method == "trapezoidal":
-            integrate = trapezoidal_nonuniform
-        elif method == 'simpson':
-            integrate = simpson_nonuniform
-
-        self.rho = integrate(self.contour.path, rhoRs)
+        self.rho = self.contour.integrate(rhoRs, method=method)
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
-                f = AijRs[(R, iatom, jatom)]
-                self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
+                self.A_ijR[(R, iatom,
+                            jatom)] = self.contour.integrate(AijRs[(R, iatom,
+                                                                    jatom)],
+                                                             method=method)
+                if Aorb_ijRs is not None:
+                    self.A_orb_ijR[(R, iatom, jatom)] = self.contour.integrate(
+                        Aorb_ijRs[(R, iatom, jatom)], method=method)
 
     def get_AijR_rhoR(self, e):
         GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
-        AijR = self.get_all_A(GR)
-        return AijR, self.get_rho_e(rhoR)
+        AijR, AijR_orb = self.get_all_A(GR)
+        return AijR, self.get_rho_e(rhoR), AijR_orb
 
-    def save_AijR(self, AijRs, fname):
-        result=dict(path=self.contour.path, AijRs=AijRs)
+    def save_AijRs(self, AijRs, fname):
+        result = dict(contour=self.contour, AijRs=AijRs)
         with open(fname, 'wb') as myfile:
             pickle.dump(result, myfile)
 
@@ -567,7 +599,6 @@ class ExchangeNCL(Exchange):
 
         #self.save_AijRs(AijRs)
         self.integrate(rhoRs, AijRs)
-
         self.get_rho_atom()
         self.A_to_Jtensor()
         bar.finish()

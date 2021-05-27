@@ -98,7 +98,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                    ne=ne,
                                    np=np,
                                    use_cache=use_cache,
-                                   description=description)
+                                   description=description,
+                                   output_path=output_path)
         else:
             exchange = ExchangeCLQspace(tbmodels=(tbmodel_up, tbmodel_dn),
                                         atoms=atoms,
@@ -118,7 +119,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                         ne=ne,
                                         np=np,
                                         use_cache=use_cache,
-                                        description=description)
+                                        description=description,
+                                        output_path=output_path)
 
         exchange.run(path=output_path)
         print(
@@ -164,7 +166,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               output_path=output_path)
         exchange.run(path=output_path)
         print(
             "All calculation finsihed. The results are in TB2J_results directory."
@@ -212,7 +215,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               output_path=output_path)
         print("\n")
         exchange.run(path=output_path)
         print(
@@ -276,7 +280,8 @@ def gen_exchange_siesta(fdf_fname,
             ne=ne,
             np=np,
             use_cache=use_cache,
-            description=description)
+            description=description,
+            output_path=output_path)
         exchange.run(path=output_path)
         print("\n")
         print(
@@ -307,7 +312,8 @@ def gen_exchange_siesta(fdf_fname,
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               output_path=output_path)
         exchange.run(path=output_path)
         print("\n")
         print(
@@ -341,7 +347,8 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               output_path=output_path)
         exchange.run(path=output_path)
         print("\n")
         print(
@@ -359,7 +366,8 @@ def gen_exchange_gpaw(gpw_fname,
                       Rcut=None,
                       use_cache=False,
                       output_path='TB2J_results',
-                      description=''):
+                      description='',
+                      ):
     print("Reading from GPAW data and calculate electronic structure.")
     model = GPAWWrapper(gpw_fname=gpw_fname)
     efermi = model.calc.get_fermi_level()
@@ -380,7 +388,8 @@ def gen_exchange_gpaw(gpw_fname,
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               output_path=output_path)
         exchange.run(path=output_path)
         print("\n")
         print(

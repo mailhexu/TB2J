@@ -113,7 +113,7 @@ def auto_assign_wannier_to_atom2(positions,
         iatom = np.argmin(distances)
         ind_atoms.append(iatom)
         shifted_pos.append(distance_vecs[iatom] + patoms[iatom])
-        shifted_pos=np.array(shifted_pos)
+        shifted_pos = np.array(shifted_pos)
         if min(distances) > max_distance:
             print(
                 "Warning: the minimal distance between wannier function No. %s is large. Check if the MLWFs are well localized."
@@ -121,10 +121,10 @@ def auto_assign_wannier_to_atom2(positions,
     if half:
         #ind_atoms = np.vstack([ind_atoms, ind_atoms], dtype=int)
         #shifted_pos = np.vstack([shifted_pos, shifted_pos], dtype=float)
-        ind_atoms= np.repeat(ind_atoms, 2)
-        shape=shifted_pos.shape
-        shape[0]*=2
-        tmp=copy.deepcopy(shifted_pos)
+        ind_atoms = np.repeat(ind_atoms, 2)
+        shape = shifted_pos.shape
+        shape[0] *= 2
+        tmp = copy.deepcopy(shifted_pos)
         shifted_pos = np.zeros(shape, dtype=float)
         shifted_pos[::2] = tmp
         shifted_pos[1::2] = tmp
@@ -256,7 +256,7 @@ def trapezoidal_nonuniform(x, f):
     h = np.diff(x)
     f = np.array(f)
     avg = (f[:-1] + f[1:]) / 2.0
-    return np.tensordot(avg, h, axes=(0,0))
+    return np.tensordot(avg, h, axes=(0, 0))
 
 
 def simpson_nonuniform(x, f):
@@ -300,3 +300,50 @@ def simpson_nonuniform(x, f):
         result -= f[N - 2] * h[N - 1]**3\
                      / ( 6 * h[N - 2] * ( h[N - 2] + h[N - 1] ) )
     return result
+
+
+class SimpsonIntegrator():
+    def __init__(self, x, dtype):
+        self.x = x
+        self.dtype = dtype
+        self.weight = simpson_nonuniform_weight(x, dtype=dtype)
+
+    def run(self, y):
+        return np.dot(self.weight, y)
+
+
+def simpson_nonuniform_weight(x, dtype=complex):
+    """
+    Simpson rule for irregularly spaced data.
+
+        Parameters
+        ----------
+        x : list or np.array of floats
+                Sampling points for the function values
+        f : list or np.array of floats
+                Function values at the sampling points
+
+        Returns
+        -------
+        float : weight of each x
+    """
+    N = len(x) - 1
+    h = np.diff(x)
+
+    w = np.zeros(shape=x.shape, dtype=dtype)
+
+    for i in range(1, N, 2):
+        hph = h[i] + h[i - 1]
+        w[i] += (h[i]**3 + h[i - 1]**3 +
+                 3. * h[i] * h[i - 1] * hph) / (6 * h[i] * h[i - 1])
+        w[i - 1] += (2. * h[i - 1]**3 - h[i]**3 +
+                     3. * h[i] * h[i - 1]**2) / (6 * h[i - 1] * hph)
+        w[i + 1] += (2. * h[i]**3 - h[i - 1]**3 +
+                     3. * h[i - 1] * h[i]**2) / (6 * h[i] * hph)
+
+    if (N + 1) % 2 == 0:
+        w[N] += (2 * h[N - 1]**2 +
+                 3. * h[N - 2] * h[N - 1]) / (6 * (h[N - 2] + h[N - 1]))
+        w[N - 1] += (h[N - 1]**2 + 3 * h[N - 1] * h[N - 2]) / (6 * h[N - 2])
+        w[N - 2] -= h[N - 1]**3 / (6 * h[N - 2] * (h[N - 2] + h[N - 1]))
+    return w
