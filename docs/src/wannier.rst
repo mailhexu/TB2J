@@ -156,6 +156,9 @@ the file extension are used to identify the format, for example, Quantum ESPRESS
 input should be name with \*.pwi) The supported file format are can be found on the list in:
 https://wiki.fysik.dtu.dk/ase/ase/io/io.html
 
+(From version 0.6.2 this file is no more necessary as TB2J can read the atomic structures from 
+the Wannier90 .win file). The --posfile option will still be used by default if it is specified.)
+
 With the WF Hamiltonian generated, we can calculate the exchange
 parameters now. In the scripts directory inside your TB2J directory you
 find the wann2J.py script. Please make sure that it is executable and

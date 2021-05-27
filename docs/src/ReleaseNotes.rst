@@ -1,6 +1,12 @@
 Release Notes
 ===============
 
+v0.6.1 May 27, 2021
+-------------------------
+Enable reading structures from wannier .win file so --posfile is no more necessray.
+ --posfile option can still be used.
+
+
 v0.6.1
 -------------------------
 Change the internal order of orbitals in noncollinear Tight-binding. 
