@@ -47,7 +47,7 @@ def write_vampire_unitcell_file(cls, fname):
 
         nexch = len(cls.exchange_Jdict.items())
         myfile.write("{num_interactions} {type_exchange}\n".format(
-            num_interactions=nexch, type_exchange=2))
+            num_interactions=nexch, type_exchange='tensor'))
 
         counter = -1
         for key, val in cls.exchange_Jdict.items():
