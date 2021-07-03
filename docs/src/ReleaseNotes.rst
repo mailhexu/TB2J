@@ -1,7 +1,10 @@
 Release Notes
 ===============
+v0.6.3 July 3, 2021
+----------------------------
+Revert qsolver to old version.
 
-v0.6.1 May 27, 2021
+v0.6.2 May 27, 2021
 -------------------------
 Enable reading structures from wannier .win file so --posfile is no more necessray.
  --posfile option can still be used.
