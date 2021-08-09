@@ -110,7 +110,6 @@ def run_siesta2J():
             include_orbs[elem] = orb
         else:
             include_orbs[element] = None
-    print(include_orbs)
 
     gen_exchange_siesta(
         fdf_fname=args.fdf_fname,
