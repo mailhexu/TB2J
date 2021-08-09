@@ -1,5 +1,13 @@
 Release Notes
 ===============
+
+v0.6.4 August 9, 2021
+----------------------------
+Documentation of orbital decomposition.
+More concise orbital decompostion to the exchange with siesta2J.py.
+Allow to specify the orbitals used in the decomposition in siesta2J.py --element option.
+
+
 v0.6.3 July 3, 2021
 ----------------------------
 Revert qsolver to old version.
