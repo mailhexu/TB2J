@@ -37,6 +37,7 @@ class GPAWWrapper():
         #self.nbasis=len(self.positions)
         self.norb=len(self.positions)
         self.nbasis=self.norb*2
+        self._name='GPAW'
 
 
     #def gen_ham(self, k):

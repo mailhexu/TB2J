@@ -83,6 +83,19 @@ def write_atom_section(cls, myfile):
     myfile.write('\n')
 
 
+def write_orbital_section(cls, myfile):
+    if cls.exchange_Jdict_orb is not None:
+        myfile.write('=' * 90 + '\n')
+        myfile.write('Orbitals used in decomposition: \n')
+        myfile.write("The name of the orbitals for the decomposition: \n")
+        symnum = symbol_number(cls.atoms)
+        sns = list(symnum.keys())
+        for iatom in cls.orbital_names:
+            if cls.index_spin[iatom] != -1:
+                myfile.write(f"{sns[iatom]} : {cls.orbital_names[iatom]}\n")
+        myfile.write("\n")
+
+
 def write_exchange_section(cls,
                            myfile,
                            order='distance',
@@ -217,6 +230,7 @@ def write_txt(cls,
     with open(fname, 'w') as myfile:
         write_info_section(cls, myfile)
         write_atom_section(cls, myfile)
+        write_orbital_section(cls, myfile)
         write_exchange_section(cls,
                                myfile,
                                write_experimental=write_experimental)

@@ -8,15 +8,14 @@ import argparse
 def run_siesta2J():
     print_license()
     parser = argparse.ArgumentParser(
-        description=
-        "siesta2J: Using magnetic force theorem to calculate exchange parameter J from siesta Hamiltonian"
+        description="siesta2J: Using magnetic force theorem to calculate exchange parameter J from siesta Hamiltonian"
     )
     parser.add_argument('--fdf_fname',
                         help="path of the input fdf file",
                         default='./',
                         type=str)
     parser.add_argument('--elements',
-                        help="elements to be considered in Heisenberg model",
+                        help="list of elements to be considered in Heisenberg model. For each element, a postfixes can be used to specify the orbitals(Only with Siesta backend), eg. Fe_3d, or Fe_3d_4s ",
                         default=None,
                         type=str,
                         nargs='*')
@@ -31,8 +30,7 @@ def run_siesta2J():
                         type=float)
     parser.add_argument(
         '--kmesh',
-        help=
-        'kmesh in the format of kx ky kz. Monkhorst pack. If all the numbers are odd, it is Gamma cenetered. (strongly recommended)',
+        help='kmesh in the format of kx ky kz. Monkhorst pack. If all the numbers are odd, it is Gamma cenetered. (strongly recommended)',
         type=int,
         nargs='*',
         default=[5, 5, 5])
@@ -46,11 +44,10 @@ def run_siesta2J():
                         default=0.05)
     parser.add_argument(
         '--use_cache',
-        help=
-        "whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce memory usage. Default: False",
+        help="whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce memory usage. Default: False",
         action='store_true',
         default=False)
-    #parser.add_argument(
+    # parser.add_argument(
     #    '--height',
     #    help=
     #    'energy contour, a small number (often between 0.1 to 0.5, default 0.2)',
@@ -60,9 +57,9 @@ def run_siesta2J():
                         help='number of integration steps, default: 50',
                         default=50,
                         type=int)
-    #parser.add_argument(
+    # parser.add_argument(
     #    '--nz2', help='number of steps 2, default: 200', default=200, type=int)
-    #parser.add_argument(
+    # parser.add_argument(
     #    '--nz3', help='number of steps 3, default: 50', default=50, type=int)
     parser.add_argument(
         '--cutoff',
@@ -72,8 +69,7 @@ def run_siesta2J():
 
     parser.add_argument(
         '--exclude_orbs',
-        help=
-        "the indices of wannier functions to be excluded from magnetic site. counting start from 0",
+        help="the indices of wannier functions to be excluded from magnetic site. counting start from 0",
         default=[],
         type=int,
         nargs='+')
@@ -85,8 +81,7 @@ def run_siesta2J():
 
     parser.add_argument(
         "--description",
-        help=
-        "add description of the calculatiion to the xml file. Essential information, like the xc functional, U values, magnetic state should be given.",
+        help="add description of the calculatiion to the xml file. Essential information, like the xc functional, U values, magnetic state should be given.",
         type=str,
         default="Calculated with TB2J.")
 
@@ -106,18 +101,30 @@ def run_siesta2J():
     if args.elements is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
+
+    include_orbs = {}
+    for element in args.elements:
+        if "_" in element:
+            elem = element.split("_")[0]
+            orb = element.split("_")[1:]
+            include_orbs[elem] = orb
+        else:
+            include_orbs[element] = None
+    print(include_orbs)
+
     gen_exchange_siesta(
         fdf_fname=args.fdf_fname,
         kmesh=args.kmesh,
-        magnetic_elements=args.elements,
+        magnetic_elements=list(include_orbs.keys()),
+        include_orbs=include_orbs,
         Rcut=args.rcut,
         emin=args.emin,
         emax=args.emax,
         nz=args.nz,
-        #height=args.height,
-        #nz1=args.nz1,
-        #nz2=args.nz2,
-        #nz3=args.nz3,
+        # height=args.height,
+        # nz1=args.nz1,
+        # nz2=args.nz2,
+        # nz3=args.nz3,
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,

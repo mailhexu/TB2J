@@ -10,5 +10,6 @@ Tutorial
    parameters.rst
    rotate_and_merge.rst
    downfold.md
+   orbital_contribution.md
    output.rst
 

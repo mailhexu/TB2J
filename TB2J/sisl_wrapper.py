@@ -5,9 +5,10 @@ from ase.atoms import Atoms
 from TB2J.utils import symbol_number
 from collections import defaultdict
 from scipy.linalg import eigh
+from TB2J.myTB import AbstractTB
 
 
-class SislWrapper():
+class SislWrapper(AbstractTB):
     def __init__(self, sisl_hamiltonian, spin=None):
         self.is_siesta = False
         self.is_orthogonal = False
@@ -59,6 +60,8 @@ class SislWrapper():
         else:
             raise ValueError(
                 "The hamiltonian should be either spin-orbit or colinear")
+        self._name = 'SIESTA'
+
 
     def view_info(self):
         print(self.orb_dict)

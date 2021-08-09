@@ -40,6 +40,12 @@ class AbstractTB():
         #: 1: orb1_up, orb2_up,  ... orb1_down, orb2_down,...
         #: 2: orb1_up, orb1_down, orb2_up, orb2_down,...
 
+        self._name = None
+
+    @property
+    def name(self):
+        return self._name
+
     def get_hamR(self, R):
         """
         get the Hamiltonian H(R), array of shape (nbasis, nbasis)
@@ -117,6 +123,8 @@ class MyTB(AbstractTB):
         self.k2Rfactor = -2.0j * np.pi
         self.is_siesta = False
         self.is_orthogonal = True
+
+        self._name='Wannier'
 
     def set_atoms(self, atoms):
         self.atoms = atoms

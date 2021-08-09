@@ -25,6 +25,7 @@ class ExchangeCL2(ExchangeCL):
         only difference is a colinear tag.
         """
         self.tbmodel_up, self.tbmodel_dn = tbmodels
+        self.backend_name = self.tbmodel_up.name
         self.Gup = TBGreen(self.tbmodel_up,
                            self.kmesh,
                            self.efermi,
@@ -54,13 +55,14 @@ class ExchangeCL2(ExchangeCL):
             self.is_orthogonal = True
         else:
             self.is_orthogonal = False
-            #self.S0=self.Gup.S0
-        self._is_colinear = True
+            # self.S0=self.Gup.S0
 
         self.exchange_Jdict = {}
         self.exchange_Jdict_orb = {}
 
         self.biquadratic = False
+
+        self._is_collinear=True
 
     def _clean_tbmodels(self):
         del self.tbmodel_up
@@ -78,8 +80,8 @@ class ExchangeCL2(ExchangeCL):
 
     def get_Delta(self, iatom):
         #orbs = self.iorb(iatom)
-        #return self.Delta[np.ix_(orbs, orbs)]
-        s=self.orb_slice[iatom]
+        # return self.Delta[np.ix_(orbs, orbs)]
+        s = self.orb_slice[iatom]
         return self.Delta[s, s]
 
     def GR_atom(self, GR, iatom, jatom):
@@ -93,7 +95,7 @@ class ExchangeCL2(ExchangeCL):
         """
         #orbi = self.iorb(iatom)
         #orbj = self.iorb(jatom)
-        #return GR[np.ix_(orbi, orbj)]
+        # return GR[np.ix_(orbi, orbj)]
         return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, Gup, Gdn, iatom, jatom):
@@ -175,7 +177,18 @@ class ExchangeCL2(ExchangeCL):
                 np.dot(self.spinat[iatom], self.spinat[jatom]))
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jij
-                self.exchange_Jdict_orb[keyspin] = Jorbij
+                self.exchange_Jdict_orb[
+                    keyspin] = self.simplify_orbital_contributions(Jorbij, iatom, jatom)
+
+    def simplify_orbital_contributions(self, Jorbij, iatom, jatom):
+        """
+        sum up the contribution of all the orbitals with same (n,l,m)
+        """
+        if self.backend_name == 'SIESTA':
+            mmat_i = self.mmats[iatom]
+            mmat_j = self.mmats[jatom]
+            Jorbij = mmat_i.T @ Jorbij @ mmat_j
+        return Jorbij
 
     def get_rho_e(self, rho_up, rho_dn):
         #self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))
@@ -280,6 +293,7 @@ class ExchangeCL2(ExchangeCL):
             spinat=self.spinat,
             index_spin=self.index_spin,
             colinear=True,
+            orbital_names=self.orbital_names,
             distance_dict=self.distance_dict,
             exchange_Jdict=self.exchange_Jdict,
             exchange_Jdict_orb=self.exchange_Jdict_orb,
