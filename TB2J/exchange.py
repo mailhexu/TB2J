@@ -195,10 +195,17 @@ class Exchange():
         if self.backend_name == "SIESTA":
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
-                mmat, reduced_orbs = map_orbs_matrix(
-                    orbs,
-                    spinor=not (self._is_collinear),
-                    include_only=self.include_orbs[syms[iatom]])
+                if syms[iatom] in self.include_orbs:
+                    mmat, reduced_orbs = map_orbs_matrix(
+                        orbs,
+                         spinor=not (self._is_collinear),
+                         include_only=self.include_orbs[syms[iatom]])
+                else:
+                    mmat, reduced_orbs = map_orbs_matrix(
+                        orbs,
+                         spinor=not (self._is_collinear),
+                         include_only=None)
+
                 self.mmats[iatom] = mmat
                 self.orbital_names[iatom] = reduced_orbs
         else:
