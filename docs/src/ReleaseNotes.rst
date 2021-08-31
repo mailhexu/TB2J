@@ -1,6 +1,12 @@
 Release Notes
 ===============
 
+v0.6.6 August 9, 2021
+----------------------------
+Output the figure of J vs distance.
+Fix a bug when the orbitals are not grouped by atoms.
+
+
 v0.6.4 August 9, 2021
 ----------------------------
 Documentation of orbital decomposition.
