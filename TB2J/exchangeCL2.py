@@ -79,10 +79,10 @@ class ExchangeCL2(ExchangeCL):
         print(f"A gap is found at {self.emin}, set emin to it.")
 
     def get_Delta(self, iatom):
-        #orbs = self.iorb(iatom)
-        # return self.Delta[np.ix_(orbs, orbs)]
-        s = self.orb_slice[iatom]
-        return self.Delta[s, s]
+        orbs = self.iorb(iatom)
+        return self.Delta[np.ix_(orbs, orbs)]
+        #s = self.orb_slice[iatom]
+        #return self.Delta[s, s]
 
     def GR_atom(self, GR, iatom, jatom):
         """Given a green's function matrix, return the [iatom, jatom] component.
@@ -93,10 +93,10 @@ class ExchangeCL2(ExchangeCL):
         :returns:  G_ij
         :rtype:  complex matrix.
         """
-        #orbi = self.iorb(iatom)
-        #orbj = self.iorb(jatom)
-        # return GR[np.ix_(orbi, orbj)]
-        return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
+        orbi = self.iorb(iatom)
+        orbj = self.iorb(jatom)
+        return GR[np.ix_(orbi, orbj)]
+        #return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, Gup, Gdn, iatom, jatom):
         Rij_done = set()

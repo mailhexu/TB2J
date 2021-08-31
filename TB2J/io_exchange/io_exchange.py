@@ -9,12 +9,14 @@ write not only xml output.
 """
 
 import os
+from collections.abc import Iterable
 import numpy as np
 from ase.dft.kpoints import monkhorst_pack
 import pickle
 from ase.cell import Cell
 from TB2J import __version__
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 
 class SpinIO(object):
@@ -184,6 +186,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_multibinit(path=os.path.join(path, 'Multibinit'))
         self.write_tom_format(path=os.path.join(path, 'TomASD'))
         self.write_vampire(path=os.path.join(path, 'Vampire'))
+        self.plot_all(savefile=os.path.join(path, 'JvsR.pdf'))
         self.write_Jq(kmesh=[9, 9, 9], path=path)
 
     def write_txt(self, path):
@@ -214,6 +217,120 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 "The spin ground state is estimated by calculating\n the eigenvalues and eigen vectors of J(q):\n"
             )
             write_Jq_info(self, kpts, evals, evecs, myfile, special_kpoints={})
+
+    def plot_JvsR(self,
+                  ax=None,
+                  color='blue',
+                  marker='o',
+                  fname=None,
+                  show=False):
+        if ax is None:
+            fig, ax = plt.subplots()
+        ds = []
+        Js = []
+        for key, val in self.exchange_Jdict.items():
+            d = self.distance_dict[key][1]
+            ds.append(d)
+            Js.append(val * 1e3)
+        ax.scatter(ds, Js, marker=marker, color=color)
+        ax.axhline(color='gray')
+        ax.set_xlabel("Distance ($\AA$)")
+        ax.set_ylabel("J (meV)")
+        if fname is not None:
+            plt.savefig(fname)
+        if show:
+            plt.show()
+        return ax
+
+    def plot_DvsR(self, ax=None, fname=None, show=False):
+        if ax is None:
+            fig, ax = plt.subplots()
+        ds = []
+        Ds = []
+        for key, val in self.dmi_ddict.items():
+            d = self.distance_dict[key][1]
+            ds.append(d)
+            Ds.append(val * 1e3)
+        Ds = np.array(Ds)
+        ax.scatter(ds, Ds[:, 0], marker='s', color='r', label="Dx")
+        ax.scatter(ds,
+                   Ds[:, 1],
+                   marker='o',
+                   edgecolors='g',
+                   facecolors='none',
+                   label='Dy')
+        ax.scatter(ds,
+                   Ds[:, 2],
+                   marker='D',
+                   edgecolors='b',
+                   facecolors='none',
+                   label='Dz')
+        ax.axhline(color='gray')
+        ax.legend(loc=1)
+        ax.set_ylabel("D (meV)")
+        if fname is not None:
+            plt.savefig(fname)
+        if show:
+            plt.show()
+        return ax
+
+    def plot_JanivsR(self, ax=None, fname=None, show=False):
+        if ax is None:
+            fig, ax = plt.subplots()
+        ds = []
+        Jani = []
+        for key, val in self.Jani_dict.items():
+            d = self.distance_dict[key][1]
+            ds.append(d)
+            val = val - np.diag([np.trace(val) / 3] * 3)
+            Jani.append(val * 1e3)
+        Jani = np.array(Jani)
+        s = 'xyz'
+        for i in range(3):
+            ax.scatter(ds, Jani[:, i, i], marker='s', label=f"J{s[i]}{s[i]}")
+        c = 'rgb'
+        for ic, (i, j) in enumerate([(0, 1), (0, 2), (1, 2)]):
+            ax.scatter(ds,
+                       Jani[:, i, j],
+                       edgecolors=c[ic],
+                       facecolors='none',
+                       label=f"J{s[i]}{s[j]}")
+        ax.axhline(color='gray')
+        ax.legend(loc=1, ncol=2)
+        ax.set_ylabel("Jani (meV)")
+        if fname is not None:
+            plt.savefig(fname)
+        if show:
+            plt.show()
+        return ax
+
+    def plot_all(self, title=None, savefile=None, show=False):
+        if self.has_dmi and self.has_bilinear:
+            naxis = 3
+        else:
+            naxis = 1
+        fig, axes = plt.subplots(naxis, 1, sharex=True, figsize=(5, 2.2*naxis))
+
+        if self.has_dmi and self.has_bilinear:
+            self.plot_JvsR(axes[0])
+            self.plot_DvsR(axes[1])
+            self.plot_JanivsR(axes[2])
+        else:
+            self.plot_JvsR(axes)
+
+        if title is not None:
+            fig.suptitle(title)
+        plt.tight_layout()
+        plt.subplots_adjust(hspace=0.03, top=0.93)
+        if savefile is not None:
+            plt.savefig(savefile)
+        if show:
+            plt.show()
+        plt.clf()
+        plt.close()
+        return fig, axes
+
+
 
     def write_tom_format(self, path):
         from TB2J.io_exchange.io_tomsasd import write_tom_format
@@ -271,3 +388,6 @@ def test_spin_io():
                  exchange_Jdict=exchange_Jdict)
 
     sio.write_all()
+
+if __name__=='__main__':
+    test_spin_io()

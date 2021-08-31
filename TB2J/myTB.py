@@ -10,7 +10,7 @@ from ase.io import read
 from ase.atoms import Atoms
 from TB2J.utils import auto_assign_basis_name
 from functools import lru_cache
-from TB2J.wannier import parse_ham, parse_xyz
+from TB2J.wannier import parse_ham, parse_xyz, parse_atoms
 
 
 class AbstractTB():
@@ -177,7 +177,7 @@ class MyTB(AbstractTB):
     @staticmethod
     def read_from_wannier_dir(path,
                               prefix,
-                              #posfile='POSCAR',
+                              posfile='POSCAR',
                               atoms=None,
                               nls=True,
                               groupby=None):
@@ -189,10 +189,14 @@ class MyTB(AbstractTB):
         #tbmodel = Model.from_wannier_folder(
         #    folder=path, prefix=prefix)
         #m = MyTB.from_tbmodel(tbmodel)
+
         nbasis, data = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
         xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix +
                                                    '_centres.xyz'))
-        #atoms = read(os.path.join(path, posfile))
+        try:
+            atoms = read(os.path.join(path, posfile))
+        except:
+            atoms = parse_atoms(os.path.join(path, f"{prefix}.win"))
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
         if groupby == 'spin':

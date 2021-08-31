@@ -106,7 +106,7 @@ class TBGreen():
             if 'TMPDIR' in os.environ:
                 rpath = os.environ['TMPDIR']
             else:
-                rpath = './TB2J_cache'
+                rpath = '/dev/shm/TB2J_cache'
         else:
             rpath = self.cache_path
         if not os.path.exists(rpath):
