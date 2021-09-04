@@ -37,14 +37,14 @@ One can see that the contribution from the (orb_1, orb_1) pair is 3.184, and tha
 For Siesta input, the names are known, and printed in the "orbitals use in decomposition" section. They are not the exactly the name of the siesta basis (like 3dxyZ1). For example, with a double-zeta basis set, the a 3dxy orbital might be splitted into 3dxyZ1 and 3dxyZ2. The contribution of them are summed up to make it more concise. Often, the contribution from some orbitals are negligible. In the siesta2J.py command, it's possible to specify the orbitals to be considered in the decompostion. For example, if only the 3dxy contribution of Cr is needed, one can write
 
 ```
-wann2J.py --elements Fe_3d  ....
+siesta2J.py --elements Fe_3d  ....
 
 ```
 
 If both the 3d and 4s are to be considered, one can write:
 
 ```
-wann2J.py --elements Fe_3d_4s  ....
+siesta2J.py --elements Fe_3d_4s  ....
 
 ```
 
@@ -71,6 +71,8 @@ Orbital contributions:
 
 ```
 where we can find in the $x$ direction, the dxy and dxz  orbitals contribute mostly to the ferromagnetic interaction, whereas the 3dx2-y2 contribution is antiferromagnetic. 
+
+Note that the option for selection of orbitals is not available in the Wannier90 interface, as the informations for labelling the orbitals are not included in the Wannier90 output (sometimes it is even not possible to do so as the Wannier functions are not necessarily atomic-orbital like). 
 
 
 
