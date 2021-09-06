@@ -162,19 +162,19 @@ class Exchange():
                     self.orb_dict[iatom] += [i]
                     self.labels[iatom] += [orb_sym]
 
-        self.orb_slice = []
+        #self.orb_slice = []
 
-        for iatom in range(len(self.atoms)):
-            if iatom in self.orb_dict:
-                self.orb_slice.append(
-                    slice(
-                        self.orb_dict[iatom][0],
-                        self.orb_dict[iatom][-1] + 1,
-                    ))
-            else:
-                self.orb_slice.append(slice(0, 0))
+        #for iatom in range(len(self.atoms)):
+        #    if iatom in self.orb_dict:
+        #        self.orb_slice.append(
+        #            slice(
+        #                self.orb_dict[iatom][0],
+        #                self.orb_dict[iatom][-1] + 1,
+        #            ))
+        #    else:
+        #        self.orb_slice.append(slice(0, 0))
 
-        self.orb_slice = np.array(self.orb_slice)
+        #self.orb_slice = np.array(self.orb_slice)
 
         # index of magnetic atoms
         for i, sym in enumerate(self.atoms.get_chemical_symbols()):
