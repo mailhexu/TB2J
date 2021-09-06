@@ -46,7 +46,7 @@ class SislWrapper(AbstractTB):
                 self.orb_dict[ia] += orb_names
             self.norb = len(self.orbs)
             self.nbasis = self.norb
-        elif self.ham.spin.is_spinorbit or self.spin == 'merge':
+        elif self.ham.spin.is_spinorbit or self.ham.spin.is_noncolinear or self.spin == 'merge':
             for ia, a in enumerate(_atoms):
                 symnum = sdict[ia]
                 orb_names = []

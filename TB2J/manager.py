@@ -333,7 +333,7 @@ def gen_exchange_siesta(fdf_fname,
             f"All calculation finsihed. The results are in {output_path} directory."
         )
 
-    elif H.spin.is_spinorbit:
+    elif H.spin.is_spinorbit or H.spin.is_noncolinear:
 
         print("Reading Siesta hamiltonian: non-colinear spin.")
         tbmodel = SislWrapper(H, spin=None)
