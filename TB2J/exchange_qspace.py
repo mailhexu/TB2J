@@ -9,7 +9,6 @@ from TB2J.myTB import MyTB
 from ase.io import read
 from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
-import progressbar
 from functools import lru_cache
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
