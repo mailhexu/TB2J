@@ -1,7 +1,7 @@
 Release Notes
 ===============
 
-v0.6.6 September 10, 2021
+v0.6.7 September 10, 2021
 ----------------------------
 Use tqdm & p_tqdm instead of progressbar.
 Fix progressbar in parallel mode.
