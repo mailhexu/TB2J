@@ -9,6 +9,8 @@ from ase.io import read
 from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
 import progressbar
+from tqdm import tqdm
+from p_tqdm import p_map
 from functools import lru_cache
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
@@ -557,30 +559,19 @@ class ExchangeNCL(Exchange):
         """
         print("Green's function Calculation started.")
 
-        widgets = [
-            ' [',
-            progressbar.Timer(),
-            '] ',
-            progressbar.Bar(),
-            ' (',
-            progressbar.ETA(),
-            ') ',
-        ]
-
-        bar = progressbar.ProgressBar(maxval=self.contour.npoints,
-                                      widgets=widgets)
-        bar.start()
         rhoRs = []
         GRs = []
         AijRs = {}
+
+        npole=len(self.contour.path)
         if self.np > 1:
-            executor = ProcessPool(nodes=self.np)
-            results = executor.map(self.get_AijR_rhoR, self.contour.path)
+            #executor = ProcessPool(nodes=self.np)
+            #results = executor.map(self.get_AijR_rhoR, self.contour.path)
+            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
         else:
-            results = map(self.get_AijR_rhoR, self.contour.path)
+            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
 
         for i, result in enumerate(results):
-            bar.update(i)
             for iR, R in enumerate(self.R_ijatom_dict):
                 for (iatom, jatom) in self.R_ijatom_dict[R]:
                     if (R, iatom, jatom) in AijRs:
@@ -592,16 +583,16 @@ class ExchangeNCL(Exchange):
                                                                   jatom])
             rhoRs.append(result[1])
         if self.np > 1:
-            executor.close()
-            executor.join()
-            executor.clear()
+            #executor.close()
+            #executor.join()
+            #executor.clear()
+            pass
 
         # self.save_AijRs(AijRs)
         self.integrate(rhoRs, AijRs)
 
         self.get_rho_atom()
         self.A_to_Jtensor()
-        bar.finish()
 
     def _prepare_index_spin(self):
         # index_spin: index in spin hamiltonian of atom. starts from 1. -1 means not considered.

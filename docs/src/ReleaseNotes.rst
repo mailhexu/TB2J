@@ -1,6 +1,12 @@
 Release Notes
 ===============
 
+v0.6.6 September 10, 2021
+----------------------------
+Use tqdm & p_tqdm instead of progressbar.
+Fix progressbar in parallel mode.
+
+
 v0.6.6 September 1, 2021
 ----------------------------
 Output the figure of J vs distance.

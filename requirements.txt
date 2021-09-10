@@ -2,7 +2,8 @@ numpy>1.16.5
 scipy
 matplotlib
 ase>=3.19
-progressbar
+tqdm>=4.42.0
+p_tqdm
 pathos
 packaging
 

@@ -12,11 +12,13 @@ from TB2J.myTB import MyTB
 from ase.io import read
 from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
-import progressbar
+from tqdm import tqdm
+from p_tqdm import p_map
 from functools import lru_cache
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
 from pathos.multiprocessing import ProcessPool
+from functools import partial
 
 
 class ExchangeCL2(ExchangeCL):
@@ -249,25 +251,14 @@ class ExchangeCL2(ExchangeCL):
         """
         print("Green's function Calculation started.")
 
-        widgets = [
-            ' [',
-            progressbar.Timer(),
-            '] ',
-            progressbar.Bar(),
-            ' (',
-            progressbar.ETA(),
-            ') ',
-        ]
-        bar = progressbar.ProgressBar(maxval=len(self.contour.path),
-                                      widgets=widgets)
-        bar.start()
+        npole=len(self.contour.path)
         if self.np == 1:
-            results = map(self.get_AijR_rhoR, self.contour.path)
+            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
         else:
-            pool = ProcessPool(nodes=self.np)
-            results = pool.map(self.get_AijR_rhoR, self.contour.path)
+            #pool = ProcessPool(nodes=self.np)
+            #results = pool.map(self.get_AijR_rhoR ,self.contour.path)
+            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
         for i, result in enumerate(results):
-            bar.update(i)
             rup, rdn, Jorb_list, JJ_list = result
             self.rho_up_list.append(rup)
             self.rho_dn_list.append(rdn)
@@ -277,13 +268,13 @@ class ExchangeCL2(ExchangeCL):
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
         if self.np > 1:
-            pool.close()
-            pool.join()
-            pool.clear()
+            pass
+            #pool.close()
+            #pool.join()
+            #pool.clear()
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()
-        bar.finish()
 
     def write_output(self, path='TB2J_results'):
         self._prepare_index_spin()
