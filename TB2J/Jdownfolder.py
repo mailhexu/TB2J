@@ -108,7 +108,9 @@ class JDownfolder_pickle():
             for i, ispin in enumerate(self.index_spin):
                 for j, jspin in enumerate(self.index_spin):
                     if ispin>=0 and jspin>=0:
-                        self.Jdict[(tuple(R), i, j)]=Jd[iR, i, j]
+                        if not (tuple(R) ==(0,0,0) and i==j): 
+                            # self interaction.
+                            self.Jdict[(tuple(R), i, j)]=Jd[iR, i, j]
 
 
         io = SpinIO(atoms=atoms,
