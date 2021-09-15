@@ -4,6 +4,8 @@ Release Notes
 v0.6.8 September 15, 2021
 ----------------------------
 Bug fix: downfolding with non-magnetic atoms now works.
+Bug fix: Error reading from user specified structural input file.
+
 
 
 v0.6.7 September 10, 2021
