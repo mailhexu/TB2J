@@ -22,7 +22,7 @@ class JDownfolder():
         self.nqpt = len(self.qpts)
 
     def get_Jq(self, q):
-        Jq = np.zeros((self.nsite, self.nsite), dtype=complex)
+        Jq = np.zeros(self.JR[0].shape, dtype=complex)
         for iR, R in enumerate(self.Rlist):
             phase = np.exp(2.0j * np.pi * np.dot(q, R))
             Jq += self.JR[iR] * phase
@@ -57,37 +57,44 @@ class JDownfolder_pickle():
             self.obj = pickle.load(myfile)
 
         self.atoms = self.obj['atoms']
+        atoms = self.atoms
+        index_spin = self.obj['index_spin']
+        ind_atoms = self.obj['ind_atoms']
+        Jdict = self.obj['exchange_Jdict']
+        nspin = len([x for x in index_spin if x>=0])
+
+
+        self.natom=len(self.atoms)
+
         self.magnetic_elements= metals
         self.iM=[]
         self.iL=[]
+        self.ind_mag_atoms=[]
         for i, sym in enumerate(self.atoms.get_chemical_symbols()):
             if sym in self.magnetic_elements:
-                self.iM.append(i)
+                self.iM.append(index_spin[i])
+                self.ind_mag_atoms.append(i)
             elif sym in ligands:
-                self.iL.append(i)
-        self.ind_mag_atoms=self.iM
+                self.iL.append(index_spin[i])
 
         self.nM=len(self.iM)
         self.nL=len(self.iL)
         self.nsite=self.nM+self.nL
 
-        atoms = self.obj['atoms']
-        index_spin = self.obj['index_spin']
-        ind_atoms = self.obj['ind_atoms']
-        Jdict = self.obj['exchange_Jdict']
-        nspin = len(index_spin)
-        JR = defaultdict(lambda: np.zeros((nspin, nspin), dtype=float))
+
+        # build matrix form of JR
+        JR = defaultdict(lambda: np.zeros((self.nsite, self.nsite), dtype=float))
         for key, val in Jdict.items():
             R, i, j = key
             JR[R][i, j] = val
 
         Rlist = list(JR.keys())
 
-        # build matrix form of JR
         nR = len(Rlist)
-        JR2 = np.zeros((nR, nspin, nspin), dtype=float)
+        JR2 = np.zeros((nR, self.nsite, self.nsite), dtype=float)
         for i, (key, val) in enumerate(JR.items()):
             JR2[i] = val
+
 
         # sum rule
         iR0 = np.argmin(np.linalg.norm(Rlist, axis=1))
@@ -108,9 +115,9 @@ class JDownfolder_pickle():
             for i, ispin in enumerate(self.index_spin):
                 for j, jspin in enumerate(self.index_spin):
                     if ispin>=0 and jspin>=0:
-                        if not (tuple(R) ==(0,0,0) and i==j): 
+                        if not (tuple(R) ==(0,0,0) and ispin==jspin): 
                             # self interaction.
-                            self.Jdict[(tuple(R), i, j)]=Jd[iR, i, j]
+                            self.Jdict[(tuple(R), ispin, jspin)]=Jd[iR, ispin, jspin]
 
 
         io = SpinIO(atoms=atoms,
