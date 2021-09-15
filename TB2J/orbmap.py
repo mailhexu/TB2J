@@ -57,4 +57,5 @@ def test():
     map_orbs_matrix(olist, spinor=True, include_only=['3d'])
 
 
-test()
+if __name__=="__main__":
+    test()

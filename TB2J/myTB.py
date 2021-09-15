@@ -177,7 +177,6 @@ class MyTB(AbstractTB):
     @staticmethod
     def read_from_wannier_dir(path,
                               prefix,
-                              posfile='POSCAR',
                               atoms=None,
                               nls=True,
                               groupby=None):
@@ -193,10 +192,6 @@ class MyTB(AbstractTB):
         nbasis, data = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
         xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix +
                                                    '_centres.xyz'))
-        try:
-            atoms = read(os.path.join(path, posfile))
-        except:
-            atoms = parse_atoms(os.path.join(path, f"{prefix}.win"))
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
         if groupby == 'spin':
@@ -220,7 +215,6 @@ class MyTB(AbstractTB):
     @staticmethod
     def load_banddownfolder(path,
                             prefix,
-                            #posfile='POSCAR',
                             atoms=None,
                             nls=True,
                             groupby='spin'):

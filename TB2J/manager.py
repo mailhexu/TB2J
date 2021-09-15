@@ -44,7 +44,7 @@ def gen_exchange(path,
         atoms = read(os.path.join(path, posfile))
     except Exception:
 
-        print(f"Cannot read atomic structure from file {fname}.")
+        print(f"Cannot read atomic structure from file {fname}. Trying to read from Wannier input.")
         if colinear:
             fname=os.path.join(path, f"{prefix_up}.win")
         else:
@@ -59,14 +59,12 @@ def gen_exchange(path,
             print("Reading Wannier90 hamiltonian: spin up.")
             tbmodel_up = MyTB.read_from_wannier_dir(path=path,
                                                     prefix=prefix_up,
-                                                    #posfile=posfile,
                                                     atoms=atoms, 
                                                     nls=False)
             print("Reading Wannier90 hamiltonian: spin down.")
             tbmodel_dn = MyTB.read_from_wannier_dir(path=path,
                                                     prefix=prefix_dn,
                                                     atoms=atoms,
-                                                    #posfile=posfile,
                                                     nls=False)
             if os.path.exists(basis_fname):
                 basis = read_basis(basis_fname)
@@ -76,12 +74,11 @@ def gen_exchange(path,
             print("Reading Banddownfolder hamiltonian: spin up.")
             tbmodel_up = MyTB.load_banddownfolder(path=path,
                                                   prefix=prefix_up,
-                                                  atoms=atoms, #posfile=posfile,
-                                                  nls=False)
+                                                  atoms=atoms,                                                   nls=False)
             print("Reading Banddownfolder hamiltonian: spin down.")
             tbmodel_dn = MyTB.load_banddownfolder(path=path,
                                                   prefix=prefix_dn,
-                                                  atoms=atoms, #posfile=posfile,
+                                                  atoms=atoms, 
                                                   nls=False)
 
             basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
@@ -145,13 +142,13 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
         print("Reading Wannier90 hamiltonian: spin up.")
         tbmodel_up = MyTB.read_from_wannier_dir(path=path,
                                                 prefix=prefix_up,
-                                                atoms=atoms, #posfile=posfile,
+                                                atoms=atoms,
                                                 groupby=None,
                                                 nls=False)
         print("Reading Wannier90 hamiltonian: spin down.")
         tbmodel_dn = MyTB.read_from_wannier_dir(path=path,
                                                 prefix=prefix_dn,
-                                                atoms=atoms, #posfile=posfile,
+                                                atoms=atoms,
                                                 groupby=None,
                                                 nls=False)
         tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
@@ -192,7 +189,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
             raise ValueError("groupby can only be spin or orbital.")
         tbmodel = MyTB.read_from_wannier_dir(path=path,
                                              prefix=prefix_SOC,
-                                             atoms=atoms, #posfile=posfile,
+                                             atoms=atoms,
                                              groupby=groupby,
                                              nls=True)
         if os.path.exists(basis_fname):
