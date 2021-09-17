@@ -23,3 +23,5 @@ script:
   - cd examples/abinit-w90/SrMnO3
   - ls -lah
   - sh get_J.sh
+  - cd TB2J_results/Multibinit
+  - TB2J_magnon.py --figfname magnon.png
