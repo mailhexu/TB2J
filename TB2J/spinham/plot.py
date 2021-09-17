@@ -1,17 +1,59 @@
 #!/usr/bin/env python
 from __future__ import division
+import ase
 from ase.atoms import Atoms
 from mpl_toolkits.mplot3d import axes3d
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg
-from ase.geometry import cell_to_cellpar, crystal_structure_from_cell, cellpar_to_cell
+from ase.geometry import cell_to_cellpar, cellpar_to_cell
 from ase.dft.kpoints import (get_special_points, bandpath, special_paths,
                              parse_path_string)
 #from minimulti.spin.hamiltonian import SpinHamiltonian
 #from minimulti.spin.mover import SpinMover
 from .qsolver import QSolver
 from .constants import mu_B, meV
+
+
+
+def group_band_path(bp, eps=1e-8, shift=0.15):
+    xs, Xs, knames = bp.get_linear_kpoint_axis()
+    kpts = bp.kpts
+
+    m = (xs[1:]-xs[:-1] < eps)
+    segments = [0]+list(np.where(m)[0]+1)+[len(xs)]
+
+    # split Xlist
+    xlist, kptlist = [], []
+    for i, (start, end) in enumerate(zip(segments[:-1], segments[1:])):
+        kptlist.append(kpts[start:end])
+        xlist.append(xs[start:end]+i*shift)
+
+    m = (Xs[1:]-Xs[:-1] < eps)
+
+    s = np.where(m)[0] + 1
+
+    for i in s:
+        Xs[i:] += shift
+
+    return xlist, kptlist, Xs, knames
+
+
+def test_group_band_path():
+    atoms = ase.Atoms('H', cell=[1, 1, 2])
+    bp = atoms.cell.bandpath(npoints=50)
+    xlist, kptlist, Xs, knames = group_band_path(bp)
+
+    for x, k in zip(xlist, kptlist):
+        plt.plot(x,x)
+
+    plt.xticks(Xs, knames)
+    plt.show()
+
+
+
+if __name__=="__main__":
+    test_group_band_path()
 
 
 def plot_3d_vector(positions, vectors, length=0.1):

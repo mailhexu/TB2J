@@ -1,6 +1,10 @@
 Release Notes
 ===============
 
+v0.6.9 September 15, 2021
+----------------------------
+Better xticks in magnon bands. 
+
 v0.6.8 September 15, 2021
 ----------------------------
 Bug fix: downfolding with non-magnetic atoms now works.

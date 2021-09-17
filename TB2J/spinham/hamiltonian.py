@@ -8,7 +8,7 @@ from .hamiltonian_terms import (ZeemanTerm, UniaxialMCATerm, ExchangeTerm,
 from .constants import mu_B, gyromagnetic_ratio
 from .supercell import SupercellMaker
 from .spin_xml import SpinXmlParser, SpinXmlWriter
-#from .plot import plot_magnon_band
+from .plot import group_band_path
 from ase.cell import Cell
 #from minimulti.spin.hamiltonian import SpinHamiltonian
 #from minimulti.spin.mover import SpinMover
@@ -324,34 +324,46 @@ class SpinHamiltonian(object):
         if ax is None:
             fig, ax = plt.subplots()
         if knames is None and kvectors is None:
+            # fully automatic k-path
             bp = Cell(self.cell).bandpath(npoints=npoints)
-            kpts = bp.kpts
-            x, X, knames = bp.get_linear_kpoint_axis()
             spk = bp.special_points
+            xlist, kptlist, Xs, knames=group_band_path(bp)
         elif knames is not None and kvectors is None:
+            # user specified kpath by name
             bp = Cell(self.cell).bandpath(knames, npoints=npoints)
+            spk = bp.special_points
             kpts = bp.kpts
-            x, X, knames = bp.get_linear_kpoint_axis()
+            xlist, kptlist, Xs, knames=group_band_path(bp)
         else:
-            kpts, x, X = bandpath(kvectors, self.cell, npoints)
+            # user spcified kpath and kvector.
+            kpts, x, Xs = bandpath(kvectors, self.cell, npoints)
             spk = dict(zip(knames, kvectors))
+            xlist=[x]
+            kptlist=[kpts]
 
         if supercell_matrix is not None:
             kvectors = [np.dot(k, supercell_matrix) for k in kvectors]
+        print("High symmetry k-points:")
+        for name, k in spk.items():
+            if name=='G':
+                name='Gamma'
+            print(f"{name}: {k}")
 
-        evals, evecs = self.solve_k(kpts,Jq=Jq)
-        # Plot band structure
-        nbands = evals.shape[1]
-        emin = np.min(evals[:, 0])
-        for i in range(nbands):
-            ax.plot(x, (evals[:, i]) / 1.6e-22, color=color)
+
+        for kpts, xs in zip(kptlist, xlist):
+            evals, evecs = self.solve_k(kpts,Jq=Jq)
+            # Plot band structure
+            nbands = evals.shape[1]
+            emin = np.min(evals[:, 0])
+            for i in range(nbands):
+                ax.plot(xs, (evals[:, i]) / 1.6e-22, color=color)
+
         ax.set_ylabel('Energy (meV)')
-        ax.set_xlim(x[0], x[-1])
-        #ax.set_ylim(0)
-        ax.set_xticks(X)
+        ax.set_xlim(xlist[0][0], xlist[-1][-1])
+        ax.set_xticks(Xs)
         knames=[x if x!='G' else '$\Gamma$' for x in knames]
         ax.set_xticklabels(knames)
-        for x in X:
+        for x in Xs:
             ax.axvline(x, linewidth=0.6, color='gray')
         return ax
 

@@ -161,6 +161,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         self.orbital_names = orbital_names
 
+    def get_J(self, i,j, R):
+        return self.exchange_Jdict[(tuple(R), i,j)]
+
     def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
         if not os.path.exists(path):
             os.makedirs(path)
@@ -223,7 +226,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                   color='blue',
                   marker='o',
                   fname=None,
-                  show=False):
+                  show=False,
+                  **kwargs,
+                  ):
         if ax is None:
             fig, ax = plt.subplots()
         ds = []
@@ -232,7 +237,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             d = self.distance_dict[key][1]
             ds.append(d)
             Js.append(val * 1e3)
-        ax.scatter(ds, Js, marker=marker, color=color)
+        ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
         ax.axhline(color='gray')
         ax.set_xlabel("Distance ($\AA$)")
         ax.set_ylabel("J (meV)")
