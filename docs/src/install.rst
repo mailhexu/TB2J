@@ -3,14 +3,21 @@ Installation
 
 Dependencies
 ------------
+TB2J is a python package which requires python version higher than 3.6 to work.
+It depends on the following packages.
 
--  python (>=3.6)
 -  numpy
 -  scipy
 -  ASE (atomic simulation environment)
 -  matplotlib
+
+If you use pip to intall, they will be automatically installed so there is no need to 
+install them manually before installing TB2J. 
+
+There are some optional dependencies, which you need to install if needed.
+
 -  sisl (optional) for Siesta interface
--  GPAW (optional) For gpaw interface
+-  GPAW (optional) For gpaw interface (not yet fully operational).
 
 How to install
 --------------
