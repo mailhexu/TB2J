@@ -125,7 +125,7 @@ class ExchangeCL2(ExchangeCL):
                 self.JJ_list[(R, iatom, jatom)].append(tmp / (4.0 * np.pi))
                 Rij_done.add((R, iatom, jatom))
                 if (Rm, jatom, iatom) not in Rij_done:
-                    Jorb_list[(Rm, jatom, iatom)] = t / (4.0 * np.pi)
+                    Jorb_list[(Rm, jatom, iatom)] = t.T / (4.0 * np.pi)
                     JJ_list[(Rm, jatom, iatom)] = tmp / (4.0 * np.pi)
                     Rij_done.add((Rm, jatom, iatom))
         return Jorb_list, JJ_list
