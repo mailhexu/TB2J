@@ -182,16 +182,6 @@ class ExchangeCL2(ExchangeCL):
                 self.exchange_Jdict_orb[
                     keyspin] = self.simplify_orbital_contributions(Jorbij, iatom, jatom)
 
-    def simplify_orbital_contributions(self, Jorbij, iatom, jatom):
-        """
-        sum up the contribution of all the orbitals with same (n,l,m)
-        """
-        if self.backend_name == 'SIESTA':
-            mmat_i = self.mmats[iatom]
-            mmat_j = self.mmats[jatom]
-            Jorbij = mmat_i.T @ Jorbij @ mmat_j
-        return Jorbij
-
     def get_rho_e(self, rho_up, rho_dn):
         #self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))
         #self.rho_dn_list.append(-1.0 / np.pi * np.imag(rho_dn[(0,0,0)]))
