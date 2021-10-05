@@ -84,7 +84,7 @@ def write_atom_section(cls, myfile):
 
 
 def write_orbital_section(cls, myfile):
-    if cls.exchange_Jdict_orb is not None:
+    if not cls.Jiso_orb:
         myfile.write('=' * 90 + '\n')
         myfile.write('Orbitals used in decomposition: \n')
         myfile.write("The name of the orbitals for the decomposition: \n")
@@ -99,7 +99,9 @@ def write_orbital_section(cls, myfile):
 def write_exchange_section(cls,
                            myfile,
                            order='distance',
-                           write_experimental: bool = True):
+                           write_experimental: bool = True,
+                           write_orb_decomposition: bool = False,
+                           ):
     symnum = symbol_number(cls.atoms)
     sns = list(symnum.keys())
     poses = cls.atoms.get_positions()
@@ -153,7 +155,7 @@ def write_exchange_section(cls,
         if write_experimental:
             try:
                 #DMI2 = cls.debug_dict['DMI2'][ll] * 1e3
-                #myfile.write('[Debug!] DMI2: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                # myfile.write('[Debug!] DMI2: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
                 #    DMI2[0], DMI2[1], DMI2[2]))
                 pass
             except:
@@ -177,11 +179,33 @@ def write_exchange_section(cls,
                 '[Testing!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
                     J[0], J[1], J[2]))
 
-        if cls.exchange_Jdict_orb:
-            myfile.write("Orbital contributions:\n {} \n".format(
-                np.array_str(cls.exchange_Jdict_orb[ll] * 1e3,
-                             precision=3,
-                             suppress_small=True)))
+        if write_orb_decomposition:
+            if cls.Jiso_orb:
+                myfile.write("Orbital contributions:\n isotropic J:\n {} \n".format(
+                    np.array_str(cls.Jiso_orb[ll] * 1e3,
+                                 precision=3,
+                                 suppress_small=True)))
+    
+            xyz='xyz'
+            if cls.DMI_orb:
+                for i in range(3):
+                    myfile.write(f"DMI {xyz[i]}:\n")
+                    myfile.write(np.array_str(cls.DMI_orb[ll][i] * 1e3,
+                                 precision=3,
+                                 suppress_small=True))
+                    myfile.write("\n")
+    
+            if cls.Jani_orb:
+                for i in range(3):
+                    for j in range(3):
+                        myfile.write(f"Jani {xyz[i]}{xyz[j]}:\n")
+                        myfile.write(np.array_str(cls.Jani_orb[ll][i,j] * 1e3,
+                                 precision=3,
+                                 suppress_small=True))
+                        myfile.write("\n")
+    
+    
+
 
 
 def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
@@ -221,7 +245,7 @@ def write_txt(cls,
               path='TB2J_results',
               fname='exchange.out',
               order='distance',
-              write_orb=False,
+              write_orb_decomposition=False,
               write_experimental=True,
               cutoff=1e-4):
     if not os.path.exists(path):
@@ -233,4 +257,6 @@ def write_txt(cls,
         write_orbital_section(cls, myfile)
         write_exchange_section(cls,
                                myfile,
-                               write_experimental=write_experimental)
+                               write_experimental=write_experimental,
+                               write_orb_decomposition= write_orb_decomposition
+                               )

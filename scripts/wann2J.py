@@ -128,6 +128,13 @@ def run_wann2J():
                         help="Whether to use spinor wannier function.",
                         default=False)
 
+    parser.add_argument("--orb_decomposition", 
+                        default=False,
+                        action='store_true',
+                        help="whether to do orbital decomposition in the non-collinear mode."
+            )
+
+
     parser.add_argument(
         "--output_path",
         help="The path of the output directory, default is TB2J_results",
@@ -179,7 +186,8 @@ def run_wann2J():
                  output_path=args.output_path,
                  exclude_orbs=args.exclude_orbs, 
                  wannier_type=args.wannier_type,
-                 qspace= args.qspace
+                 qspace= args.qspace,
+                 orb_decomposition=args.orb_decomposition
             )
 
 

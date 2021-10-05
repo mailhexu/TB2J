@@ -43,7 +43,7 @@ class Exchange():
             use_cache=False,
             np=1,
             description='',
-            orb_decomposition=True
+            orb_decomposition=False
     ):
 
         self.atoms = atoms
@@ -87,6 +87,8 @@ class Exchange():
         self.has_elistc = False
         self.description = description
         self._clean_tbmodels()
+
+
 
         # self._prepare_Jorb_file()
 
@@ -390,14 +392,14 @@ class ExchangeNCL(Exchange):
                     torb[a, b] = self.simplify_orbital_contributions(
                         np.einsum('ij, ji -> ij', piGij, pjGji)/np.pi,
                         iatom, jatom)
-                    tmp[a, b] = np.sum(torb)
+                    tmp[a, b] = np.sum(torb[a,b])
 
         else:
             for a in range(4):
                 pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
                     jatom)
                 for b in range(4):
-                    AijRab = np.matmul(pGp, Gji_Ixyz[b])
+                    AijRab = pGp @ Gji_Ixyz[b]
                     tmp[a, b] = np.trace(AijRab)/np.pi
             torb = None
         return tmp, torb
@@ -422,41 +424,42 @@ class ExchangeNCL(Exchange):
         """
         convert the orbital composition of A into J, DMI, Jani
         """
+        self.Jiso_orb = {}
         self.Jani_orb = {}
         self.DMI_orb = {}
-        self.Jiso_orb = {}
 
-        for key, val in self.A_ijR_orb.items():
-            R, iatom, jatom = key
-            Rm = tuple(-x for x in R)
-            valm = self.A_ijR[(Rm, jatom, iatom)]
-            ni = self.norb_reduced[iatom]
-            nj = self.norb_reduced[jatom]
-
-            is_nonself = not (R == (0, 0, 0) and iatom == jatom)
-            ispin = self.ispin(iatom)
-            jspin = self.ispin(jatom)
-            keyspin = (R, ispin, jspin)
-
-            # isotropic J
-            Jiso = np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
-
-            # off-diagonal anisotropic exchange
-            Ja = np.zeros((3, 3, ni, nj), dtype=float)
-            for i in range(3):
-                for j in range(3):
-                    Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
-            # DMI
-
-            Dtmp = np.zeros((3, ni, nj), dtype=float)
-            for i in range(3):
-                Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
-
-            if is_nonself:
-                self.Jiso_orb[keyspin] = Jiso
-                self.Jani_orb[keyspin] = Ja
-                self.DMI_orb[keyspin] = Dtmp
-
+        if self.orb_decomposition:
+            for key, val in self.A_ijR_orb.items():
+                R, iatom, jatom = key
+                Rm = tuple(-x for x in R)
+                valm = self.A_ijR[(Rm, jatom, iatom)]
+                ni = self.norb_reduced[iatom]
+                nj = self.norb_reduced[jatom]
+    
+                is_nonself = not (R == (0, 0, 0) and iatom == jatom)
+                ispin = self.ispin(iatom)
+                jspin = self.ispin(jatom)
+                keyspin = (R, ispin, jspin)
+    
+                # isotropic J
+                Jiso = np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
+    
+                # off-diagonal anisotropic exchange
+                Ja = np.zeros((3, 3, ni, nj), dtype=float)
+                for i in range(3):
+                    for j in range(3):
+                        Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                # DMI
+    
+                Dtmp = np.zeros((3, ni, nj), dtype=float)
+                for i in range(3):
+                    Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
+    
+                if is_nonself:
+                    self.Jiso_orb[keyspin] = Jiso
+                    self.Jani_orb[keyspin] = Ja
+                    self.DMI_orb[keyspin] = Dtmp
+    
     def A_to_Jtensor(self):
         """
         Calculate J tensors from A.
@@ -471,7 +474,7 @@ class ExchangeNCL(Exchange):
         self.Jprime = {}
         self.B = {}
         self.exchange_Jdict = {}
-        self.exchange_Jdict_orb = {}
+        self.Jiso_orb = {}
 
         self.debug_dict = {'DMI2': {}}
 
@@ -653,8 +656,7 @@ class ExchangeNCL(Exchange):
         GRs = []
         AijRs = {}
 
-        if self.orb_decomposition:
-            AijRs_orb = {}
+        AijRs_orb = {}
 
         npole = len(self.contour.path)
         if self.np > 1:
@@ -722,18 +724,21 @@ class ExchangeNCL(Exchange):
             orbital_names=self.orbital_names,
             distance_dict=self.distance_dict,
             exchange_Jdict=self.exchange_Jdict,
+            Jiso_orb=self.Jiso_orb,
             dmi_ddict=self.DMI,
+            Jani_dict=self.Jani,
+            DMI_orb=self.DMI_orb,
+            Jani_orb=self.Jani_orb,
             NJT_Jdict=self.Jdict_NJT,
             NJT_ddict=self.Ddict_NJT,
-            Jani_dict=self.Jani,
             biquadratic_Jdict=self.B,
             debug_dict=self.debug_dict,
             description=self.description,
         )
         output.write_all(path=path)
-        with open("TB2J_results/J_orb.pickle", 'wb') as myfile:
-            pickle.dump({'Jiso_orb': self.Jiso_orb,
-                         'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
+        #with open("TB2J_results/J_orb.pickle", 'wb') as myfile:
+        #    pickle.dump({'Jiso_orb': self.Jiso_orb,
+        #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
     def finalize(self):
         self.G.clean_cache()

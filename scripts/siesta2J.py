@@ -25,12 +25,12 @@ def run_siesta2J():
         default=None,
         type=float)
     parser.add_argument('--efermi',
-                        help='Fermi energy in eV',
+                        help='Fermi energy in eV. For test only. ',
                         default=None,
                         type=float)
     parser.add_argument(
         '--kmesh',
-        help='kmesh in the format of kx ky kz. Monkhorst pack. If all the numbers are odd, it is Gamma cenetered. (strongly recommended)',
+        help='kmesh in the format of kx ky kz. Monkhorst pack. If all the numbers are odd, it is Gamma cenetered. (strongly recommended), Default: 5 5 5',
         type=int,
         nargs='*',
         default=[5, 5, 5])
@@ -39,7 +39,7 @@ def run_siesta2J():
                         type=float,
                         default=-14.0)
     parser.add_argument('--emax',
-                        help='energy maximum above efermi, default 0.0 eV',
+                        help='energy maximum above efermi. Default 0.0 eV',
                         type=float,
                         default=0.05)
     parser.add_argument(
@@ -54,7 +54,7 @@ def run_siesta2J():
     #    type=float,
     #    default=0.1)
     parser.add_argument('--nz',
-                        help='number of integration steps, default: 50',
+                        help='number of integration steps. Default: 50',
                         default=50,
                         type=int)
     # parser.add_argument(
@@ -63,13 +63,13 @@ def run_siesta2J():
     #    '--nz3', help='number of steps 3, default: 50', default=50, type=int)
     parser.add_argument(
         '--cutoff',
-        help="The minimum of J amplitude to write, (in eV), default is 1e-5 eV",
+        help="The minimum of J amplitude to write, (in eV). Default: 1e-5 eV",
         default=1e-5,
         type=float)
 
     parser.add_argument(
         '--exclude_orbs',
-        help="the indices of wannier functions to be excluded from magnetic site. counting start from 0",
+        help="the indices of wannier functions to be excluded from magnetic site. counting start from 0. Default is none.",
         default=[],
         type=int,
         nargs='+')
@@ -84,6 +84,12 @@ def run_siesta2J():
         help="add description of the calculatiion to the xml file. Essential information, like the xc functional, U values, magnetic state should be given.",
         type=str,
         default="Calculated with TB2J.")
+
+    parser.add_argument("--orb_decomposition", 
+                        default=False,
+                        action='store_true',
+                        help="whether to do orbital decomposition in the non-collinear mode. Default: False."
+            )
 
     parser.add_argument("--fname",
                         default='exchange.xml',
@@ -120,15 +126,13 @@ def run_siesta2J():
         emin=args.emin,
         emax=args.emax,
         nz=args.nz,
-        # height=args.height,
-        # nz1=args.nz1,
-        # nz2=args.nz2,
-        # nz3=args.nz3,
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,
         np=args.np,
-        exclude_orbs=args.exclude_orbs)
+        exclude_orbs=args.exclude_orbs,
+        orb_decomposition=args.orb_decomposition
+        )
 
 
 if __name__ == "__main__":
