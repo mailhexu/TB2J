@@ -60,7 +60,7 @@ class ExchangeCL2(ExchangeCL):
             # self.S0=self.Gup.S0
 
         self.exchange_Jdict = {}
-        self.exchange_Jdict_orb = {}
+        self.Jiso_orb = {}
 
         self.biquadratic = False
 
@@ -179,7 +179,7 @@ class ExchangeCL2(ExchangeCL):
                 np.dot(self.spinat[iatom], self.spinat[jatom]))
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jij
-                self.exchange_Jdict_orb[
+                self.Jiso_orb[
                     keyspin] = self.simplify_orbital_contributions(Jorbij, iatom, jatom)
 
     def get_rho_e(self, rho_up, rho_dn):
@@ -277,7 +277,7 @@ class ExchangeCL2(ExchangeCL):
             orbital_names=self.orbital_names,
             distance_dict=self.distance_dict,
             exchange_Jdict=self.exchange_Jdict,
-            exchange_Jdict_orb=self.exchange_Jdict_orb,
+            Jiso_orb=self.Jiso_orb,
             dmi_ddict=None,
             NJT_Jdict=None,
             NJT_ddict=None,
