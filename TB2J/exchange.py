@@ -196,6 +196,11 @@ class Exchange():
             if sym in self.magnetic_elements:
                 self.ind_mag_atoms.append(i)
 
+        # sanity check to see if some magnetic atom has no orbital.
+        for iatom in self.ind_mag_atoms:
+            if iatom not in self.orb_dict:
+                raise ValueError(f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions.""")
+
         self._spin_dict = {}
         self._atom_dict = {}
         for ispin, iatom in enumerate(self.ind_mag_atoms):
