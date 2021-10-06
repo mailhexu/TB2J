@@ -101,6 +101,9 @@ class ExchangeCL2(ExchangeCL):
         #return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, Gup, Gdn, iatom, jatom):
+        """
+        ! Note: not used. In get_all_A, it is reimplemented.
+        """
         Rij_done = set()
         Jorb_list = dict()
         JJ_list = dict()
@@ -160,7 +163,7 @@ class ExchangeCL2(ExchangeCL):
                     JJ_list[(R, iatom, jatom)] = tmp / (4.0 * np.pi)
                     Rij_done.add((R, iatom, jatom))
                     if (Rm, jatom, iatom) not in Rij_done:
-                        Jorb_list[(Rm, jatom, iatom)] = t / (4.0 * np.pi)
+                        Jorb_list[(Rm, jatom, iatom)] = t.T / (4.0 * np.pi)
                         JJ_list[(Rm, jatom, iatom)] = tmp / (4.0 * np.pi)
                         Rij_done.add((Rm, jatom, iatom))
         return Jorb_list, JJ_list
