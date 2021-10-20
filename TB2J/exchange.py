@@ -88,8 +88,6 @@ class Exchange():
         self.description = description
         self._clean_tbmodels()
 
-
-
         # self._prepare_Jorb_file()
 
     def _prepare_Jorb_file(self):
@@ -199,7 +197,8 @@ class Exchange():
         # sanity check to see if some magnetic atom has no orbital.
         for iatom in self.ind_mag_atoms:
             if iatom not in self.orb_dict:
-                raise ValueError(f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions.""")
+                raise ValueError(
+                    f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions.""")
 
         self._spin_dict = {}
         self._atom_dict = {}
@@ -397,7 +396,7 @@ class ExchangeNCL(Exchange):
                     torb[a, b] = self.simplify_orbital_contributions(
                         np.einsum('ij, ji -> ij', piGij, pjGji)/np.pi,
                         iatom, jatom)
-                    tmp[a, b] = np.sum(torb[a,b])
+                    tmp[a, b] = np.sum(torb[a, b])
 
         else:
             for a in range(4):
@@ -437,34 +436,35 @@ class ExchangeNCL(Exchange):
             for key, val in self.A_ijR_orb.items():
                 R, iatom, jatom = key
                 Rm = tuple(-x for x in R)
-                valm = self.A_ijR[(Rm, jatom, iatom)]
+                valm = self.A_ijR_orb[(Rm, jatom, iatom)]
                 ni = self.norb_reduced[iatom]
                 nj = self.norb_reduced[jatom]
-    
+
                 is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                 ispin = self.ispin(iatom)
                 jspin = self.ispin(jatom)
                 keyspin = (R, ispin, jspin)
-    
+
                 # isotropic J
                 Jiso = np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
-    
+
                 # off-diagonal anisotropic exchange
                 Ja = np.zeros((3, 3, ni, nj), dtype=float)
                 for i in range(3):
                     for j in range(3):
-                        Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                        Ja[i, j] = np.imag(
+                            val[i + 1, j + 1] + valm[i + 1, j + 1])
                 # DMI
-    
+
                 Dtmp = np.zeros((3, ni, nj), dtype=float)
                 for i in range(3):
                     Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
-    
+
                 if is_nonself:
                     self.Jiso_orb[keyspin] = Jiso
                     self.Jani_orb[keyspin] = Ja
                     self.DMI_orb[keyspin] = Dtmp
-    
+
     def A_to_Jtensor(self):
         """
         Calculate J tensors from A.
@@ -741,7 +741,7 @@ class ExchangeNCL(Exchange):
             description=self.description,
         )
         output.write_all(path=path)
-        #with open("TB2J_results/J_orb.pickle", 'wb') as myfile:
+        # with open("TB2J_results/J_orb.pickle", 'wb') as myfile:
         #    pickle.dump({'Jiso_orb': self.Jiso_orb,
         #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
@@ -780,4 +780,3 @@ class ExchangeCL(ExchangeNCL):
             description=self.description,
         )
         output.write_all(path=path)
-
