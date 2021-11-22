@@ -52,9 +52,6 @@ def test_group_band_path():
 
 
 
-if __name__=="__main__":
-    test_group_band_path()
-
 
 def plot_3d_vector(positions, vectors, length=0.1):
     fig = plt.figure()

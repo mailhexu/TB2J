@@ -9,11 +9,11 @@ def main():
                         help="name of the file containing the atomic structure",
                         type=str)
     parser.add_argument('--ftype',
-                        help="type of the output files, e.g.  xyz. Please use the ",
+                        help="type of the output files, e.g.  xyz. Please use the format which contains the full cell matrix. (e.g. .cif file should not be used) ",
                         default='xyz',
                         type=str)
 
-    args=parser.parse_args()
+    args = parser.parse_args()
     rotate_xyz(args.fname, ftype=args.ftype)
 
 

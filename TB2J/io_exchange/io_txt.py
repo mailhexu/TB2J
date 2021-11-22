@@ -84,7 +84,7 @@ def write_atom_section(cls, myfile):
 
 
 def write_orbital_section(cls, myfile):
-    if not cls.Jiso_orb:
+    if cls.Jiso_orb:
         myfile.write('=' * 90 + '\n')
         myfile.write('Orbitals used in decomposition: \n')
         myfile.write("The name of the orbitals for the decomposition: \n")
@@ -185,27 +185,24 @@ def write_exchange_section(cls,
                     np.array_str(cls.Jiso_orb[ll] * 1e3,
                                  precision=3,
                                  suppress_small=True)))
-    
-            xyz='xyz'
+
+            xyz = 'xyz'
             if cls.DMI_orb:
                 for i in range(3):
                     myfile.write(f"DMI {xyz[i]}:\n")
                     myfile.write(np.array_str(cls.DMI_orb[ll][i] * 1e3,
-                                 precision=3,
-                                 suppress_small=True))
+                                              precision=3,
+                                              suppress_small=True))
                     myfile.write("\n")
-    
+
             if cls.Jani_orb:
                 for i in range(3):
                     for j in range(3):
                         myfile.write(f"Jani {xyz[i]}{xyz[j]}:\n")
-                        myfile.write(np.array_str(cls.Jani_orb[ll][i,j] * 1e3,
-                                 precision=3,
-                                 suppress_small=True))
+                        myfile.write(np.array_str(cls.Jani_orb[ll][i, j] * 1e3,
+                                                  precision=3,
+                                                  suppress_small=True))
                         myfile.write("\n")
-    
-    
-
 
 
 def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
@@ -258,5 +255,5 @@ def write_txt(cls,
         write_exchange_section(cls,
                                myfile,
                                write_experimental=write_experimental,
-                               write_orb_decomposition= write_orb_decomposition
+                               write_orb_decomposition=write_orb_decomposition
                                )

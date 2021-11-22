@@ -172,8 +172,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         self.orbital_names = orbital_names
 
-    def get_J(self, i,j, R):
-        return self.exchange_Jdict[(tuple(R), i,j)]
+    def get_J(self, i, j, R):
+        return self.exchange_Jdict[(tuple(R), i, j)]
 
     def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
         if not os.path.exists(path):
@@ -198,21 +198,22 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_pickle(path=path)
         self.write_txt(path=path)
         if self.Jiso_orb:
-            self.write_txt(path=path, fname='exchange_orb_decomposition.txt',
-                       write_orb_decomposition=True)
+            self.write_txt(path=path, fname='exchange_orb_decomposition.out',
+                           write_orb_decomposition=True)
         self.write_multibinit(path=os.path.join(path, 'Multibinit'))
         self.write_tom_format(path=os.path.join(path, 'TomASD'))
         self.write_vampire(path=os.path.join(path, 'Vampire'))
         self.plot_all(savefile=os.path.join(path, 'JvsR.pdf'))
-        self.write_Jq(kmesh=[9, 9, 9], path=path)
+        #self.write_Jq(kmesh=[9, 9, 9], path=path)
 
     def write_txt(self, *args, **kwargs):
         from TB2J.io_exchange.io_txt import write_txt
         write_txt(self, *args, **kwargs)
 
-    def write_txt_with_orb(self, path):
-        from TB2J.io_exchange.io_txt import write_txt
-        write_txt_with_orb(self, path=path, write_experimental=self.write_experimental)
+    # def write_txt_with_orb(self, path):
+    #    from TB2J.io_exchange.io_txt import write_txt
+    #    write_txt_with_orb(
+    #        self, path=path, write_experimental=self.write_experimental)
 
     def write_multibinit(self, path):
         from TB2J.io_exchange.io_multibinit import write_multibinit
@@ -291,6 +292,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         ax.axhline(color='gray')
         ax.legend(loc=1)
         ax.set_ylabel("D (meV)")
+        ax.set_xlabel("Distance ($\AA$)")
         if fname is not None:
             plt.savefig(fname)
         if show:
@@ -320,6 +322,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                        label=f"J{s[i]}{s[j]}")
         ax.axhline(color='gray')
         ax.legend(loc=1, ncol=2)
+        ax.set_xlabel("Distance ($\AA$)")
         ax.set_ylabel("Jani (meV)")
         if fname is not None:
             plt.savefig(fname)
@@ -344,7 +347,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         if title is not None:
             fig.suptitle(title)
         plt.tight_layout()
-        plt.subplots_adjust(hspace=0.03, top=0.93)
+        plt.subplots_adjust(hspace=0.25, top=0.93)
         if savefile is not None:
             plt.savefig(savefile)
         if show:
@@ -352,8 +355,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         plt.clf()
         plt.close()
         return fig, axes
-
-
 
     def write_tom_format(self, path):
         from TB2J.io_exchange.io_tomsasd import write_tom_format
@@ -412,5 +413,6 @@ def test_spin_io():
 
     sio.write_all()
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     test_spin_io()
