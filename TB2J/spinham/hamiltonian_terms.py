@@ -27,7 +27,7 @@ class HamTerm(object):
         r"""
         Hi = -1/ms_i * (\partial H/\partial Si)
         """
-        return -self.jacobian(S) 
+        return -self.jacobian(S)
 
     def calc_hessian(self):
         raise NotImplementedError()
@@ -47,6 +47,9 @@ class HamTerm(object):
         if self._hessian_ijR is None:
             self.calc_hessian_ijR()
         return self._hessian_ijR
+
+    def energy(self, S):
+        raise NotImplementedError()
 
 
 class SingleBodyTerm(HamTerm):
@@ -111,12 +114,12 @@ class ZeemanTerm(SingleBodyTerm):
         super(ZeemanTerm, self).__init__(ms)
         self.H = H
 
-    def eff_field(self, S):
+    def eff_field(self, S, Heff):
         r"""
         Hi = -1/ms_i * (\partial H/\partial Si)
         It is here because it is simpler than the form of jacobian. Therefore faster.
         """
-        return self.H*self.ms
+        Heff[:, :] += self.H * self.ms[:, None]
 
 
 class UniaxialMCATerm(TwoBodyTerm):
@@ -135,13 +138,13 @@ class UniaxialMCATerm(TwoBodyTerm):
     def func_i(self, S, i):
         return -self.Ku[i] * np.dot(S[i], self.e[i])**2
 
-    def jacobian(self, S):
-        return self.hessian().dot(S.reshape(3 * self.nmatoms)).reshape(
+    def eff_field(self, S, Heff):
+        Heff[:, :] -= self.hessian().dot(S.reshape(3 * self.nmatoms)).reshape(
             self.nmatoms, 3)
 
     def calc_hessian(self):
-        self._hessian = ssp.lil_matrix((self.nmatoms * 3, self.nmatoms * 3),
-                                       dtype=float)
+        self._hessian = ssp.lil_matrix(
+            (self.nmatoms * 3, self.nmatoms * 3), dtype=float)
         for i in range(self.nmatoms):
             self._hessian[i * 3:i * 3 + 3, i * 3:i * 3 + 3] = (
                 -2.0 * self.Ku[i]) * np.outer(self.e[i], self.e[i])
@@ -173,8 +176,8 @@ class HomoUniaxialMCATerm(SingleBodyTerm):
     def jacobian_i(self, S, i):
         return -2.0 * self.Ku * np.dot(S[i], self.e) * self.e
 
-    def eff_field(self, S):
-        return 2.0 * self.Ku * np.outer(
+    def eff_field(self, S, Heff):
+        Heff += 2.0 * self.Ku * np.outer(
             np.einsum('ij,j,i->i', S, self.e, 1), self.e)
 
 
@@ -183,7 +186,7 @@ class ExchangeTerm(TwoBodyTerm):
     exchane interaction in Heissenberg model
     """
 
-    def __init__(self, Jdict, ms=None, sparse_matrix_form=True):
+    def __init__(self, Jdict, ms=None, sparse_matrix_form=True, pbc=[1, 1, 1]):
         """
         J is given as a dict of {(i, j, R): val},
          where R is a tuple, val is a scalar.
@@ -193,7 +196,8 @@ class ExchangeTerm(TwoBodyTerm):
         Jmat = defaultdict(float)
         for key, val in self.Jdict.items():
             i, j, R = key
-            Jmat[(i, j)] += val
+            if np.all(R * (1 - np.array(pbc)) == 0):
+                Jmat[(i, j)] += val
         self.ilist, self.jlist = np.array(tuple(Jmat.keys()), dtype='int').T
         self.vallist = np.array(tuple(Jmat.values()))
         self.jac = np.zeros((self.nmatoms, 3))
@@ -203,7 +207,6 @@ class ExchangeTerm(TwoBodyTerm):
     def jacobian(self, S):
         self.jac = -2.0 * self.hessian().dot(S.reshape(
             self.nmatoms * 3)).reshape(self.nmatoms, 3)
-        #self.jac = -1.0 * self.hessian().dot(S)
         return self.jac
 
     def calc_hessian(self):
@@ -276,6 +279,7 @@ class BilinearTerm(TwoBodyTerm):
     """
     Bilinear term
     """
+
     def __init__(self, bidict, ms):
         """
         J is given as a dict of {(i, j, R): val},
@@ -315,7 +319,6 @@ class BilinearTerm(TwoBodyTerm):
         return self._hessian_ijR
 
 
-
 class DipDip(TwoBodyTerm):
     """
     Dipolar interaction.
@@ -324,4 +327,3 @@ class DipDip(TwoBodyTerm):
 
     def __init__(self):
         pass
-

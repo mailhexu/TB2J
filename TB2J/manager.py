@@ -37,6 +37,7 @@ def gen_exchange(path,
                  output_path='TB2J_results',
                  wannier_type="wannier90",
                  qspace=False,
+                 orb_decomposition=False,
                  description=''):
     try:
         fname=os.path.join(path, posfile)
@@ -74,7 +75,8 @@ def gen_exchange(path,
             print("Reading Banddownfolder hamiltonian: spin up.")
             tbmodel_up = MyTB.load_banddownfolder(path=path,
                                                   prefix=prefix_up,
-                                                  atoms=atoms,                                                   nls=False)
+                                                  atoms=atoms,
+                                                  nls=False)
             print("Reading Banddownfolder hamiltonian: spin down.")
             tbmodel_dn = MyTB.load_banddownfolder(path=path,
                                                   prefix=prefix_dn,
@@ -225,7 +227,9 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               orb_decomposition=orb_decomposition,
+                               )
         print("\n")
         exchange.run(path=output_path)
         print(
@@ -246,6 +250,7 @@ def gen_exchange_siesta(fdf_fname,
                         np=1,
                         use_cache=False,
                         output_path='TB2J_results',
+                        orb_decomposition=False,
                         description=''):
 
     try:
@@ -282,10 +287,6 @@ def gen_exchange_siesta(fdf_fname,
             emin=emin,
             emax=emax,
             nz=nz,
-            #height=height,
-            #nz1=nz1,
-            #nz2=nz2,
-            #nz3=nz3,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
@@ -298,9 +299,9 @@ def gen_exchange_siesta(fdf_fname,
             f"All calculation finsihed. The results are in {output_path} directory."
         )
 
-    elif H.spin.is_colinear:
+    elif H.spin.is_colinear and False:
         print(
-            "Reading Siesta hamiltonian: colinear spin. Treat as non-colinear")
+            "Reading Siesta hamiltonian: colinear spin. Treat as non-colinear. For testing only.")
         tbmodel = SislWrapper(H, spin='merge')
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
         print("Starting to calculate exchange.")
@@ -323,7 +324,8 @@ def gen_exchange_siesta(fdf_fname,
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               orb_decomposition=orb_decomposition)
         exchange.run(path=output_path)
         print("\n")
         print(
@@ -358,7 +360,9 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
-                               description=description)
+                               description=description,
+                               orb_decomposition= orb_decomposition
+                               )
         exchange.run(path=output_path)
         print("\n")
         print(

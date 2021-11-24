@@ -1,6 +1,6 @@
 ### Decompose the exchange into orbital contributions.
 
-The exchange J between two atoms can be decomposed into the sum of all the pairs of orbitals. For two atoms  with m and n orbitals respectively, the decomposition can be written as a m b n matrix. 
+The exchange J between two atoms can be decomposed into the sum of all the pairs of orbitals. For two atoms  with m and n orbitals respectively, the decomposition can be written as m by n matrix. 
 
 Here is an example:
 
@@ -75,5 +75,6 @@ where we can find in the $x$ direction, the dxy and dxz  orbitals contribute mos
 Note that the option for selection of orbitals is not available in the Wannier90 interface, as the informations for labelling the orbitals are not included in the Wannier90 output (sometimes it is even not possible to do so as the Wannier functions are not necessarily atomic-orbital like). 
 
 
-
-
+#### Decomposition in non-collinear mode
+In collinear mode, the orbital decomposition of the isotropic exchange, DMI, and anisotropic exchange is turned off by default as there are a lot of terms and boast the size of the output files for large systems. 
+It could be turned on with the --orb_decomposition option. The orbital decomposition will be written into another file called exchange_orb_decomposition.txt. In this file, the orbital decompositions for the isotropic exchange, the three DMI vector elements (Dx, Dy, Dz) and the nine anisotropic exchange matrix elements, will be outputed as m by n matrices for each element. 

@@ -1,10 +1,14 @@
 Release Notes
 ===============
 
+v0.7.0 October 05, 2021
+--------------------------------
+Allow to do orbital decompositions to isotropic/anisotropic exchange and DMI with --orb_decomposition.
+
+
 v0.6.10 September 29, 2021
 ----------------------------
 Bug fix: wrong matrix alignment in orbital decomposition for atom pairs with different species.
-
 
 v0.6.9 September 15, 2021
 ----------------------------

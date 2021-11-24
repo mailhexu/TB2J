@@ -30,7 +30,9 @@ class SpinIO(object):
         colinear=True,
         distance_dict=None,
         exchange_Jdict=None,
-        exchange_Jdict_orb=None,
+        Jiso_orb=None,
+        DMI_orb=None,
+        Jani_orb=None,
         dJdx=None,
         dmi_ddict=None,
         Jani_dict=None,
@@ -53,7 +55,9 @@ class SpinIO(object):
         :param colinear: whether the parameters are for a colinear wannier calculation.
         :param distance_dict: {(R, i,j ): distance}
         :param exchange_Jdict: {(R, i,j): J}
-        :param exchange_Jdict_orb: {(R, i,j): J}
+        :param Jiso_orb: {(R, i,j): J_orb}
+        :param DMI_orb: {(R, i,j): D_orb}
+        :param Jani_orb: {(R, i,j): Jani_orb}
         :param dJdx: {(R, i,j): dJdx}
         :param dim_ddict:{(R, i,j): DMI}
         :param Jani_dict: {(R, i,j): Jani'}, Jani is a 3*3 matrix
@@ -68,13 +72,16 @@ class SpinIO(object):
         :param description: add some description into the xml file.
         """
         self.atoms = atoms  #: atomic structures, ase.Atoms object
-        self.index_spin = index_spin  #: index of spin linked to atoms. -1 if non-magnetic
+        self.index_spin = index_spin
+        #: index of spin linked to atoms. -1 if non-magnetic
         self.spinat = spinat  #: spin for each atom. shape of (natom, 3)
         self.colinear = colinear  #: If the calculation is collinear or not
         if self.colinear and self.spinat != []:
             self.magmoms = np.array(self.spinat)[:, 2]
         self.charges = charges
-        #: A dictionary of distances, the keys are (i,j, R), where i and j are spin index and R is the cell index, a tuple of three integers.
+        #: A dictionary of distances, the keys are (i,j, R),
+        # where i and j are spin index and R is the cell index,
+        # a tuple of three integers.
         self.distance_dict = distance_dict
         self.ind_atoms = {}  #: The index of atom for each spin.
         for iatom, ispin in enumerate(self.index_spin):
@@ -83,13 +90,17 @@ class SpinIO(object):
 
         if exchange_Jdict is not None:
             self.has_exchange = True  #: whether there is isotropic exchange
-            #: The dictionary of :math:`J_{ij}(R)`, the keys are (i,j, R), where R is a tuple, and the value is the isotropic exchange
+            #: The dictionary of :math:`J_{ij}(R)`, the keys are (i,j, R),
+            # where R is a tuple, and the value is the isotropic exchange
             self.exchange_Jdict = exchange_Jdict
         else:
             self.has_exchange = False
             self.exchange_Jdict = None
 
-        self.exchange_Jdict_orb = exchange_Jdict_orb
+        self.Jiso_orb = Jiso_orb
+
+        self.DMI_orb = DMI_orb
+        self.Jani_orb = Jani_orb
 
         self.dJdx = dJdx
 
@@ -161,8 +172,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         self.orbital_names = orbital_names
 
-    def get_J(self, i,j, R):
-        return self.exchange_Jdict[(tuple(R), i,j)]
+    def get_J(self, i, j, R):
+        return self.exchange_Jdict[(tuple(R), i, j)]
 
     def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
         if not os.path.exists(path):
@@ -186,15 +197,23 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def write_all(self, path='TB2J_results'):
         self.write_pickle(path=path)
         self.write_txt(path=path)
+        if self.Jiso_orb:
+            self.write_txt(path=path, fname='exchange_orb_decomposition.out',
+                           write_orb_decomposition=True)
         self.write_multibinit(path=os.path.join(path, 'Multibinit'))
         self.write_tom_format(path=os.path.join(path, 'TomASD'))
         self.write_vampire(path=os.path.join(path, 'Vampire'))
         self.plot_all(savefile=os.path.join(path, 'JvsR.pdf'))
-        self.write_Jq(kmesh=[9, 9, 9], path=path)
+        #self.write_Jq(kmesh=[9, 9, 9], path=path)
 
-    def write_txt(self, path):
+    def write_txt(self, *args, **kwargs):
         from TB2J.io_exchange.io_txt import write_txt
-        write_txt(self, path=path, write_experimental=self.write_experimental)
+        write_txt(self, *args, **kwargs)
+
+    # def write_txt_with_orb(self, path):
+    #    from TB2J.io_exchange.io_txt import write_txt
+    #    write_txt_with_orb(
+    #        self, path=path, write_experimental=self.write_experimental)
 
     def write_multibinit(self, path):
         from TB2J.io_exchange.io_multibinit import write_multibinit
@@ -273,6 +292,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         ax.axhline(color='gray')
         ax.legend(loc=1)
         ax.set_ylabel("D (meV)")
+        ax.set_xlabel("Distance ($\AA$)")
         if fname is not None:
             plt.savefig(fname)
         if show:
@@ -302,6 +322,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                        label=f"J{s[i]}{s[j]}")
         ax.axhline(color='gray')
         ax.legend(loc=1, ncol=2)
+        ax.set_xlabel("Distance ($\AA$)")
         ax.set_ylabel("Jani (meV)")
         if fname is not None:
             plt.savefig(fname)
@@ -326,7 +347,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         if title is not None:
             fig.suptitle(title)
         plt.tight_layout()
-        plt.subplots_adjust(hspace=0.03, top=0.93)
+        plt.subplots_adjust(hspace=0.25, top=0.93)
         if savefile is not None:
             plt.savefig(savefile)
         if show:
@@ -334,8 +355,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         plt.clf()
         plt.close()
         return fig, axes
-
-
 
     def write_tom_format(self, path):
         from TB2J.io_exchange.io_tomsasd import write_tom_format
@@ -394,5 +413,6 @@ def test_spin_io():
 
     sio.write_all()
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     test_spin_io()
