@@ -1,8 +1,14 @@
-Application: Spin model in MULTIBINIT
+Application: Spin Dynamics
 =====================================
 
 The output of TB2J can be directly readed by several atomistic spin
-dynamics and Monte Carlo code. Here we show how to use MULTIBINIT, a
+dynamics and Monte Carlo code. Currently TB2J can provide output for
+MULTIBINIT and Vampire. 
+
+
+Interface with Multibinit
+------------------------------------------
+Here we show how to use MULTIBINIT, a
 second principles code which can do spin dynamics. It is a part of the
 `ABINIT <ABINIT>`_ package since version 9.0. The tutorial of the spin dynamics can be found
 on `MULTIBINIT tutorial page <MULTIBINIT>`_.
@@ -59,4 +65,25 @@ to run the spin dynamics. A mb.out.varT file is then generated, which has the vo
 
 
 
+Interface with Vampire
+--------------------------------------
+Warning: there might be compatibility issues in the TB2J-Vampire interface for some versions, please contact the developpers if you encounter some of them. 
 
+A few notes about the Vampire input format:
+
+There are 6 exchange interaction format in Vampire. 
+
+* isotropic
+
+* vectorial
+
+* tensorial
+
+* normalised-isotropic
+
+* normalised-vectorial
+
+* normalised-tensorial
+
+Since version 0.7.1, the TB2J-Vampire output take the "tensorial" format, in which the exchange values are 2 times that in the convention of TB2J. 
+The anisotropic exchange and DMI are not written as the time of v0.7.1. It will be soon added. 

@@ -47,7 +47,7 @@ def write_vampire_unitcell_file(cls, fname):
 
         nexch = len(cls.exchange_Jdict.items())
         myfile.write("{num_interactions} {type_exchange}\n".format(
-            num_interactions=nexch, type_exchange='tensor'))
+            num_interactions=nexch, type_exchange='tensorial'))
 
         counter = -1
         for key, val in cls.exchange_Jdict.items():
@@ -60,7 +60,7 @@ def write_vampire_unitcell_file(cls, fname):
                        Rx=key[0][0],
                        Ry=key[0][1],
                        Rz=key[0][2],
-                       Jij=val / J))
+                       Jij=2.0*val / J))
 
 
 def write_vampire_mat_file(cls, fname):
@@ -154,5 +154,5 @@ output:material-magnetisation
 """
     with open(fname, 'w') as myfile:
         #cellpar = cls.atoms.get_cell_lengths_and_angles()
-        cellpar=cls.atoms.cell.cellpar()
+        cellpar = cls.atoms.cell.cellpar()
         myfile.write(text.format(a=cellpar[0], b=cellpar[1], c=cellpar[2]))

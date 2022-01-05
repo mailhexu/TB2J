@@ -1,6 +1,12 @@
 Release Notes
 ===============
 
+v0.7.1 January 04, 2021
+--------------------------------
+Bug fix: convention in Vampire output (tensor->tensorial, and a factor of 2 added to the exchange values).
+Some documentation about the Vampire format added.
+(Contributions from Jun Gyu Lee.)
+
 v0.7.0 October 05, 2021
 --------------------------------
 Allow to do orbital decompositions to isotropic/anisotropic exchange and DMI with --orb_decomposition.

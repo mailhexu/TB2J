@@ -146,6 +146,10 @@ def write_exchange_section(cls,
             dJdx = cls.dJdx[ll]
             myfile.write(f"dJ/dx: {dJdx*1e3:.3f}\n")
 
+        if cls.dJdx2 is not None:
+            dJdx2 = cls.dJdx2[ll]
+            myfile.write(f"d2J/dx2: {dJdx2*1e3:.3f}\n")
+
         if cls.dmi_ddict is not None:
             DMI = cls.dmi_ddict[ll] * 1e3
             myfile.write(

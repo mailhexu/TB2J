@@ -34,6 +34,7 @@ class SpinIO(object):
         DMI_orb=None,
         Jani_orb=None,
         dJdx=None,
+        dJdx2=None,
         dmi_ddict=None,
         Jani_dict=None,
         biquadratic_Jdict=None,
@@ -59,6 +60,7 @@ class SpinIO(object):
         :param DMI_orb: {(R, i,j): D_orb}
         :param Jani_orb: {(R, i,j): Jani_orb}
         :param dJdx: {(R, i,j): dJdx}
+        :param dJdx2: {(R, i,j): dJdx2}
         :param dim_ddict:{(R, i,j): DMI}
         :param Jani_dict: {(R, i,j): Jani'}, Jani is a 3*3 matrix
         :param biqudratic_Jdict: {(R, i,j ): J}
@@ -103,6 +105,7 @@ class SpinIO(object):
         self.Jani_orb = Jani_orb
 
         self.dJdx = dJdx
+        self.dJdx2 = dJdx2
 
         if dmi_ddict is not None:
             self.has_dmi = True  #: Whether there is DMI.
