@@ -18,8 +18,8 @@ setup(
         'scripts/wann2J.py', 'scripts/siesta2J.py', 'scripts/TB2J_rotate.py',
         'scripts/TB2J_merge.py', 'scripts/TB2J_magnon.py', 'scripts/TB2J_downfold.py'
     ],
-    install_requires=['numpy', 'scipy', 'matplotlib',
-                      'ase>=3.19', 'tqdm', 'p_tqdm', 'pathos', 'packaging'],
+    install_requires=['numpy>1.16.5', 'scipy', 'matplotlib',
+                      'ase>=3.19', 'tqdm', 'p_tqdm', 'pathos', 'packaging>=20.0'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Programming Language :: Python :: 3',

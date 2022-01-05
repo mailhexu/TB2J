@@ -5,5 +5,5 @@ ase>=3.19
 tqdm>=4.42.0
 p_tqdm
 pathos
-packaging
+packaging>=20.0
 
