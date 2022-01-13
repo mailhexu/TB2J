@@ -24,6 +24,7 @@ def plot_magnon_band(fname='exchange.xml',
                      supercell_matrix=np.eye(3),
                      Jq=False,
                      kpath_fname='exchange_kpth.txt',
+                     ax=None,
                      **kwargs
                      ):
     m = SpinModel(fname=fname, sc_matrix=None)
@@ -34,6 +35,7 @@ def plot_magnon_band(fname='exchange.xml',
                        kpath_fname=kpath_fname,
                        Jq=Jq,
                        supercell_matrix=supercell_matrix,
+                       ax=ax
                        )
 
     plt.savefig(figfname)

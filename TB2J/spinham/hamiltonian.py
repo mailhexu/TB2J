@@ -317,7 +317,7 @@ class SpinHamiltonian(object):
                                             [.5, .5, .5]]),
                          knames=['$\Gamma$', 'X', 'M', '$\Gamma$', 'R'],
                          supercell_matrix=None,
-                         npoints=100,
+                         npoints=50,
                          color='red',
                          kpath_fname=None,
                          Jq=False,
