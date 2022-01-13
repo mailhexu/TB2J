@@ -8,9 +8,11 @@ from ase.cell import Cell
 import numpy as np
 from TB2J import __version__
 
+
 def write_emin(**kwargs):
-    m=SpinIO.load_pickle("./")
+    m = SpinIO.load_pickle("./")
     m.write_Jq(kmesh=[9, 9, 9], path='./', **kwargs)
+
 
 def plot_magnon_band(fname='exchange.xml',
                      path='./',
@@ -19,6 +21,7 @@ def plot_magnon_band(fname='exchange.xml',
                      kvectors=None,
                      knames=None,
                      figfname="magnon_band.pdf",
+                     supercell_matrix=np.eye(3),
                      Jq=False,
                      kpath_fname='exchange_kpth.txt',
                      **kwargs
@@ -30,7 +33,8 @@ def plot_magnon_band(fname='exchange.xml',
                        npoints=npoints,
                        kpath_fname=kpath_fname,
                        Jq=Jq,
-)
+                       supercell_matrix=supercell_matrix,
+                       )
 
     plt.savefig(figfname)
     if show:

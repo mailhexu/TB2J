@@ -127,7 +127,7 @@ class SpinHamiltonian(object):
         snorm = np.linalg.norm(self.s, axis=1)
         self.s /= np.expand_dims(snorm, axis=1)
 
-    def set(self, gilbert_damping=None, gyro_ratio=None, 
+    def set(self, gilbert_damping=None, gyro_ratio=None,
             has_exchange=None, has_dmi=None, has_bilinear=None,
             has_external_hfield=None, has_uniaxial_anisotropy=None):
         """
@@ -143,11 +143,13 @@ class SpinHamiltonian(object):
             self.gilbert_damping = np.array(gilbert_damping)
         if gyro_ratio is not None:
             self.gyro_ratio = np.array(gyro_ratio)
-        self.has_exchange=self.has_exchange and bool(has_exchange)
-        self.has_dmi=self.has_dmi and bool(has_dmi)
-        self.has_bilinear=self.has_bilinear and bool(has_bilinear)
-        self.has_external_hfield=self.has_external_hfield and bool(has_external_hfield)
-        self.has_uniaxial_anisotropy=self.has_uniaxial_anisotropy and bool(has_uniaxial_anisotropy)
+        self.has_exchange = self.has_exchange and bool(has_exchange)
+        self.has_dmi = self.has_dmi and bool(has_dmi)
+        self.has_bilinear = self.has_bilinear and bool(has_bilinear)
+        self.has_external_hfield = self.has_external_hfield and bool(
+            has_external_hfield)
+        self.has_uniaxial_anisotropy = self.has_uniaxial_anisotropy and bool(
+            has_uniaxial_anisotropy)
 
     def set_exchange_ijR(self, exchange_Jdict):
         """
@@ -214,7 +216,7 @@ class SpinHamiltonian(object):
         else:
             self.hamiltonians[name] = Hamiltonian_term
 
-    #@profile
+    # @profile
     def get_effective_field(self, S):
         """
         calculate the effective field Heff=-1/ms * \partial H / \partial S
@@ -323,35 +325,35 @@ class SpinHamiltonian(object):
                          ):
         if ax is None:
             fig, ax = plt.subplots()
+        kptlist = kvectors
         if knames is None and kvectors is None:
             # fully automatic k-path
             bp = Cell(self.cell).bandpath(npoints=npoints)
             spk = bp.special_points
-            xlist, kptlist, Xs, knames=group_band_path(bp)
+            xlist, kptlist, Xs, knames = group_band_path(bp)
         elif knames is not None and kvectors is None:
             # user specified kpath by name
             bp = Cell(self.cell).bandpath(knames, npoints=npoints)
             spk = bp.special_points
             kpts = bp.kpts
-            xlist, kptlist, Xs, knames=group_band_path(bp)
+            xlist, kptlist, Xs, knames = group_band_path(bp)
         else:
             # user spcified kpath and kvector.
             kpts, x, Xs = bandpath(kvectors, self.cell, npoints)
             spk = dict(zip(knames, kvectors))
-            xlist=[x]
-            kptlist=[kpts]
+            xlist = [x]
+            kptlist = [kpts]
 
         if supercell_matrix is not None:
-            kvectors = [np.dot(k, supercell_matrix) for k in kvectors]
+            kptlist = [np.dot(k, supercell_matrix) for k in kptlist]
         print("High symmetry k-points:")
         for name, k in spk.items():
-            if name=='G':
-                name='Gamma'
+            if name == 'G':
+                name = 'Gamma'
             print(f"{name}: {k}")
 
-
         for kpts, xs in zip(kptlist, xlist):
-            evals, evecs = self.solve_k(kpts,Jq=Jq)
+            evals, evecs = self.solve_k(kpts, Jq=Jq)
             # Plot band structure
             nbands = evals.shape[1]
             emin = np.min(evals[:, 0])
@@ -361,7 +363,7 @@ class SpinHamiltonian(object):
         ax.set_ylabel('Energy (meV)')
         ax.set_xlim(xlist[0][0], xlist[-1][-1])
         ax.set_xticks(Xs)
-        knames=[x if x!='G' else '$\Gamma$' for x in knames]
+        knames = [x if x != 'G' else '$\Gamma$' for x in knames]
         ax.set_xticklabels(knames)
         for x in Xs:
             ax.axvline(x, linewidth=0.6, color='gray')
