@@ -1,6 +1,13 @@
 Release Notes
 ===============
 
+v0.7.2 January 17, 2021
+--------------------------------
+Enabling an new DMI calculation method in the output. This should be current treated as an none-tested implementation, so the result has an 
+ [Debug!] label. 
+
+
+
 v0.7.1 January 04, 2021
 --------------------------------
 Bug fix: convention in Vampire output (tensor->tensorial, and a factor of 2 added to the exchange values).
