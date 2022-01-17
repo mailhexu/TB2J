@@ -158,9 +158,9 @@ def write_exchange_section(cls,
 
         if write_experimental:
             try:
-                #DMI2 = cls.debug_dict['DMI2'][ll] * 1e3
-                # myfile.write('[Debug!] DMI2: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
-                #    DMI2[0], DMI2[1], DMI2[2]))
+                DMI2 = cls.debug_dict['DMI2'][ll] * 1e3
+                myfile.write('[Debug!] DMI2: ({:7.4f} {:7.4f} {:7.4f})\n'.format(
+                    DMI2[0], DMI2[1], DMI2[2]))
                 pass
             except:
                 pass
