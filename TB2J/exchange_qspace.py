@@ -38,7 +38,6 @@ def find_index_k(kpts, q):
 class ExchangeCLQspace(ExchangeCL2):
     def _prepare(self):
         self.nmagatom = len(self.ind_mag_atoms)
-        #self.qmesh=[3,3,3]
         self.qmesh = self.kmesh
         self.qpts = monkhorst_pack(size=self.qmesh)
         self.Rqlist = kmesh_to_R(self.qmesh)
@@ -100,10 +99,10 @@ class ExchangeCLQspace(ExchangeCL2):
 
                 for ik, ikq in enumerate(ikplusq_list):
                     #Kq= Gk_up[ik] @ self.Delta @ Gk_dn[ikq]
-                    #for ik, ikq in enumerate(range(self.nkpts)):
+                    # for ik, ikq in enumerate(range(self.nkpts)):
                     Guk = Gk_up[ik, :, :]
-                    #Gdk = Gk_dn[ik, :, :]
-                    #Gukq = Gk_up[ikq, :, :]
+                    Gdk = Gk_dn[ik, :, :]
+                    Gukq = Gk_up[ikq, :, :]
                     Gdkq = Gk_dn[ikq, :, :]
                     for i, iatom in enumerate(self.ind_mag_atoms):
                         Deltai = self.get_Delta(iatom)
@@ -118,7 +117,7 @@ class ExchangeCLQspace(ExchangeCL2):
                                 np.linalg.multi_dot(
                                     (Deltai, Gij_up_k, Deltaj, Gji_dn_kq)))
                             K1 = Gij_up_k @ Deltaj @ Gji_dn_kq
-                
+
                             K2 = Gij_dn_kq @ Deltaj @ Gji_up_k
                             X = Gij_up_k @ Gji_dn_kq
                             A = (np.trace(Deltai @ K1) +
@@ -160,7 +159,6 @@ class ExchangeCLQspace(ExchangeCL2):
                     self.Xq[iq, i, j] = np.imag(
                         integrate(self.contour.path, self.Xqe_list[:, iq, i,
                                                                    j]))
-            #print(f"{q=}, {self.Kq[iq]}")
         return self.Jq
 
     def bruno_renormalize(self):
@@ -200,7 +198,7 @@ class ExchangeCLQspace(ExchangeCL2):
                     is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                     Jij = val / np.sign(
                         np.dot(self.spinat[iatom], self.spinat[jatom]))
-                    #Jorbij = np.imag(self.Jorb[key]) / np.sign(
+                    # Jorbij = np.imag(self.Jorb[key]) / np.sign(
                     #    np.dot(self.spinat[iatom], self.spinat[jatom]))
                     if is_nonself:
                         self.exchange_Jdict[keyspin] = Jij

@@ -20,8 +20,8 @@ def eigen_to_G(evals, evecs, efermi, energy):
     """
     return np.einsum("ij, j-> ij", evecs, 1.0 /
                      (-evals + (energy + efermi))) @ evecs.conj().T
-    #return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T)
-    #return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
+    # return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T)
+    # return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
     #    evecs.conj().T)
 
 
@@ -57,14 +57,14 @@ def find_energy_ingap(evals, rbound, gap=1.0):
 
 class TBGreen():
     def __init__(
-        self,
-        tbmodel,
-        kmesh,  # [ikpt, 3]
-        efermi,  # efermi
-        k_sym=False,
-        use_cache=False,
-        cache_path=None,
-        nproc=1):
+            self,
+            tbmodel,
+            kmesh,  # [ikpt, 3]
+            efermi,  # efermi
+            k_sym=False,
+            use_cache=False,
+            cache_path=None,
+            nproc=1):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
@@ -282,7 +282,7 @@ class TBGreen():
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
                 GR[R] += Gkw * (phase * self.kweights[ik])
 
-                dHRdx = dHdx.get_hamR(R)
+                dHRdx = dHdx.get_dHR(R)
                 dGRdx[R] += Gkw @ dHRdx @ Gk
                 #dGRdx[R] += Gk.dot(dHRdx).dot(Gkp)
         return GR, dGRdx
@@ -300,7 +300,7 @@ class TBGreen():
             Gk = self.get_Gk(ik, energy)
             #Gmk = self.get_Gk(self.i_minus_k(kpt), energy)
             Gkp = Gk * self.kweights[ik]
-            dHk = dHdx.gen_ham(tuple(kpt))
+            dHk = dHdx.get_dHk(tuple(kpt))
             dG = Gk @ dHk @ Gkp
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
@@ -308,7 +308,7 @@ class TBGreen():
                 dGRdx[R] += dG * (phase * self.kweights[ik])
         return GR, dGRdx
 
-    def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, energy, dHdx, dHdx2):
+    def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, energy, dHdx):
         """
         calculate G(R) and dG(R)/dx.
         dG(k)/dx =  G(k) (dH(k)/dx) G(k).
@@ -322,8 +322,8 @@ class TBGreen():
             Gk = self.get_Gk(ik, energy)
             #Gmk = self.get_Gk(self.i_minus_k(kpt), energy)
             Gkp = Gk * self.kweights[ik]
-            dHk = dHdx.gen_ham(tuple(kpt))
-            dHk2 = dHdx2.gen_ham(tuple(kpt))
+            dHk = dHdx.get_dHk(tuple(kpt))
+            dHk2 = dHdx.get_d2Hk(tuple(kpt))
             dG = Gk @ dHk @ Gkp
             dG2 = Gk @ dHk2 @ Gkp
             for iR, R in enumerate(Rpts):

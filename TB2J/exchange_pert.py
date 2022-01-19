@@ -6,6 +6,7 @@ from functools import lru_cache
 from TB2J.exchange import ExchangeNCL
 from collections import defaultdict
 
+
 class ExchangePert(ExchangeNCL):
     def set_dHdx(self, dHdx):
         self.dHdx = dHdx
