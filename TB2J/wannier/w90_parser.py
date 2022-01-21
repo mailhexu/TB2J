@@ -51,13 +51,13 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
         n = n - 1
         H_real, H_imag = map(float, t[5:])
         val = H_real + 1j * H_imag
-        if (m == n and np.linalg.norm(R) < 0.001):
-            H_mnR[R][m, n] = val / 2.0
+        if (m == n and np.linalg.norm(R) < 0.001):  # onsite
+            H_mnR[R][m, n] = val
         elif cutoff is not None:
             if abs(val) > cutoff:
-                H_mnR[R][m, n] = val / 2.0
+                H_mnR[R][m, n] = val
         else:
-            H_mnR[R][m, n] = val / 2.0
+            H_mnR[R][m, n] = val
     return n_wann, H_mnR
 
 

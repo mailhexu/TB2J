@@ -236,7 +236,7 @@ class TBGreen():
         #Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
-    def get_GR(self, Rpts, energy, get_rho=False):
+    def get_GR(self, Rpts, energy, get_rho=True):
         """ calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
@@ -266,27 +266,6 @@ class TBGreen():
         else:
             return GR
 
-    def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
-        """
-        calculate G(R) and dG(R)/dx.
-        dG(R)/dx = \sum_k G(k) (dH(R)/dx) G(k).
-        """
-        Rpts = [tuple(R) for R in Rpts]
-        GR = defaultdict(lambda: 0.0 + 0.0j)
-        dGRdx = defaultdict(lambda: 0.0 + 0j)
-        for ik, kpt in enumerate(self.kpts):
-            Gk = self.get_Gk(ik, energy)
-            Gkw = Gk * self.kweights[ik]
-            #Gmk = self.get_Gk(self.i_minus_k(kpt), energy)
-            for iR, R in enumerate(Rpts):
-                phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                GR[R] += Gkw * (phase * self.kweights[ik])
-
-                dHRdx = dHdx.get_dHR(R)
-                dGRdx[R] += Gkw @ dHRdx @ Gk
-                #dGRdx[R] += Gk.dot(dHRdx).dot(Gkp)
-        return GR, dGRdx
-
     def get_GR_and_dGRdx(self, Rpts, energy, dHdx):
         """
         calculate G(R) and dG(R)/dx.
@@ -295,18 +274,25 @@ class TBGreen():
         """
         Rpts = [tuple(R) for R in Rpts]
         GR = defaultdict(lambda: 0.0 + 0.0j)
+        rhoR = defaultdict(lambda: 0.0j)
         dGRdx = defaultdict(lambda: 0.0 + 0j)
+
         for ik, kpt in enumerate(self.kpts):
             Gk = self.get_Gk(ik, energy)
-            #Gmk = self.get_Gk(self.i_minus_k(kpt), energy)
+            if self.is_orthogonal:
+                rhok = Gk
+            else:
+                rhok = self.get_Sk(ik) @ Gk
             Gkp = Gk * self.kweights[ik]
             dHk = dHdx.get_dHk(tuple(kpt))
             dG = Gk @ dHk @ Gkp
-            for iR, R in enumerate(Rpts):
+            for R in Rpts:
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                GR[R] += Gkp * (phase * self.kweights[ik])
-                dGRdx[R] += dG * (phase * self.kweights[ik])
-        return GR, dGRdx
+                GR[R] += Gkp * phase
+                dGRdx[R] += dG * phase
+                if R == (0, 0, 0):
+                    rhoR[R] += rhok * (phase * self.kweights[ik])
+        return GR, dGRdx, rhoR
 
     def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, energy, dHdx):
         """
@@ -328,7 +314,7 @@ class TBGreen():
             dG2 = Gk @ dHk2 @ Gkp
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                GR[R] += Gkp * (phase * self.kweights[ik])
-                dGRdx[R] += dG * (phase * self.kweights[ik])
-                dGRdx2[R] += dG2 * (phase * self.kweights[ik])
+                GR[R] += Gkp * phase
+                dGRdx[R] += dG * phase
+                dGRdx2[R] += dG2 * phase
         return GR, dGRdx, dGRdx2

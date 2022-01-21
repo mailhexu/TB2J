@@ -27,30 +27,31 @@ def Gpert(H0, dH, e):
     """
     Show Dyson
     """
-    evals, evecs=sl.eigh(H0)
-    G0=eigen_to_G(evals, evecs, 0.0, e)
+    evals, evecs = sl.eigh(H0)
+    G0 = eigen_to_G(evals, evecs, 0.0, e)
 
-    G01= H2G(H0, e)
-    print (G0-G01)
+    G01 = H2G(H0, e)
+    print(G0-G01)
 
-    evals, evecs=sl.eigh(H0+dH)
-    G=eigen_to_G(evals, evecs, 0.0, e)
+    evals, evecs = sl.eigh(H0+dH)
+    G = eigen_to_G(evals, evecs, 0.0, e)
 
-    print(G-(G0@dH@G+G0))
-    print(G-(G0@dH@G0+G0))
-    #print(G0@dH@G0+G0@dH@G0@dH@G0-G+G0)
-    #print(G0@dH@G0+G0@dH@G0@dH@G0+G0@dH@G0@dH@G0@dH@G0-G+G0)
+    print("Error G0dG", G-(G0@dH@G+G0))
+    print("Error G0dG0", G-(G0@dH@G0+G0))
+    print("Error Gmany", G0@dH@G0+G0@dH@G0@dH@G0-G+G0)
+    # print(G0@dH@G0+G0@dH@G0@dH@G0+G0@dH@G0@dH@G0@dH@G0-G+G0)
+
 
 def test():
-    H0=np.random.rand(4,4)
-    H0=H0+H0.T.conj()
+    H0 = np.random.rand(4, 4)
+    H0 = H0+H0.T.conj()
 
-    dH=np.random.rand(4,4)
-    dH=H0+H0.T.conj()
+    dH = np.random.rand(4, 4)
+    dH = H0+H0.T.conj()
 
-    dH=dH*0.1
+    dH = dH*0.02
 
     Gpert(H0, dH, 1.3+0.00j)
 
 
-#test()
+test()

@@ -1,4 +1,5 @@
 from collections import defaultdict, OrderedDict
+
 import os
 import numpy as np
 from TB2J.green import TBGreen
@@ -12,10 +13,10 @@ from tqdm import tqdm
 from p_tqdm import p_map
 from functools import lru_cache
 from TB2J.contour import Contour
-from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
 from TB2J.orbmap import map_orbs_matrix
 from pathos.multiprocessing import ProcessPool
 import pickle
+from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
 
 
 class Exchange():
@@ -30,7 +31,7 @@ class Exchange():
             kmesh=[4, 4, 4],
             emin=-15,  # integration lower bound, relative to fermi energy
             # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-            emax=0.05,
+        emax=0.05,
             nz=100,
             # the delta in the (i delta) in green's function to prevent divergence
             height=0.5,
@@ -43,8 +44,7 @@ class Exchange():
             use_cache=False,
             np=1,
             description='',
-            orb_decomposition=False
-    ):
+            orb_decomposition=False):
 
         self.atoms = atoms
         self.efermi = efermi
@@ -198,7 +198,8 @@ class Exchange():
         for iatom in self.ind_mag_atoms:
             if iatom not in self.orb_dict:
                 raise ValueError(
-                    f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions.""")
+                    f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
+                )
 
         self._spin_dict = {}
         self._atom_dict = {}
@@ -215,7 +216,8 @@ class Exchange():
         if self.backend_name == "SIESTA":
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
-                if (self.include_orbs is not None) and syms[iatom] in self.include_orbs:
+                if (self.include_orbs
+                        is not None) and syms[iatom] in self.include_orbs:
                     mmat, reduced_orbs = map_orbs_matrix(
                         orbs,
                         spinor=not (self._is_collinear),
@@ -228,11 +230,11 @@ class Exchange():
 
                 self.mmats[iatom] = mmat
                 self.orbital_names[iatom] = reduced_orbs
-                self.norb_reduced[iatom] = len(reduced_orbs)//2
+                self.norb_reduced[iatom] = len(reduced_orbs) // 2
         else:
             self.orbital_names = self.labels
             for iatom, orbs in self.labels.items():
-                self.norb_reduced[iatom] = len(orbs)//2
+                self.norb_reduced[iatom] = len(orbs) // 2
 
     def ispin(self, iatom):
         return self._spin_dict[iatom]
@@ -289,7 +291,6 @@ class ExchangeNCL(Exchange):
     """
     Non-collinear exchange
     """
-
     def set_tbmodels(self, tbmodels):
         """
         tbmodels should be in spinor form.
@@ -306,7 +307,6 @@ class ExchangeNCL(Exchange):
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         self.HR0 = self.G.H0
@@ -381,12 +381,10 @@ class ExchangeNCL(Exchange):
         Gji = self.GR_atom(GRm, jatom, iatom)
         Gji_Ixyz = pauli_block_all(Gji)
 
-        ni = self.norb_reduced[iatom]
-        nj = self.norb_reduced[jatom]
-
         tmp = np.zeros((4, 4), dtype=complex)
-
         if self.orb_decomposition:
+            ni = self.norb_reduced[iatom]
+            nj = self.norb_reduced[jatom]
             torb = np.zeros((4, 4, ni, nj), dtype=complex)
             # a, b in (0,x,y,z)
             for a in range(4):
@@ -394,17 +392,16 @@ class ExchangeNCL(Exchange):
                 for b in range(4):
                     pjGji = self.get_P_iatom(jatom) @ Gji_Ixyz[b]
                     torb[a, b] = self.simplify_orbital_contributions(
-                        np.einsum('ij, ji -> ij', piGij, pjGji)/np.pi,
-                        iatom, jatom)
+                        np.einsum('ij, ji -> ij', piGij, pjGji) / np.pi, iatom,
+                        jatom)
                     tmp[a, b] = np.sum(torb[a, b])
-
         else:
             for a in range(4):
                 pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
                     jatom)
                 for b in range(4):
                     AijRab = pGp @ Gji_Ixyz[b]
-                    tmp[a, b] = np.trace(AijRab)/np.pi
+                    tmp[a, b] = np.trace(AijRab) / np.pi
             torb = None
         return tmp, torb
 
@@ -413,7 +410,6 @@ class ExchangeNCL(Exchange):
         Calculate all A matrix elements
         Loop over all magnetic atoms.
         :param G: Green's function.
-        :param de: energy step.
         """
         A_ijR_list = {}
         Aorb_ijR_list = {}
@@ -452,8 +448,8 @@ class ExchangeNCL(Exchange):
                 Ja = np.zeros((3, 3, ni, nj), dtype=float)
                 for i in range(3):
                     for j in range(3):
-                        Ja[i, j] = np.imag(
-                            val[i + 1, j + 1] + valm[i + 1, j + 1])
+                        Ja[i,
+                           j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
                 # DMI
 
                 Dtmp = np.zeros((3, ni, nj), dtype=float)
@@ -638,8 +634,8 @@ class ExchangeNCL(Exchange):
                 f = AijRs[(R, iatom, jatom)]
                 self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
                 if self.orb_decomposition:
-                    self.A_ijR_orb[(R, iatom, jatom)] = integrate(self.contour.path,
-                                                                  AijRs_orb[(R, iatom, jatom)])
+                    self.A_ijR_orb[(R, iatom, jatom)] = integrate(
+                        self.contour.path, AijRs_orb[(R, iatom, jatom)])
 
     def get_AijR_rhoR(self, e):
         GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
@@ -658,20 +654,18 @@ class ExchangeNCL(Exchange):
         print("Green's function Calculation started.")
 
         rhoRs = []
-        GRs = []
         AijRs = {}
 
         AijRs_orb = {}
 
         npole = len(self.contour.path)
         if self.np > 1:
-            #executor = ProcessPool(nodes=self.np)
-            #results = executor.map(self.get_AijR_rhoR, self.contour.path)
             results = p_map(self.get_AijR_rhoR,
-                            self.contour.path, num_cpus=self.np)
+                            self.contour.path,
+                            num_cpus=self.np)
         else:
-            results = map(self.get_AijR_rhoR, tqdm(
-                self.contour.path, total=npole))
+            results = map(self.get_AijR_rhoR,
+                          tqdm(self.contour.path, total=npole))
 
         for i, result in enumerate(results):
             for iR, R in enumerate(self.R_ijatom_dict):
@@ -680,8 +674,9 @@ class ExchangeNCL(Exchange):
                         AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
                                                                   jatom])
                         if self.orb_decomposition:
-                            AijRs_orb[(R, iatom, jatom)].append(result[1][R, iatom,
-                                                                          jatom])
+                            AijRs_orb[(R, iatom,
+                                       jatom)].append(result[1][R, iatom,
+                                                                jatom])
 
                     else:
                         AijRs[(R, iatom, jatom)] = []
@@ -689,14 +684,10 @@ class ExchangeNCL(Exchange):
                                                                   jatom])
                         if self.orb_decomposition:
                             AijRs_orb[(R, iatom, jatom)] = []
-                            AijRs_orb[(R, iatom, jatom)].append(result[1][R, iatom,
-                                                                          jatom])
+                            AijRs_orb[(R, iatom,
+                                       jatom)].append(result[1][R, iatom,
+                                                                jatom])
             rhoRs.append(result[2])
-        if self.np > 1:
-            # executor.close()
-            # executor.join()
-            # executor.clear()
-            pass
 
         # self.save_AijRs(AijRs)
         self.integrate(rhoRs, AijRs, AijRs_orb)
