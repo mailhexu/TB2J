@@ -28,10 +28,10 @@ class Exchange():
             basis=None,
             magnetic_elements=[],
             include_orbs={},
-            kmesh=[4, 4, 4],
+            kmesh=[5, 5, 5],
             emin=-15,  # integration lower bound, relative to fermi energy
             # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-        emax=0.05,
+            emax=0.00,
             nz=100,
             # the delta in the (i delta) in green's function to prevent divergence
             height=0.5,
@@ -44,6 +44,8 @@ class Exchange():
             use_cache=False,
             np=1,
             description='',
+            list_iatom=None,
+            list_jatom=None,
             orb_decomposition=False):
 
         self.atoms = atoms
@@ -70,6 +72,17 @@ class Exchange():
 
         self.orb_decomposition = orb_decomposition
 
+        natom = len(self.atoms)
+        if list_iatom is None:
+            self.list_iatom = list(range(natom))
+        else:
+            self.list_iatom = list_iatom
+
+        if list_jatom is None:
+            self.list_jatom = list(range(natom))
+        else:
+            self.list_jatom = list_iatom
+
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
         self._prepare_elist(method='legendre')
@@ -86,6 +99,7 @@ class Exchange():
         self._is_collinear = True
         self.has_elistc = False
         self.description = description
+
         self._clean_tbmodels()
 
         # self._prepare_Jorb_file()
@@ -249,16 +263,17 @@ class Exchange():
         ind_matoms = self.ind_mag_atoms
         for ispin, iatom in enumerate(ind_matoms):
             for jspin, jatom in enumerate(ind_matoms):
-                for R in self.Rlist:
-                    pos_i = self.atoms.get_positions()[iatom]
-                    pos_jR = self.atoms.get_positions()[jatom] + np.dot(
-                        R, self.atoms.get_cell())
-                    vec = pos_jR - pos_i
-                    distance = np.sqrt(np.sum(vec**2))
-                    if self.Rcut is None or distance < self.Rcut:
-                        self.distance_dict[(tuple(R), ispin,
-                                            jspin)] = (vec, distance)
-                        self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
+                if iatom in self.list_iatom and jatom in self.list_jatom:
+                    for R in self.Rlist:
+                        pos_i = self.atoms.get_positions()[iatom]
+                        pos_jR = self.atoms.get_positions()[jatom] + np.dot(
+                            R, self.atoms.get_cell())
+                        vec = pos_jR - pos_i
+                        distance = np.sqrt(np.sum(vec**2))
+                        if self.Rcut is None or distance < self.Rcut:
+                            self.distance_dict[(tuple(R), ispin,
+                                                jspin)] = (vec, distance)
+                            self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
         self.short_Rlist = list(self.R_ijatom_dict.keys())
 
     def iorb(self, iatom):
@@ -291,6 +306,7 @@ class ExchangeNCL(Exchange):
     """
     Non-collinear exchange
     """
+
     def set_tbmodels(self, tbmodels):
         """
         tbmodels should be in spinor form.
@@ -298,7 +314,6 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
-        # TODO: check if tbmodels are really a tbmodel with SOC.
         self.G = TBGreen(self.tbmodel,
                          self.kmesh,
                          self.efermi,
@@ -483,8 +498,8 @@ class ExchangeNCL(Exchange):
             # key:(R, iatom, jatom)
             R, iatom, jatom = key
 
-            Rm = tuple(-x for x in R)
-            valm = self.A_ijR[(Rm, jatom, iatom)]
+            #Rm = tuple(-x for x in R)
+            #valm = self.A_ijR[(Rm, jatom, iatom)]
 
             ispin = self.ispin(iatom)
             jspin = self.ispin(jatom)
@@ -504,7 +519,8 @@ class ExchangeNCL(Exchange):
             # off-diagonal anisotropic exchange
             for i in range(3):
                 for j in range(3):
-                    Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                    #Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                    Ja[i, j] = np.imag(val[i + 1, j + 1] + val[j + 1, i + 1])
             if is_nonself:
                 self.Jani[keyspin] = Ja
 

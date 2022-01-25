@@ -5,7 +5,7 @@ from TB2J.exchange import ExchangeCL, ExchangeNCL
 from TB2J.exchange_pert import ExchangePert
 from TB2J.utils import read_basis, auto_assign_basis_name
 from ase.io import read
-from TB2J.FDTB import FDTB
+from TB2J.FDTB import dHdx
 
 
 class PolyTB():
@@ -38,11 +38,12 @@ def gen_exchange_Oiju(path,
                       kmesh=[5, 5, 5],
                       emin=-12.0,
                       emax=0.0,
-                      height=0.2,
                       nz=50,
                       np=1,
                       exclude_orbs=[],
-                      description=''):
+                      description='',
+                      list_iatom=None,
+                      ):
     atoms = read(os.path.join(path, posfile))
     basis_fname = os.path.join(path, 'basisb.txt')
     if colinear:
@@ -65,17 +66,17 @@ def gen_exchange_Oiju(path,
             kmesh=kmesh,
             emin=emin,
             emax=emax,
-            height=height,
             nz=nz,
             np=np,
             exclude_orbs=exclude_orbs,
+            list_iatom=list_iatom,
             description=description)
         exchange.set_dHdx(dHdx)
         exchange.run('Oiju')
 
 
 if __name__ == '__main__':
-    dHdx = FDTB.load_from_pickle("dHdx.pickle")
+    dHdx = dHdx.load_from_pickle("dHdx_shiftz.pickle")
     gen_exchange_Oiju(
         path="./U3_SrMnO3_111_slater0.00",
         colinear=True,
@@ -88,9 +89,11 @@ if __name__ == '__main__':
         efermi=4.5,
         magnetic_elements=['Mn'],
         kmesh=[5, 5, 5],
-        emin=-8.0,
+        emin=-7.3363330034071295,
         emax=0.0,
-        nz=70,
+        nz=100,
         np=3,
         exclude_orbs=[],
-        description='')
+        description='',
+        list_iatom=[2],
+    )

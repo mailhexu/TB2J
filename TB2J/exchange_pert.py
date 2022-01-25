@@ -13,6 +13,7 @@ class ExchangePert(ExchangeNCL):
     def set_dHdx(self, dHdx):
         self.dHdx = dHdx
         self.dHdxR0 = dHdx.dHR_0
+        print(f"{self.dHdx.nbasis} {self.nbasis}")
         assert (self.dHdx.nbasis == self.nbasis)
         self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.dA2_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
@@ -69,17 +70,17 @@ class ExchangePert(ExchangeNCL):
                 jatom)
             pdGp = self.get_P_iatom(iatom) @ dGij_Ixyz[a] @ self.get_P_iatom(
                 jatom)
-            dpGp = self.get_dP_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
-                jatom)
+            # dpGp = self.get_dP_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
+            #    jatom)
             pGdp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_dP_iatom(
                 jatom)
             for b in range(4):
                 AijRab = pGp @ Gji_Ixyz[b]
                 A1 = pdGp @ Gji_Ixyz[b]
                 A2 = pGp @ dGji_Ixyz[b]
-                A3 = dpGp @ Gji_Ixyz[b]
-                A4 = pGdp @ Gji_Ixyz[b]
-                AOijRab = A1 + A2 + A3 + A4
+                #A3 = dpGp @ Gji_Ixyz[b]
+                #A4 = pGdp @ Gji_Ixyz[b]
+                AOijRab = A1 + A2  # + A3 + A4
 
                 if False:
                     B1 = np.matmul(
@@ -104,8 +105,8 @@ class ExchangePert(ExchangeNCL):
                     tmp3[a, b] = np.trace(B1 + B2 + B3 + B4 + B5 + B6)
 
                 # trace over orb
-                tmp1[a, b] = np.trace(AijRab)/np.pi
-                tmp2[a, b] = np.trace(AOijRab)/np.pi
+                tmp1[a, b] = np.trace(AijRab) / np.pi
+                tmp2[a, b] = np.trace(AOijRab) / np.pi
         return tmp1, tmp2
 
     def get_all_A(self, G, dG):
@@ -126,8 +127,7 @@ class ExchangePert(ExchangeNCL):
     def get_AijR_rhoR(self, e):
         GR, dGR, rhoR = self.G.get_GR_and_dGRdx(self.short_Rlist,
                                                 energy=e,
-                                                dHdx=self.dHdx
-                                                )
+                                                dHdx=self.dHdx)
         AijR, dAdx_ijR = self.get_all_A(GR, dGR)
         return AijR, dAdx_ijR, self.get_rho_e(rhoR)
 
@@ -149,7 +149,8 @@ class ExchangePert(ExchangeNCL):
             dJiso = np.zeros((3, 3), dtype=float)
             # Heisenberg like J.
             for i in range(3):
-                dJiso[i, i] = np.imag(val[0, 0]-val[1, 1]-val[2, 2]-val[3, 3])
+                dJiso[i, i] = np.imag(val[0, 0] - val[1, 1] - val[2, 2] -
+                                      val[3, 3])
             if is_nonself:
                 self.dJdx[keyspin] = dJiso[0, 0]
 

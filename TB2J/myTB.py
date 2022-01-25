@@ -112,7 +112,7 @@ class MyTB(AbstractTB):
             self._positions = np.zeros((nbasis, self.ndim))
         else:
             self._positions = positions
-        self.prepare_phase_rjri()
+        self.rjminusri = None
         self.sparse = sparse
         if sparse:
             self._matrix = csr_matrix
@@ -226,9 +226,9 @@ class MyTB(AbstractTB):
             R = tuple(R)
             val = lwf.HwannR[iR]
             if np.linalg.norm(R) < 0.001:
-                H_mnR[R] = val/2.0
+                H_mnR[R] = val / 2.0
             else:
-                H_mnR[R] = val/2.0
+                H_mnR[R] = val / 2.0
         m = MyTB(nbasis,
                  data=H_mnR,
                  nspin=nspin,
@@ -258,6 +258,8 @@ class MyTB(AbstractTB):
                 Hk += H
         elif convention == 1:
             for R, mat in self.data.items():
+                if self.rjminusri is None:
+                    self.prepare_phase_rjri()
                 phase = np.exp(self.R2kfactor * np.dot(k, R + self.rjminusri))
                 H = mat * phase
                 Hk += H
@@ -286,8 +288,8 @@ class MyTB(AbstractTB):
         evals = np.zeros((nk, self.nbasis), dtype=float)
         evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
-            hams[ik], S, evals[ik], evecs[ik] = self.HSE_k(tuple(k),
-                                                           convention=convention)
+            hams[ik], S, evals[ik], evecs[ik] = self.HSE_k(
+                tuple(k), convention=convention)
         return hams, None, evals, evecs
 
     def prepare_phase_rjri(self):
@@ -323,7 +325,7 @@ class MyTB(AbstractTB):
         """
         return hamiltonian at R=0. Note that the data is halfed for R=0.
         """
-        return (self.data[(0, 0, 0)] + self.data[(0, 0, 0)].T.conj())/2.0
+        return (self.data[(0, 0, 0)] + self.data[(0, 0, 0)].T.conj()) / 2.0
 
     def get_hamR(self, R):
         """
@@ -337,7 +339,7 @@ class MyTB(AbstractTB):
         elif len(nzR) == 0:
             newR = R
             mat = self.data[newR]
-            return (mat+mat.T.conj())*0.5
+            return (mat + mat.T.conj()) * 0.5
         else:
             newR = R
             return self.data[newR]
@@ -528,13 +530,31 @@ class MyTB(AbstractTB):
                 raise ValueError("Dimension of R should be ndim %s" %
                                  (self.ndim))
 
+    def make_supercell(self, scmaker):
+        nbasis = scmaker.ncell * self.nbasis
+        data = scmaker.sc_RHdict(self.data, self.nbasis)
+        atoms = scmaker.sc_atoms(self.atoms)
+        positions = np.array(scmaker.sc_pos(self.positions))
+        sparse = self.sparse
+        ndim = self.ndim
+        nspin = self.nspin
+        print(f"nbasis: {nbasis}")
+        ret = MyTB(nbasis=nbasis,
+                   data=data,
+                   positions=positions,
+                   sparse=False,
+                   ndim=ndim,
+                   nspin=nspin)
+        ret.set_atoms(atoms)
+        return ret
+
 
 def merge_tbmodels_spin(tbmodel_up, tbmodel_dn):
     """
     Merge a spin up and spin down model to one spinor model.
     """
     natom = len(tbmodel_up.positions)
-    positions = np.zeros((natom*2, 3), dtype=float)
+    positions = np.zeros((natom * 2, 3), dtype=float)
     positions[::2] = tbmodel_up.positions
     positions[1::2] = tbmodel_dn.positions
     tbmodel = MyTB(nbasis=tbmodel_up.nbasis * 2,
@@ -544,6 +564,7 @@ def merge_tbmodels_spin(tbmodel_up, tbmodel_dn):
                    ndim=tbmodel_up.ndim,
                    nspin=2)
     norb = tbmodel.norb
+    tbmodel.atoms = tbmodel_up.atoms
     for R in tbmodel_up.data:
         tbmodel.data[R][::2, ::2] = tbmodel_up.data[R][:, :]
         tbmodel.data[R][1::2, 1::2] = tbmodel_dn.data[R][:, :]
