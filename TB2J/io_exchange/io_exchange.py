@@ -178,6 +178,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def get_J(self, i, j, R):
         return self.exchange_Jdict[(tuple(R), i, j)]
 
+    def get_dJ(self, i, j, R):
+        return self.dJdx[(tuple(R), i, j)]
+
     def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
         if not os.path.exists(path):
             os.makedirs(path)
@@ -358,6 +361,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         plt.clf()
         plt.close()
         return fig, axes
+
+    def plot_dJvsR(self, ax, marker, color='red', **kwargs):
+        ds = []
+        Js = []
+        for key, val in self.dJdx.items():
+            d = self.distance_dict[key][1]
+            ds.append(d)
+            Js.append(val * 1e3)
+        ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
+        ax.axhline(color='gray')
+        ax.set_xlabel("Distance ($\AA$)")
+        ax.set_ylabel("$\delta J$ (meV/$\AA$)")
 
     def write_tom_format(self, path):
         from TB2J.io_exchange.io_tomsasd import write_tom_format

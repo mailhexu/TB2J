@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.linalg import norm
 import scipy.linalg as sl
 from collections import defaultdict
 from ase.dft.kpoints import monkhorst_pack
@@ -6,6 +7,7 @@ from shutil import rmtree
 import os
 import tempfile
 from pathos.multiprocessing import ProcessPool
+from TB2J.epwparser import EpmatOneMode
 import sys
 
 
@@ -43,7 +45,7 @@ def fermi(e, mu, width=0.01):
 
 def find_energy_ingap(evals, rbound, gap=1.0):
     """
-    find a energy inside a gap below rbound (right bound), 
+    find a energy inside a gap below rbound (right bound),
     return the energy gap top - 0.5.
     """
     m0 = np.sort(evals.flatten())
@@ -91,6 +93,9 @@ class TBGreen():
         self.nproc = nproc
         self._prepare_eigen()
 
+        self._Rmap = None
+        self._Rmap_rev = None
+
     def _reduce_eigens(self, evals, evecs, emin, emax):
         ts = np.logical_and(evals >= emin, evals < emax)
         ts = np.any(ts, axis=0)
@@ -123,7 +128,7 @@ class TBGreen():
     def _prepare_eigen(self):
         """
         calculate eigen values and vectors for all kpts and save.
-        Note that the convention 2 is used here, where the 
+        Note that the convention 2 is used here, where the
         phase factor is e^(ik.R), not e^(ik.(R+rj-ri))
         """
         nkpts = len(self.kpts)
@@ -233,7 +238,7 @@ class TBGreen():
                         energy=energy)
 
         # A slower version. For test.
-        #Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
+        # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
     def get_GR(self, Rpts, energy, get_rho=True):
@@ -294,7 +299,101 @@ class TBGreen():
                     rhoR[R] += rhok * (phase * self.kweights[ik])
         return GR, dGRdx, rhoR
 
-    def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, energy, dHdx):
+    def get_GR_and_dGRdx_from_epw(self, Rpts, Rjlist, energy, epc, Ru, cutoff=2.1):
+        """
+        calculate G(R) and dG(R)/dx.
+        dG(k)/dx =  G(k) (dH(k)/dx) G(k).
+        dG(R)/dx = \sum_k dG(k)/dx * e^{-ikR}
+        """
+        Rpts = [tuple(R) for R in Rpts]
+        GR = defaultdict(lambda: 0.0 + 0.0j)
+        rhoR = defaultdict(lambda: 0.0j)
+        dGRijdx = defaultdict(lambda: 0.0 + 0j)
+        dGRjidx = defaultdict(lambda: 0.0 + 0j)
+        for ik, kpt in enumerate(self.kpts):
+            Gk = self.get_Gk(ik, energy)
+            if self.is_orthogonal:
+                rhok = Gk
+            else:
+                rhok = self.get_Sk(ik) @ Gk
+            Gkp = Gk * self.kweights[ik]
+            for R in Rpts:
+                phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
+                GR[R] += Gkp * phase
+                if R == (0, 0, 0):
+                    rhoR[R] += rhok * (phase * self.kweights[ik])
+        dGRijdx, dGRjidx = self.get_dGR(
+            GR, Rpts, Rjlist, epc, Ru, cutoff=cutoff)
+        return GR, dGRijdx, dGRjidx, rhoR
+
+    def get_dGR(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, cutoff=0.1):
+        Rpts = [tuple(R) for R in Rpts]
+        Rset = set(Rpts)
+        Rdict = dict(zip(Rpts, range(len(Rpts))))
+
+        ij_path = set()
+        ji_path = set()
+
+        if self._Rmap is None:
+            self._Rmap = []
+            self._Rmap_rev = []
+            counter = 0
+            for Rj in Rjlist:
+                for Rq in epc.Rqdict:
+                    for Rk in epc.Rkdict:
+                        if norm(Rk) < cutoff:
+                            Rm = tuple(np.array(Ru)-np.array(Rq))
+                            Rn = tuple(np.array(Rm) + np.array(Rk))
+                            Rnj = tuple(np.array(Rj)-np.array(Rn))
+                            if Rm in Rset and Rnj in Rset:
+                                counter += 1
+                                self._Rmap.append((Rq, Rk, Rm, Rnj, Rj))
+                                ij_path.add(
+                                    (Rm, Rn, Rj))
+
+            print(counter)
+
+            counter = 0
+            for Rj in Rjlist:
+                for Rq in epc.Rqdict:
+                    for Rk in epc.Rkdict:
+                        if norm(Rk) < cutoff:
+                            Rn = tuple(np.array(Ru)-np.array(Rq))
+                            Rm = tuple(np.array(Rn) + np.array(Rk))
+                            Rjn = tuple(np.array(Rn)-np.array(Rj))
+                            Rmi = tuple(-np.array(Rm))
+                            if Rmi in Rset and Rjn in Rset:
+                                counter += 1
+                                self._Rmap_rev.append((Rq, Rk, Rjn, Rmi, Rj))
+                                ji_path.add(
+                                    (Rm, Rn, Rj))
+            print(counter)
+
+            # print(ij_path.difference(ji_path))
+        dGRdxij = defaultdict(lambda: 0.0 + 0j)
+        dGRdxji = defaultdict(lambda: 0.0 + 0j)
+        for Rq, Rk, Rm, Rnj, Rj in self._Rmap:
+            #dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk)))
+            dV = epc.get_epmat_RgRk_two_spin(Rq, Rk)
+            dG = GR[Rm]@dV@GR[Rnj]
+            dGRdxij[Rj] += dG/2
+            dGRdxji[Rj] += dG.T/2
+
+            #dGRdxji[Rj] += dG.T.conj()
+            pass
+
+        for Rq, Rk, Rjn, Rmi, Rj in self._Rmap_rev:
+            #dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk)))
+            dV = epc.get_epmat_RgRk_two_spin(Rq, Rk)
+            dG = GR[Rjn]@dV@GR[Rmi]
+            dGRdxji[Rj] += dG/2
+            dGRdxij[Rj] += dG.T/2
+
+            #dGRdxij[Rj] += dG.T
+
+        return dGRdxij, dGRdxji
+
+    def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, Rjlist, energy, dHdx):
         """
         calculate G(R) and dG(R)/dx.
         dG(k)/dx =  G(k) (dH(k)/dx) G(k).
@@ -306,7 +405,7 @@ class TBGreen():
         dGRdx2 = defaultdict(lambda: 0.0 + 0j)
         for ik, kpt in enumerate(self.kpts):
             Gk = self.get_Gk(ik, energy)
-            #Gmk = self.get_Gk(self.i_minus_k(kpt), energy)
+            # Gmk = self.get_Gk(self.i_minus_k(kpt), energy)
             Gkp = Gk * self.kweights[ik]
             dHk = dHdx.get_dHk(tuple(kpt))
             dHk2 = dHdx.get_d2Hk(tuple(kpt))

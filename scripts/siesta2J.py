@@ -85,11 +85,11 @@ def run_siesta2J():
         type=str,
         default="Calculated with TB2J.")
 
-    parser.add_argument("--orb_decomposition", 
+    parser.add_argument("--orb_decomposition",
                         default=False,
                         action='store_true',
                         help="whether to do orbital decomposition in the non-collinear mode. Default: False."
-            )
+                        )
 
     parser.add_argument("--fname",
                         default='exchange.xml',
@@ -132,7 +132,7 @@ def run_siesta2J():
         np=args.np,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition
-        )
+    )
 
 
 if __name__ == "__main__":

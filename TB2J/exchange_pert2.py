@@ -5,16 +5,19 @@ from functools import lru_cache
 from TB2J.exchange import ExchangeNCL
 from collections import defaultdict
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
+from TB2J.epwparser import Epmat, EpmatOneMode
 from tqdm import tqdm
 from p_tqdm import p_map
 
 
-class ExchangePert(ExchangeNCL):
-    def set_dHdx(self, dHdx):
-        self.dHdx = dHdx
-        self.dHdxR0 = dHdx.dHR_0
-        print(f"{self.dHdx.nbasis} {self.nbasis}")
-        assert (self.dHdx.nbasis == self.nbasis)
+class ExchangePert2(ExchangeNCL):
+    def set_epw(self, Ru, imode=None, epmode=None, epmat=None):
+        if epmat is not None and imode is not None:
+            self.epc = EpmatOneMode(epmat, imode, close_nc=True)
+        else:
+            self.epc = epmode
+        self.Ru = Ru
+
         self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.dA2_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
 
@@ -23,7 +26,7 @@ class ExchangePert(ExchangeNCL):
         orbs = self.iorb(iatom)
         return pauli_block_sigma_norm(self.dHdxR0[np.ix_(orbs, orbs)])
 
-    def get_A_ijR(self, G, dG, R, iatom, jatom):
+    def get_A_ijR(self, G, dG, dGrev, R, iatom, jatom):
         """ calculate A from G for a energy .
         It take the
         .. math::
@@ -40,7 +43,6 @@ class ExchangePert(ExchangeNCL):
         :rtype:  4*4 matrix
         """
 
-        # G[i, j, R]
         GR = G[R]
         Gij = self.GR_atom(GR, iatom, jatom)
         Gij_Ixyz = pauli_block_all(Gij)
@@ -49,6 +51,7 @@ class ExchangePert(ExchangeNCL):
         Rm = tuple(-x for x in R)
         GRm = G[Rm]
         Gji = self.GR_atom(GRm, jatom, iatom)
+        # Gji = Gij.T.conj()  # self.GR_atom(GRm, jatom, iatom)
         Gji_Ixyz = pauli_block_all(Gji)
 
         dGR = dG[R]
@@ -56,15 +59,14 @@ class ExchangePert(ExchangeNCL):
         # GijR , I, x, y, z component.
         dGij_Ixyz = pauli_block_all(dGij)
 
-        # G(j, i, -R)
-        Rm = tuple(-np.array(R))
-        dGRm = dG[R].T.conj()
+        # dG(j, i, -R)
+        #Rm = tuple(-np.array(R))
+        dGRm = dGrev[R]
         dGji = self.GR_atom(dGRm, jatom, iatom)
         dGji_Ixyz = pauli_block_all(dGji)
 
         tmp1 = np.zeros((4, 4), dtype=complex)
         tmp2 = np.zeros((4, 4), dtype=complex)
-        tmp3 = np.zeros((4, 4), dtype=complex)
 
         for a, b in ([0, 0], [3, 3]):
             pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
@@ -78,51 +80,9 @@ class ExchangePert(ExchangeNCL):
             tmp1[a, b] = np.trace(AijRab) / np.pi
             tmp2[a, b] = np.trace(AOijRab) / np.pi
 
-        # for a in range(4):
-        #    pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
-        #        jatom)
-        #    pdGp = self.get_P_iatom(iatom) @ dGij_Ixyz[a] @ self.get_P_iatom(
-        #        jatom)
-        #    # dpGp = self.get_dP_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
-        #    #    jatom)
-        #    # pGdp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_dP_iatom(
-        #    #    jatom)
-        #    for b in range(4):
-        #        AijRab = pGp @ Gji_Ixyz[b]
-        #        A1 = pdGp @ Gji_Ixyz[b]
-        #        A2 = pGp @ dGji_Ixyz[b]
-        #        #A3 = dpGp @ Gji_Ixyz[b]
-        #        #A4 = pGdp @ Gji_Ixyz[b]
-        #        AOijRab = A1 + A2  # + A3 + A4
-
-        #        if False:
-        #            B1 = np.matmul(
-        #                np.matmul(self.get_dP_iatom(iatom), dGij_Ixyz[a]),
-        #                np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
-        #            B2 = np.matmul(
-        #                np.matmul(self.get_dP_iatom(iatom), Gij_Ixyz[a]),
-        #                np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]))
-        #            B3 = np.matmul(
-        #                np.matmul(self.get_dP_iatom(iatom), Gij_Ixyz[a]),
-        #                np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]))
-        #            B4 = np.matmul(
-        #                np.matmul(self.get_P_iatom(iatom), dGij_Ixyz[a]),
-        #                np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]))
-        #            B5 = np.matmul(
-        #                np.matmul(self.get_P_iatom(iatom), dGij_Ixyz[a]),
-        #                np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]))
-
-        #            B6 = np.matmul(
-        #                np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-        #                np.matmul(self.get_dP_iatom(jatom), dGji_Ixyz[b]))
-        #            tmp3[a, b] = np.trace(B1 + B2 + B3 + B4 + B5 + B6)
-
-        #        # trace over orb
-        #        tmp1[a, b] = np.trace(AijRab) / np.pi
-        #        tmp2[a, b] = np.trace(AOijRab) / np.pi
         return tmp1, tmp2
 
-    def get_all_A(self, G, dG):
+    def get_all_A(self, G, dGij, dGji):
         """
         Calculate all A matrix elements
         Loop over all magnetic atoms.
@@ -132,16 +92,15 @@ class ExchangePert(ExchangeNCL):
         dAdx_ijR_list = {}
         for iR, R in enumerate(self.R_ijatom_dict):
             for (iatom, jatom) in self.R_ijatom_dict[R]:
-                A, dAdx = self.get_A_ijR(G, dG, R, iatom, jatom)
+                A, dAdx = self.get_A_ijR(G, dGij, dGji, R, iatom, jatom)
                 A_ijR_list[(R, iatom, jatom)] = A
                 dAdx_ijR_list[(R, iatom, jatom)] = dAdx
         return A_ijR_list, dAdx_ijR_list
 
     def get_AijR_rhoR(self, e):
-        GR, dGR, rhoR = self.G.get_GR_and_dGRdx(self.short_Rlist,
-                                                energy=e,
-                                                dHdx=self.dHdx)
-        AijR, dAdx_ijR = self.get_all_A(GR, dGR)
+        GR, dGRij, dGRji, rhoR = self.G.get_GR_and_dGRdx_from_epw(self.Rlist, self.short_Rlist,
+                                                                  energy=e, epc=self.epc, Ru=self.Ru)
+        AijR, dAdx_ijR = self.get_all_A(GR, dGRij, dGRji)
         return AijR, dAdx_ijR, self.get_rho_e(rhoR)
 
     def A_to_Jtensor(self):
@@ -255,6 +214,7 @@ class ExchangePert(ExchangeNCL):
                 self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
                 self.dA_ijR[(R, iatom,
                              jatom)] = integrate(self.contour.path, df)
+        print(f"{self.A_ijR.keys()=}")
 
     def write_output(self, path='TB2J_results'):
         self._prepare_index_spin()

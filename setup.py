@@ -19,7 +19,7 @@ setup(
         'scripts/TB2J_merge.py', 'scripts/TB2J_magnon.py', 'scripts/TB2J_downfold.py'
     ],
     install_requires=['numpy>1.16.5', 'scipy', 'matplotlib',
-                      'ase>=3.19', 'tqdm', 'p_tqdm', 'pathos', 'packaging>=20.0'],
+                      'ase>=3.19', 'tqdm', 'p_tqdm', 'pathos', 'packaging>=20.0', 'supercellmap'],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Programming Language :: Python :: 3',

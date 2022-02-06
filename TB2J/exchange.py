@@ -257,6 +257,7 @@ class Exchange():
         return self._atom_dict[ispin]
 
     def _prepare_distance(self):
+        print(f"{self.Rcut=}")
         self.distance_dict = {}
         self.short_Rlist = []
         self.R_ijatom_dict = defaultdict(lambda: [])
