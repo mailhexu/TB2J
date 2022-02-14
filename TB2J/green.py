@@ -299,7 +299,7 @@ class TBGreen():
                     rhoR[R] += rhok * (phase * self.kweights[ik])
         return GR, dGRdx, rhoR
 
-    def get_GR_and_dGRdx_from_epw(self, Rpts, Rjlist, energy, epc, Ru, cutoff=2.1):
+    def get_GR_and_dGRdx_from_epw(self, Rpts, Rjlist, energy, epc, Ru, cutoff=3.1):
         """
         calculate G(R) and dG(R)/dx.
         dG(k)/dx =  G(k) (dH(k)/dx) G(k).
@@ -326,7 +326,7 @@ class TBGreen():
             GR, Rpts, Rjlist, epc, Ru, cutoff=cutoff)
         return GR, dGRijdx, dGRjidx, rhoR
 
-    def get_dGR(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, cutoff=0.1):
+    def get_dGR(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, cutoff=1.1, diag=False):
         Rpts = [tuple(R) for R in Rpts]
         Rset = set(Rpts)
         Rdict = dict(zip(Rpts, range(len(Rpts))))
@@ -373,21 +373,31 @@ class TBGreen():
         dGRdxij = defaultdict(lambda: 0.0 + 0j)
         dGRdxji = defaultdict(lambda: 0.0 + 0j)
         for Rq, Rk, Rm, Rnj, Rj in self._Rmap:
-            #dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk)))
-            dV = epc.get_epmat_RgRk_two_spin(Rq, Rk)
+            if diag:
+                dV = np.diag(
+                    np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
+            else:
+                dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
             dG = GR[Rm]@dV@GR[Rnj]
-            dGRdxij[Rj] += dG/2
-            dGRdxji[Rj] += dG.T/2
+            dGRdxij[Rj] += dG
+
+            #dGRdxij[Rj] += dG/2
+            #dGRdxji[Rj] += dG.T/2
 
             #dGRdxji[Rj] += dG.T.conj()
             pass
 
         for Rq, Rk, Rjn, Rmi, Rj in self._Rmap_rev:
-            #dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk)))
-            dV = epc.get_epmat_RgRk_two_spin(Rq, Rk)
+            if diag:
+                dV = np.diag(
+                    np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
+            else:
+                dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
             dG = GR[Rjn]@dV@GR[Rmi]
-            dGRdxji[Rj] += dG/2
-            dGRdxij[Rj] += dG.T/2
+            dGRdxji[Rj] += dG
+
+            #dGRdxji[Rj] += dG/2
+            #dGRdxij[Rj] += dG.T/2
 
             #dGRdxij[Rj] += dG.T
 

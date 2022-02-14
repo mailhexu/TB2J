@@ -182,6 +182,56 @@ class ExchangePert(ExchangeNCL):
             if is_nonself:
                 self.dJdx2[keyspin] = dJ2iso[0, 0]
 
+    def A_to_Jtensor_orb(self):
+        """
+        convert the orbital composition of A into J, DMI, Jani
+        """
+        self.Jiso_orb = {}
+        self.Jani_orb = {}
+        self.DMI_orb = {}
+        self.dJdx_orb = {}
+
+        if self.orb_decomposition:
+            for key, val in self.A_ijR_orb.items():
+                dval = self.dA_ijR_orb[key]
+
+                R, iatom, jatom = key
+                Rm = tuple(-x for x in R)
+                valm = self.A_ijR_orb[(Rm, jatom, iatom)]
+                #dvalm = self.dA_ijR_orb[(Rm, jatom, iatom)]
+
+                ni = self.norb_reduced[iatom]
+                nj = self.norb_reduced[jatom]
+
+                is_nonself = not (R == (0, 0, 0) and iatom == jatom)
+                ispin = self.ispin(iatom)
+                jspin = self.ispin(jatom)
+                keyspin = (R, ispin, jspin)
+
+                # isotropic J
+                Jiso = np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
+
+                dJdx = np.imag(dval[0, 0] - dval[1, 1] -
+                               dval[2, 2] - dval[3, 3])
+
+                # off-diagonal anisotropic exchange
+                Ja = np.zeros((3, 3, ni, nj), dtype=float)
+                for i in range(3):
+                    for j in range(3):
+                        Ja[i,
+                           j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                # DMI
+
+                Dtmp = np.zeros((3, ni, nj), dtype=float)
+                for i in range(3):
+                    Dtmp[i] = np.real(val[0, i + 1] - val[i + 1, 0])
+
+                if is_nonself:
+                    self.Jiso_orb[keyspin] = Jiso
+                    self.Jani_orb[keyspin] = Ja
+                    self.DMI_orb[keyspin] = Dtmp
+                    self.dJdx_orb[keyspin] = dJdx
+
     def calculate_all(self):
         """
         The top level.
@@ -239,7 +289,7 @@ class ExchangePert(ExchangeNCL):
                   AijRs_orb=None,
                   method='simpson'):
         """
-        AijRs: a list of AijR, 
+        AijRs: a list of AijR,
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
         if method == "trapezoidal":

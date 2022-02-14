@@ -186,7 +186,7 @@ class EpmatOneMode():
                 ret /= 2.0
         return ret
 
-    def get_epmat_RgRk_two_spin(self, Rg, Rk, avg=True):
+    def get_epmat_RgRk_two_spin(self, Rg, Rk, avg=False):
         H = self.get_epmat_RgRk(Rg, Rk, avg=avg)
         ret = np.zeros((self.nwann*2, self.nwann*2), dtype=complex)
         ret[::2, ::2] = H
@@ -314,23 +314,23 @@ def test():
 
 
 def test_read_data():
-    path = "/home/hexu/projects/SrMnO3/spinphon_data/epw555_2"
+    path = "/home/hexu/projects/SrMnO3/spinphon_data/epw555_10"
     prefix = 'SrMnO3'
     #path = "/home/hexu/projects/epw_test/sic_small_kq/NM/epw"
     #prefix = 'sic'
     ep = Epmat()
     ep.read(path=path, prefix=prefix, epmat_ncfile='epmat.nc')
     # ep.get_epmat_Rv_from_index(0, 0)
-    d = ep.get_epmat_Rv_from_R(0, (0, 0, 0))
+    #d = ep.get_epmat_Rv_from_R(0, (0, 0, 0))
     # print(d[(0, 0, 2)].imag)
 
     ep1mode = EpmatOneMode(ep, imode=3)
     Rg = (0, 0, 0)
-    Rk = (1, 0, 0)
+    Rk = (0, 1, 0)
     Rg2 = tuple(np.array(Rg)-np.array(Rk))
     Rk2 = tuple(-np.array(Rk))
-    dv1 = ep1mode.get_epmat_RgRk(Rg=Rg, Rk=Rk, avg=True).real
-    dv2 = ep1mode.get_epmat_RgRk(Rg=Rg2, Rk=Rk2, avg=True).real.T
+    dv1 = ep1mode.get_epmat_RgRk(Rg=Rg, Rk=Rk, avg=False).real
+    dv2 = ep1mode.get_epmat_RgRk(Rg=Rg2, Rk=Rk2, avg=False).real.T
     print(dv1)
     print("-"*10)
     print(dv2)

@@ -189,6 +189,11 @@ def write_exchange_section(cls,
                     np.array_str(cls.Jiso_orb[ll] * 1e3,
                                  precision=3,
                                  suppress_small=True)))
+            if cls.dJdx_orb:
+                myfile.write("Orbital contributions:\n dJ/dx:\n {} \n".format(
+                    np.array_str(cls.dJdx_orb[ll] * 1e3,
+                                 precision=3,
+                                 suppress_small=True)))
 
             xyz = 'xyz'
             if cls.DMI_orb:

@@ -32,6 +32,12 @@ def pauli_mat(nbasis, i):
                      [M * spm[1, 0], M * spm[1, 1]]])
 
 
+def commutate(M, i):
+    m = pauli_dict[i]
+    # return (m@M-M@m)
+    return (m@M-M@m)
+
+
 def pauli_decomp(M):
     """ Given a 2*2 matrix, get the I, x, y, z component.
     :param M: 2*2 matrix
@@ -40,6 +46,10 @@ def pauli_decomp(M):
     """
     return (np.trace(s0.dot(M)) / 2, np.trace(s1.dot(M)) / 2,
             np.trace(s2.dot(M)) / 2, np.trace(s3.dot(M)) / 2)
+
+
+def vec_to_mat(v0, vx, vy, vz):
+    return (s0*v0+s1*vx+s2*vy+s3*vz)
 
 
 def pauli_decomp2(M):

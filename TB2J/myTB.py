@@ -391,12 +391,12 @@ class MyTB(AbstractTB):
                     nzR = np.nonzero(sR)[0]
                     if len(nzR) != 0 and sR[nzR[0]] < 0:
                         newR = tuple(-np.array(sR))
-                        #d.data[newR][j, i] += v[i, j].conj()
                         d.data[sR][i, j] += v[i, j]
                     elif len(nzR) == 0:
                         newR = sR
-                        d.data[newR][i, j] += v[i, j] * 0.5
-                        d.data[newR][j, i] += v[i, j].conj() * 0.5
+                        #d.data[newR][i, j] += v[i, j] * 0.5
+                        #d.data[newR][j, i] += v[i, j].conj() * 0.5
+                        d.data[newR][i, j] += v[i, j]
                     else:
                         d.data[sR][i, j] += v[i, j]
         return d
