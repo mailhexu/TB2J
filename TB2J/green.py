@@ -135,12 +135,34 @@ class TBGreen():
         self.evals = np.zeros((nkpts, self.nbasis), dtype=float)
         self.nkpts = nkpts
         self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-        H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-        if not self.is_orthogonal:
-            self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+        if self._use_cache:
+            self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
+                                   mode='w+',
+                                   shape=(nkpts, self.nbasis, self.nbasis),
+                                   dtype=complex)
+            self.evecs_shape = self.evecs.shape
+            H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
+                          mode='w+',
+                          shape=(nkpts, self.nbasis, self.nbasis),
+                          dtype=complex)
+            if not self.is_orthogonal:
+                self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
+                                   mode='w+',
+                                   shape=(nkpts, self.nbasis, self.nbasis),
+                                   dtype=complex)
+            else:
+                self.S = None
+
         else:
-            self.S = None
+            self.evecs = np.zeros(
+                (nkpts, self.nbasis, self.nbasis), dtype=complex)
+            H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+
+            if not self.is_orthogonal:
+                self.S = np.zeros(
+                    (nkpts, self.nbasis, self.nbasis), dtype=complex)
+            else:
+                self.S = None
         if self.nproc == 1:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:
@@ -158,30 +180,30 @@ class TBGreen():
                 H[ik], self.S[ik], self.evals[ik], self.evecs[ik] = result
             self.H0 += H[ik] / self.nkpts
 
-        self.evals, self.evecs = self._reduce_eigens(self.evals,
-                                                     self.evecs,
-                                                     emin=self.efermi - 10.0,
-                                                     emax=self.efermi + 10.1)
+        # self.evals, self.evecs = self._reduce_eigens(self.evals,
+        #                                             self.evecs,
+        #                                             emin=self.efermi - 10.0,
+        #                                             emax=self.efermi + 10.1)
+
+        # if self._use_cache:
+        #    evecs = self.evecs
+        #    self.evecs_shape = self.evecs.shape
+        #    self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
+        #                           mode='w+',
+        #                           shape=self.evecs.shape,
+        #                           dtype=complex)
+        #    self.evecs[:, :, :] = evecs[:, :, :]
+        #    if self.is_orthogonal:
+        #        self.S = None
+        #    else:
+        #        S = self.S
+        #        self.S[:] = S[:]
+        #    del self.evecs
+        #    if not self.is_orthogonal:
+        #        del self.S
         if self._use_cache:
-            evecs = self.evecs
-            self.evecs_shape = self.evecs.shape
-            self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
-                                   mode='w+',
-                                   shape=self.evecs.shape,
-                                   dtype=complex)
-            self.evecs[:, :, :] = evecs[:, :, :]
-            if self.is_orthogonal:
-                self.S = None
-            else:
-                S = self.S
-                self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
-                                   mode='w+',
-                                   shape=(nkpts, self.nbasis, self.nbasis),
-                                   dtype=complex)
-                self.S[:] = S[:]
             del self.evecs
-            if not self.is_orthogonal:
-                del self.S
+            del self.S
 
     def get_evecs(self, ik):
         if self._use_cache:
