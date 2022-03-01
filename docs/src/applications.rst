@@ -6,3 +6,4 @@ Applications
 
    magnon_band.rst
    multibinit.rst
+   eigen.rst

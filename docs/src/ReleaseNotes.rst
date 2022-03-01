@@ -1,7 +1,12 @@
 Release Notes
 ===============
 
-v0.7.1 January 04, 2021
+v0.7.2 March 01, 2022
+--------------------------------
+Add TB2J_eigen.py script to write the eigen values and eigenvectors of the J(q) in a qpoint mesh.
+Remove J' and B from the output, which are often not useful and confusing. 
+
+v0.7.1 January 04, 2022
 --------------------------------
 Bug fix: convention in Vampire output (tensor->tensorial, and a factor of 2 added to the exchange values).
 Some documentation about the Vampire format added.

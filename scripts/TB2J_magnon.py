@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from TB2J.plot import plot_magnon_band, write_emin
+from TB2J.plot import plot_magnon_band, write_eigen
 from TB2J.versioninfo import print_license
 import argparse
 """
@@ -83,9 +83,9 @@ def plot_magnon():
             return not x
 
     if args.write_emin:
-        write_emin(has_exchange=nonone(args.no_Jiso),
-                   has_dmi=nonone(args.no_dmi),
-                   has_bilinear=nonone(args.no_Jani))
+        write_eigen(has_exchange=nonone(args.no_Jiso),
+                    has_dmi=nonone(args.no_dmi),
+                    has_bilinear=nonone(args.no_Jani))
     else:
         plot_magnon_band(fname=args.fname,
                          knames=args.qpath,

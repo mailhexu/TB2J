@@ -9,9 +9,10 @@ import numpy as np
 from TB2J import __version__
 
 
-def write_emin(**kwargs):
-    m = SpinIO.load_pickle("./")
-    m.write_Jq(kmesh=[9, 9, 9], path='./', **kwargs)
+def write_eigen(qmesh, gamma=True, path='./', output_fname='EigenJq.txt', **kwargs):
+    m = SpinIO.load_pickle(path)
+    m.write_Jq(kmesh=qmesh, path=path, gamma=gamma,
+               output_fname=output_fname, **kwargs)
 
 
 def plot_magnon_band(fname='exchange.xml',
