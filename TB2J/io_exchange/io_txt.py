@@ -167,7 +167,7 @@ def write_exchange_section(cls,
             except:
                 pass
 
-        if cls.Jani_dict is not None and write_experimental:
+        if cls.Jani_dict is not None:
             J = cls.Jani_dict[ll] * 1e3
             myfile.write(
                 f"[Testing!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
@@ -261,7 +261,7 @@ def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
     for i, ev in enumerate(evec_min):
         v = ev / np.linalg.norm(ev)
         myfile.write(
-            f"{sns[cls.ind_atoms[i]]}, {v[0]: 8.3f}, {v[2]: 8.3f}, {v[2]: 8.3f}")
+            f"{sns[cls.ind_atoms[i]]}, {v[0]: 8.3f}, {v[2]: 8.3f}, {v[2]: 8.3f}\n")
 
     print("\nThe energy minimum is at:")
     print("%s\n" % kpts[np.argmin(evals[:, 0])])
@@ -269,7 +269,7 @@ def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
     for i, ev in enumerate(evec_min):
         v = ev / np.linalg.norm(ev)
         print(
-            f"{sns[cls.ind_atoms[i]]}, {v[0]: 8.3f}, {v[2]: 8.3f}, {v[2]: 8.3f}")
+            f"{sns[cls.ind_atoms[i]]}, {v[0]: 8.3f}, {v[2]: 8.3f}, {v[2]: 8.3f}\n")
 
 
 def write_txt(cls,

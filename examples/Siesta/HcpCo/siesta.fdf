@@ -13,7 +13,6 @@ SCF.Mixer.Spin	spinor
 SCF.Mixer.Weight	0.4
 SCF.Spin.Fix	True
 SaveHS	True
-Write.DMHS.Netcdf	True
 SCFMustConverge	True
 
 Spin     	spin-orbit
