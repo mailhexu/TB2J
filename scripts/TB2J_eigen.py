@@ -22,13 +22,13 @@ def write_eigen_info():
         help='qmesh in the format of kx ky kz. Monkhorst pack or Gamma-centered.',
         type=int,
         nargs='*',
-        default=[5, 5, 5])
+        default=[8, 8, 8])
 
     parser.add_argument(
         '--gamma',
         help="whether shift the qpoint grid to  Gamma-centered. Default: False",
         action='store_true',
-        default=False)
+        default=True)
 
     parser.add_argument(
         "--output_fname",
