@@ -1,4 +1,3 @@
-import os
 import matplotlib.pyplot as plt
 from TB2J.spinham.spin_api import SpinModel
 from TB2J.io_exchange.io_exchange import SpinIO

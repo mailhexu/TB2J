@@ -1,13 +1,6 @@
 import numpy as np
-import xml.etree.cElementTree as ET
-from xml.dom import minidom
-from ase.data import atomic_masses
-from ase.units import eV, Hartree, Bohr, Ry, J
 import os
-from collections import Iterable, namedtuple
-from itertools import groupby
-from TB2J.utils import symbol_number
-import pickle
+from ase.units import Ry
 
 
 def write_uppasd(cls, path='TB2J_results/UppASD'):
@@ -17,6 +10,7 @@ def write_uppasd(cls, path='TB2J_results/UppASD'):
     cls.write_uppasd_momfile(os.path.join(path, 'momfile'))
     cls.write_uppasd_exchange(os.path.join(path, 'jASD1'))
     cls.write_uppasd_infile(os.path.join(path, 'input'))
+
 
 def write_uppasd_posfile(cls, fname):
     with open(fname, 'w') as myfile:
@@ -35,6 +29,7 @@ def write_uppasd_posfile(cls, fname):
                 )
                 myfile.write(text)
 
+
 def write_uppasd_momfile(cls, fname):
     with open(fname, 'w') as myfile:
         natom = len(cls.atoms)
@@ -48,6 +43,7 @@ def write_uppasd_momfile(cls, fname):
                 text = "{id_atom} {id_spin} {ms} 0.0 0.0 1.0\n".format(
                     id_atom=id_spin + 1, id_spin=id_spin + 1, ms=ms)
                 myfile.write(text)
+
 
 def write_uppasd_exchange(cls, fname):
     with open(fname, 'w') as myfile:
@@ -70,6 +66,7 @@ def write_uppasd_exchange(cls, fname):
                 Ry=d[1],
                 Rz=d[2],
                 Jij=val * 1e3 / Ry))  # mRy
+
 
 def write_uppasd_infile(cls, fname):
     tmpl = """ simid Unamed
@@ -124,4 +121,3 @@ def write_uppasd_infile(cls, fname):
     """
     with open(fname, 'w') as myfile:
         myfile.write(tmpl)
-

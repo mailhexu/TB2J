@@ -1,6 +1,5 @@
 import os
 import pickle
-import copy
 from collections import defaultdict
 import numpy as np
 from ase.dft.kpoints import monkhorst_pack
@@ -59,7 +58,7 @@ class JDownfolder_pickle():
         self.atoms = self.obj['atoms']
         atoms = self.atoms
         index_spin = self.obj['index_spin']
-        ind_atoms = self.obj['ind_atoms']
+        self.obj['ind_atoms']
         Jdict = self.obj['exchange_Jdict']
         nspin = len([x for x in index_spin if x >= 0])
 
@@ -163,7 +162,7 @@ class JDownfolder_pickle():
 
 def test(inpath, outpath, metals, ligands):
     #path = "/home/hexu/projects/NiCl2/vasp_inputs/TB2J_results"
-    path = "/home/hexu/projects/NiCl2/AFM/TB2J_results"
+    pass
     #fname = os.path.join(path, "TB2J.pickle")
     p = JDownfolder_pickle(inpath=inpath, metals=['Ni'], ligands=[
                            'Cl'], outpath='TB2J_results_downfolded')

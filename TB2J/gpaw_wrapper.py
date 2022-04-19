@@ -118,7 +118,7 @@ class GPAWTBWrapper():
                 calc=GPAW(gpw_fname, fixdensity=True, symmetry='off', txt='TB2J_wrapper.log', basis='dzp', mode='lcao')
                 atoms=calc.atoms
                 atoms.calc=calc
-                E = atoms.get_potential_energy()
+                atoms.get_potential_energy()
             tb=TightBinding(atoms, calc)
             self.H_NMM, self.S_NMM=tb.h_and_s()
             self.Rlist=tb.R_cN.T
@@ -164,7 +164,7 @@ def test_Ham():
     atoms=calc.atoms
     atoms.calc=calc
     calc.set(kpts=(3,3,3))
-    E = atoms.get_potential_energy()
+    atoms.get_potential_energy()
     tb=TightBinding(atoms, calc)
     kpath=monkhorst_pack([3,3,3])
     evals, evecs=tb.band_structure(kpath, blochstates=True)

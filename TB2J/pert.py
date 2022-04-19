@@ -1,8 +1,6 @@
 import numpy as np
 import scipy.linalg as sl
-from collections import defaultdict
 from ase.dft.kpoints import monkhorst_pack
-import os
 import matplotlib.pyplot as plt
 
 

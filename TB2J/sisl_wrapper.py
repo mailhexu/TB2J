@@ -1,5 +1,4 @@
 import os
-import shutil
 import numpy as np
 from ase.atoms import Atoms
 from TB2J.utils import symbol_number
@@ -126,9 +125,9 @@ class SislWrapper(AbstractTB):
 
     def Sk(self, k, convention=2):
         if convention == 1:
-            gauge = 'r'
+            pass
         elif convention == 2:
-            gauge = 'R'
+            pass
         S0 = self.ham.Sk(k, gauge='R', format='dense')
         if self.spin is None:
             S = S0

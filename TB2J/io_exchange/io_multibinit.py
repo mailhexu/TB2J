@@ -1,14 +1,8 @@
 import numpy as np
 import xml.etree.cElementTree as ET
 from xml.dom import minidom
-from ase.data import atomic_masses
 from ase.units import eV, Hartree, Bohr, Ry, J
 import os
-from collections import Iterable, namedtuple
-from itertools import groupby
-from TB2J.utils import symbol_number
-import pickle
-
 
 
 def write_multibinit_inp(cls, path='TB2J_results/Multibinit'):
@@ -39,7 +33,7 @@ ncell =   16 16 16  ! size of supercell.
 spin_dynamics=1  ! enable spin dynamics
 spin_mag_field= 0.0 0.0 0.0   ! external magnetic field
 spin_ntime_pre =10000          ! warming up steps. 
-spin_ntime =10000             ! number of steps. 
+spin_ntime =100000             ! number of steps. 
 spin_nctime=100               ! number of time steps between two nc file write
 spin_dt=5e-16 s               ! time step. 
 spin_init_state = 1           ! random initial spin
@@ -59,6 +53,7 @@ spin_calc_thermo_obs = 1      ! calculate thermodynamics related observables
         """
         myfile.write(infile_template)
 
+
 def write_xml(cls, fname):
     root = ET.Element("System_definition")
     try:
@@ -69,16 +64,16 @@ def write_xml(cls, fname):
         ["\t".join(["%.5e" % x for x in ui]) for ui in unitcell])
     uc = ET.SubElement(root, "unit_cell", units="bohrradius")
     uc.text = uctext
-    #ET.SubElement(
+    # ET.SubElement(
     #    root, "unit_cell", units="bohrradius").text = "\t".join(
     #        list(
     #            "%.5e" % x
     #            for x in np.array(cls.atoms.get_cell()).flatten() / Bohr))
     natom = len(cls.atoms)
-    #cls._map_to_magnetic_only()
+    # cls._map_to_magnetic_only()
     #id_spin = [-1] * natom
     #counter = 0
-    #for i in np.array(cls.magsites, dtype=int):
+    # for i in np.array(cls.magsites, dtype=int):
     #    counter += 1
     #    id_spin[int(i)] = counter
 
@@ -102,18 +97,18 @@ def write_xml(cls, fname):
     if cls.has_exchange:
         exc = ET.SubElement(root, "spin_exchange_list", units="eV")
         ET.SubElement(exc,
-                        "nterms").text = "%s" % (len(cls.exchange_Jdict))
+                      "nterms").text = "%s" % (len(cls.exchange_Jdict))
         for key, val in cls.exchange_Jdict.items():
             R, i, j = key
             exc_term = ET.SubElement(exc, "spin_exchange_term")
             ET.SubElement(
                 exc_term,
                 "ijR").text = "%d %d %d %d %d" % (i + 1, j + 1, R[0], R[1],
-                                                    R[2])
+                                                  R[2])
             try:
                 ET.SubElement(exc_term,
-                                "data").text = "%.5e \t %.5e \t %.5e" % (
-                                    val[0], val[1], val[2])
+                              "data").text = "%.5e \t %.5e \t %.5e" % (
+                    val[0], val[1], val[2])
             except Exception:
                 ET.SubElement(
                     exc_term,
@@ -127,11 +122,11 @@ def write_xml(cls, fname):
             ET.SubElement(
                 dmi_term,
                 "ijR").text = "%d %d %d %d %d" % (i + 1, j + 1, R[0], R[1],
-                                                    R[2])
+                                                  R[2])
             ET.SubElement(
                 dmi_term,
                 "data").text = "%.5e \t %.5e \t %.5e" % (val[0], val[1],
-                                                            val[2])
+                                                         val[2])
 
     if cls.has_uniaxial_anistropy:
         uni = ET.SubElement(root, "spin_uniaxial_SIA_list", units="eV")
@@ -148,7 +143,7 @@ def write_xml(cls, fname):
     if cls.has_bilinear:
         bilinear = ET.SubElement(root, "spin_bilinear_list", units="eV")
         ET.SubElement(bilinear,
-                        "nterms").text = "%d" % len(cls.Jani_dict)
+                      "nterms").text = "%d" % len(cls.Jani_dict)
         for key, val in cls.Jani_dict.items():
             bilinear_term = ET.SubElement(bilinear, "spin_bilinear_term")
             ET.SubElement(bilinear_term, "ijR").text = "%d %d %d %d %d" % (
@@ -160,7 +155,7 @@ def write_xml(cls, fname):
         description.text = cls.description
 
     #tree = ET.ElementTree(root)
-    #tree.write(fname)
+    # tree.write(fname)
     with open(fname, 'w') as myfile:
         myfile.write(
             minidom.parseString(
@@ -171,4 +166,3 @@ def write_multibinit(cls, path):
     write_multibinit_inp(cls, path=path)
     xmlfname = os.path.join(path, 'exchange.xml')
     write_xml(cls, xmlfname)
-

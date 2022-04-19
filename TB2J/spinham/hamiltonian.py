@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
-from collections import Iterable, defaultdict
+from collections.abc import Iterable
+from collections import defaultdict
 import matplotlib.pyplot as plt
 from ase.dft.kpoints import bandpath, monkhorst_pack
 from .hamiltonian_terms import (ZeemanTerm, UniaxialMCATerm, ExchangeTerm,
@@ -10,8 +11,6 @@ from .supercell import SupercellMaker
 from .spin_xml import SpinXmlParser, SpinXmlWriter
 from .plot import group_band_path
 from ase.cell import Cell
-#from minimulti.spin.hamiltonian import SpinHamiltonian
-#from minimulti.spin.mover import SpinMover
 from .qsolver import QSolver
 
 
@@ -179,7 +178,6 @@ class SpinHamiltonian(object):
         """
         add the dipole dipole interaction term.
         """
-        pass
 
     def set_external_hfield(self, H):
         """
@@ -238,7 +236,7 @@ class SpinHamiltonian(object):
         sc_zion = smaker.sc_trans_invariant(np.array(self.zion))
 
         if self.index_spin is not None:
-            sc_index_spin = smaker.sc_trans_invariant(self.index_spin)
+            smaker.sc_trans_invariant(self.index_spin)
 
         sc_Rlist = np.repeat(smaker.R_sc, self.nspin, axis=0)
         sc_iprim = smaker.sc_trans_invariant(list(range(self.nspin)))

@@ -13,7 +13,6 @@ from collections.abc import Iterable
 import numpy as np
 from TB2J.kpoints import monkhorst_pack
 import pickle
-from ase.cell import Cell
 from TB2J import __version__
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -228,9 +227,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         m = SpinModel(fname=os.path.join(path, 'Multibinit', 'exchange.xml'))
         m.set_ham(**kwargs)
         kpts = monkhorst_pack(kmesh, gamma_center=gamma)
-        #bp = Cell(self.atoms.cell).bandpath(npoints=400)
-        #kpts2 = bp.kpts
-        #kpts = np.vstack([kpts1, kpts2])
 
         evals, evecs = m.ham.solve_k(kpts, Jq=True)
         with open(os.path.join(path, output_fname), 'w') as myfile:

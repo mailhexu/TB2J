@@ -76,7 +76,6 @@ class OijuWannEPC(ExchangeCL2):
         """
         self.dDelta = np.zeros((self.nphon, self.nwann, self.nwann))
         #iq, iv, iR
-        iR0 = iRlist[(0, 0, 0)]
         iq0 = iqlist[(0, 0, 0)]
 
         for iv in range(self.nphon):

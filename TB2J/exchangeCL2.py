@@ -14,11 +14,9 @@ from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
 from p_tqdm import p_map
-from functools import lru_cache
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
 from pathos.multiprocessing import ProcessPool
-from functools import partial
 
 
 class ExchangeCL2(ExchangeCL):
@@ -64,7 +62,7 @@ class ExchangeCL2(ExchangeCL):
 
         self.biquadratic = False
 
-        self._is_collinear=True
+        self._is_collinear = True
 
     def _clean_tbmodels(self):
         del self.tbmodel_up
@@ -84,7 +82,7 @@ class ExchangeCL2(ExchangeCL):
         orbs = self.iorb(iatom)
         return self.Delta[np.ix_(orbs, orbs)]
         #s = self.orb_slice[iatom]
-        #return self.Delta[s, s]
+        # return self.Delta[s, s]
 
     def GR_atom(self, GR, iatom, jatom):
         """Given a green's function matrix, return the [iatom, jatom] component.
@@ -98,7 +96,7 @@ class ExchangeCL2(ExchangeCL):
         orbi = self.iorb(iatom)
         orbj = self.iorb(jatom)
         return GR[np.ix_(orbi, orbj)]
-        #return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
+        # return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, Gup, Gdn, iatom, jatom):
         """
@@ -244,13 +242,15 @@ class ExchangeCL2(ExchangeCL):
         """
         print("Green's function Calculation started.")
 
-        npole=len(self.contour.path)
+        npole = len(self.contour.path)
         if self.np == 1:
-            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
+            results = map(self.get_AijR_rhoR, tqdm(
+                self.contour.path, total=npole))
         else:
             #pool = ProcessPool(nodes=self.np)
             #results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
+            results = p_map(self.get_AijR_rhoR,
+                            self.contour.path, num_cpus=self.np)
         for i, result in enumerate(results):
             rup, rdn, Jorb_list, JJ_list = result
             self.rho_up_list.append(rup)
@@ -262,9 +262,9 @@ class ExchangeCL2(ExchangeCL):
                     self.JJ_list[key].append(JJ_list[key])
         if self.np > 1:
             pass
-            #pool.close()
-            #pool.join()
-            #pool.clear()
+            # pool.close()
+            # pool.join()
+            # pool.clear()
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()

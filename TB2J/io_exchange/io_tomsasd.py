@@ -1,13 +1,7 @@
 import numpy as np
-import xml.etree.cElementTree as ET
-from xml.dom import minidom
-from ase.data import atomic_masses
 from ase.units import eV, Hartree, Bohr, Ry, J
 import os
-from collections import Iterable, namedtuple
 from itertools import groupby
-from TB2J.utils import symbol_number
-import pickle
 
 
 def write_tom_ucf(cls, fname):
@@ -32,7 +26,6 @@ def write_tom_ucf(cls, fname):
                 gyro_ratio = cls.gyro_ratio[i]
                 symbol = cls.atoms.get_chemical_symbols()[i]
                 if cls.has_uniaxial_anistropy:
-                    #abs(K)
                     k1 = cls.k1[i]
                     k1dir = cls.k1dir[i]
                 else:
@@ -56,6 +49,7 @@ def write_tom_ucf(cls, fname):
                     kz=k1dir[2],
                 )
                 myfile.write(text)
+
 
 def write_tom_exch(cls, fname):
     """
@@ -107,11 +101,12 @@ TruncateExchange = FALSE;
                 myfile.write("};\n")
 
 # Tom's ASD code
+
+
 def write_tom_format(cls, path='TB2J_results/TomASD', prefix='exchange'):
     if not os.path.exists(path):
         os.makedirs(path)
     exch_fname = os.path.join(path, "%s.exch" % prefix)
     ucf_fname = os.path.join(path, "%s.ucf" % prefix)
-    write_tom_ucf(cls,ucf_fname)
+    write_tom_ucf(cls, ucf_fname)
     write_tom_exch(cls, exch_fname)
-

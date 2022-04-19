@@ -63,7 +63,6 @@ def EPCMat():
         #TODO: implement this.
         self.Relec_list = []
         self.nRelec = len(self.Rlist_elec)
-        pass
 
     def _build_phonon_Rlist(self):
         #TODO: implement this
@@ -127,4 +126,3 @@ def EPCMat():
         Lmat: matrix to transfer atomic displacement to lattice wannier function.
         """
         # TODO: implement this
-        pass

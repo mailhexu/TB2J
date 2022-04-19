@@ -1,8 +1,4 @@
-from collections import defaultdict
-import os
-import shutil
 import numpy as np
-import time
 from TB2J.green import TBGreen
 from TB2J.utils import symbol_number, read_basis, kmesh_to_R
 from TB2J.myTB import MyTB

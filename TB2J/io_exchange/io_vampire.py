@@ -1,13 +1,6 @@
 import numpy as np
-import xml.etree.cElementTree as ET
-from xml.dom import minidom
-from ase.data import atomic_masses
-from ase.units import eV, Hartree, Bohr, Ry, J
 import os
-from collections import Iterable, namedtuple
-from itertools import groupby
-from TB2J.utils import symbol_number
-import pickle
+from ase.units import J
 
 
 def write_vampire(cls, path='TB2J_results/Vampire'):

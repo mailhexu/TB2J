@@ -12,7 +12,6 @@ class PolyTB():
         self.m0 = m0
         self.m1 = m1
         self.m2 = m2
-        pass
 
     def gen_model(self, amp):
         m = copy.deepcopy(self.ref_model)

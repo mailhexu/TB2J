@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from TB2J.myTB2 import MyTB
-from TB2J.pauli import *  #pauli_block
+from TB2J.pauli import *  # pauli_block
 from TB2J.green_SOC import TBGreen
 from TB2J.utils import auto_assign_basis_name
 from TB2J.exchange import ExchangeNCL, gen_exchange
@@ -38,9 +38,9 @@ class TBTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.path = '/media/hexu/Backup/materials/SOC/RuCl3_FM_SOC/'
-        #m = MyTB.read_from_wannier_dir(
+        # m = MyTB.read_from_wannier_dir(
         #    path=self.path, prefix='wannier90', poscar='POSCAR', nls=True)
-        #m.save('RuCl3.nc')
+        # m.save('RuCl3.nc')
         cls.tbmodel = MyTB.load_MyTB('RuCl3.nc')
         cls.positions = cls.tbmodel.xred
         cls.atoms = cls.tbmodel.atoms
@@ -49,7 +49,6 @@ class TBTest(unittest.TestCase):
         m = MyTB.read_from_wannier_dir(
             path=self.path, prefix='wannier90', poscar='POSCAR', nls=True)
         m.save('RuCl3.nc')
-        pass
 
     def test_saveload_wannier(self):
         # test onsite energy
@@ -97,7 +96,7 @@ class ExchangeTest(unittest.TestCase):
         path = '/media/hexu/Backup/materials/SOC/RuCl3_FM_SOC/'
         cls.exchange = gen_exchange(
             kmesh=[6, 6, 3],
-            Rmesh=[1,1,1],
+            Rmesh=[1, 1, 1],
             nz1=50,
             nz3=50,
             nz2=300,

@@ -10,7 +10,6 @@ from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
 from p_tqdm import p_map
-from functools import lru_cache
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
 from TB2J.orbmap import map_orbs_matrix
@@ -658,7 +657,6 @@ class ExchangeNCL(Exchange):
         print("Green's function Calculation started.")
 
         rhoRs = []
-        GRs = []
         AijRs = {}
 
         AijRs_orb = {}

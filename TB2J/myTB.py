@@ -9,7 +9,6 @@ from collections import defaultdict
 from ase.io import read
 from ase.atoms import Atoms
 from TB2J.utils import auto_assign_basis_name
-from functools import lru_cache
 from TB2J.wannier import parse_ham, parse_xyz, parse_atoms
 
 

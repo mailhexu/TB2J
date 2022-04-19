@@ -113,7 +113,7 @@ def auto_assign_wannier_to_atom2(positions,
         iatom = np.argmin(distances)
         ind_atoms.append(iatom)
         shifted_pos.append(distance_vecs[iatom] + patoms[iatom])
-        shifted_pos=np.array(shifted_pos)
+        shifted_pos = np.array(shifted_pos)
         if min(distances) > max_distance:
             print(
                 "Warning: the minimal distance between wannier function No. %s is large. Check if the MLWFs are well localized."
@@ -121,10 +121,10 @@ def auto_assign_wannier_to_atom2(positions,
     if half:
         #ind_atoms = np.vstack([ind_atoms, ind_atoms], dtype=int)
         #shifted_pos = np.vstack([shifted_pos, shifted_pos], dtype=float)
-        ind_atoms= np.repeat(ind_atoms, 2)
-        shape=shifted_pos.shape
-        shape[0]*=2
-        tmp=copy.deepcopy(shifted_pos)
+        ind_atoms = np.repeat(ind_atoms, 2)
+        shape = shifted_pos.shape
+        shape[0] *= 2
+        tmp = copy.deepcopy(shifted_pos)
         shifted_pos = np.zeros(shape, dtype=float)
         shifted_pos[::2] = tmp
         shifted_pos[1::2] = tmp
@@ -157,8 +157,8 @@ def shift_positions(p, pref):
 
 
 def test_shift_positions():
-    a = np.array((0.0, 0.1, 1.8))
-    b = np.array((0.1, -1.9, 1.3))
+    print(np.array((0.0, 0.1, 1.8)))
+    print(np.array((0.1, -1.9, 1.3)))
     #print(shift_positions(a, b))
 
 
@@ -256,7 +256,7 @@ def trapezoidal_nonuniform(x, f):
     h = np.diff(x)
     f = np.array(f)
     avg = (f[:-1] + f[1:]) / 2.0
-    return np.tensordot(avg, h, axes=(0,0))
+    return np.tensordot(avg, h, axes=(0, 0))
 
 
 def simpson_nonuniform(x, f):
@@ -280,23 +280,23 @@ def simpson_nonuniform(x, f):
     result = 0.0
     for i in range(1, N, 2):
         hph = h[i] + h[i - 1]
-        result += f[i] * ( h[i]**3 + h[i - 1]**3
-                           + 3. * h[i] * h[i - 1] * hph )\
-                     / ( 6 * h[i] * h[i - 1] )
-        result += f[i - 1] * ( 2. * h[i - 1]**3 - h[i]**3
+        result += f[i] * (h[i]**3 + h[i - 1]**3
+                          + 3. * h[i] * h[i - 1] * hph)\
+            / (6 * h[i] * h[i - 1])
+        result += f[i - 1] * (2. * h[i - 1]**3 - h[i]**3
                               + 3. * h[i] * h[i - 1]**2)\
-                     / ( 6 * h[i - 1] * hph)
-        result += f[i + 1] * ( 2. * h[i]**3 - h[i - 1]**3
+            / (6 * h[i - 1] * hph)
+        result += f[i + 1] * (2. * h[i]**3 - h[i - 1]**3
                               + 3. * h[i - 1] * h[i]**2)\
-                     / ( 6 * h[i] * hph )
+            / (6 * h[i] * hph)
 
     if (N + 1) % 2 == 0:
-        result += f[N] * ( 2 * h[N - 1]**2
+        result += f[N] * (2 * h[N - 1]**2
                           + 3. * h[N - 2] * h[N - 1])\
-                     / ( 6 * ( h[N - 2] + h[N - 1] ) )
-        result += f[N - 1] * ( h[N - 1]**2
-                           + 3*h[N - 1]* h[N - 2] )\
-                     / ( 6 * h[N - 2] )
+            / (6 * (h[N - 2] + h[N - 1]))
+        result += f[N - 1] * (h[N - 1]**2
+                              + 3*h[N - 1] * h[N - 2])\
+            / (6 * h[N - 2])
         result -= f[N - 2] * h[N - 1]**3\
-                     / ( 6 * h[N - 2] * ( h[N - 2] + h[N - 1] ) )
+            / (6 * h[N - 2] * (h[N - 2] + h[N - 1]))
     return result
