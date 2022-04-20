@@ -1,6 +1,10 @@
 Release Notes
 ===============
 
+v0.7.2.1 April 20, 2022
+---------------------------------------
+Fix compatibility issue with Python3.10
+
 v0.7.2 March 01, 2022
 --------------------------------
 Add TB2J_eigen.py script to write the eigen values and eigenvectors of the J(q) in a qpoint mesh.
