@@ -7,10 +7,10 @@ Frequently asked questions.
  See the reference section.
 
 How can I ask questions or report bugs?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-We recommend posting the questions to the TB2J forum, `https://groups.google.com/g/tb2j<https://groups.google.com/g/tb2j>`_ . Equivalently you can send emails to  `tb2j@googlegroups.com<tb2j@googlegroups.com>`_ . Another option is the discussion page on github: `https://github.com/mailhexu/TB2J/discussions<https://github.com/mailhexu/TB2J/discussions``_ . Before doing so, please read the documents and first try to find out if things are already there.
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+We recommend posting the questions to the TB2J forum, `https://groups.google.com/g/tb2j<https://groups.google.com/g/tb2j>`. Equivalently you can send emails to  `tb2j@googlegroups.com<tb2j@googlegroups.com>` . Another option is the discussion page on github: `https://github.com/mailhexu/TB2J/discussions<https://github.com/mailhexu/TB2J/discussions` . Before doing so, please read the documents and first try to find out if things are already there.
 
-For reporting bugs, you can also open a issue on `https://github.com/mailhexu/TB2J/issues<https://github.com/mailhexu/TB2J/issues>`_ .
+For reporting bugs, you can also open a issue on `https://github.com/mailhexu/TB2J/issues<https://github.com/mailhexu/TB2J/issues>`.
 
 If you meet with a bug, please first try to upgrade to the latest version to see if it is still there. And when reporting a bug, please post the inputs, the TB2J command, and the version of TB2J being used if possible. Should these files be kept secret, try to reproduce the bug in a simple system.
 
@@ -19,7 +19,7 @@ It is highly recommended to sign with your real name and affiliation. We appreci
 Any kind of feedback will help us to make improvement. Don't hesitate to get in contact!
 
 Is it reasonable to do the DFT calculation in a magnetic non-ground state for the calculation of the exchange parameters?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 It depends on how "Heisenberg" the material is. In a ideal Heisenberg model, the exchange parameters does not depend on the orientation of the spins. But in a real material it is only an approximation. Although it is a good approximation for many materials, there could be other cases that it fails. 
 
 To do such compuation can be very helpful when the magnetic ground state is unkown or difficult to compute with DFT, e.g. huge supercell could be needed to model some complex magnetic states. In these cases, the estimation of the exchange parameters could be useful for finding the ground state, or provide an estimation of the other magnetic properties. 
@@ -32,6 +32,8 @@ First, compare the band structure from the DFT results and that from the Wannier
   
 How can I improve the Wannierization?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+This web page provides some nice tips on how to build high quality Wannier functions:
+`<https://www.wanniertools.org/tutorials/high-quality-wfs>`
 
 How can I speedup the calculation?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
