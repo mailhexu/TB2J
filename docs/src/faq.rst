@@ -18,12 +18,16 @@ It is highly recommended to sign with your real name and affiliation. We appreci
 
 Any kind of feedback will help us to make improvement. Don't hesitate to get in contact!
 
-Is it reasonable to do the DFT calculation in a magnetic non-ground state?
+Is it reasonable to do the DFT calculation in a magnetic non-ground state for the calculation of the exchange parameters?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+It depends on how "Heisenberg" the material is. In a ideal Heisenberg model, the exchange parameters does not depend on the orientation of the spins. But in a real material it is only an approximation. Although it is a good approximation for many materials, there could be other cases that it fails. 
+
+To do such compuation can be very helpful when the magnetic ground state is unkown or difficult to compute with DFT, e.g. huge supercell could be needed to model some complex magnetic states. In these cases, the estimation of the exchange parameters could be useful for finding the ground state, or provide an estimation of the other magnetic properties. 
 
 
 What quantities should I look into for validating the Wannier functions?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+First, compare the band structure from the DFT results and that from the Wannier Hamiltonian. Then check the Wannier centers and Wannier spread to see if they are near the atom centers and the spread is small enough. From that you can also get some limited sense on the symmetry of the Wannier functions. Another thing to check in the collinear-spin case is the Re/Im ratio of the Wannier functions, which can be found in the Wannier90 output files. 
 
   
 How can I improve the Wannierization?
@@ -33,7 +37,7 @@ How can I speedup the calculation?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 TB2J can be used in parallel mode, with the --np option to specify the number of processes to be used. Note that it can
 only use one computer node. So if you're using a job management system like slurm or pbs, you need to explicitly specify that
-the resources should be allocated in a single node.
+the resources should be allocated in a single node. 
 
 Is is possible to reduce the memory usage?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -43,6 +47,13 @@ will store one copy of it. However, you can use the --use-cache option so that t
 
 My exchange parameters are different from the results from total energy methods. What are the possible reasons?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The exchange parameters from TB2J and those from the total energy are not completely the same so they can be different.
+- TB2J uses the magnetic force theorem and perturbation theory, which is more accurate if the spin orientation only slightly deviate from the reference state. 
+  The total energy method often flip the spins to get the energies with various spin configuration, therefore is probably better at describing the interactions if the spin is more disordered. 
+
+- The results from the total energy method depends on the model it assumes. For example, for system with long-range spin ineraction, or higher order interactions, these parameters are re-normalized into the exchange parameters. Whereas TB2J does not, which makes the physically meaning more tractable. 
+
+- The conventions should be checked when you compare the results from different sources. Perhaps sometimes it is just a factor of 1/2 or whether the S is normalized to 1. 
 
 The results seems to contradict the experimental results. Why?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
