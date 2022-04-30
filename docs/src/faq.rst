@@ -2,15 +2,12 @@ Frequently asked questions.
 ==========================================
 
 
- How to cite TB2J?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- See the reference section.
 
 How can I ask questions or report bugs?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-We recommend posting the questions to the TB2J forum, `https://groups.google.com/g/tb2j<https://groups.google.com/g/tb2j>`. Equivalently you can send emails to  `tb2j@googlegroups.com<tb2j@googlegroups.com>` . Another option is the discussion page on github: `https://github.com/mailhexu/TB2J/discussions<https://github.com/mailhexu/TB2J/discussions` . Before doing so, please read the documents and first try to find out if things are already there.
+We recommend posting the questions to the TB2J forum, https://groups.google.com/g/tb2j . Equivalently you can send emails to  tb2j@googlegroups.com . Another option is the discussion page on github: https://github.com/mailhexu/TB2J/discussions . Before doing so, please read the documents and first try to find out if things are already there.
 
-For reporting bugs, you can also open a issue on `https://github.com/mailhexu/TB2J/issues<https://github.com/mailhexu/TB2J/issues>`.
+For reporting bugs, you can also open a issue on https://github.com/mailhexu/TB2J/issues .
 
 If you meet with a bug, please first try to upgrade to the latest version to see if it is still there. And when reporting a bug, please post the inputs, the TB2J command, and the version of TB2J being used if possible. Should these files be kept secret, try to reproduce the bug in a simple system.
 
