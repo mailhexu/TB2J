@@ -13,13 +13,14 @@ from ase.io import read
 from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
-from p_tqdm import p_map
+from TB2J.external import p_map
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
 from pathos.multiprocessing import ProcessPool
 
 
 class ExchangeCL2(ExchangeCL):
+
     def set_tbmodels(self, tbmodels):
         """
         only difference is a colinear tag.
@@ -180,8 +181,8 @@ class ExchangeCL2(ExchangeCL):
                 np.dot(self.spinat[iatom], self.spinat[jatom]))
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jij
-                self.Jiso_orb[
-                    keyspin] = self.simplify_orbital_contributions(Jorbij, iatom, jatom)
+                self.Jiso_orb[keyspin] = self.simplify_orbital_contributions(
+                    Jorbij, iatom, jatom)
 
     def get_rho_e(self, rho_up, rho_dn):
         #self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))
@@ -244,13 +245,14 @@ class ExchangeCL2(ExchangeCL):
 
         npole = len(self.contour.path)
         if self.np == 1:
-            results = map(self.get_AijR_rhoR, tqdm(
-                self.contour.path, total=npole))
+            results = map(self.get_AijR_rhoR,
+                          tqdm(self.contour.path, total=npole))
         else:
             #pool = ProcessPool(nodes=self.np)
             #results = pool.map(self.get_AijR_rhoR ,self.contour.path)
             results = p_map(self.get_AijR_rhoR,
-                            self.contour.path, num_cpus=self.np)
+                            self.contour.path,
+                            num_cpus=self.np)
         for i, result in enumerate(results):
             rup, rdn, Jorb_list, JJ_list = result
             self.rho_up_list.append(rup)

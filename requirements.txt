@@ -4,7 +4,6 @@ scipy
 matplotlib
 ase>=3.19
 tqdm>=4.42.0
-p_tqdm
 pathos
 packaging>=20.0
 
