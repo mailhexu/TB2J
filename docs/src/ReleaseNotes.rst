@@ -1,6 +1,13 @@
 Release Notes
 ===============
 
+v0.7.3 June 8, 2022
+---------------------------------------
+The Vampire output include the DMI and anisotropic exchange.
+The TB2J_downfold.py is extended to DMI and anisotropic exchange.
+
+
+
 v0.7.2.1 April 20, 2022
 ---------------------------------------
 Fix compatibility issue with Python3.10

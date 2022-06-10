@@ -30,7 +30,7 @@ class Exchange():
             kmesh=[4, 4, 4],
             emin=-15,  # integration lower bound, relative to fermi energy
             # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-        emax=0.05,
+            emax=0.05,
             nz=100,
             # the delta in the (i delta) in green's function to prevent divergence
             height=0.5,
@@ -437,7 +437,7 @@ class ExchangeNCL(Exchange):
             for key, val in self.A_ijR_orb.items():
                 R, iatom, jatom = key
                 Rm = tuple(-x for x in R)
-                valm = self.A_ijR_orb[(Rm, jatom, iatom)]
+                #valm = self.A_ijR_orb[(Rm, jatom, iatom)]
                 ni = self.norb_reduced[iatom]
                 nj = self.norb_reduced[jatom]
 
@@ -454,7 +454,7 @@ class ExchangeNCL(Exchange):
                 for i in range(3):
                     for j in range(3):
                         Ja[i,
-                           j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                           j] = np.imag(val[i + 1, j + 1] + val[j + 1, i + 1])
                 # DMI
 
                 Dtmp = np.zeros((3, ni, nj), dtype=float)

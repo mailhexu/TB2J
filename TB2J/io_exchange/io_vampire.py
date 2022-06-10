@@ -43,17 +43,16 @@ def write_vampire_unitcell_file(cls, fname):
             num_interactions=nexch, type_exchange='tensorial'))
 
         counter = -1
-        for key, val in cls.exchange_Jdict.items():
+        for key in cls.exchange_Jdict:
+            R, ispin, jspin=key
+            Jtensor= cls.get_J_tensor(ispin, jspin, R)
             counter += 1  # starts at 0
             myfile.write(
-                "{IID} {i} {j} {Rx} {Ry} {Rz} {Jij} 0 0 0 {Jij} 0 0 0 {Jij}\n".
-                format(IID=counter,
-                       i=key[1],
-                       j=key[2],
-                       Rx=key[0][0],
-                       Ry=key[0][1],
-                       Rz=key[0][2],
-                       Jij=2.0*val / J))
+                f"{counter} {ispin} {jspin} {R[0]} {R[1]} {R[2]} ")
+            for i in range(3):
+                for j in range(3):
+                    myfile.write(f"{Jtensor[i,j]*2.0/J} ")
+            myfile.write("\n")
 
 
 def write_vampire_mat_file(cls, fname):
