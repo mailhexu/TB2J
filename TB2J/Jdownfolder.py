@@ -106,7 +106,6 @@ class JDownfolder_pickle():
 
     def _downfold(self):
         JR2 = self.exc.get_full_Jtensor_for_Rlist(asr=True)
-
         d = JDownfolder(JR2, self.exc.Rlist, iM=self.iM,
                         iL=self.iL, qmesh=self.qmesh, is_collinear=self.is_colinear)
         Jd = d.get_JR()

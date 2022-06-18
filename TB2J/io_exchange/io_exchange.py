@@ -212,9 +212,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             return None
 
     def get_J_tensor(self, i, j, R):
-        return combine_J_tensor(Jiso=self.get_J(i, j, R),
-                                D=self.get_DMI(i, j, R),
-                                Jani=self.get_Jani(i, j, R))
+        Jtensor = combine_J_tensor(Jiso=self.get_J(i, j, R),
+                                   D=self.get_DMI(i, j, R),
+                                   Jani=self.get_Jani(i, j, R))
+        return(Jtensor)
 
     def get_full_Jtensor_for_one_R(self, R):
         n3 = self.nspin * 3
@@ -376,7 +377,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for key, val in self.Jani_dict.items():
             d = self.distance_dict[key][1]
             ds.append(d)
-            val = val - np.diag([np.trace(val) / 3] * 3)
+            #val = val - np.diag([np.trace(val) / 3] * 3)
             Jani.append(val * 1e3)
         Jani = np.array(Jani)
         s = 'xyz'
