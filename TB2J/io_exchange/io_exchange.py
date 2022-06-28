@@ -306,7 +306,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for key, val in self.Jani_dict.items():
             d = self.distance_dict[key][1]
             ds.append(d)
-            val = val - np.diag([np.trace(val) / 3] * 3)
+            #val = val - np.diag([np.trace(val) / 3] * 3)
             Jani.append(val * 1e3)
         Jani = np.array(Jani)
         s = 'xyz'
