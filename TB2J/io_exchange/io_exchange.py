@@ -14,11 +14,14 @@ import numpy as np
 from TB2J.kpoints import monkhorst_pack
 import pickle
 from TB2J import __version__
+from TB2J.Jtensor import decompose_J_tensor, combine_J_tensor
 from datetime import datetime
 import matplotlib.pyplot as plt
+from ase import Atoms
 
 
 class SpinIO(object):
+
     def __init__(
         self,
         atoms,
@@ -53,14 +56,14 @@ class SpinIO(object):
         :param charges: charges for each atom (natom)
         :param index_spin: index of spin in the spin potential for each atom.
         :param colinear: whether the parameters are for a colinear wannier calculation.
-        :param distance_dict: {(R, i,j ): distance}
+        :param distance_dict: {(R, i,j ): distance} , here i and j are spin indices
         :param exchange_Jdict: {(R, i,j): J}
         :param Jiso_orb: {(R, i,j): J_orb}
         :param DMI_orb: {(R, i,j): D_orb}
         :param Jani_orb: {(R, i,j): Jani_orb}
         :param dJdx: {(R, i,j): dJdx}
         :param dJdx2: {(R, i,j): dJdx2}
-        :param dim_ddict:{(R, i,j): DMI}
+        :param dmi_ddict:{(R, i,j): DMI}
         :param Jani_dict: {(R, i,j): Jani'}, Jani is a 3*3 matrix
         :param biqudratic_Jdict: {(R, i,j ): J}
         :param k1: single ion anisotropy amplitude.o
@@ -173,9 +176,69 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             self.description += description
 
         self.orbital_names = orbital_names
+        self.TB2J_version = __version__
+
+    def _build_Rlist(self):
+        Rset = set()
+        ispin_set = set()
+        for R, i, j in self.exchange_Jdict:
+            Rset.add(R)
+            ispin_set.add(i)
+            ispin_set.add(j)
+        self.Rlist = list(Rset)
+        self.ispin_list = list(ispin_set)
+        self.nspin = len(self.ispin_list)
+        assert (self.nspin == max(self.ispin_list)+1)
 
     def get_J(self, i, j, R):
-        return self.exchange_Jdict[(tuple(R), i, j)]
+        key = (tuple(R), i, j,)
+        if self.exchange_Jdict is not None and key in self.exchange_Jdict:
+            return self.exchange_Jdict[key]
+        else:
+            return None
+
+    def get_DMI(self, i, j, R):
+        key = (tuple(R), i, j,)
+        if self.dmi_ddict is not None and key in self.dmi_ddict:
+            return self.dmi_ddict[(tuple(R), i, j)]
+        else:
+            return None
+
+    def get_Jani(self, i, j, R):
+        key = (tuple(R), i, j,)
+        if self.Jani_dict is not None and key in self.Jani_dict:
+            return self.Jani_dict[(tuple(R), i, j)]
+        else:
+            return None
+
+    def get_J_tensor(self, i, j, R):
+        Jtensor = combine_J_tensor(Jiso=self.get_J(i, j, R),
+                                   D=self.get_DMI(i, j, R),
+                                   Jani=self.get_Jani(i, j, R))
+        return(Jtensor)
+
+    def get_full_Jtensor_for_one_R(self, R):
+        n3 = self.nspin * 3
+        Jmat = np.zeros((n3, n3), dtype=float)
+        for i in range(self.nspin):
+            for j in range(self.nspin):
+                Jmat[i * 3:i * 3 + 3,
+                     j * 3:j * 3 + 3] = self.get_J_tensor(i, j, R)
+        return Jmat
+
+    def get_full_Jtensor_for_Rlist(self, asr=False):
+        n3 = self.nspin * 3
+        nR = len(self.Rlist)
+        Jmat = np.zeros((nR, n3, n3), dtype=float)
+        for iR, R in enumerate(self.Rlist):
+            Jmat[iR] = self.get_full_Jtensor_for_one_R(R)
+        if asr:
+            iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
+            assert(np.linalg.norm(self.Rlist[iR0]) == 0)
+            for i in range(n3):
+                sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
+                Jmat[iR0][i, i] -= sum_JRi
+        return Jmat
 
     def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
         if not os.path.exists(path):
@@ -188,19 +251,21 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 print(f"Pickle not written due to {ex}")
 
     @classmethod
-    def load_pickle(cls, path='TB2J_resutls', fname='TB2J.pickle'):
+    def load_pickle(cls, path='TB2J_results', fname='TB2J.pickle'):
         fname = os.path.join(path, fname)
         with open(fname, 'rb') as myfile:
             d = pickle.load(myfile)
         obj = cls(atoms=[], spinat=[], charges=[], index_spin=[])
         obj.__dict__.update(d)
+        obj._build_Rlist()
         return obj
 
     def write_all(self, path='TB2J_results'):
         self.write_pickle(path=path)
         self.write_txt(path=path)
         if self.Jiso_orb:
-            self.write_txt(path=path, fname='exchange_orb_decomposition.out',
+            self.write_txt(path=path,
+                           fname='exchange_orb_decomposition.out',
                            write_orb_decomposition=True)
         self.write_multibinit(path=os.path.join(path, 'Multibinit'))
         self.write_tom_format(path=os.path.join(path, 'TomASD'))
@@ -221,7 +286,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         from TB2J.io_exchange.io_multibinit import write_multibinit
         write_multibinit(self, path=path)
 
-    def write_Jq(self, kmesh,  path, gamma=True, output_fname='EigenJq.txt',  **kwargs):
+    def write_Jq(self,
+                 kmesh,
+                 path,
+                 gamma=True,
+                 output_fname='EigenJq.txt',
+                 **kwargs):
         from TB2J.spinham.spin_api import SpinModel
         from TB2J.io_exchange.io_txt import write_Jq_info
         m = SpinModel(fname=os.path.join(path, 'Multibinit', 'exchange.xml'))
@@ -239,14 +309,15 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             )
             write_Jq_info(self, kpts, evals, evecs, myfile, special_kpoints={})
 
-    def plot_JvsR(self,
-                  ax=None,
-                  color='blue',
-                  marker='o',
-                  fname=None,
-                  show=False,
-                  **kwargs,
-                  ):
+    def plot_JvsR(
+        self,
+        ax=None,
+        color='blue',
+        marker='o',
+        fname=None,
+        show=False,
+        **kwargs,
+    ):
         if ax is None:
             fig, ax = plt.subplots()
         ds = []
@@ -334,7 +405,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             naxis = 3
         else:
             naxis = 1
-        fig, axes = plt.subplots(naxis, 1, sharex=True, figsize=(5, 2.2*naxis))
+        fig, axes = plt.subplots(naxis,
+                                 1,
+                                 sharex=True,
+                                 figsize=(5, 2.2 * naxis))
 
         if self.has_dmi and self.has_bilinear:
             self.plot_JvsR(axes[0])
