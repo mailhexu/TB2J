@@ -179,11 +179,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.TB2J_version = __version__
 
     def get_ispin(self, iatom):
-        pass
+        return self.index_spin[iatom]
 
     def get_iatom(self, ispin):
-        return self.ispin[]
-
+        return self.ind_atoms[ispin]
 
     def _build_Rlist(self):
         Rset = set()
