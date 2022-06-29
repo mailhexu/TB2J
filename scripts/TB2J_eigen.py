@@ -26,7 +26,7 @@ def write_eigen_info():
 
     parser.add_argument(
         '--gamma',
-        help="whether shift the qpoint grid to  Gamma-centered. Default: False",
+        help="whether shift the qpoint grid to  Gamma-centered. Default: True",
         action='store_true',
         default=True)
 

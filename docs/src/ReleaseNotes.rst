@@ -1,11 +1,15 @@
 Release Notes
 ===============
 
+v0.7.4 June 29, 2022
+---------------------------------------
+Added function to cut exchange parameters from supercell calculation to a unitcell.
+
+
 v0.7.3 June 8, 2022
 ---------------------------------------
 The Vampire output include the DMI and anisotropic exchange.
 The TB2J_downfold.py is extended to DMI and anisotropic exchange.
-
 
 
 v0.7.2.1 April 20, 2022

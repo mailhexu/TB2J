@@ -12,4 +12,5 @@ Tutorial
    downfold.md
    orbital_contribution.md
    output.rst
+   cutcell.md
 

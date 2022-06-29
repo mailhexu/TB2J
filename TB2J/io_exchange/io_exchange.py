@@ -178,6 +178,13 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.orbital_names = orbital_names
         self.TB2J_version = __version__
 
+    def get_ispin(self, iatom):
+        pass
+
+    def get_iatom(self, ispin):
+        return self.ispin[]
+
+
     def _build_Rlist(self):
         Rset = set()
         ispin_set = set()

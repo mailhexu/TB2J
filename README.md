@@ -22,7 +22,7 @@ For more information, see the documentation on
  <https://tb2j.readthedocs.io/en/latest/>
 
 ## Dependencies
-* python (tested for ver 3.6)
+* python (tested for version 3.7 to 3.10)
 * numpy 
 * scipy
 * ASE (atomic simulation environment) 
