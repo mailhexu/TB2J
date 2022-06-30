@@ -460,11 +460,9 @@ def find_primitive_cell(atoms,
     scell = atoms.get_cell().array
     inv_scmat = np.linalg.inv(sc_matrix)
     pcell = scell@inv_scmat
-    print(f"{inv_scmat=}")
 
     xcart = atoms.get_positions()
     xred = atoms.get_scaled_positions()
-    print(xred)
     if origin_atom_id is not None:
         origin = xred[origin_atom_id]
     else:
@@ -476,13 +474,10 @@ def find_primitive_cell(atoms,
     #xred += 0.05
 
     sc_xred = xred@sc_matrix
-    print(sc_xred)
     #np.all(sc_xred<1 and sc_xred>=0.0)
     # print(sc_xred<1)
     x = np.logical_and(sc_xred < 1+thr, sc_xred >= -thr)
-    print(np.all(x, axis=1))
     selected = np.where(np.all(x, axis=1))[0]
-    print(selected)
     symbols = atoms.get_chemical_symbols()
     psymbols = [symbols[i] for i in selected]
     patoms = Atoms(symbols=psymbols, positions=xcart[selected], cell=pcell)

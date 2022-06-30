@@ -7,10 +7,11 @@ TB2J provide a tool to cut the magnetic parameters inside a unitcell. Besides th
 With a python script (eg. "run_cut_cell.py") like below, we can 
 
 ``` python
+import numpy as np
 from TB2J.cut_cell import cut_cell
 cut_cell(path='TB2J_results',
     output_path='TB2J_results_cutted',
-    sc_matrix=[[1, 1, 0], [-1, 1, 0], [0, 0, 2]], 
+    sc_matrix=np.array([[1, 1, 0], [-1, 1, 0], [0, 0, 2]]), 
     origin_atom_id=0, 
     thr=1e-5)
 ```

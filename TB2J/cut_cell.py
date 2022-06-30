@@ -13,7 +13,7 @@ def cut_cell(path, output_path, sc_matrix, origin_atom_id, thr=1e-5):
     :param thr: the atoms which the reduced position is within -thr to 1.0+thr are considered as inside the primitive atoms
     :returns:
     """
-
+    sc_matrix = np.asarray(sc_matrix, dtype=int)
     sc_excparams = SpinIO.load_pickle(path=path, fname='TB2J.pickle')
     sc_atoms = sc_excparams.atoms
     uc_atoms, ids = find_primitive_cell(sc_atoms,
@@ -69,13 +69,13 @@ def cut_cell(path, output_path, sc_matrix, origin_atom_id, thr=1e-5):
 def run_cut_cell(
     path="TB2J_results",
     output_path="./TB2J_cutted",
-    sc_matrix=[[1, 1, 0], [-1, 1, 0], [0, 0, 2]],
+    sc_matrix=np.array([[1, 1, 0], [-1, 1, 0], [0, 0, 2]]),
 ):
-    cut_cell_exchange(path,
-                      output_path,
-                      np.array(sc_matrix),
-                      origin_atom_id=0,
-                      thr=1e-19)
+    cut_cell(path,
+             output_path,
+             np.array(sc_matrix),
+             origin_atom_id=0,
+             thr=1e-19)
 
 
 if __name__ == "__main__":
