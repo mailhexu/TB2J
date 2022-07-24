@@ -30,7 +30,7 @@ class Exchange():
             kmesh=[4, 4, 4],
             emin=-15,  # integration lower bound, relative to fermi energy
             # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-            emax=0.05,
+        emax=0.05,
             nz=100,
             # the delta in the (i delta) in green's function to prevent divergence
             height=0.5,
@@ -199,7 +199,15 @@ class Exchange():
                 raise ValueError(
                     f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
                 )
-
+            nsorb=size(self.orb_dict[iatom])
+            if nsorb % 2 != 0:
+                raise ValueError(
+                    f"""The number of spin-orbitals for atom {iatom} is not even,
+{nsorb} spin-orbitals are found near this atom.
+which means the spin up/down does not have same number of orbitals. 
+This is often because the Wannier functions are wrongly defined,
+or badly localized. Please check the Wannier centers in the Wannier90 output file.  """
+                )
         self._spin_dict = {}
         self._atom_dict = {}
         for ispin, iatom in enumerate(self.ind_mag_atoms):
@@ -652,6 +660,11 @@ class ExchangeNCL(Exchange):
         with open(fname, 'wb') as myfile:
             pickle.dump(result, myfile)
 
+    def validate(self):
+        """
+        Do some sanity check before proceding.
+        """
+
     def calculate_all(self):
         """
         The top level.
@@ -662,6 +675,8 @@ class ExchangeNCL(Exchange):
         AijRs = {}
 
         AijRs_orb = {}
+
+        self.validate()
 
         npole = len(self.contour.path)
         if self.np > 1:
