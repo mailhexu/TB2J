@@ -1,5 +1,8 @@
 doc/refs/*.pdf
 
+
+*.swp
+
 # Latex 
 *.aux
 
