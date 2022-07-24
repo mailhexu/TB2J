@@ -199,14 +199,15 @@ class Exchange():
                 raise ValueError(
                     f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
                 )
-            nsorb=size(self.orb_dict[iatom])
+            nsorb=len(self.orb_dict[iatom])
             if nsorb % 2 != 0:
                 raise ValueError(
                     f"""The number of spin-orbitals for atom {iatom} is not even,
 {nsorb} spin-orbitals are found near this atom.
 which means the spin up/down does not have same number of orbitals. 
 This is often because the Wannier functions are wrongly defined,
-or badly localized. Please check the Wannier centers in the Wannier90 output file.  """
+or badly localized. Please check the Wannier centers in the Wannier90 output file. 
+"""
                 )
         self._spin_dict = {}
         self._atom_dict = {}
