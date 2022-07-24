@@ -200,7 +200,7 @@ class Exchange():
                     f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
                 )
             nsorb=len(self.orb_dict[iatom])
-            if nsorb % 2 != 0:
+            if (not self._is_collinear) and nsorb % 2 != 0:
                 raise ValueError(
                     f"""The number of spin-orbitals for atom {iatom} is not even,
 {nsorb} spin-orbitals are found near this atom.
