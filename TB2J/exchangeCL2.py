@@ -31,13 +31,13 @@ class ExchangeCL2(ExchangeCL):
                            self.kmesh,
                            self.efermi,
                            use_cache=self._use_cache,
-                           cache_path='TB2J_results/cache/spinup',
+                           # cache_path='TB2J_results/cache/spinup',
                            nproc=self.np)
         self.Gdn = TBGreen(self.tbmodel_dn,
                            self.kmesh,
                            self.efermi,
                            use_cache=self._use_cache,
-                           cache_path='TB2J_results/cache/spindn',
+                           # cache_path='TB2J_results/cache/spindn',
                            nproc=self.np)
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
@@ -207,9 +207,9 @@ class ExchangeCL2(ExchangeCL):
     def finalize(self):
         self.Gup.clean_cache()
         self.Gdn.clean_cache()
-        path = 'TB2J_results/cache'
-        if os.path.exists(path):
-            shutil.rmtree(path)
+        #path = 'TB2J_results/cache'
+        # if os.path.exists(path):
+        #    shutil.rmtree(path)
 
     def integrate(self, method="simpson"):
         if method == "trapezoidal":

@@ -123,7 +123,7 @@ class MyTB(AbstractTB):
         self.is_siesta = False
         self.is_orthogonal = True
 
-        self._name='Wannier'
+        self._name = 'Wannier'
 
     def set_atoms(self, atoms):
         self.atoms = atoms
@@ -172,7 +172,6 @@ class MyTB(AbstractTB):
         np.fill_diagonal(data[(0, 0, 0)], 0.0)
         return data
 
-
     @staticmethod
     def read_from_wannier_dir(path,
                               prefix,
@@ -184,13 +183,15 @@ class MyTB(AbstractTB):
         :param path: path
         :param prefix: prefix to the wannier files, often wannier90, or wannier90_up, or wannier90_dn for vasp.
         """
-        #tbmodel = Model.from_wannier_folder(
+        # tbmodel = Model.from_wannier_folder(
         #    folder=path, prefix=prefix)
         #m = MyTB.from_tbmodel(tbmodel)
 
         nbasis, data = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
         xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix +
                                                    '_centres.xyz'))
+        if atoms is None:
+            atoms = parse_atoms(os.path.join(path, prefix+'.win'))
         cell = atoms.get_cell()
         xred = cell.scaled_positions(xcart)
         if groupby == 'spin':
@@ -200,16 +201,15 @@ class MyTB(AbstractTB):
             xred[1::2] = xtmp[norb:]
             for key, val in data.items():
                 dtmp = copy.deepcopy(val)
-                data[key][::2, ::2]   = dtmp[:norb, :norb]
-                data[key][::2, 1::2]  = dtmp[:norb, norb:]
-                data[key][1::2, ::2]  = dtmp[norb:, :norb]
+                data[key][::2, ::2] = dtmp[:norb, :norb]
+                data[key][::2, 1::2] = dtmp[:norb, norb:]
+                data[key][1::2, ::2] = dtmp[norb:, :norb]
                 data[key][1::2, 1::2] = dtmp[norb:, norb:]
         ind, positions = auto_assign_basis_name(xred, atoms)
         m = MyTB(nbasis=nbasis, data=data, positions=xred)
         nm = m.shift_position(positions)
         nm.set_atoms(atoms)
         return nm
-
 
     @staticmethod
     def load_banddownfolder(path,
@@ -226,7 +226,7 @@ class MyTB(AbstractTB):
         H_mnR = defaultdict(lambda: np.zeros((nbasis, nbasis), dtype=complex))
 
         for iR, R in enumerate(lwf.Rlist):
-            R=tuple(R)
+            R = tuple(R)
             val = lwf.HwannR[iR]
             if np.linalg.norm(R) < 0.001:
                 H_mnR[R] = val/2.0
@@ -290,7 +290,7 @@ class MyTB(AbstractTB):
         evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
             hams[ik], S, evals[ik], evecs[ik] = self.HSE_k(tuple(k),
-                                                         convention=convention)
+                                                           convention=convention)
         return hams, None, evals, evecs
 
     def prepare_phase_rjri(self):
@@ -445,7 +445,6 @@ class MyTB(AbstractTB):
                 self.atoms.get_scaled_positions(wrap=False))
             atom_cell[:] = np.array(self.atoms.get_cell())
         root.close()
-
 
     @staticmethod
     def load_MyTB(fname):

@@ -7,13 +7,13 @@ Release Notes
 
 v0.7.3.1 July 24, 2022
 --------------------------------------
+Improve error message for wannier functions badly localized to atomic centers.
 
 
 v0.7.3 June 8, 2022
 ---------------------------------------
 The Vampire output include the DMI and anisotropic exchange.
-The TB2J_downfold.py is extended to DMI and anisotropic exchange.
-
+The TB2J_downfold.py is extended to DMI and anisotropic exchange (for early test only).
 
 
 v0.7.2.1 April 20, 2022
