@@ -99,7 +99,7 @@ class SpinHamiltonian(object):
         select the sites with spin and re-index.
         """
         ms = np.linalg.norm(self._spin, axis=1)
-        self.magsites = np.where(ms > 0.00001 * mu_B)[0]
+        self.magsites = np.where(ms > -0.00001 * mu_B)[0]
         self.ms = ms[self.magsites]
         S = self._spin[self.magsites]
         self.nspin = len(S)
