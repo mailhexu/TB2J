@@ -53,8 +53,10 @@ def test():
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             '5pxZ2', '5dxyZ1P', '5dxyZ1P', '5dyzZ1P', '5dyzZ1P', '5dz2Z1P', '5dz2Z1P', '5dxzZ1P', '5dxzZ1P', '5dx2-y2Z1P', '5dx2-y2Z1P'], 4: ['5sZ1', '5sZ1', '5sZ2', '5sZ2', '5pyZ1', '5pyZ1', '5pzZ1', '5pzZ1', '5pxZ1', '5pxZ1', '5pyZ2', '5pyZ2', '5pzZ2', '5pzZ2', '5pxZ2', '5pxZ2', '5dxyZ1P', '5dxyZ1P', '5dyzZ1P', '5dyzZ1P', '5dz2Z1P', '5dz2Z1P', '5dxzZ1P', '5dxzZ1P', '5dx2-y2Z1P', '5dx2-y2Z1P'], 5: ['5sZ1', '5sZ1', '5sZ2', '5sZ2', '5pyZ1', '5pyZ1', '5pzZ1', '5pzZ1', '5pxZ1', '5pxZ1', '5pyZ2', '5pyZ2', '5pzZ2', '5pzZ2', '5pxZ2', '5pxZ2', '5dxyZ1P', '5dxyZ1P', '5dyzZ1P', '5dyzZ1P', '5dz2Z1P', '5dz2Z1P', '5dxzZ1P', '5dxzZ1P', '5dx2-y2Z1P', '5dx2-y2Z1P'], 6: ['5sZ1', '5sZ1', '5sZ2', '5sZ2', '5pyZ1', '5pyZ1', '5pzZ1', '5pzZ1', '5pxZ1', '5pxZ1', '5pyZ2', '5pyZ2', '5pzZ2', '5pzZ2', '5pxZ2', '5pxZ2', '5dxyZ1P', '5dxyZ1P', '5dyzZ1P', '5dyzZ1P', '5dz2Z1P', '5dz2Z1P', '5dxzZ1P', '5dxzZ1P', '5dx2-y2Z1P', '5dx2-y2Z1P'], 7: ['5sZ1', '5sZ1', '5sZ2', '5sZ2', '5pyZ1', '5pyZ1', '5pzZ1', '5pzZ1', '5pxZ1', '5pxZ1', '5pyZ2', '5pyZ2', '5pzZ2', '5pzZ2', '5pxZ2', '5pxZ2', '5dxyZ1P', '5dxyZ1P', '5dyzZ1P', '5dyzZ1P', '5dz2Z1P', '5dz2Z1P', '5dxzZ1P', '5dxzZ1P', '5dx2-y2Z1P', '5dx2-y2Z1P']}
 
     olist = odict[0]
-    map_orbs_matrix(olist, spinor=True)
-    map_orbs_matrix(olist, spinor=True, include_only=['3d'])
+    r1=map_orbs_matrix(olist, spinor=True)
+    print(r1)
+    r2=map_orbs_matrix(olist, spinor=True, include_only=['3d'])
+    print(r2)
 
 
 if __name__=="__main__":

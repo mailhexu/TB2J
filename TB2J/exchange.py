@@ -199,7 +199,7 @@ class Exchange():
                 raise ValueError(
                     f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
                 )
-            nsorb=len(self.orb_dict[iatom])
+            nsorb = len(self.orb_dict[iatom])
             if (not self._is_collinear) and nsorb % 2 != 0:
                 raise ValueError(
                     f"""The number of spin-orbitals for atom {iatom} is not even,
@@ -238,11 +238,15 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
 
                 self.mmats[iatom] = mmat
                 self.orbital_names[iatom] = reduced_orbs
-                self.norb_reduced[iatom] = len(reduced_orbs) // 2
+                # Note that for siesta, spin up and spin down has same orb name.
+                # Therefor there is no nedd to /2
+                self.norb_reduced[iatom] = len(reduced_orbs)
         else:
             self.orbital_names = self.labels
             for iatom, orbs in self.labels.items():
-                self.norb_reduced[iatom] = len(orbs) // 2
+                # Note that for siesta, spin up and spin down has same orb name.
+                # thus //2
+                self.norb_reduced[iatom] = len(orbs)//2
 
     def ispin(self, iatom):
         return self._spin_dict[iatom]
