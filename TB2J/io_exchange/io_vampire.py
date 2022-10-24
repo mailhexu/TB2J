@@ -13,12 +13,14 @@ def write_vampire(cls, path='TB2J_results/Vampire'):
 
 def write_vampire_unitcell_file(cls, fname):
     with open(fname, 'w') as myfile:
+        
+        cell = cls.atoms.get_cell().array
+        lattice_parameters = np.linalg.norm(cell, axis=-1)
         myfile.write("# Unit cell size (Angstrom):\n")
-        myfile.write("1 1 1\n")
+        np.savetxt(myfile, [lattice_parameters], fmt='%f')
         myfile.write("# Unit cell lattice vectors:\n")
-        for l in cls.atoms.get_cell():
-            myfile.write(" ".join([str(x) for x in l]))
-            myfile.write("\n")
+        np.savetxt(myfile, cell / lattice_parameters, fmt='%f')
+
         myfile.write("# Atoms\n")
         nspins = sum([1 if i > -1 else 0 for i in cls.index_spin])
         myfile.write("%s %s\n" % (nspins, nspins))
