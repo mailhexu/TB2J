@@ -29,6 +29,7 @@ def main():
         help="The path of the output directory, default is TB2J_results",
         type=str,
         default="TB2J_results")
+
     args = parser.parse_args()
     merge(*(args.directories), args.type.strip().lower(), path=args.output_path)
 

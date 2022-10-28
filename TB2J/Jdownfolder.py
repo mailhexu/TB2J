@@ -20,7 +20,7 @@ def ind_to_indn(ind, n=3):
 
 class JDownfolder():
 
-    def __init__(self, JR, Rlist, iM, iL, qmesh, is_collinear=True):
+    def __init__(self, JR, Rlist, iM, iL, qmesh, iso_only=False):
         self.JR = JR
         self.Rlist = Rlist
         self.nR = len(Rlist)
@@ -34,6 +34,7 @@ class JDownfolder():
         self.nqpt = len(self.qpts)
         self.nMn = self.nM*3
         self.nLn = self.nL*3
+        self.iso_only=iso_only
 
     def get_Jq(self, q):
         Jq = np.zeros(self.JR[0].shape, dtype=complex)
@@ -69,10 +70,10 @@ class JDownfolder():
 
 class JDownfolder_pickle():
 
-    def __init__(self, inpath, metals, ligands, outpath, qmesh=[7, 7, 7]):
+    def __init__(self, inpath, metals, ligands, outpath, qmesh=[7, 7, 7], iso_only=False):
         self.exc = SpinIO.load_pickle(path=inpath, fname="TB2J.pickle")
 
-        self.is_colinear = self.exc.dmi_ddict is None
+        self.iso_only = (self.exc.dmi_ddict is None) or iso_only
 
         self.metals = metals
         self.ligands = ligands
@@ -107,13 +108,13 @@ class JDownfolder_pickle():
     def _downfold(self):
         JR2 = self.exc.get_full_Jtensor_for_Rlist(asr=True)
         d = JDownfolder(JR2, self.exc.Rlist, iM=self.iM,
-                        iL=self.iL, qmesh=self.qmesh, is_collinear=self.is_colinear)
+                        iL=self.iL, qmesh=self.qmesh, iso_only=self.iso_only)
         Jd = d.get_JR()
 
         self._prepare_distance()
         self._prepare_index_spin()
         self.Jdict = {}
-        if self.is_colinear:
+        if self.iso_only:
             self.DMIdict = None
             self.Janidict = None
         else:
@@ -130,7 +131,7 @@ class JDownfolder_pickle():
                                      jspin * 3:jspin * 3 + 3]
                             J, DMI, Jani = decompose_J_tensor(J33)
                             self.Jdict[(tuple(R), ispin, jspin)] = J
-                            if not self.is_colinear:
+                            if not self.iso_only:
                                 self.DMIdict[(tuple(R), ispin, jspin)] = DMI
                                 self.Janidict[(tuple(R), ispin, jspin)] = Jani
 
@@ -138,7 +139,7 @@ class JDownfolder_pickle():
                     spinat=self.exc.spinat,
                     charges=self.exc.charges,
                     index_spin=self.index_spin,
-                    colinear=self.is_colinear,
+                    colinear=self.iso_only,
                     distance_dict=self.distance_dict,
                     exchange_Jdict=self.Jdict,
                     dmi_ddict=self.DMIdict,

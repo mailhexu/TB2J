@@ -38,6 +38,18 @@ def main():
                         nargs='+',
                         default=[])
 
+    parser.add_argument('--qmesh',
+                        help='kmesh in the format of kx ky kz',
+                        type=int,
+                        nargs='*',
+                        default=[5, 5, 5])
+
+    parser.add_argument(
+        '--iso_only',
+        help="whether to downfold only the isotropic part. The other parts will be neglected.",
+        action='store_true',
+        default=False)
+
     args = parser.parse_args()
 
     if len(args.metals) == []:
@@ -46,10 +58,13 @@ def main():
     if len(args.ligands) == []:
         print("List of ligand elements cannot be empty")
 
+
     JDownfolder_pickle(inpath=args.inpath,
                        metals=args.metals,
                        ligands=args.ligands,
-                       outpath=args.outpath)
+                       outpath=args.outpath,
+                       qmesh=args.qmesh,
+                       iso_only=args.iso_only)
 
 
 main()

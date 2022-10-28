@@ -160,7 +160,8 @@ class SislWrapper(AbstractTB):
     def HSE_k(self, k,convention=2):
         Hk = self.Hk(k, convention=convention)
         Sk = self.Sk(k, convention=convention)
-        evalue, evec = self.solve(k, convention=convention)
+        evalue, evec = eigh(Hk, Sk)
+        #evalue, evec = self.solve(k, convention=convention)
         return Hk, Sk, evalue, evec
 
 

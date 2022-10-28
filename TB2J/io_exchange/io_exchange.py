@@ -211,8 +211,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         else:
             return None
 
-    def get_J_tensor(self, i, j, R):
-        Jtensor = combine_J_tensor(Jiso=self.get_J(i, j, R),
+    def get_J_tensor(self, i, j, R, iso_only=False):
+        if iso_only:
+            Jtensor= np.eye(3)*self.get_J(i, j, R)
+        else:
+            Jtensor = combine_J_tensor(Jiso=self.get_J(i, j, R),
                                    D=self.get_DMI(i, j, R),
                                    Jani=self.get_Jani(i, j, R))
         return(Jtensor)
@@ -226,7 +229,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                      j * 3:j * 3 + 3] = self.get_J_tensor(i, j, R)
         return Jmat
 
-    def get_full_Jtensor_for_Rlist(self, asr=False):
+    def get_full_Jtensor_for_Rlist(self, asr=False, iso_only=False):
         n3 = self.nspin * 3
         nR = len(self.Rlist)
         Jmat = np.zeros((nR, n3, n3), dtype=float)
