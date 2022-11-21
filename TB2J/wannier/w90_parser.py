@@ -10,6 +10,11 @@ unit_dict = {'ANG': Angstrom, 'BOHR': Bohr}
 
 
 def parse_xyz(fname):
+    """
+    wannier90 xyz file parser.
+    
+    :param fname: realtive or absolube path to the xyz file.  str.
+    """
     atoms = read(fname)
     symbols = atoms.get_chemical_symbols()
     pos = atoms.get_positions()
@@ -27,7 +32,9 @@ def parse_xyz(fname):
 
 def parse_ham(fname='wannier90_hr.dat', cutoff=None):
     """
-    wannier90 hr file phaser.
+    wannier90 hr file parser.
+    
+    :param fname: realtive or absolube path to the hamiltonian file.  str.
 
     :param cutoff: the energy cutoff.  None | number | list (of Emin, Emax).
     """
@@ -62,6 +69,11 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
 
 
 def parse_cell(fname, unit=Angstrom):
+    """
+    wannier90 hr cell parser.
+    
+    :param fname: realtive or absolube path to the file.  str.
+    """
 
     uc_regex = re.compile(
         r'BEGIN\s+UNIT_CELL_CART\s+'
@@ -85,6 +97,11 @@ def parse_cell(fname, unit=Angstrom):
 
 
 def parse_atoms(fname):
+    """
+    wannier90 hr atoms parser.
+    
+    :param fname: realtive or absolube path to the file.  str.
+    """
     cell = parse_cell(fname)
     atoms_regex = re.compile(
         r'BEGIN\s+ATOMS_(?P<suffix>(FRAC)|(CART))\s+'
