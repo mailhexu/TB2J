@@ -13,7 +13,7 @@ def parse_xyz(fname):
     """
     wannier90 xyz file parser.
     
-    :param fname: realtive or absolube path to the xyz file.  str.
+    :param fname: relative or absolute path to the xyz file.  str.
     """
     atoms = read(fname)
     symbols = atoms.get_chemical_symbols()
@@ -34,7 +34,7 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
     """
     wannier90 hr file parser.
     
-    :param fname: realtive or absolube path to the hamiltonian file.  str.
+    :param fname: relative or absolute path to the hamiltonian file.  str.
 
     :param cutoff: the energy cutoff.  None | number | list (of Emin, Emax).
     """
@@ -72,7 +72,7 @@ def parse_cell(fname, unit=Angstrom):
     """
     wannier90 hr cell parser.
     
-    :param fname: realtive or absolube path to the file.  str.
+    :param fname: relative or absolute path to the file.  str.
     """
 
     uc_regex = re.compile(
@@ -100,7 +100,7 @@ def parse_atoms(fname):
     """
     wannier90 hr atoms parser.
     
-    :param fname: realtive or absolube path to the file.  str.
+    :param fname: relative or absolute path to the file.  str.
     """
     cell = parse_cell(fname)
     atoms_regex = re.compile(
