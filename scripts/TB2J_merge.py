@@ -32,7 +32,13 @@ def main():
         help=
         'The type of calculations, either structure of spin, meaning that the three calculations are done by rotating the structure/spin. '
     )
+    parser.add_argument(
+        "--output_path",
+        help="The path of the output directory, default is TB2J_results",
+        type=str,
+        default="TB2J_results")
+
     args = parser.parse_args()
-    merge(*(args.directories), main_path=args.main_directory, method=args.type.strip().lower(), )
+    merge(*(args.directories), main_path=args.main_directory, method=args.type.strip().lower(), path=args.output_path)
 
 main()
