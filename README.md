@@ -33,5 +33,5 @@ For more information, see the documentation on
 pip install TB2J
 
 ## Message:
-- We welcome contributions. If you would like to add the interface to other codes, or extend the capability of TB2J, please contact us! <mailheux_AT_gmail_DOT_com>
+- We welcome contributions. If you would like to add the interface to other codes, or extend the capability of TB2J, please contact us! <mailhexu_AT_gmail_DOT_com>
 
