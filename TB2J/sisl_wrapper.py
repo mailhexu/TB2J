@@ -8,7 +8,7 @@ from TB2J.myTB import AbstractTB
 
 
 class SislWrapper(AbstractTB):
-    def __init__(self, sisl_hamiltonian, spin=None):
+    def __init__(self, sisl_hamiltonian, geom=None, spin=None):
         self.is_siesta = False
         self.is_orthogonal = False
         self.ham = sisl_hamiltonian
@@ -23,8 +23,11 @@ class SislWrapper(AbstractTB):
         self.spin = spin
         self.orbs = []
         self.orb_dict = defaultdict(lambda: [])
-        g = self.ham._geometry
-        _atoms = self.ham._geometry._atoms
+        if geom is None:
+            g = self.ham._geometry
+        else:
+            g=geom
+        _atoms = geom._atoms
         atomic_numbers = []
         self.positions = g.xyz
         self.cell = np.array(g.sc.cell)

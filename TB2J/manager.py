@@ -265,11 +265,12 @@ def gen_exchange_siesta(fdf_fname,
             f"sisl version is {sisl.__version__}, but should be larger than 0.10.0."
         )
     fdf = sisl.get_sile(fdf_fname)
+    geom = fdf.read_geometry()
     H = fdf.read_hamiltonian()
     if H.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
-        tbmodel_up = SislWrapper(H, spin=0)
-        tbmodel_dn = SislWrapper(H, spin=1)
+        tbmodel_up = SislWrapper(H, spin=0, geom=geom)
+        tbmodel_dn = SislWrapper(H, spin=1, geom=geom)
         basis = dict(zip(tbmodel_up.orbs, list(range(tbmodel_up.norb))))
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Siesta data.
@@ -302,7 +303,7 @@ def gen_exchange_siesta(fdf_fname,
     elif H.spin.is_colinear and False:
         print(
             "Reading Siesta hamiltonian: colinear spin. Treat as non-colinear. For testing only.")
-        tbmodel = SislWrapper(H, spin='merge')
+        tbmodel = SislWrapper(H, spin='merge', geom=geom)
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Siesta data.
@@ -335,7 +336,7 @@ def gen_exchange_siesta(fdf_fname,
     elif H.spin.is_spinorbit or H.spin.is_noncolinear:
 
         print("Reading Siesta hamiltonian: non-colinear spin.")
-        tbmodel = SislWrapper(H, spin=None)
+        tbmodel = SislWrapper(H, spin=None, geom=geom)
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
         print("Starting to calculate exchange.")
         description = f""" Input from non-collinear Siesta data.
