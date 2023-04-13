@@ -18,7 +18,7 @@ class SislWrapper(AbstractTB):
             spin = 0
         elif spin == 'down':
             spin = 1
-        if spin not in [None, 0, 1, 'merge']:
+        if spin not in [None, 0, 1, 'merge', "fakemerge"]:
             raise ValueError("spin should be None/0/1, but is %s" % spin)
         self.spin = spin
         self.orbs = []
@@ -48,7 +48,8 @@ class SislWrapper(AbstractTB):
                 self.orb_dict[ia] += orb_names
             self.norb = len(self.orbs)
             self.nbasis = self.norb
-        elif self.ham.spin.is_spinorbit or self.ham.spin.is_noncolinear or self.spin == 'merge':
+        elif (self.ham.spin.is_spinorbit or self.ham.spin.is_noncolinear 
+                or self.spin == 'merge' or self.spin == "fakemerge"):
             for ia, a in enumerate(_atoms):
                 symnum = sdict[ia]
                 orb_names = []
@@ -97,6 +98,19 @@ class SislWrapper(AbstractTB):
             evecs[::2, ::2] = evecs0
             evecs[1::2, 1::2] = evecs1
 
+        elif self.spin == "fakemerge":
+            evals0, evecs0 = self.ham.eigh(k=k,
+                                           eigvals_only=False,
+                                           gauge=gauge)
+            evals1, evecs1 = self.ham.eigh(k=k,
+                                           eigvals_only=False,
+                                           gauge=gauge)
+            evals = np.zeros(self.nbasis, dtype=float)
+            evecs = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+            evals[::2] = evals0
+            evals[1::2] = evals1
+            evecs[::2, ::2] = evecs0
+            evecs[1::2, 1::2] = evecs1
         return evals, evecs
 
     def Hk(self, k, convention=2):
@@ -118,6 +132,14 @@ class SislWrapper(AbstractTB):
                                                     spin=1,
                                                     gauge=gauge,
                                                     format='dense')
+        elif self.spin == "fakemerge":
+            H = np.zeros((self.nbasis, self.nbasis), dtype='complex')
+            H[::2, ::2] = self.ham.Hk(k,
+                                                    gauge=gauge,
+                                                    format='dense')
+            H[1::2, 1::2] = self.ham.Hk(k,
+                                                    gauge=gauge,
+                                                    format='dense')
         return H
 
     def eigen(self, k, convention=2):
@@ -136,7 +158,7 @@ class SislWrapper(AbstractTB):
             S = S0
         elif self.spin in [0, 1]:
             S = S0
-        elif self.spin == 'merge':
+        elif self.spin == 'merge' or self.spin == "fakemerge":
             S = np.zeros((self.nbasis, self.nbasis), dtype='complex')
             S[::2, ::2] = S0
             S[1::2, 1::2] = S0

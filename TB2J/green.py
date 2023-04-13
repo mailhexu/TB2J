@@ -120,7 +120,8 @@ class TBGreen():
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
 
-    def _prepare_eigen(self):
+
+    def _prepare_eigen(self, solve=True):
         """
         calculate eigen values and vectors for all kpts and save.
         Note that the convention 2 is used here, where the 
