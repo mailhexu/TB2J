@@ -202,7 +202,7 @@ class Exchange():
         if not self._is_collinear:
             for iatom, orb in self.orb_dict.items():
                 nsorb = len(self.orb_dict[iatom])
-                if and (nsorb % 2 != 0):
+                if nsorb % 2 != 0:
                     raise ValueError(
                         f"""The number of spin-orbitals for atom {iatom} is not even,
 {nsorb} spin-orbitals are found near this atom.

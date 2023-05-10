@@ -64,18 +64,18 @@ def plot_magnon():
 
     args = parser.parse_args()
     if args.Jq:
+        if args.figfname is None:
+            args.figfname = 'Eigen_Jq.pdf'
         print(
             "Plotting the eigenvalues of -J(q). The figure is written to %s" %
             (args.figfname))
-        if args.figfname is None:
-            args.figfname = 'Eigen_Jq.pdf'
     else:
+        if args.figfname is None:
+            args.figfname = 'magnon_band.pdf'
         print(
             "Plotting the magnon band structure. The figure is written to %s" %
             (args.figfname))
-        if args.figfname is None:
-            args.figfname = 'magnon_band.pdf'
-
+        
     def nonone(x):
         if x is None:
             return x
@@ -97,5 +97,5 @@ def plot_magnon():
                          has_dmi=nonone(args.no_dmi),
                          has_bilinear=nonone(args.no_Jani))
 
-
-plot_magnon()
+if __name__=="__main__":
+    plot_magnon()
