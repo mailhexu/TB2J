@@ -48,3 +48,7 @@ parameter, the band structure is shown on screen.
    :alt: exchange_magnon
 
    exchange_magnon
+
+From version v0.7.5, the infomation for plotting the band structure is written into a json file(magnon_band.json), together with the 
+script for parsing the file and plot the band structure (plot_magnon_from_json_file.py). 
+
