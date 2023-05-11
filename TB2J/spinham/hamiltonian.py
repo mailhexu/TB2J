@@ -60,7 +60,7 @@ def load_magnon_json(filename):
     xlist = data["xlist"]
     knames = data["knames"]
     Xs = data["X_for_highsym_kpoints"]
-    allevals = np.array(data["evals"])
+    allevals = [np.array(x) for x in data["evals"]]
     return kptlist, xlist, knames, Xs, allevals
 
 def plot_magnon_json(filename, ax, color="k", show=True):
