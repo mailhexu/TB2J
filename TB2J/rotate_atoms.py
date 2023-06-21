@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import copy
 from ase.io import read, write
+import numpy as np 
 
 def rotate_atom_xyz(atoms):
     """
@@ -15,6 +16,46 @@ def rotate_atom_xyz(atoms):
     atoms_y.rotate(90, 'x', rotate_cell=True)
     atoms_z = atoms
     return atoms_x, atoms_y, atoms_z
+
+def rotate_atom_spin(atoms):
+    """
+    given a atoms, return the atoms with rotated spin:
+    - 'z'->'x'
+    - 'z'->'y'
+    - 'z'->'z'
+    """
+    magmoms=np.array(atoms.get_initial_magnetic_moments())
+    if len(magmoms.shape)==1:
+        m=np.zeros((len(magmoms), 3), dtype=float)
+        m[:,2]=magmoms
+    else:
+        m=magmoms
+    atoms_copy=copy.deepcopy(atoms)
+    atoms.set_initial_magnetic_moments(None)
+
+    m_x = copy.deepcopy(m)
+    m_x[:,0] = m[:,2] 
+    m_x[:,1] = m[:,1]
+    m_x[:,2] = m[:,0]
+    atoms_x = copy.deepcopy(atoms_copy)
+    atoms_x.set_initial_magnetic_moments(m_x)
+
+    m_y = copy.deepcopy(m)
+    m_y[:,0] = m[:,0]
+    m_y[:,1] = m[:,2]
+    m_y[:,2] = m[:,1]
+    atoms_y = copy.deepcopy(atoms_copy)
+    atoms_y.set_initial_magnetic_moments(m_y)
+
+    m_z = copy.deepcopy(m)
+    m_z[:,0] = m[:,0]
+    m_z[:,1] = m[:,1]
+    m_z[:,2] = m[:,2]
+    atoms_z = copy.deepcopy(atoms_copy)
+    atoms_z.set_initial_magnetic_moments(m_z)
+
+    return atoms_x, atoms_y, atoms_z
+
 
 
 def check_ftype(ftype):
