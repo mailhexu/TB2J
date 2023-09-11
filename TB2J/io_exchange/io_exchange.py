@@ -87,10 +87,10 @@ class SpinIO(object):
         # where i and j are spin index and R is the cell index,
         # a tuple of three integers.
         self.distance_dict = distance_dict
-        self.ind_atoms = {}  #: The index of atom for each spin.
+        self._ind_atoms = {}  #: The index of atom for each spin.
         for iatom, ispin in enumerate(self.index_spin):
             if ispin >= 0:
-                self.ind_atoms[ispin] = iatom
+                self._ind_atoms[ispin] = iatom
 
         if exchange_Jdict is not None:
             self.has_exchange = True  #: whether there is isotropic exchange
@@ -190,6 +190,19 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.nspin = len(self.ispin_list)
         assert (self.nspin == max(self.ispin_list)+1)
 
+    def _build_ind_atoms(self):
+        self._ind_atoms = {}  #: The index of atom for each spin.
+        for iatom, ispin in enumerate(self.index_spin):
+            if ispin >= 0:
+                self._ind_atoms[ispin] = iatom
+
+    @property
+    def ind_atoms(self):
+        if not self._ind_atoms:
+            self._build_ind_atoms()
+        return self._ind_atoms
+
+
     def get_J(self, i, j, R):
         key = (tuple(R), i, j,)
         if self.exchange_Jdict is not None and key in self.exchange_Jdict:
@@ -258,7 +271,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         fname = os.path.join(path, fname)
         with open(fname, 'rb') as myfile:
             d = pickle.load(myfile)
-        obj = cls(atoms=[], spinat=[], charges=[], index_spin=[])
+        obj = cls(atoms=d["atoms"], spinat=d["spinat"], charges=d["charges"], index_spin=d["index_spin"])
         obj.__dict__.update(d)
         obj._build_Rlist()
         return obj
