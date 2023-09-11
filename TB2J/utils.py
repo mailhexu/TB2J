@@ -134,7 +134,7 @@ def auto_assign_wannier_to_atom2(positions,
 def auto_assign_basis_name(positions,
                            atoms,
                            max_distance=0.1,
-                           write_basis_file='assigned_basis.txt',
+                           write_basis_file=None,
                            half=False):
     ind_atoms, shifted_pos = auto_assign_wannier_to_atom(
         positions=positions, atoms=atoms, max_distance=max_distance, half=half)
