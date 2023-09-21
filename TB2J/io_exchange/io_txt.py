@@ -22,7 +22,7 @@ def write_atom_section(cls, myfile):
     myfile.write("Cell (Angstrom):\n")
     cell = cls.atoms.get_cell()
     for c in cell:
-        myfile.write("{:6.3f}  {:6.3f}  {:6.3f}\n".format(c[0], c[1], c[2]))
+        myfile.write("{:10.8f}  {:10.8f}  {:10.8f}\n".format(c[0], c[1], c[2]))
 
     # write atom information
     myfile.write('\n')
@@ -31,11 +31,11 @@ def write_atom_section(cls, myfile):
     myfile.write(
         '(Note: charge and magmoms only count the wannier functions.)\n')
     if cls.colinear:
-        myfile.write("{:^12s} {:^9s} {:^9s} {:^9s} {:^9s} {:^9s}\n".format(
+        myfile.write("{:^12s} {:^13s} {:^13s} {:^13s} {:^9s} {:^9s}\n".format(
             'Atom number', 'x', 'y', 'z', 'w_charge', 'w_magmom'))
     else:
         myfile.write(
-            "{:^12s} {:^9s} {:^9s} {:^9s} {:^9s} {:^9s} {:^9s} {:^9s}\n".
+            "{:^12s} {:^13s} {:^13s} {:^13s} {:^9s} {:^9s} {:^9s} {:^9s}\n".
             format('Atom_number', 'x', 'y', 'z', 'w_charge', 'M(x)', 'M(y)',
                    'M(z)'))
 
@@ -49,13 +49,13 @@ def write_atom_section(cls, myfile):
             mag = cls.magmoms[i]
             chg = cls.charges[i]
             myfile.write(
-                "{:<12s} {:9.4f} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n".format(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f} {:9.4f} {:9.4f}\n".format(
                     s, poses[i, 0], poses[i, 1], poses[i, 2], chg, mag))
         else:
             chg = cls.charges[i]
             mx, my, mz = cls.spinat[i, :]
             myfile.write(
-                "{:<12s} {:9.4f} {:9.4f} {:9.4f} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n"
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n"
                 .format(s, poses[i, 0], poses[i, 1], poses[i, 2], chg, mx, my,
                         mz))
             tchg += chg
