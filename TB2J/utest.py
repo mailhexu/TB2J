@@ -4,7 +4,8 @@ from TB2J.myTB2 import MyTB
 from TB2J.pauli import *  # pauli_block
 from TB2J.green_SOC import TBGreen
 from TB2J.utils import auto_assign_basis_name
-from TB2J.exchange import ExchangeNCL, gen_exchange
+from TB2J.exchange import ExchangeNCL
+from TB2J.manager import gen_exchange
 
 
 class AssignTest(unittest.TestCase):
