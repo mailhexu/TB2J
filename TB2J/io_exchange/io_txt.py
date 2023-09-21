@@ -63,11 +63,11 @@ def write_atom_section(cls, myfile):
             tmy += my
             tmz += mz
     if cls.colinear:
-        myfile.write("{:<12s} {:9s} {:9s} {:9s} {:9.4f} {:9.4f}\n".format(
+        myfile.write("{:<12s} {:13s} {:13s} {:13s} {:9.4f} {:9.4f}\n".format(
             'Total', '', '', '', np.sum(cls.charges), np.sum(cls.magmoms)))
     else:
         myfile.write(
-            "{:<12s} {:9s} {:9s} {:9s} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n".
+            "{:<12s} {:13s} {:13s} {:13s} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n".
             format('Total', '', '', '', tchg, tmx, tmy, tmz))
 
     myfile.write('\n')
