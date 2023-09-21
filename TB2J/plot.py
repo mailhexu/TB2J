@@ -1,9 +1,6 @@
 import matplotlib.pyplot as plt
 from TB2J.spinham.spin_api import SpinModel
 from TB2J.io_exchange.io_exchange import SpinIO
-from TB2J.io_exchange.io_txt import write_Jq_info
-from ase.dft.kpoints import monkhorst_pack
-from ase.cell import Cell
 import numpy as np
 from TB2J import __version__
 

@@ -1,5 +1,4 @@
 import numpy as np
-from ase.units import eV, Hartree, Bohr, Ry, J
 import os
 from itertools import groupby
 

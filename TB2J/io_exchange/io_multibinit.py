@@ -1,7 +1,6 @@
-import numpy as np
 import xml.etree.cElementTree as ET
 from xml.dom import minidom
-from ase.units import eV, Hartree, Bohr, Ry, J
+from ase.units import Bohr
 import os
 
 
