@@ -3,7 +3,6 @@ Hamiltonian terms
 """
 import numpy as np
 from collections import defaultdict
-from .constants import mu_0, Boltzmann
 import scipy.sparse as ssp
 
 

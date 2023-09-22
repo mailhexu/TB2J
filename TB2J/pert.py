@@ -1,7 +1,5 @@
 import numpy as np
 import scipy.linalg as sl
-from ase.dft.kpoints import monkhorst_pack
-import matplotlib.pyplot as plt
 
 
 def eigen_to_G(evals, evecs, efermi, energy):

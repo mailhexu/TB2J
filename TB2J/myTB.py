@@ -1,12 +1,11 @@
 import os
 import numpy as np
 import copy
-from scipy.linalg import eigh, eigvalsh
+from scipy.linalg import eigh
 from scipy.sparse import csr_matrix
 from scipy.io import netcdf_file
 from collections import defaultdict
 #from tbmodels import Model
-from ase.io import read
 from ase.atoms import Atoms
 from TB2J.utils import auto_assign_basis_name
 from TB2J.wannier import parse_ham, parse_xyz, parse_atoms

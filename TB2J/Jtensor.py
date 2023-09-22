@@ -1,5 +1,4 @@
 import numpy as np
-from dataclasses import dataclass
 
 
 def decompose_J_tensor(Jtensor):

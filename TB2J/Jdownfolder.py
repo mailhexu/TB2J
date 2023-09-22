@@ -1,10 +1,9 @@
 import os
-import pickle
 from collections import defaultdict
 import numpy as np
 from ase.dft.kpoints import monkhorst_pack
 from TB2J.io_exchange import SpinIO
-from TB2J.Jtensor import decompose_J_tensor, combine_J_tensor
+from TB2J.Jtensor import decompose_J_tensor
 
 
 def ind_to_indn(ind, n=3):
