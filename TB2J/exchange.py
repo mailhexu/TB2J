@@ -83,7 +83,6 @@ class Exchange():
         self.description = description
         self._clean_tbmodels()
 
-        # self._prepare_Jorb_file()
 
     def _prepare_Jorb_file(self):
         os.makedirs(self.output_path, exist_ok=True)

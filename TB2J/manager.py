@@ -70,7 +70,8 @@ def gen_exchange(path,
             if os.path.exists(basis_fname):
                 basis = read_basis(basis_fname)
             else:
-                basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
+                basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms,
+                        write_basis_file=os.path.join(output_path, "assigned_basis.txt"))
         elif wannier_type.lower() == "banddownfolder":
             print("Reading Banddownfolder hamiltonian: spin up.")
             tbmodel_up = MyTB.load_banddownfolder(path=path,
@@ -83,7 +84,8 @@ def gen_exchange(path,
                                                   atoms=atoms, 
                                                   nls=False)
 
-            basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms)
+            basis, _ = auto_assign_basis_name(tbmodel_up.xred, atoms,
+                        write_basis_file=os.path.join(output_path, "assigned_basis.txt"))
         else:
             raise ValueError(
                 "wannier_type should be Wannier90 or banddownfolder.")
@@ -154,7 +156,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                                 groupby=None,
                                                 nls=False)
         tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
-        basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
+        basis, _ = auto_assign_basis_name(tbmodel.xred, atoms, 
+                        write_basis_file=os.path.join(output_path, "assigned_basis.txt"))
         description = f""" Input from collinear BandDownfolder data.
  Tight binding data from {path}. 
  Prefix of wannier function files:{prefix_up} and {prefix_dn}.
@@ -198,7 +201,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
             print("The use of basis file is deprecated. It will be ignored.")
             #basis = read_basis(basis_fname)
         else:
-            basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
+            basis, _ = auto_assign_basis_name(tbmodel.xred, atoms, 
+                    write_basis_file=os.path.join(output_path, "assigned_basis.txt"))
         description = f""" Input from non-collinear Wannier90 data.
  Tight binding data from {path}. 
  Prefix of wannier function files:{prefix_SOC}.
@@ -387,7 +391,9 @@ def gen_exchange_gpaw(gpw_fname,
     efermi = model.calc.get_fermi_level()
     print(f"Fermi Energy: {efermi}")
     poses = np.vstack([model.positions, model.positions])
-    basis, _ = auto_assign_basis_name(poses, model.atoms)
+    basis, _ = auto_assign_basis_name(poses, model.atoms, 
+            write_basis_file=os.path.join(output_path, "assigned_basis.txt"))
+
     if model.calc.get_spin_polarized():
         print("Starting to calculate exchange.")
         exchange = ExchangeNCL(tbmodels=model,
