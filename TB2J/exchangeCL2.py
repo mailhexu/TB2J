@@ -24,13 +24,11 @@ class ExchangeCL2(ExchangeCL):
                            self.kmesh,
                            self.efermi,
                            use_cache=self._use_cache,
-                           # cache_path='TB2J_results/cache/spinup',
                            nproc=self.np)
         self.Gdn = TBGreen(self.tbmodel_dn,
                            self.kmesh,
                            self.efermi,
                            use_cache=self._use_cache,
-                           # cache_path='TB2J_results/cache/spindn',
                            nproc=self.np)
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
@@ -257,9 +255,6 @@ class ExchangeCL2(ExchangeCL):
                     self.JJ_list[key].append(JJ_list[key])
         if self.np > 1:
             pass
-            # pool.close()
-            # pool.join()
-            # pool.clear()
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()

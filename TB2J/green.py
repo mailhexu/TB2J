@@ -217,6 +217,22 @@ class TBGreen():
                     ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
         return rho
 
+    def get_rho_R(self, Rpts):
+        nR=len(Rpts)
+        rho_R = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
+        for ik, kpt in enumerate(self.kpts):
+            rhok=(self.get_evecs(ik) * fermi(self.evals[ik], self.efermi)
+                    ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
+            for iR, R in enumerate(Rpts):
+                rho_R[iR] += rhok * exp(2*np.pi *kpt * R)
+        return rho
+
+    def write_rho_R(self, Rpts, fname="rhoR.pickle"):
+        rho=self.get_rho_R(self, Rpts)
+        with open(fname, "wb") as myfile:
+            pickle.dump(rho, fname)
+
+
     def get_density(self):
         return np.real(np.diag(self.get_density_matrix()))
 
