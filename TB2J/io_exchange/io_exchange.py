@@ -14,10 +14,9 @@ import numpy as np
 from TB2J.kpoints import monkhorst_pack
 import pickle
 from TB2J import __version__
-from TB2J.Jtensor import decompose_J_tensor, combine_J_tensor
+from TB2J.Jtensor import combine_J_tensor
 from datetime import datetime
 import matplotlib.pyplot as plt
-from ase import Atoms
 
 
 class SpinIO(object):

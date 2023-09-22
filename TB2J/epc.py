@@ -1,5 +1,4 @@
 import numpy as np
-from numpy.linalg import norm
 from .utils import match_k
 
 class WannierUmat():

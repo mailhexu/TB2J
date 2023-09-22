@@ -3,20 +3,13 @@ Exchange from Green's function
 """
 
 from collections import defaultdict
-import os
-import shutil
 import numpy as np
 from TB2J.green import TBGreen
-from TB2J.utils import symbol_number, read_basis
-from TB2J.myTB import MyTB
-from ase.io import read
-from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
 from TB2J.external import p_map
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
-from pathos.multiprocessing import ProcessPool
 
 
 class ExchangeCL2(ExchangeCL):

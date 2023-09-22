@@ -1,7 +1,7 @@
 import os
 from TB2J.myTB import MyTB, merge_tbmodels_spin
 import numpy as np
-from TB2J.exchange import ExchangeCL, ExchangeNCL
+from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.exchange_qspace import ExchangeCLQspace
 from TB2J.utils import read_basis, auto_assign_basis_name

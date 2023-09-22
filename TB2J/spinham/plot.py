@@ -1,18 +1,12 @@
 #!/usr/bin/env python
 from __future__ import division
 import ase
-from ase.atoms import Atoms
-from mpl_toolkits.mplot3d import axes3d
 import matplotlib.pyplot as plt
 import numpy as np
-import numpy.linalg
 from ase.geometry import cell_to_cellpar, cellpar_to_cell
-from ase.dft.kpoints import (get_special_points, bandpath, special_paths,
-                             parse_path_string)
+from ase.dft.kpoints import get_special_points, parse_path_string
 #from minimulti.spin.hamiltonian import SpinHamiltonian
 #from minimulti.spin.mover import SpinMover
-from .qsolver import QSolver
-from .constants import mu_B, meV
 
 
 

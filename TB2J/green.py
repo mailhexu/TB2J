@@ -1,5 +1,4 @@
 import numpy as np
-import scipy.linalg as sl
 from collections import defaultdict
 from ase.dft.kpoints import monkhorst_pack
 from shutil import rmtree
