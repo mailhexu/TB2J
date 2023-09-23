@@ -11,6 +11,8 @@ Welcome to TB2J's documentation!
  For questions please use the online forum at `<https://groups.google.com/g/tb2j>`_, or send email to `<tb2j@googlegroup.com>`_.
  More TB2J examples with full DFT/Wannier data can be found at `https://github.com/mailhexu/TB2J_examples <https://github.com/mailhexu/TB2J_examples>`_ .
 
+ 
+
  There are video tutorials in TB2J channel on youtube: `<https://www.youtube.com/channel/UCPbmKE10Wz3orbo4x-g0c9A>`_ .
 
 
@@ -24,6 +26,7 @@ Welcome to TB2J's documentation!
    src/applications.rst
    src/extend.rst
    src/roadmap.md
+   src/ecosystem.md
    src/faq.rst
    src/Contributors.rst
    src/references
