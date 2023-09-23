@@ -10,7 +10,7 @@
 - [SIESTA](https://siesta-project.org/siesta/): SIESTA is both a method and its computer program implementation, to perform efficient electronic structure calculations and ab initio molecular dynamics simulations of molecules and solids. SIESTA's efficiency stems from the use of a basis set of strictly-localized atomic orbitals. A very important feature of the code is that its accuracy and cost can be tuned in a wide range, from quick exploratory calculations to highly accurate simulations matching the quality of other approaches, such as plane-wave methods. The parsing of the SIESTA output files is through [sisl](https://github.com/zerothi/sisl). 
 - [OpenMX](https://www.openmx-square.org/): OpenMX (Open source package for Material eXplorer) is a software package for nano-scale material simulations based on density functional theories (DFT), norm-conserving pseudopotentials, and pseudo-atomic localized basis functions. The methods and algorithms used in OpenMX and their implementation are carefully designed for the realization of large-scale *ab initio* electronic structure calculations on parallel computers based on the MPI or MPI/OpenMP hybrid parallelism. The TB2J-OpenMX interface is packaged in [TB2J-OpenMX](https://github.com/mailhexu/TB2J-OpenMX) under the GPLv3 license. 
 
-### Spin dynamics code interfaced with TB2J
+#### Spin dynamics code interfaced with TB2J
 
 TB2J can provide the input files containing the parameters for Heisenberg models to be used in spin-dynamics code.  Currently, TB2J is interfaced to MULTIBINIT and Vampire. 
 
@@ -18,14 +18,14 @@ TB2J can provide the input files containing the parameters for Heisenberg models
 
 * [Vampire](https://vampire.york.ac.uk/):Vampire is a high performance general purpose code for the atomistic simulation of magnetic materials. Using a variety of common simulation methods it can calculate the equilibrium and dynamic magnetic properties of a wide variety of magnetic materials and phenomena, including ferro, ferri and antiferromagnets, core-shell nanoparticles, ultrafast spin dynamics, magnetic recording media, heat assisted magnetic recording, exchange bias, magnetic multilayer films and complete devices.
 
-### Codes for Linear Spin Wave method and magnon band structure
+#### Codes for Linear Spin Wave method and magnon band structure
 
 * [RAD-tools](https://rad-tools.org/en/stable/index.html): RAD-tools is a package focused leaning towards the treatment of spin Hamiltonian with the parameters obtained form any source. It provides the means of solving the magnon problem, simplify the notation changes, and aimed at the graphical as well as text output. 
   It can utilize the Heisenberg Hamiltonian from TB2J, and compute the magnon band structure from Linear spin wave theory. The documentation for doing this can be found [here](https://rad-tools.org/en/stable/user-guide/module/magnons/index.html) and [here](https://rad-tools.org/en/stable/user-guide/library/magnon-dispersion.html)
 
   
 
-### Related software without already-built interface with TB2J
+#### Related software without already-built interface with TB2J
 
 There are many other tools which can be used together with TB2J, but the interface is not yet built (or made publicly available). 
 
