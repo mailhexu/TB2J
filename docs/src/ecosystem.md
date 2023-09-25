@@ -20,8 +20,8 @@ TB2J can provide the input files containing the parameters for Heisenberg models
 
 #### Codes for Linear Spin Wave method and magnon band structure
 
-* [RAD-tools](https://rad-tools.org/en/stable/index.html): RAD-tools is a package focused leaning towards the treatment of spin Hamiltonian with the parameters obtained form any source. It provides the means of solving the magnon problem, simplify the notation changes, and aimed at the graphical as well as text output. 
-  It can utilize the Heisenberg Hamiltonian from TB2J, and compute the magnon band structure from Linear spin wave theory. The documentation for doing this can be found [here](https://rad-tools.org/en/stable/user-guide/module/magnons/index.html) and [here](https://rad-tools.org/en/stable/user-guide/library/magnon-dispersion.html)
+* [RAD-tools](https://rad-tools.org/): RAD-tools is a python package for the spin Hamiltonian analysis (with built-in notation changes) and magnon band structure calculation. It is interfaced directly with the TB2J .txt output ("exchange.out") and can compute the magnon band structure via the [linear spin wave theory](https://rad-tools.org/en/stable/user-guide/library/magnon-dispersion.html) for **ferromagnetic**, **antiferromagnetic** and **spiral** magnetic structures. Documentation of the usage can be found on the package website: if you know python -  [use as library](https://rad-tools.org/en/stable/user-guide/module/magnons/index.html) or if you do not know python - [use console interface](https://rad-tools.org/en/stable/user-guide/scripts/rad-plot-tb2j-magnons.html).
+
 
   
 
