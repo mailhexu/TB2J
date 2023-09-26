@@ -20,9 +20,6 @@ def eigen_to_G(evals, evecs, efermi, energy):
     """
     return np.einsum("ij, j-> ij", evecs, 1.0 /
                      (-evals + (energy + efermi))) @ evecs.conj().T
-    #return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T)
-    #return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
-    #    evecs.conj().T)
 
 
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
@@ -95,6 +92,8 @@ class TBGreen():
         ts = np.logical_and(evals >= emin, evals < emax)
         ts = np.any(ts, axis=0)
         ts = np.where(ts)[0]
+        if len(ts)==0:
+            raise ValueError(f"Cannot find any band in the energy range specified by emin {emin} and emax {emax}, which are relative to the Fermi energy. Please check that the Fermi energy, the emin and emax are correct. If you're using Wannier90 output, check the Wannier functions give the right band structure.")
         istart, iend = ts[0], ts[-1] + 1
         return evals[:, istart:iend], evecs[:, :, istart:iend]
 
