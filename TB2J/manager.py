@@ -38,6 +38,7 @@ def gen_exchange(path,
                  wannier_type="wannier90",
                  qspace=False,
                  orb_decomposition=False,
+                 write_density_matrix=False,
                  description=''):
     try:
         fname=os.path.join(path, posfile)
@@ -115,6 +116,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                    ne=ne,
                                    np=np,
                                    use_cache=use_cache,
+                                   output_path=output_path,
+                                   write_density_matrix=write_density_matrix,
                                    description=description)
         else:
             exchange = ExchangeCLQspace(tbmodels=(tbmodel_up, tbmodel_dn),
@@ -135,6 +138,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                         ne=ne,
                                         np=np,
                                         use_cache=use_cache,
+                                        output_path=output_path,
+                                        write_density_matrix=write_density_matrix,
                                         description=description)
 
         exchange.run(path=output_path)
@@ -182,6 +187,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                ne=ne,
                                np=np,
                                use_cache=use_cache,
+                               output_path=output_path,
+                               write_density_matrix=write_density_matrix,
                                description=description)
         exchange.run(path=output_path)
         print(
@@ -232,6 +239,8 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                                np=np,
                                use_cache=use_cache,
                                description=description,
+                               output_path=output_path,
+                               write_density_matrix=write_density_matrix,
                                orb_decomposition=orb_decomposition,
                                )
         print("\n")
@@ -297,6 +306,7 @@ def gen_exchange_siesta(fdf_fname,
             ne=ne,
             np=np,
             use_cache=use_cache,
+            output_path=output_path,
             description=description)
         exchange.run(path=output_path)
         print("\n")
@@ -330,6 +340,7 @@ def gen_exchange_siesta(fdf_fname,
                                np=np,
                                use_cache=use_cache,
                                description=description,
+                               output_path=output_path,
                                orb_decomposition=orb_decomposition)
         exchange.run(path=output_path)
         print("\n")
@@ -366,6 +377,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                                np=np,
                                use_cache=use_cache,
                                description=description,
+                               output_path=output_path,
                                orb_decomposition= orb_decomposition
                                )
         exchange.run(path=output_path)
@@ -408,6 +420,7 @@ def gen_exchange_gpaw(gpw_fname,
                                exclude_orbs=exclude_orbs,
                                Rcut=Rcut,
                                use_cache=use_cache,
+                               output_path=output_path,
                                description=description)
         exchange.run(path=output_path)
         print("\n")

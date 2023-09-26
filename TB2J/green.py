@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathos.multiprocessing import ProcessPool
 import sys
+import pickle
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
@@ -217,20 +218,23 @@ class TBGreen():
                     ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
         return rho
 
-    def get_rho_R(self, Rpts):
-        nR=len(Rpts)
+    def get_rho_R(self, Rlist):
+        nR=len(Rlist)
         rho_R = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
         for ik, kpt in enumerate(self.kpts):
-            rhok=(self.get_evecs(ik) * fermi(self.evals[ik], self.efermi)
-                    ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
-            for iR, R in enumerate(Rpts):
-                rho_R[iR] += rhok * exp(2*np.pi *kpt * R)
-        return rho
+            evec=self.get_evecs(ik)
+            #rhok=(evec * fermi(self.evals[ik], self.efermi)
+            #        ) @ evec.T.conj()
+            #print(fermi(self.evals[ik] , self.efermi))
+            rhok=np.einsum("ib,b, bj-> ij", evec, fermi(self.evals[ik] , self.efermi),evec.conj().T)
+            for iR, R in enumerate(Rlist):
+                rho_R[iR] += rhok * np.exp(self.k2Rfactor *kpt @ R) * self.kweights[ik]
+        return rho_R
 
-    def write_rho_R(self, Rpts, fname="rhoR.pickle"):
-        rho=self.get_rho_R(self, Rpts)
+    def write_rho_R(self, Rlist, fname="rhoR.pickle"):
+        rho_R=self.get_rho_R( Rlist)
         with open(fname, "wb") as myfile:
-            pickle.dump(rho, fname)
+            pickle.dump({"Rlist": Rlist, "rhoR":rho_R}, myfile)
 
 
     def get_density(self):
