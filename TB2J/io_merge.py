@@ -10,6 +10,7 @@ Rxz = Rotation.from_euler('y', -90, degrees=True)
 Ryz = Rotation.from_euler('x', -90, degrees=True)
 
 
+
 def rot_merge_DMI(Dx, Dy, Dz):
     Dx_z = Rxz.apply(Dx)
     Dy_z = Ryz.apply(Dy)
