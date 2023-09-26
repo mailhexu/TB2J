@@ -30,6 +30,7 @@ Welcome to TB2J's documentation!
    src/faq.rst
    src/Contributors.rst
    src/references
+   src/development.md
    src/ReleaseNotes.md
 
 
