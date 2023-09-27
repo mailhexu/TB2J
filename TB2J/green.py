@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathos.multiprocessing import ProcessPool
 import sys
+import pickle
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
@@ -19,9 +20,6 @@ def eigen_to_G(evals, evecs, efermi, energy):
     """
     return np.einsum("ij, j-> ij", evecs, 1.0 /
                      (-evals + (energy + efermi))) @ evecs.conj().T
-    #return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T)
-    #return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
-    #    evecs.conj().T)
 
 
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
@@ -94,6 +92,8 @@ class TBGreen():
         ts = np.logical_and(evals >= emin, evals < emax)
         ts = np.any(ts, axis=0)
         ts = np.where(ts)[0]
+        if len(ts)==0:
+            raise ValueError(f"Cannot find any band in the energy range specified by emin {emin} and emax {emax}, which are relative to the Fermi energy. Please check that the Fermi energy, the emin and emax are correct. If you're using Wannier90 output, check the Wannier functions give the right band structure.")
         istart, iend = ts[0], ts[-1] + 1
         return evals[:, istart:iend], evecs[:, :, istart:iend]
 
@@ -217,20 +217,23 @@ class TBGreen():
                     ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
         return rho
 
-    def get_rho_R(self, Rpts):
-        nR=len(Rpts)
+    def get_rho_R(self, Rlist):
+        nR=len(Rlist)
         rho_R = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
         for ik, kpt in enumerate(self.kpts):
-            rhok=(self.get_evecs(ik) * fermi(self.evals[ik], self.efermi)
-                    ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
-            for iR, R in enumerate(Rpts):
-                rho_R[iR] += rhok * exp(2*np.pi *kpt * R)
-        return rho
+            evec=self.get_evecs(ik)
+            #rhok=(evec * fermi(self.evals[ik], self.efermi)
+            #        ) @ evec.T.conj()
+            #print(fermi(self.evals[ik] , self.efermi))
+            rhok=np.einsum("ib,b, bj-> ij", evec, fermi(self.evals[ik] , self.efermi),evec.conj().T)
+            for iR, R in enumerate(Rlist):
+                rho_R[iR] += rhok * np.exp(self.k2Rfactor *kpt @ R) * self.kweights[ik]
+        return rho_R
 
-    def write_rho_R(self, Rpts, fname="rhoR.pickle"):
-        rho=self.get_rho_R(self, Rpts)
+    def write_rho_R(self, Rlist, fname="rhoR.pickle"):
+        rho_R=self.get_rho_R( Rlist)
         with open(fname, "wb") as myfile:
-            pickle.dump(rho, fname)
+            pickle.dump({"Rlist": Rlist, "rhoR":rho_R}, myfile)
 
 
     def get_density(self):

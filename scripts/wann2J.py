@@ -41,6 +41,7 @@ def run_wann2J():
         default='spin',
         type=str,
     )
+    parser.add_argument("--write_dm", help="whether to write density matrix", action='store_true', default=False)
 
     parser.add_argument(
         '--rcut',
@@ -178,6 +179,7 @@ def run_wann2J():
                  exclude_orbs=args.exclude_orbs,
                  wannier_type=args.wannier_type,
                  # qspace=args.qspace,
+                 write_density_matrix=args.write_dm,
                  orb_decomposition=args.orb_decomposition
                  )
 

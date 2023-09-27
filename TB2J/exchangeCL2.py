@@ -1,7 +1,7 @@
 """
 Exchange from Green's function
 """
-
+import os
 from collections import defaultdict
 import numpy as np
 from TB2J.green import TBGreen
@@ -30,6 +30,9 @@ class ExchangeCL2(ExchangeCL):
                            self.efermi,
                            use_cache=self._use_cache,
                            nproc=self.np)
+        if self.write_density_matrix:
+            self.Gup.write_rho_R(Rlist=self.Rlist, fname=os.path.join(self.output_path, "rho_up.pickle"))
+            self.Gdn.write_rho_R(Rlist=self.Rlist, fname=os.path.join(self.output_path, "rho_dn.pickle"))
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
         self.rho_up_list = []
