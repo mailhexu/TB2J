@@ -57,7 +57,7 @@ def rotate_back(rot1, rot2, J_rotated):
     """
     return rot1.T@J_rotated@rot2
 
-def remove_components(J, vec1, vec2, indices=[[2,2]]):
+def remove_components(J, vec1, vec2, remove_indices=[[2,2]]):
     """
     Remove the zz component of the tensor
     """
@@ -65,7 +65,7 @@ def remove_components(J, vec1, vec2, indices=[[2,2]]):
     w=np.ones_like(J)
     rot1, rot2, J_rotated=rotate_tensor(vec1, J, vec2)
     w_rotated= rot1@w@rot2.T
-    for (i,j) in indices:
+    for (i,j) in remove_indices:
         w_rotated[i, j]=0
         J_rotated[i, j]=0
     Jback= rotate_back(rot1, rot2, J_rotated)

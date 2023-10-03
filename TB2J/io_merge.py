@@ -3,6 +3,7 @@ import copy
 import numpy as np
 from scipy.spatial.transform import Rotation
 from TB2J.io_exchange import SpinIO
+from TB2J.tensor_rotate import remove_components
 
 # Rotation from x to z
 Rxz = Rotation.from_euler('y', -90, degrees=True)
@@ -77,6 +78,37 @@ def read_pickle(path):
     else:
         raise FileNotFoundError(f"Cannot find either file {p1} or {p2}")
     return ret
+
+
+class Merger2():
+    def __init__(self, paths, method):
+        self.paths = paths
+        self.indata = [read_pickle(path) for path in paths]
+        self.dat = copy.deepcopy(self.indata[-1])
+        self.dat.description += 'Merged from TB2J results in paths: \n  ' + '\n  '.join(
+            paths) + '\n'
+        self.method = method
+
+    def merge_Jani(self):
+        Jani_dict = {}
+        for key, Jani in self.dat.exchange_Jdict.items():
+            i, j, R=key
+            weights=np.zeros((3,3),dtype=float)
+            Jani_sum=np.zeros((3, 3), dtype=float)
+            for dat in self.indata:
+                Si=dat.get_spin_ispin(i)
+                Sj=dat.get_spin_ispin(j)
+                try:
+                    Jani=dat.get_Jani(i, j, R)
+                except KeyError:
+                    Jani = np.zeros((3, 3))
+                Jani_removed, w = remove_components(Jani, Si, Sj, remove_indices=[[0, 2], [1,2], [2,2], [2,1], [2, 0]])
+                Jani_sum+= Jani_removed
+                weights+= w
+            if np.any(weights==0):
+                raise RuntimeError("The data set to be merged does not give a complete anisotropic J tensor, please add more data")
+            Jani_dict[key]=Jani_sum/weights
+        self.dat.Jani_dict=Jani_dict
 
 
 class Merger():

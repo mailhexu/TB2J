@@ -189,6 +189,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.nspin = len(self.ispin_list)
         assert (self.nspin == max(self.ispin_list)+1)
 
+
     def _build_ind_atoms(self):
         self._ind_atoms = {}  #: The index of atom for each spin.
         for iatom, ispin in enumerate(self.index_spin):
@@ -201,6 +202,20 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             self._build_ind_atoms()
         return self._ind_atoms
 
+    def iatom(self, i):
+        return self.ind_atoms[i]
+
+    def get_spin_ispin(self, i):
+        return self.spinat[self.iatom[i]]
+
+    def get_charge_ispin(self, i):
+        return self.charges[self.iatom[i]]
+
+    def get_spin_iatom(self, iatom):
+        return self.spinat[iatom]
+
+    def get_charge_iatom(self, iatom):
+        return self.charges[iatom]
 
     def get_J(self, i, j, R):
         key = (tuple(R), i, j,)
@@ -217,6 +232,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             return None
 
     def get_Jani(self, i, j, R):
+        """
+        Return the anisotropic exchange tensor for atom i and j, and cell R.
+        param i : spin index i
+        param j: spin index j
+        param R (tuple of integers): cell index R
+        """
         key = (tuple(R), i, j,)
         if self.Jani_dict is not None and key in self.Jani_dict:
             return self.Jani_dict[(tuple(R), i, j)]
@@ -224,6 +245,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             return None
 
     def get_J_tensor(self, i, j, R, iso_only=False):
+        """
+        Return the full exchange tensor for atom i and j, and cell R.
+        param i : spin index i
+        param j: spin index j
+        param R (tuple of integers): cell index R
+        """
         if iso_only:
             Jtensor= np.eye(3)*self.get_J(i, j, R)
         else:
@@ -233,6 +260,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return(Jtensor)
 
     def get_full_Jtensor_for_one_R(self, R):
+        """
+        Return the full exchange tensor of all i and j for cell R.
+        param R (tuple of integers): cell index R
+        returns:
+            Jmat: (3*nspin,3*nspin) matrix. 
+        """
         n3 = self.nspin * 3
         Jmat = np.zeros((n3, n3), dtype=float)
         for i in range(self.nspin):
