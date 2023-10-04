@@ -59,11 +59,11 @@ class ExchangeParams:
         self.ne = ne
         self._use_cache = use_cache
         self.np = np
-        self._kmesh=kmesh
+        self._kmesh = kmesh
         self.orb_decomposition = orb_decomposition
         self.write_density_matrix = write_density_matrix
         self.description = description
-        self.output_path=output_path
+        self.output_path = output_path
 
 
 class Exchange(ExchangeParams):

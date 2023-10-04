@@ -17,6 +17,8 @@ Rzx = Rotation.from_euler("y", 90, degrees=True)
 # Inverse of the Rotation from y to z
 Rzy = Rotation.from_euler("x", -90, degrees=True)
 
+Rzz = Rotation.from_euler("z", 0, degrees=True)
+
 
 def test_rotation_matrix():
     x = [1, 0, 0]
@@ -34,7 +36,7 @@ def recover_DMI_from_rotated_structure(Ddict, rotation):
     D: the dictionary of DMI vector in the rotated structure.
     rotation: the rotation operator from the original structure to the rotated structure.
     """
-    for key, val in Ddict:
+    for key, val in Ddict.items():
         Ddict[key] = rotation.apply(val, inverse=True)
     return Ddict
 
@@ -47,9 +49,23 @@ def recover_Jani_fom_rotated_structure(Janidict, rotation):
     """
     R = rotation.as_matrix()
     RT = R.T
-    for key, val in Janidict:
-        Janidict[key] = R @ val @ RT
+    for key, val in Janidict.items():
+        if np.any(val > 1e-5):
+            # print(f"{R=}, {val=}, {RT=}")
+            pass
+        Janidict[key] = RT @ val @ R
     return Janidict
+
+
+def recover_spinat_from_rotated_structure(spinat, rotation):
+    """
+    Recover the spinat from the rotated structure.
+    spinat: the spinat in the rotated structure.
+    rotation: the rotation operator from the original structure to the rotated structure.
+    """
+    for i, spin in enumerate(spinat):
+        spinat[i] = rotation.apply(spin, inverse=True)
+    return spinat
 
 
 # test_rotation_matrix()
@@ -113,11 +129,16 @@ def test_swap():
 
 
 def merge_Jani(Janix, Janiy, Janiz):
-    Jani = (
-        np.array([[0, 0, 0], [0, 1, 1], [0, 1, 1]]) * Janix
-        + np.array([[1, 0, 1], [0, 0, 0], [1, 0, 1]]) * Janiy
-        + np.array([[1, 1, 0], [1, 1, 0], [0, 0, 0]]) * Janiz
-    ) / 2.0
+    # This is wrong.
+    # Jani = (
+    #    np.array([[0, 0, 0], [0, 1, 1], [0, 1, 1]]) * Janix
+    #    + np.array([[1, 0, 1], [0, 0, 0], [1, 0, 1]]) * Janiy
+    #    + np.array([[1, 1, 0], [1, 1, 0], [0, 0, 0]]) * Janiz
+    # ) / 2.0
+    wx = np.array([[0, 0, 0], [0, 1, 1], [0, 1, 1]])
+    wy = np.array([[1, 0, 1], [0, 0, 0], [1, 0, 1]])
+    wz = np.array([[1, 1, 0], [1, 1, 0], [0, 0, 0]])
+    Jani = (wx * Janix + wy * Janiy + wz * Janiz) / (wx + wy + wz)
     return Jani
 
 
@@ -136,12 +157,12 @@ def read_pickle(path):
 
 
 class Merger2:
-    def __init(self, paths, method):
+    def __init__(self, paths, method):
         self.method = method
         if method.lower() == "spin":
             self.load_with_rotated_spin(paths)
         elif method.lower() == "structure":
-            self.laod_with_rotated_structure(paths)
+            self.load_with_rotated_structure(paths)
         else:
             raise ValueError("method should be either 'spin' or 'structure'")
 
@@ -153,16 +174,22 @@ class Merger2:
         """
         self.paths = paths
         if len(self.paths) != 3:
-            raise ValueError("The number of paths should be 3")
+            raise ValueError(
+                "The number of paths should be 3, with structure rotated from z to x, y, z"
+            )
         for i, path in enumerate(self.paths):
             read_pickle(path)
         self.indata = [read_pickle(path) for path in paths]
+
         self.dat = copy.deepcopy(self.indata[-1])
         self.dat.description += (
             "Merged from TB2J results in paths: \n  " + "\n  ".join(paths) + "\n"
         )
-        if self.method != "spin":
-            raise NotImplementedError("Only spin method is implemented")
+        Rotations = [Rzx, Rzy, Rzz]
+        for dat, rotation in zip(self.indata, Rotations):
+            dat.spinat = recover_spinat_from_rotated_structure(dat.spinat, rotation)
+            dat.dmi_ddict = recover_DMI_from_rotated_structure(dat.dmi_ddict, rotation)
+            dat.Jani_dict = recover_Jani_fom_rotated_structure(dat.Jani_dict, rotation)
 
     def load_with_rotated_spin(self, paths):
         """
@@ -182,8 +209,8 @@ class Merger2:
         Merge the anisotropic exchange tensor.
         """
         Jani_dict = {}
-        for key, Jani in self.dat.exchange_Jdict.items():
-            i, j, R = key
+        for key, Jani in self.dat.Jani_dict.items():
+            R, i, j = key
             weights = np.zeros((3, 3), dtype=float)
             Jani_sum = np.zeros((3, 3), dtype=float)
             for dat in self.indata:
@@ -205,6 +232,7 @@ class Merger2:
                 raise RuntimeError(
                     "The data set to be merged does not give a complete anisotropic J tensor, please add more data"
                 )
+            print(f"{weights=}")
             Jani_dict[key] = Jani_sum / weights
         self.dat.Jani_dict = Jani_dict
 
@@ -214,8 +242,8 @@ class Merger2:
         """
         DMI = {}
         for key, D in self.dat.dmi_ddict.items():
-            i, j, R = key
-            weights = np.zeros((3,), dtype=float)
+            R, i, j = key
+            weights = np.zeros((3, 3), dtype=float)
             Dtensor_sum = np.zeros((3, 3), dtype=float)
             for dat in self.indata:
                 Si = dat.get_spin_ispin(i)
@@ -226,7 +254,7 @@ class Merger2:
                     D = np.zeros((3,))
                 Dtensor = DMI_to_Jtensor(D)
                 Dtensor_removed, w = remove_components(
-                    Dtensor, Si, Sj, remove_indices=[[2, 2]]
+                    Dtensor, Si, Sj, remove_indices=[[0, 1], [1, 0]]
                 )
                 Dtensor_sum += Dtensor_removed
                 weights += w
@@ -243,8 +271,8 @@ class Merger2:
         """
         Jiso = {}
         for key, J in self.dat.exchange_Jdict.items():
-            i, j, R = key
-            weights = np.zeros((3,), dtype=float)
+            R, i, j = key
+            weights = 0.0
             Jiso_sum = 0.0
             for dat in self.indata:
                 Si = dat.get_spin_ispin(i)
@@ -253,7 +281,7 @@ class Merger2:
                     J = dat.get_Jiso(i, j, R)
                 except KeyError:
                     J = 0.0
-                Jiso_sum += J
+                Jiso_sum += J  # *np.eye(3, dtype=float)
                 weights += 1.0
             if np.any(weights == 0):
                 raise RuntimeError(
@@ -261,6 +289,23 @@ class Merger2:
                 )
             Jiso[key] = Jiso_sum / weights
         self.dat.exchange_Jdict = Jiso
+
+    def write(self, path="TB2J_results"):
+        """
+        Write the merged TB2J results to a folder.
+        :param path: the path to the folder to write the results.
+        """
+        self.dat.description += (
+            "Merged from TB2J results in paths: \n  " + "\n  ".join(self.paths) + "\n"
+        )
+        if self.method == "spin":
+            self.dat.description += (
+                ", which are from DFT data with various spin orientations. \n"
+            )
+        elif self.method == "structure":
+            self.dat.description += ", which are from DFT data with structure with z axis rotated to x, y, z\n"
+        self.dat.description += "\n"
+        self.dat.write_all(path=path)
 
 
 class Merger:
@@ -382,6 +427,23 @@ class Merger:
 
 def merge(path_x, path_y, path_z, method, save=True, path="TB2J_results"):
     m = Merger(path_x, path_y, path_z, method)
+    m.merge_Jiso()
+    m.merge_DMI()
+    m.merge_Jani()
+    if save:
+        m.write(path=path)
+    return m.dat
+
+
+def merge2(paths, method, save=True, path="TB2J_results"):
+    """
+    Merge TB2J results from multiple calculations.
+    :param paths: a list of paths to the TB2J results.
+    :param method: 'structure' or 'spin'
+    :param save: whether to save the merged results.
+    :param path: the path to the folder to write the results.
+    """
+    m = Merger2(paths, method)
     m.merge_Jiso()
     m.merge_DMI()
     m.merge_Jani()

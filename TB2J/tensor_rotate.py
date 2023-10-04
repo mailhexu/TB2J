@@ -89,7 +89,10 @@ def remove_zz_component(J, vec1, vec2):
     """
     Remove the zz component of the tensor
     """
-    return remove_components(J, vec1, vec2, indices=[[2, 2]])
+    # return remove_components(J, vec1, vec2, remove_indices=[[2, 2]])
+    return remove_components(
+        J, vec1, vec2, remove_indices=[[0, 2], [1, 2], [2, 0], [2, 1], [2, 2]]
+    )
 
 
 def test_remove_zz_component():
@@ -97,7 +100,7 @@ def test_remove_zz_component():
     Test remove_zz_component
     """
     J = np.array([[1, 2, 3], [2, 4, 5], [3, 5, 6]])
-    vec1 = np.array([0, -1, 0])
+    vec1 = np.array([1, 0, 0])
     vec2 = np.array([1, 0, 0])
     J2, weight = remove_zz_component(J, vec1, vec2)
     print(J2)
@@ -171,5 +174,5 @@ def test_rotate_isotropic_tensor():
 if __name__ == "__main__":
     # test_rotate_tensor()
     # test_find_rotation_matrix_to_z()
-    # test_remove_zz_component()
-    test_rotate_isotropic_tensor()
+    test_remove_zz_component()
+    # test_rotate_isotropic_tensor()

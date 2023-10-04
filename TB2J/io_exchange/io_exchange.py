@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 
 
 class SpinIO(object):
-
     def __init__(
         self,
         atoms,
@@ -135,8 +134,9 @@ class SpinIO(object):
 
         self.has_bilinear = not (Jani_dict == {} or Jani_dict is None)
 
-        self.has_biquadratic = not (biquadratic_Jdict == {}
-                                    or biquadratic_Jdict is None)
+        self.has_biquadratic = not (
+            biquadratic_Jdict == {} or biquadratic_Jdict is None
+        )
         self.biquadratic_Jdict = biquadratic_Jdict
 
         if NJT_ddict is not None:
@@ -149,8 +149,7 @@ class SpinIO(object):
 
         natom = len(self.atoms)
         if gyro_ratio is None:
-            self.gyro_ratio = [1.0
-                               ] * natom  #: Gyromagnetic ratio for each atom
+            self.gyro_ratio = [1.0] * natom  #: Gyromagnetic ratio for each atom
         elif isinstance(gyro_ratio, Iterable):
             self.gyro_ratio = gyro_ratio
         else:
@@ -187,8 +186,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.Rlist = list(Rset)
         self.ispin_list = list(ispin_set)
         self.nspin = len(self.ispin_list)
-        assert (self.nspin == max(self.ispin_list)+1)
-
+        assert self.nspin == max(self.ispin_list) + 1
 
     def _build_ind_atoms(self):
         self._ind_atoms = {}  #: The index of atom for each spin.
@@ -206,10 +204,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return self.ind_atoms[i]
 
     def get_spin_ispin(self, i):
-        return self.spinat[self.iatom[i]]
+        return self.spinat[self.iatom(i)]
 
     def get_charge_ispin(self, i):
-        return self.charges[self.iatom[i]]
+        return self.charges[self.iatom(i)]
 
     def get_spin_iatom(self, iatom):
         return self.spinat[iatom]
@@ -218,14 +216,33 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return self.charges[iatom]
 
     def get_J(self, i, j, R):
-        key = (tuple(R), i, j,)
+        key = (
+            tuple(R),
+            i,
+            j,
+        )
+        if self.exchange_Jdict is not None and key in self.exchange_Jdict:
+            return self.exchange_Jdict[key]
+        else:
+            return None
+
+    def get_Jiso(self, i, j, R):
+        key = (
+            tuple(R),
+            i,
+            j,
+        )
         if self.exchange_Jdict is not None and key in self.exchange_Jdict:
             return self.exchange_Jdict[key]
         else:
             return None
 
     def get_DMI(self, i, j, R):
-        key = (tuple(R), i, j,)
+        key = (
+            tuple(R),
+            i,
+            j,
+        )
         if self.dmi_ddict is not None and key in self.dmi_ddict:
             return self.dmi_ddict[(tuple(R), i, j)]
         else:
@@ -238,7 +255,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         param j: spin index j
         param R (tuple of integers): cell index R
         """
-        key = (tuple(R), i, j,)
+        key = (
+            tuple(R),
+            i,
+            j,
+        )
         if self.Jani_dict is not None and key in self.Jani_dict:
             return self.Jani_dict[(tuple(R), i, j)]
         else:
@@ -252,26 +273,27 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         param R (tuple of integers): cell index R
         """
         if iso_only:
-            Jtensor= np.eye(3)*self.get_J(i, j, R)
+            Jtensor = np.eye(3) * self.get_J(i, j, R)
         else:
-            Jtensor = combine_J_tensor(Jiso=self.get_J(i, j, R),
-                                   D=self.get_DMI(i, j, R),
-                                   Jani=self.get_Jani(i, j, R))
-        return(Jtensor)
+            Jtensor = combine_J_tensor(
+                Jiso=self.get_J(i, j, R),
+                D=self.get_DMI(i, j, R),
+                Jani=self.get_Jani(i, j, R),
+            )
+        return Jtensor
 
     def get_full_Jtensor_for_one_R(self, R):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
         returns:
-            Jmat: (3*nspin,3*nspin) matrix. 
+            Jmat: (3*nspin,3*nspin) matrix.
         """
         n3 = self.nspin * 3
         Jmat = np.zeros((n3, n3), dtype=float)
         for i in range(self.nspin):
             for j in range(self.nspin):
-                Jmat[i * 3:i * 3 + 3,
-                     j * 3:j * 3 + 3] = self.get_J_tensor(i, j, R)
+                Jmat[i * 3 : i * 3 + 3, j * 3 : j * 3 + 3] = self.get_J_tensor(i, j, R)
         return Jmat
 
     def get_full_Jtensor_for_Rlist(self, asr=False, iso_only=False):
@@ -282,47 +304,55 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat[iR] = self.get_full_Jtensor_for_one_R(R)
         if asr:
             iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
-            assert(np.linalg.norm(self.Rlist[iR0]) == 0)
+            assert np.linalg.norm(self.Rlist[iR0]) == 0
             for i in range(n3):
                 sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
                 Jmat[iR0][i, i] -= sum_JRi
         return Jmat
 
-    def write_pickle(self, path='TB2J_results', fname='TB2J.pickle'):
+    def write_pickle(self, path="TB2J_results", fname="TB2J.pickle"):
         if not os.path.exists(path):
             os.makedirs(path)
         fname = os.path.join(path, fname)
-        with open(fname, 'wb') as myfile:
+        with open(fname, "wb") as myfile:
             try:
                 pickle.dump(self.__dict__, myfile)
             except Exception as ex:
                 print(f"Pickle not written due to {ex}")
 
     @classmethod
-    def load_pickle(cls, path='TB2J_results', fname='TB2J.pickle'):
+    def load_pickle(cls, path="TB2J_results", fname="TB2J.pickle"):
         fname = os.path.join(path, fname)
-        with open(fname, 'rb') as myfile:
+        with open(fname, "rb") as myfile:
             d = pickle.load(myfile)
-        obj = cls(atoms=d["atoms"], spinat=d["spinat"], charges=d["charges"], index_spin=d["index_spin"])
+        obj = cls(
+            atoms=d["atoms"],
+            spinat=d["spinat"],
+            charges=d["charges"],
+            index_spin=d["index_spin"],
+        )
         obj.__dict__.update(d)
         obj._build_Rlist()
         return obj
 
-    def write_all(self, path='TB2J_results'):
+    def write_all(self, path="TB2J_results"):
         self.write_pickle(path=path)
         self.write_txt(path=path)
         if self.Jiso_orb:
-            self.write_txt(path=path,
-                           fname='exchange_orb_decomposition.out',
-                           write_orb_decomposition=True)
-        self.write_multibinit(path=os.path.join(path, 'Multibinit'))
-        self.write_tom_format(path=os.path.join(path, 'TomASD'))
-        self.write_vampire(path=os.path.join(path, 'Vampire'))
-        self.plot_all(savefile=os.path.join(path, 'JvsR.pdf'))
-        #self.write_Jq(kmesh=[9, 9, 9], path=path)
+            self.write_txt(
+                path=path,
+                fname="exchange_orb_decomposition.out",
+                write_orb_decomposition=True,
+            )
+        self.write_multibinit(path=os.path.join(path, "Multibinit"))
+        self.write_tom_format(path=os.path.join(path, "TomASD"))
+        self.write_vampire(path=os.path.join(path, "Vampire"))
+        self.plot_all(savefile=os.path.join(path, "JvsR.pdf"))
+        # self.write_Jq(kmesh=[9, 9, 9], path=path)
 
     def write_txt(self, *args, **kwargs):
         from TB2J.io_exchange.io_txt import write_txt
+
         write_txt(self, *args, **kwargs)
 
     # def write_txt_with_orb(self, path):
@@ -332,26 +362,23 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
     def write_multibinit(self, path):
         from TB2J.io_exchange.io_multibinit import write_multibinit
+
         write_multibinit(self, path=path)
 
-    def write_Jq(self,
-                 kmesh,
-                 path,
-                 gamma=True,
-                 output_fname='EigenJq.txt',
-                 **kwargs):
+    def write_Jq(self, kmesh, path, gamma=True, output_fname="EigenJq.txt", **kwargs):
         from TB2J.spinham.spin_api import SpinModel
         from TB2J.io_exchange.io_txt import write_Jq_info
-        m = SpinModel(fname=os.path.join(path, 'Multibinit', 'exchange.xml'))
+
+        m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
         m.set_ham(**kwargs)
         kpts = monkhorst_pack(kmesh, gamma_center=gamma)
 
         evals, evecs = m.ham.solve_k(kpts, Jq=True)
-        with open(os.path.join(path, output_fname), 'w') as myfile:
+        with open(os.path.join(path, output_fname), "w") as myfile:
             myfile.write("=" * 60)
             myfile.write("\n")
             myfile.write("Generated by TB2J %s.\n" % (__version__))
-            myfile.write("=" * 60 + '\n')
+            myfile.write("=" * 60 + "\n")
             myfile.write(
                 "The spin ground state is estimated by calculating\n the eigenvalues and eigen vectors of J(q):\n"
             )
@@ -360,8 +387,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def plot_JvsR(
         self,
         ax=None,
-        color='blue',
-        marker='o',
+        color="blue",
+        marker="o",
         fname=None,
         show=False,
         **kwargs,
@@ -375,7 +402,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             ds.append(d)
             Js.append(val * 1e3)
         ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
-        ax.axhline(color='gray')
+        ax.axhline(color="gray")
         ax.set_xlabel("Distance ($\AA$)")
         ax.set_ylabel("J (meV)")
         if fname is not None:
@@ -394,20 +421,14 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             ds.append(d)
             Ds.append(val * 1e3)
         Ds = np.array(Ds)
-        ax.scatter(ds, Ds[:, 0], marker='s', color='r', label="Dx")
-        ax.scatter(ds,
-                   Ds[:, 1],
-                   marker='o',
-                   edgecolors='g',
-                   facecolors='none',
-                   label='Dy')
-        ax.scatter(ds,
-                   Ds[:, 2],
-                   marker='D',
-                   edgecolors='b',
-                   facecolors='none',
-                   label='Dz')
-        ax.axhline(color='gray')
+        ax.scatter(ds, Ds[:, 0], marker="s", color="r", label="Dx")
+        ax.scatter(
+            ds, Ds[:, 1], marker="o", edgecolors="g", facecolors="none", label="Dy"
+        )
+        ax.scatter(
+            ds, Ds[:, 2], marker="D", edgecolors="b", facecolors="none", label="Dz"
+        )
+        ax.axhline(color="gray")
         ax.legend(loc=1)
         ax.set_ylabel("D (meV)")
         ax.set_xlabel("Distance ($\AA$)")
@@ -425,20 +446,22 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for key, val in self.Jani_dict.items():
             d = self.distance_dict[key][1]
             ds.append(d)
-            #val = val - np.diag([np.trace(val) / 3] * 3)
+            # val = val - np.diag([np.trace(val) / 3] * 3)
             Jani.append(val * 1e3)
         Jani = np.array(Jani)
-        s = 'xyz'
+        s = "xyz"
         for i in range(3):
-            ax.scatter(ds, Jani[:, i, i], marker='s', label=f"J{s[i]}{s[i]}")
-        c = 'rgb'
+            ax.scatter(ds, Jani[:, i, i], marker="s", label=f"J{s[i]}{s[i]}")
+        c = "rgb"
         for ic, (i, j) in enumerate([(0, 1), (0, 2), (1, 2)]):
-            ax.scatter(ds,
-                       Jani[:, i, j],
-                       edgecolors=c[ic],
-                       facecolors='none',
-                       label=f"J{s[i]}{s[j]}")
-        ax.axhline(color='gray')
+            ax.scatter(
+                ds,
+                Jani[:, i, j],
+                edgecolors=c[ic],
+                facecolors="none",
+                label=f"J{s[i]}{s[j]}",
+            )
+        ax.axhline(color="gray")
         ax.legend(loc=1, ncol=2)
         ax.set_xlabel("Distance ($\AA$)")
         ax.set_ylabel("Jani (meV)")
@@ -453,10 +476,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             naxis = 3
         else:
             naxis = 1
-        fig, axes = plt.subplots(naxis,
-                                 1,
-                                 sharex=True,
-                                 figsize=(5, 2.2 * naxis))
+        fig, axes = plt.subplots(naxis, 1, sharex=True, figsize=(5, 2.2 * naxis))
 
         if self.has_dmi and self.has_bilinear:
             self.plot_JvsR(axes[0])
@@ -479,14 +499,17 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
     def write_tom_format(self, path):
         from TB2J.io_exchange.io_tomsasd import write_tom_format
+
         write_tom_format(self, path=path)
 
     def write_vampire(self, path):
         from TB2J.io_exchange.io_vampire import write_vampire
+
         write_vampire(self, path=path)
 
     def write_uppasd(self, path):
         from TB2J.io_exchange.io_uppasd import write_uppasd
+
         write_uppasd(self, path=path)
 
 
@@ -497,8 +520,7 @@ def gen_distance_dict(ind_mag_atoms, atoms, Rlist):
         for jspin, jatom in enumerate(ind_matoms):
             for R in Rlist:
                 pos_i = atoms.get_positions()[iatom]
-                pos_jR = atoms.get_positions()[jatom] + np.dot(
-                    R, atoms.get_cell())
+                pos_jR = atoms.get_positions()[jatom] + np.dot(R, atoms.get_cell())
                 vec = pos_jR - pos_i
                 distance = np.sqrt(np.sum(vec**2))
                 distance_dict[(tuple(R), ispin, jspin)] = (vec, distance)
@@ -508,10 +530,18 @@ def gen_distance_dict(ind_mag_atoms, atoms, Rlist):
 def test_spin_io():
     from ase import Atoms
     import numpy as np
-    atoms = Atoms('SrMnO3',
-                  cell=np.eye(3) * 3.8,
-                  scaled_positions=[[0, 0, 0], [0.5, 0.5, 0.5], [0, .5, .5],
-                                    [.5, 0, .5], [.5, .5, 0]])
+
+    atoms = Atoms(
+        "SrMnO3",
+        cell=np.eye(3) * 3.8,
+        scaled_positions=[
+            [0, 0, 0],
+            [0.5, 0.5, 0.5],
+            [0, 0.5, 0.5],
+            [0.5, 0, 0.5],
+            [0.5, 0.5, 0],
+        ],
+    )
     spinat = [[0, 0, x] for x in [0, 3, 0, 0, 0]]
     charges = [2, 4, 5, 5, 5]
     index_spin = [-1, 0, -1, -1, -1]
@@ -524,16 +554,18 @@ def test_spin_io():
     R1 = (0, 0, 1)
     exchange_Jdict = {(R0, 0, 0): 1.2, (R1, 0, 0): 1.1}
 
-    sio = SpinIO(atoms,
-                 spinat,
-                 charges,
-                 index_spin,
-                 colinear=True,
-                 distance_dict=distance_dict,
-                 exchange_Jdict=exchange_Jdict)
+    sio = SpinIO(
+        atoms,
+        spinat,
+        charges,
+        index_spin,
+        colinear=True,
+        distance_dict=distance_dict,
+        exchange_Jdict=exchange_Jdict,
+    )
 
     sio.write_all()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_spin_io()
