@@ -132,10 +132,7 @@ class TBGreen:
         self.nkpts = nkpts
         self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-        if saveH:
-            self.H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-        else:
-            self.H = None
+        self.H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
         if not self.is_orthogonal:
             self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
         else:
@@ -151,12 +148,13 @@ class TBGreen:
 
         for ik, result in enumerate(results):
             if self.is_orthogonal:
-                H[ik], _, self.evals[ik], self.evecs[ik] = result
+                self.H[ik], _, self.evals[ik], self.evecs[ik] = result
             else:
-                H[ik], self.S[ik], self.evals[ik], self.evecs[ik] = result
-            if saveH:
-                self.H[ik] = H[ik]
-            self.H0 += H[ik] / self.nkpts
+                self.H[ik], self.S[ik], self.evals[ik], self.evecs[ik] = result
+            self.H0 += self.H[ik] / self.nkpts
+
+        if not saveH:
+            self.H = None
 
         self.evals, self.evecs = self._reduce_eigens(
             self.evals, self.evecs, emin=self.efermi - 10.0, emax=self.efermi + 10.1
