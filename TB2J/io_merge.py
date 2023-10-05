@@ -49,11 +49,12 @@ def recover_Jani_fom_rotated_structure(Janidict, rotation):
     """
     R = rotation.as_matrix()
     RT = R.T
-    for key, val in Janidict.items():
-        if np.any(val > 1e-5):
-            # print(f"{R=}, {val=}, {RT=}")
-            pass
-        Janidict[key] = RT @ val @ R
+    for key, Jani in Janidict.items():
+        # Note: E=Si J Sj , Si'= Si RT, Sj' = R Sj,
+        #       Si' J' Sj' = Si RT R J RT R Sj => J' = R J RT
+        #       But here we are doing the opposite rotation back to
+        #       the original axis, so we replace R with RT.
+        Janidict[key] = RT @ Jani @ R
     return Janidict
 
 
