@@ -323,22 +323,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         write_multibinit(self, path=path)
 
-    def solve_Jq(self, path, kmesh=[9, 9, 9], gamma=True, Jq=False, **kwargs):
-        """
-        Solve J(q) for a given k-mesh.
-        :param path: path to the exchange.xml file.
-        :param kmesh: k-mesh
-        :param gamma: whether the gamma point is included.
-        :param Jq: whether to calculate J(q)
-        :param kwargs: keyword arguments to set the model hamiltonian.
-        :return: evals, evecs
-        """
-        m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
-        m.set_ham(**kwargs)
-        kpts = monkhorst_pack(kmesh, gamma_center=gamma)
-        evals, evecs = m.ham.solve_k(kpts, Jq=Jq)
-        return evals, evecs
-
     def write_Jq(self, kmesh, path, gamma=True, output_fname="EigenJq.txt", **kwargs):
         m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
         m.set_ham(**kwargs)
@@ -354,6 +338,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 "The spin ground state is estimated by calculating\n the eigenvalues and eigen vectors of J(q):\n"
             )
             write_Jq_info(self, kpts, evals, evecs, myfile, special_kpoints={})
+
+    def model(self, path):
+        m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
+        return m
 
     def plot_JvsR(
         self,
