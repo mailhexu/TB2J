@@ -86,7 +86,7 @@ For example, with the following command, we get the DOS for bcc Fe.
 
 ::
 
-    TB2J_magnon_dos.py --show -s 5 -k 10 10 10 -f magnon_dos.png --show
+    TB2J_magnon_dos.py --show -s 10 -k 25 25 25 -f magnon_dos.png --show
 
 
 .. figure:: magnon_band.assets/magnon_dos.png
@@ -94,3 +94,4 @@ For example, with the following command, we get the DOS for bcc Fe.
 
    magnon_dos
 
+The energies and the DOS are also saved to a txt file. 
