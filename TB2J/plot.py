@@ -83,7 +83,11 @@ def command_line_plot_magnon_dos():
     parser = argparse.ArgumentParser(description="Plot magnon DOS")
     # parser.add_argument("fname", type=str, help="exchange.xml")
     parser.add_argument(
-        "-p", "--path", type=str, default="./", help="path to exchange.xml"
+        "-p",
+        "--path",
+        type=str,
+        default="./",
+        help="path to exchange.xml, often the TB2J_results directory, or the Multibinit directory inside it.",
     )
     parser.add_argument(
         "-n", "--npoints", type=int, default=301, help="number of points in the energy"
@@ -109,23 +113,31 @@ def command_line_plot_magnon_dos():
     )
 
     parser.add_argument(
-        "-g", "--gamma", action="store_true", help="gamma centered k mesh"
+        "-g", "--gamma", action="store_true", help="Use gamma centered k mesh."
     )
-    parser.add_argument("-Jq", action="store_true", help="use Jq")
-    parser.add_argument("--show", action="store_true", help="show the figure")
+    parser.add_argument(
+        "-Jq",
+        action="store_true",
+        help="Plot the eigenvalues of J(q) instead of the magnon frequency.",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="show the figure. By default it is not shown on the screen.",
+    )
     parser.add_argument(
         "-f",
         "--fig_filename",
         type=str,
         default="magnon_dos.pdf",
-        help="output filename for figure.",
+        help="output filename for figure. Default: magnon_dos.pdf",
     )
     parser.add_argument(
         "-t",
         "--txt_filename",
         type=str,
         default="magnon_dos.txt",
-        help="output filename of the data for the magnon DOS.",
+        help="output filename of the data for the magnon DOS. Default: magnond_dos.txt",
     )
     args = parser.parse_args()
     plot_magnon_dos(

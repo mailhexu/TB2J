@@ -80,7 +80,7 @@ From version v0.7.7, there is a script to plot the magnon density of states.
       -f FIG_FILENAME, --fig_filename FIG_FILENAME
                             output filename for figure.
       -t TXT_FILENAME, --txt_filename TXT_FILENAME
-                            output filename of the data for the magnon DOS
+                            output filename of the data for the magnon DOS. Default: magnon_dos.txt
     
 For example, with the following command, we get the DOS for bcc Fe. 
 
@@ -94,4 +94,5 @@ For example, with the following command, we get the DOS for bcc Fe.
 
    magnon_dos
 
-The energies and the DOS are also saved to a txt file. 
+The energies and the DOS are also saved to a txt file specified. The two columns of the file are the energies, and 
+the DOS, respectively. It can be used for plotting the DOS if you want to plot in your own style. 
