@@ -20,6 +20,7 @@ setup(
         "scripts/TB2J_rotate.py",
         "scripts/TB2J_merge.py",
         "scripts/TB2J_magnon.py",
+        "scripts/TB2J_magnon_dos.py",
         "scripts/TB2J_downfold.py",
         "scripts/TB2J_eigen.py",
     ],

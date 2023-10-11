@@ -17,6 +17,8 @@ from TB2J import __version__
 from TB2J.Jtensor import combine_J_tensor
 from datetime import datetime
 import matplotlib.pyplot as plt
+from TB2J.spinham.spin_api import SpinModel
+from TB2J.io_exchange.io_txt import write_Jq_info
 
 
 class SpinIO(object):
@@ -366,9 +368,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         write_multibinit(self, path=path)
 
     def write_Jq(self, kmesh, path, gamma=True, output_fname="EigenJq.txt", **kwargs):
-        from TB2J.spinham.spin_api import SpinModel
-        from TB2J.io_exchange.io_txt import write_Jq_info
-
         m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
         m.set_ham(**kwargs)
         kpts = monkhorst_pack(kmesh, gamma_center=gamma)
@@ -383,6 +382,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 "The spin ground state is estimated by calculating\n the eigenvalues and eigen vectors of J(q):\n"
             )
             write_Jq_info(self, kpts, evals, evecs, myfile, special_kpoints={})
+
+    def model(self, path):
+        m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
+        return m
 
     def plot_JvsR(
         self,

@@ -31,6 +31,7 @@ def main():
 
     args = parser.parse_args()
     # merge(*(args.directories), args.type.strip().lower(), path=args.output_path)
+    # merge(*(args.directories), method=args.type.strip().lower(), path=args.output_path)
     merge2(args.directories, args.type.strip().lower(), path=args.output_path)
 
 
