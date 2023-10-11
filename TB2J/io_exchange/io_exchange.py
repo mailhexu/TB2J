@@ -217,7 +217,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def get_charge_iatom(self, iatom):
         return self.charges[iatom]
 
-    def get_J(self, i, j, R):
+    def get_J(self, i, j, R, default=None):
         key = (
             tuple(R),
             i,
@@ -226,9 +226,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         if self.exchange_Jdict is not None and key in self.exchange_Jdict:
             return self.exchange_Jdict[key]
         else:
-            return None
+            return default
 
-    def get_Jiso(self, i, j, R):
+    def get_Jiso(self, i, j, R, default=None):
         key = (
             tuple(R),
             i,
@@ -237,9 +237,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         if self.exchange_Jdict is not None and key in self.exchange_Jdict:
             return self.exchange_Jdict[key]
         else:
-            return None
+            return default
 
-    def get_DMI(self, i, j, R):
+    def get_DMI(self, i, j, R, default=None):
         key = (
             tuple(R),
             i,
@@ -248,9 +248,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         if self.dmi_ddict is not None and key in self.dmi_ddict:
             return self.dmi_ddict[(tuple(R), i, j)]
         else:
-            return None
+            return default
 
-    def get_Jani(self, i, j, R):
+    def get_Jani(self, i, j, R, default=None):
         """
         Return the anisotropic exchange tensor for atom i and j, and cell R.
         param i : spin index i
@@ -265,7 +265,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         if self.Jani_dict is not None and key in self.Jani_dict:
             return self.Jani_dict[(tuple(R), i, j)]
         else:
-            return None
+            return default
 
     def get_J_tensor(self, i, j, R, iso_only=False):
         """

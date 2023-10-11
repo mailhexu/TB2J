@@ -81,8 +81,16 @@ def remove_components(J, vec1, vec2, remove_indices=[[2, 2]]):
         w_rotated[i, j] = 0
         J_rotated[i, j] = 0
     Jback = rotate_back(rot1, rot2, J_rotated)
-    weigth_back = rotate_back(rot1, rot2, w_rotated)
-    return Jback, weigth_back
+    weight_back = rotate_back(rot1, rot2, w_rotated)
+    # if np.linalg.norm(J)>1e-4:
+    #    print(f"{vec1=}, {vec2=}")
+    #    print(f"{J=}")
+    #    print(f"{J_rotated=}")
+    #    print(f"{Jback=}")
+    #    print(f"{w_rotated=}")
+    #    print(f"{weight_back=}")
+
+    return Jback, weight_back
 
 
 def remove_zz_component(J, vec1, vec2):

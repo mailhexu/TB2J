@@ -183,9 +183,9 @@ class Merger2:
         self.indata = [read_pickle(path) for path in paths]
 
         self.dat = copy.deepcopy(self.indata[-1])
-        self.dat.description += (
-            "Merged from TB2J results in paths: \n  " + "\n  ".join(paths) + "\n"
-        )
+        # self.dat.description += (
+        #    "Merged from TB2J results in paths: \n  " + "\n  ".join(paths) + "\n"
+        # )
         Rotations = [Rzx, Rzy, Rzz]
         for dat, rotation in zip(self.indata, Rotations):
             dat.spinat = recover_spinat_from_rotated_structure(dat.spinat, rotation)
@@ -201,9 +201,9 @@ class Merger2:
         self.paths = paths
         self.indata = [read_pickle(path) for path in paths]
         self.dat = copy.deepcopy(self.indata[-1])
-        self.dat.description += (
-            "Merged from TB2J results in paths: \n  " + "\n  ".join(paths) + "\n"
-        )
+        # self.dat.description += (
+        #    "Merged from TB2J results in paths: \n  " + "\n  ".join(paths) + "\n"
+        # )
 
     def merge_Jani(self):
         """
@@ -217,10 +217,8 @@ class Merger2:
             for dat in self.indata:
                 Si = dat.get_spin_ispin(i)
                 Sj = dat.get_spin_ispin(j)
-                try:
-                    Jani = dat.get_Jani(i, j, R)
-                except KeyError:
-                    Jani = np.zeros((3, 3))
+                # print(f"{Si=}, {Sj=}")
+                Jani = dat.get_Jani(i, j, R, default=np.zeros((3, 3), dtype=float))
                 Jani_removed, w = remove_components(
                     Jani,
                     Si,
@@ -233,7 +231,6 @@ class Merger2:
                 raise RuntimeError(
                     "The data set to be merged does not give a complete anisotropic J tensor, please add more data"
                 )
-            print(f"{weights=}")
             Jani_dict[key] = Jani_sum / weights
         self.dat.Jani_dict = Jani_dict
 
@@ -249,10 +246,7 @@ class Merger2:
             for dat in self.indata:
                 Si = dat.get_spin_ispin(i)
                 Sj = dat.get_spin_ispin(j)
-                try:
-                    D = dat.get_DMI(i, j, R)
-                except KeyError:
-                    D = np.zeros((3,))
+                D = dat.get_DMI(i, j, R, default=np.zeros((3,), dtype=float))
                 Dtensor = DMI_to_Jtensor(D)
                 Dtensor_removed, w = remove_components(
                     Dtensor, Si, Sj, remove_indices=[[0, 1], [1, 0]]
@@ -278,10 +272,7 @@ class Merger2:
             for dat in self.indata:
                 Si = dat.get_spin_ispin(i)
                 Sj = dat.get_spin_ispin(j)
-                try:
-                    J = dat.get_Jiso(i, j, R)
-                except KeyError:
-                    J = 0.0
+                J = dat.get_Jiso(i, j, R, default=0.0)
                 Jiso_sum += J  # *np.eye(3, dtype=float)
                 weights += 1.0
             if np.any(weights == 0):
