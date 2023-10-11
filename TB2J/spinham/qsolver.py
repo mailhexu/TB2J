@@ -140,15 +140,17 @@ class QSolverASEWrapper(QSolver):
         if ax is None:
             _fig, ax = plt.subplots()
         energies, tdos = self.get_dos(width=smearing_width, window=window, npts=npts)
+        energies = energies * 1000
+        tdos = tdos / 1000
         if dos_filename is not None:
             np.savetxt(
                 dos_filename,
                 np.array([energies, tdos]).T,
-                header="#Energy(eV) DOS(state/eV)",
+                header="Energy(meV) DOS(state/meV)",
             )
         ax.plot(energies, tdos)
-        ax.set_xlabel("Energy (eV)")
-        ax.set_ylabel("DOS (states/eV)")
+        ax.set_xlabel("Energy (meV)")
+        ax.set_ylabel("DOS (states/meV)")
         ax.set_title("Total DOS")
         if output is not None:
             plt.savefig(output)

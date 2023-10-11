@@ -59,7 +59,10 @@ def plot_magnon_dos(
     ax=None,
     **kwargs
 ):
-    model = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
+    ffname = os.path.join(path, "exchange.xml")
+    if not (os.path.exists(ffname) and os.path.isfile(ffname)):
+        ffname = os.path.join(path, "Multibinit", "exchange.xml")
+    model = SpinModel(ffname)
     solver = QSolverASEWrapper(model.ham)
     solver.set(kmesh=kmesh, gamma=gamma, Jq=Jq)
     solver.plot_dos(
@@ -101,8 +104,8 @@ def command_line_plot_magnon_dos():
         "-s",
         "--smearing_width",
         type=float,
-        default=0.01,
-        help="Gauss smearing width in eV.",
+        default=10,
+        help="Gauss smearing width in meV.",
     )
 
     parser.add_argument(
@@ -131,7 +134,7 @@ def command_line_plot_magnon_dos():
         npoints=args.npoints,
         kmesh=args.kmesh,
         gamma=args.gamma,
-        smearing_width=args.smearing_width,
+        smearing_width=args.smearing_width / 1000,
         Jq=args.Jq,
         figfname=args.fig_filename,
         txt_filename=args.txt_filename,

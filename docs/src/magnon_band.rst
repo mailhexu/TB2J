@@ -52,3 +52,45 @@ parameter, the band structure is shown on screen.
 From version v0.7.5, the infomation for plotting the band structure is written into a json file(magnon_band.json), together with the 
 script for parsing the file and plot the band structure (plot_magnon_from_json_file.py). 
 
+
+From version v0.7.7, there is a script to plot the magnon density of states.
+
+::
+    
+    TB2J_magnon_dos.py --help
+    usage: TB2J_magnon_dos.py [-h] [-p PATH] [-n NPOINTS] [-w WINDOW WINDOW] [-k KMESH KMESH KMESH]
+                              [-s SMEARING_WIDTH] [-g] [-Jq] [--show] [-f FIG_FILENAME] [-t TXT_FILENAME]
+    
+    Plot magnon DOS
+    
+    options:
+      -h, --help            show this help message and exit
+      -p PATH, --path PATH  path to exchange.xml
+      -n NPOINTS, --npoints NPOINTS
+                            number of points in the energy
+      -w WINDOW WINDOW, --window WINDOW WINDOW
+                            energy window for the dos, two numbers giving the lower and upper bound
+      -k KMESH KMESH KMESH, --kmesh KMESH KMESH KMESH
+                            k mesh
+      -s SMEARING_WIDTH, --smearing_width SMEARING_WIDTH
+                            Gauss smearing width in meV. Default is 10 meV.
+      -g, --gamma           gamma centered k mesh
+      -Jq                   use Jq
+      --show                show the figure
+      -f FIG_FILENAME, --fig_filename FIG_FILENAME
+                            output filename for figure.
+      -t TXT_FILENAME, --txt_filename TXT_FILENAME
+                            output filename of the data for the magnon DOS
+    
+For example, with the following command, we get the DOS for bcc Fe. 
+
+::
+
+    TB2J_magnon_dos.py --show -s 5 -k 10 10 10 -f magnon_dos.png --show
+
+
+.. figure:: magnon_band.assets/magnon_dos.png
+   :alt: magnon_dos
+
+   magnon_dos
+
