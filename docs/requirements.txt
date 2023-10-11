@@ -1,0 +1,5 @@
+recommonmark
+sphinx_rtd_theme
+sphinx.ext.mathjax
+sphinx.ext.autodoc
+
