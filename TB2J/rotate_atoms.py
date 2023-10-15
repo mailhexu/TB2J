@@ -2,7 +2,7 @@
 import copy
 from ase.io import read, write
 import numpy as np
-from TB2J.io_merge import Rzx, Rzy, Rzz
+from TB2J.io_merge import Rxx, Rxy, Rxz, Ryx, Ryy, Ryz, Rzx, Rzy, Rzz
 
 
 def rotate_atom_xyz(atoms):

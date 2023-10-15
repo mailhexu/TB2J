@@ -5,19 +5,7 @@ from scipy.spatial.transform import Rotation
 from TB2J.io_exchange import SpinIO
 from TB2J.tensor_rotate import remove_components
 from TB2J.Jtensor import DMI_to_Jtensor, Jtensor_to_DMI
-
-
-# Rotation from x to z
-Rxz = Rotation.from_euler("y", -90, degrees=True)
-# rotation from y to z
-Ryz = Rotation.from_euler("x", 90, degrees=True)
-
-# Inverse of the Rotation from x to z
-Rzx = Rotation.from_euler("y", 90, degrees=True)
-# Inverse of the Rotation from y to z
-Rzy = Rotation.from_euler("x", -90, degrees=True)
-
-Rzz = Rotation.from_euler("z", 0, degrees=True)
+from TB2J.tensor_rotate import Rzx, Rzy, Rzz, Ryz, Rxz
 
 
 def test_rotation_matrix():

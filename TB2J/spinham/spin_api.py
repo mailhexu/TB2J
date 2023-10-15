@@ -1,9 +1,10 @@
 import numpy as np
 from .hamiltonian import SpinHamiltonian, read_spin_ham_from_file
-#from minimulti.spin.mover import SpinMover
+
+# from minimulti.spin.mover import SpinMover
 
 
-class SpinModel():
+class SpinModel:
     def __init__(self, fname=None, sc_matrix=None):
         if fname is not None:
             self.read_from_file(fname)
@@ -13,7 +14,7 @@ class SpinModel():
         if sc_matrix is not None:
             self.make_supercell(sc_matrix)
 
-        #self.mover = SpinMover(self._ham)
+        # self.mover = SpinMover(self._ham)
 
     @property
     def ham(self):
@@ -26,8 +27,8 @@ class SpinModel():
     def ham(self, ham):
         self._ham = ham
 
-    #@property
-    #def S(self):
+    # @property
+    # def S(self):
     #    return self.mover.s
 
     @property
@@ -50,8 +51,9 @@ class SpinModel():
 
     def make_supercell(self, sc_matrix=None, supercell_maker=None):
         self._ham = self._ham.make_supercell(
-            sc_matrix=sc_matrix, supercell_maker=supercell_maker)
-        #self.mover = SpinMover(self._ham)
+            sc_matrix=sc_matrix, supercell_maker=supercell_maker
+        )
+        # self.mover = SpinMover(self._ham)
         return self
 
     # def run_one_step(self):
@@ -61,16 +63,17 @@ class SpinModel():
     #     self.mover.run()
 
     def plot_magnon_band(
-            self,
-            kvectors=np.array([[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0],
-                               [0, 0, 0], [.5, .5, .5]]),
-            knames=['$\Gamma$', 'X', 'M', '$\Gamma$', 'R'],
-            supercell_matrix=None,
-            npoints=100,
-            color='red',
-            ax=None,
-            kpath_fname=None,
-            Jq=False,
+        self,
+        kvectors=np.array(
+            [[0, 0, 0], [0.5, 0, 0], [0.5, 0.5, 0], [0, 0, 0], [0.5, 0.5, 0.5]]
+        ),
+        knames=["$\Gamma$", "X", "M", "$\Gamma$", "R"],
+        supercell_matrix=None,
+        npoints=100,
+        color="red",
+        ax=None,
+        kpath_fname=None,
+        Jq=False,
     ):
         self._ham.plot_magnon_band(
             kvectors=kvectors,
@@ -80,4 +83,5 @@ class SpinModel():
             color=color,
             ax=ax,
             Jq=Jq,
-            kpath_fname=kpath_fname)
+            kpath_fname=kpath_fname,
+        )

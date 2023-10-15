@@ -4,6 +4,22 @@ from scipy.spatial.transform import Rotation
 from numpy.linalg import norm, det
 
 
+# Rotation from a to b
+Rxx = Rotation.from_euler("x", 0, degrees=True)
+Rxy = Rotation.from_euler("z", 90, degrees=True)
+Rxz = Rotation.from_euler("y", -90, degrees=True)
+# rotation from y to z
+Ryx = Rotation.from_euler("z", -90, degrees=True)
+Ryy = Rotation.from_euler("x", 0, degrees=True)
+Ryz = Rotation.from_euler("x", 90, degrees=True)
+
+# Inverse of the Rotation from x to z
+Rzx = Rotation.from_euler("y", 90, degrees=True)
+# Inverse of the Rotation from y to z
+Rzy = Rotation.from_euler("x", -90, degrees=True)
+Rzz = Rotation.from_euler("z", 0, degrees=True)
+
+
 def normalize(vec):
     """
     Normalize vector
@@ -82,15 +98,93 @@ def remove_components(J, vec1, vec2, remove_indices=[[2, 2]]):
         J_rotated[i, j] = 0
     Jback = rotate_back(rot1, rot2, J_rotated)
     weight_back = rotate_back(rot1, rot2, w_rotated)
-    if np.linalg.norm(J) > 1e-4:
-        print(f"{vec1=}, {vec2=}")
-        print(f"{J=}")
-        print(f"{J_rotated=}")
-        print(f"{Jback=}")
-        print(f"{w_rotated=}")
-        print(f"{weight_back=}")
-
+    # if np.linalg.norm(J)>1e-4:
+    #    print(f"{vec1=}, {vec2=}")
+    #    print(f"{J=}")
+    #    print(f"{J_rotated=}")
+    #    print(f"{Jback=}")
+    #    print(f"{w_rotated=}")
+    #    print(f"{weight_back=}")
     return Jback, weight_back
+
+
+def get_weight_back(vec1, vec2):
+    z = np.array([0, 0, 1])
+    rot1 = find_rotation_matrix_to_vec2(vec1, z)
+    rot2 = find_rotation_matrix_to_vec2(vec2, z)
+    w = np.ones((3, 3))
+    # w=np.eye(3)
+    w_rotated = rot1 @ w @ rot2.T
+    w_rotated[:, 2] = 0
+    w_rotated[2, :] = 0
+    w_rotated[2, 2] = 0
+    return rot1.T @ w_rotated @ rot2
+
+
+def test_weight_back():
+    vec1 = [0.0, 0.0, 0.1]
+    vec2 = [0.0, 0.0, 0.1]
+    vec1 = normalize(vec1)
+    vec2 = normalize(vec2)
+    w = 0
+    # Rotations=[Rxx, Rxy, Rxz, Ryx, Ryy, Ryz, Rzx, Rzy, Rzz]
+    # wR=[0, 1, 1, 0, 0, 1, 0, 0, 0]
+    # Rotations=[ Rxy, Rxz, Ryx,  Ryz, Rzx, Rzy]
+    Rotations = [Rxy, Ryz, Rzx]
+    # Rotations=[ Ryx, Rzy, Rxz]
+    wR = [1] * len(Rotations)
+    # Rotations=[Rxy, Ryz, Rzx]
+    for wR, R in zip(wR, Rotations):
+        v1 = R.apply(vec1)
+        v2 = R.apply(vec2)
+        wi = get_weight_back(v1, v2)
+        print(wi * wR)
+        w += wi * wR
+    print((w + w.T) / 2)
+
+
+# test_weight_back()
+
+
+def test_remove_component():
+    # vec1=[0.3, 0.4, 0.5]
+    # vec2=[0.3, 0.4, -0.5]
+    vec1 = [0.0, 0.1, 0]
+    vec2 = [0.0, 0.1, 0]
+    z = np.array([0, 0, 1])
+    J = [[0.0, 0.1, 0.2], [0.1, 0.0, 0.3], [0.2, 0.3, 0.0]]
+    J = [[0.0, 0.1, 0.2], [-0.1, 0.0, 0.3], [-0.2, -0.3, 0.0]]
+    print(f"{J=}")
+    w = np.ones_like(J)
+    # w = np.eye(3)
+    rot1, rot2, J_rotated = rotate_tensor(vec1, J, vec2)
+    J_rotated = rot1 @ J @ rot2.T
+    w_rotated = rot1 @ w @ rot2.T
+    m = np.zeros((3, 3))
+    m[0, 0] = 1
+    m[0, 1] = 1
+    # w_rotated = np.ones_like(J)
+    print(f"{w_rotated=}")
+    print(f"{J_rotated=}")
+    print(f"{J*w_rotated=}")
+    m = np.linalg.inv(J_rotated)
+    remove = False
+    if remove:
+        w_rotated[:, 2] = 0
+        w_rotated[2, :] = 0
+        J_rotated[2, :] = 0
+        J_rotated[:, 2] = 0
+    m = m @ J_rotated
+    Jback = rotate_back(rot1, rot2, J_rotated)
+    # weight_back = rotate_back(rot1, rot2, w_rotated)
+    weight_back = rot2 @ m @ rot2.T
+    print(f"{weight_back=}")
+    print(f"{Jback=}")
+    print(f"{J@weight_back=}")
+    print(f"{np.sum(weight_back)=}")
+
+
+# test_remove_component()
 
 
 def remove_zz_component(J, vec1, vec2):
@@ -182,5 +276,6 @@ def test_rotate_isotropic_tensor():
 if __name__ == "__main__":
     # test_rotate_tensor()
     # test_find_rotation_matrix_to_z()
-    test_remove_zz_component()
+    # test_remove_zz_component()
     # test_rotate_isotropic_tensor()
+    pass

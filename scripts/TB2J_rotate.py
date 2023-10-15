@@ -5,13 +5,15 @@ from TB2J.rotate_atoms import rotate_atom_xyz, rotate_xyz, check_ftype
 
 def main():
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument('fname',
-                        help="name of the file containing the atomic structure",
-                        type=str)
-    parser.add_argument('--ftype',
-                        help="type of the output files, e.g.  xyz. Please use the format which contains the full cell matrix. (e.g. .cif file should not be used) ",
-                        default='xyz',
-                        type=str)
+    parser.add_argument(
+        "fname", help="name of the file containing the atomic structure", type=str
+    )
+    parser.add_argument(
+        "--ftype",
+        help="type of the output files, e.g.  xyz. Please use the format which contains the full cell matrix. (e.g. .cif file should not be used) ",
+        default="xyz",
+        type=str,
+    )
 
     args = parser.parse_args()
     rotate_xyz(args.fname, ftype=args.ftype)

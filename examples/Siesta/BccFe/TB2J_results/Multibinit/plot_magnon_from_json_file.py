@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 
+
 def load_magnon_json(filename):
     """
     Load the magnon band structure from the json file.
@@ -22,7 +23,7 @@ def load_magnon_json(filename):
         allevals: eigenvalues, in meV
             Note that the eigenvalues are splitted into groups of kpoints.
             the first index is the index of the group of kpoints
-            the second index is the index of the kpoint in the group 
+            the second index is the index of the kpoint in the group
             the third index is the index of the band
     """
     with open(filename) as f:
@@ -34,6 +35,7 @@ def load_magnon_json(filename):
     allevals = np.array(data["evals"])
     return kptlist, xlist, knames, Xs, allevals
 
+
 def plot_magnon_json(filename, ax, color="k", show=True):
     """
     Plot the magnon band structure from the json file.
@@ -42,14 +44,14 @@ def plot_magnon_json(filename, ax, color="k", show=True):
         ax: the matplotlib ax to plot the band structure.
             If None, a new figure will be created.
         color: the color of the band structure.
-        show: whether to show the plot. 
+        show: whether to show the plot.
     """
     if ax is None:
         fig, ax = plt.subplots()
 
     kptlist, xlist, knames, Xs, allevals = load_magnon_json(filename)
     for i, (kpts, xs) in enumerate(zip(kptlist, xlist)):
-        evals=allevals[i]
+        evals = allevals[i]
         # Plot band structure
         nbands = evals.shape[1]
         emin = np.min(evals[:, 0])
@@ -69,4 +71,3 @@ def plot_magnon_json(filename, ax, color="k", show=True):
 
 if __name__ == "__main__":
     plot_magnon_json("magnon_band.json", ax=None, color="k", show=True)
-

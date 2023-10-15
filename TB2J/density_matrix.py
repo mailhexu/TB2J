@@ -6,6 +6,7 @@ import pickle
 import numpy as np
 from dataclasses import dataclass
 
+
 @dataclass
 class DensityMatrix:
     """
@@ -13,6 +14,7 @@ class DensityMatrix:
     rhoR: density matrix, np.ndarray of shape (nR, N, N), or None
     Rmap: dict of R vectors, or None
     """
+
     Rlist: np.ndarray
     rhoR: np.ndarray
     Rmap: dict
@@ -26,7 +28,7 @@ class DensityMatrix:
         self.Rmap = {}
         for R in self.Rlist:
             self.Rmap[tuple(R)] = len(self.Rmap)
-    
+
     def print_dm_at_R(self, R):
         """
         print the real part with 5 decimals of the density matrix at R
@@ -47,7 +49,6 @@ class DensityMatrix:
 
     @classmethod
     def load_pickle(self, fname):
-        with open(fname, 'rb') as f:
-            d= pickle.load(f)
-        return DensityMatrix(**d) 
-
+        with open(fname, "rb") as f:
+            d = pickle.load(f)
+        return DensityMatrix(**d)

@@ -10,13 +10,18 @@ bohr_mag = 9.27400995e-24
 gyromagnetic_ratio = 1.76e11
 mu_B = bohr_mag
 
-#from scipy.constants import (Boltzmann, hbar, mu_0, epsilon_0,
+# from scipy.constants import (Boltzmann, hbar, mu_0, epsilon_0,
 
 Boltzmann, hbar, mu_0, epsilon_0, elementary_charge, pi = (
-    1.38064852e-23, 1.0545718001391127e-34, 1.2566370614359173e-06,
-    8.854187817620389e-12, 1.6021766208e-19, np.pi)
+    1.38064852e-23,
+    1.0545718001391127e-34,
+    1.2566370614359173e-06,
+    8.854187817620389e-12,
+    1.6021766208e-19,
+    np.pi,
+)
 
-kb=Boltzmann
+kb = Boltzmann
 
 eV = elementary_charge * 1
 meV = 0.001 * eV
