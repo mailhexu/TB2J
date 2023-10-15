@@ -225,8 +225,11 @@ class Merger2:
                     Sj,
                     remove_indices=[[0, 2], [1, 2], [2, 2], [2, 1], [2, 0]],
                 )
-                Jani_sum += Jani_removed
+                w = Jani_removed / Jani
+                Jani_sum += Jani * w  # Jani_removed
+                print(f"{Jani* w=}")
                 weights += w
+            print(f"{weights=}")
             if np.any(weights == 0):
                 raise RuntimeError(
                     "The data set to be merged does not give a complete anisotropic J tensor, please add more data"
@@ -251,7 +254,7 @@ class Merger2:
                 Dtensor_removed, w = remove_components(
                     Dtensor, Si, Sj, remove_indices=[[0, 1], [1, 0]]
                 )
-                Dtensor_sum += Dtensor_removed
+                Dtensor_sum += Dtensor * w  # Dtensor_removed
                 weights += w
             if np.any(weights == 0):
                 raise RuntimeError(
