@@ -448,6 +448,23 @@ class ExchangeNCL(Exchange):
         Gji = self.GR_atom(GRm, jatom, iatom)
         Gji_Ixyz = pauli_block_all(Gji)
 
+        Gij0 = (Gij + Gji) / 2  # density
+        Gij1 = (Gij - Gji) / 2  # current
+        Gij0_Ixyz = np.array(pauli_block_all(Gij0))
+        Gij1_Ixyz = np.array(pauli_block_all(Gij1))
+        Gji0_Ixyz = Gij0_Ixyz
+        Gji1_Ixyz = -Gij1_Ixyz
+
+        # Gji_Ixyz = pauli_block_all(Gji)
+
+        Bi = self.get_P_iatom(iatom)
+        Bj = self.get_P_iatom(jatom)
+
+        A00_ij = np.einsum("mn,ano,op,bpm-> ab", Bi, Gij0_Ixyz, Bj, Gji0_Ixyz)
+        A01_ij = np.einsum("mn,ano,op,bpm-> ab", Bi, Gij0_Ixyz, Bj, Gji1_Ixyz)
+        A10_ij = np.einsum("mn,ano,op,bpm-> ab", Bi, Gij1_Ixyz, Bj, Gji0_Ixyz)
+        A11_ij = np.einsum("mn,ano,op,bpm-> ab", Bi, Gij1_Ixyz, Bj, Gji1_Ixyz)
+
         ni = self.norb_reduced[iatom]
         nj = self.norb_reduced[jatom]
 
