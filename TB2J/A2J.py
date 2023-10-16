@@ -49,12 +49,3 @@ def A0A1_to_DMI2(A01, A10):
 def A0A1_to_Jani2(A00, A11):
     Jani = -4 * np.array(np.imag(A11[1:, 1:] + A00[1:, 1:]))
     return Jani
-
-
-def test():
-    A = np.ones((2, 2, 3), dtype=int)
-    print(A)
-    print(np.trace(A))
-
-
-test()
