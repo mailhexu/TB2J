@@ -1,3 +1,4 @@
+[![Python application](https://github.com/mailhexu/TB2J/actions/workflows/python-app.yml/badge.svg)](https://github.com/mailhexu/TB2J/actions/workflows/python-app.yml)
 [![Documentation Status](https://readthedocs.org/projects/tb2j/badge/?version=latest)](https://tb2j.readthedocs.io/en/latest/?badge=latest)
 [![Build Status](https://app.travis-ci.com/mailhexu/TB2J.svg?branch=master)](https://app.travis-ci.com/mailhexu/TB2J)
 [![Downloads](https://pepy.tech/badge/tb2j)](https://pepy.tech/project/tb2j)
