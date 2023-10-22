@@ -90,8 +90,8 @@ class ExchangeCLQspace(ExchangeCL2):
                     # Kq= Gk_up[ik] @ self.Delta @ Gk_dn[ikq]
                     # for ik, ikq in enumerate(range(self.nkpts)):
                     Guk = Gk_up[ik, :, :]
-                    # Gdk = Gk_dn[ik, :, :]
-                    # Gukq = Gk_up[ikq, :, :]
+                    Gdk = Gk_dn[ik, :, :]
+                    Gukq = Gk_up[ikq, :, :]
                     Gdkq = Gk_dn[ikq, :, :]
                     for i, iatom in enumerate(self.ind_mag_atoms):
                         Deltai = self.get_Delta(iatom)

@@ -61,7 +61,7 @@ class GPAWWrapper:
     #    return eigh(self.hamk(k), self.S(k))
 
     def get_kpts(self):
-        return calc.get_ibz_k_points()
+        return self.calc.get_ibz_k_points()
 
     def HS_and_eigen(self, kpts=None, convention=2):
         if kpts is not None:
@@ -135,7 +135,7 @@ class GPAWTBWrapper:
             self.H_NMM, self.S_NMM = tb.h_and_s()
             self.Rlist = tb.R_cN.T
         else:
-            with open(fname, "rb") as myfile:
+            with open(gpw_fname, "rb") as myfile:
                 self.H_NMM, self.S_NMM, self.Rlist = pickle.load(myfile)
         self.nR, self.nbasis, _ = self.H_NMM.shape
         self.positions = np.zeros((self.nbasis, 3))

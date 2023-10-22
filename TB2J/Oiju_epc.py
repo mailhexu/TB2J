@@ -57,12 +57,20 @@ class OijuWannEPC(ExchangeCL2):
         # prepare dDelta
         self.calc_dDelta()
 
+        self._kmap = None
+
     def prepare_epc_wann(self):
         """
         prepare EPC in electron wannier function representation
         """
         self.EPCmat_wann_up = self.EPCmat_up.to_wann(self.Umat_up)
         self.EPCmat_wann_dn = self.EPCmat_dn.to_wann(self.Umat_dn)
+
+    def get_iq(self, q):
+        if self._kmap is None:
+            self._kmap = {}
+        for i, q in enumerate(self.klist):
+            self._kmap[tuple(q)] = i
 
     def calc_dDelta(self):
         """
@@ -77,7 +85,8 @@ class OijuWannEPC(ExchangeCL2):
         """
         self.dDelta = np.zeros((self.nphon, self.nwann, self.nwann))
         # iq, iv, iR
-        iq0 = iqlist[(0, 0, 0)]
+        # iq0 = self.iqlist[(0, 0, 0)]
+        iq0 = self.get_iq((0, 0, 0))
 
         for iv in range(self.nphon):
             for ik, k in enumerate(self.klist):

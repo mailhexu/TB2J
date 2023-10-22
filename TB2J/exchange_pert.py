@@ -178,19 +178,19 @@ class ExchangePert(ExchangeNCL):
         """
         print("Green's function Calculation started.")
 
-        widgets = [
-            " [",
-            progressbar.Timer(),
-            "] ",
-            progressbar.Bar(),
-            " (",
-            progressbar.ETA(),
-            ") ",
-        ]
-        bar = progressbar.ProgressBar(maxval=self.contour.npoints, widgets=widgets)
-        bar.start()
+        # widgets = [
+        #    " [",
+        #    progressbar.Timer(),
+        #    "] ",
+        #    progressbar.Bar(),
+        #    " (",
+        #    progressbar.ETA(),
+        #    ") ",
+        # ]
+        # bar = progressbar.ProgressBar(maxval=self.contour.npoints, widgets=widgets)
+        # bar.start()
         for ie in range(self.contour.npoints):
-            bar.update(ie)
+            # bar.update(ie)
             e = self.contour.elist[ie]
             de = self.contour.de[ie]
             GR, dGdx = self.G.get_GR_and_dGRdx(self.Rlist, energy=e, dHdx=self.dHdx)
@@ -203,7 +203,7 @@ class ExchangePert(ExchangeNCL):
         self.A_to_Jtensor()
         if self.calc_NJt:
             self.calculate_DMI_NJT()
-        bar.finish()
+        # bar.finish()
 
     def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()

@@ -117,17 +117,17 @@ class ExchangeCL2(ExchangeCL):
                     "ij, ji-> ij", np.matmul(Deltai, Gij_up), np.matmul(Deltaj, Gji_dn)
                 )
 
-                if self.biquadratic:
-                    A = np.einsum(
-                        "ij, ji-> ij",
-                        np.matmul(Deltai, Gij_up),
-                        np.matmul(Deltaj, Gji_up),
-                    )
-                    C = np.einsum(
-                        "ij, ji-> ij",
-                        np.matmul(Deltai, Gij_down),
-                        np.matmul(Deltaj, Gji_down),
-                    )
+                # if self.biquadratic:
+                #    A = np.einsum(
+                #        "ij, ji-> ij",
+                #        np.matmul(Deltai, Gij_up),
+                #        np.matmul(Deltaj, Gji_up),
+                #    )
+                #    C = np.einsum(
+                #        "ij, ji-> ij",
+                #        np.matmul(Deltai, Gij_down),
+                #        np.matmul(Deltaj, Gji_down),
+                #    )
                 tmp = np.sum(t)
                 self.Jorb_list[(R, iatom, jatom)].append(t / (4.0 * np.pi))
                 self.JJ_list[(R, iatom, jatom)].append(tmp / (4.0 * np.pi))

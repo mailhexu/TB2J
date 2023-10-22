@@ -319,7 +319,7 @@ def map_to_primitive(atoms, primitive_atoms, offset=(0, 0, 0)):
 def test():
     sc_mat = np.diag([1, 1, 2])
     # sc_mat[0, 1] = 2
-    spm = supercell_maker(sc_matrix=sc_mat)
+    spm = SupercellMaker(sc_matrix=sc_mat)
     print(spm.sc_cell([1, 1, 1]))
     print(spm.sc_pos([[0.5, 1, 1]]))
     print(spm.sc_trans_invariant(["Fe"]))

@@ -5,6 +5,7 @@ from TB2J.utils import symbol_number
 from collections import defaultdict
 from scipy.linalg import eigh
 from TB2J.myTB import AbstractTB
+from TB2J.mathutils import Lowdin
 
 
 class SislWrapper(AbstractTB):
@@ -199,6 +200,9 @@ class SislWrapper(AbstractTB):
                     shape=(nkpts, self.nbasis, self.nbasis),
                     dtype=complex,
                 )
+            Hk = self.Hk(k, convention=convention)
+            Sk = self.Sk(k, convention=convention)
+            evalue, evec = eigh(Hk, Sk)
             self.H[ik] = Hk
             self.S[ik] = Sk
             self.evals[ik] = evalue
