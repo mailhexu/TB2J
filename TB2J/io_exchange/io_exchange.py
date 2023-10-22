@@ -80,7 +80,11 @@ class SpinIO(object):
         #: index of spin linked to atoms. -1 if non-magnetic
         self.spinat = spinat  #: spin for each atom. shape of (natom, 3)
         self.colinear = colinear  #: If the calculation is collinear or not
-        if self.colinear and self.spinat != []:
+        if (
+            self.colinear
+            and isinstance(self.spinat, np.ndarray)
+            and self.spinat.shape[1] == 3
+        ):
             self.magmoms = np.array(self.spinat)[:, 2]
         self.charges = charges
         #: A dictionary of distances, the keys are (i,j, R),

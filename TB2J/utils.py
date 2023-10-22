@@ -1,5 +1,6 @@
 from collections import OrderedDict, defaultdict
 import numpy as np
+from pathlib import Path
 
 
 def symbol_number(symbols):
@@ -138,6 +139,8 @@ def auto_assign_basis_name(
         a[iatom] = a[iatom] + 1
         basis_dict["%s|orb_%d" % (syms[iatom], a[iatom])] = i + 1
     if write_basis_file is not None:
+        path = Path(write_basis_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(write_basis_file, "w") as myfile:
             for key, val in basis_dict.items():
                 myfile.write("%s  %d \n" % (key, val))

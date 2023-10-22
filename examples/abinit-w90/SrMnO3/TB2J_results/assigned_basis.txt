@@ -1,0 +1,14 @@
+Mn1|orb_1  1 
+Mn1|orb_2  2 
+Mn1|orb_3  3 
+Mn1|orb_4  4 
+Mn1|orb_5  5 
+O1|orb_1  6 
+O1|orb_2  7 
+O1|orb_3  8 
+O2|orb_1  9 
+O2|orb_2  10 
+O2|orb_3  11 
+O3|orb_1  12 
+O3|orb_2  13 
+O3|orb_3  14 
