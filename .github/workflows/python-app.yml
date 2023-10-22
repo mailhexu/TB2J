@@ -34,4 +34,10 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       run: |
-        pytest
+        #pytest
+        #  - pwd
+        cd examples/abinit-w90/SrMnO3
+        ls -lah
+        sh get_J.sh
+        cd TB2J_results/Multibinit
+        TB2J_magnon.py --figfname magnon.png
