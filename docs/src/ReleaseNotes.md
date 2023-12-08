@@ -1,6 +1,14 @@
 ## Release Notes
 
 ------------------------------------------------------------------------
+#### v0.7.7 October 11, 2023
+Added script: TB2J\_magnon\_dos.py for plotting the magnon density of states. 
+See https://tb2j.readthedocs.io/en/latest/src/magnon\_band.html
+
+
+#### v0.7.6 May 10, 2023
+TB2J\_magnon.py now writes the band structure infomation into a json file. 
+A script to read the json file and plot the band structure is in the same directory. 
 
 #### v0.7.3.1 July 24, 2022
 

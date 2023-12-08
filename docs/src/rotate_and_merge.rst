@@ -7,7 +7,7 @@ As discussed in the previous section, the :math:`z` component of the DMI, and th
 
 .. code-block:: shell
 
-   TB2J_rotate.py BiFeO3.vasp --format vasp
+   TB2J_rotate.py BiFeO3.vasp --ftype vasp
 
 
 .. note::

@@ -6,10 +6,15 @@ from ase.io import read
 from ase.atoms import Atoms
 from ase.units import Angstrom, Bohr
 
-unit_dict = {'ANG': Angstrom, 'BOHR': Bohr}
+unit_dict = {"ANG": Angstrom, "BOHR": Bohr}
 
 
 def parse_xyz(fname):
+    """
+    wannier90 xyz file parser.
+
+    :param fname: relative or absolute path to the xyz file.  str.
+    """
     atoms = read(fname)
     symbols = atoms.get_chemical_symbols()
     pos = atoms.get_positions()
@@ -17,7 +22,7 @@ def parse_xyz(fname):
     atoms_pos = []
     atoms_symbols = []
     for s, x in zip(symbols, pos):
-        if s == 'X':
+        if s == "X":
             wann_pos.append(x)
         else:
             atoms_symbols.append(s)
@@ -25,13 +30,15 @@ def parse_xyz(fname):
     return np.array(wann_pos), atoms_symbols, np.array(atoms_pos)
 
 
-def parse_ham(fname='wannier90_hr.dat', cutoff=None):
+def parse_ham(fname="wannier90_hr.dat", cutoff=None):
     """
-    wannier90 hr file phaser.
+    wannier90 hr file parser.
+
+    :param fname: relative or absolute path to the hamiltonian file.  str.
 
     :param cutoff: the energy cutoff.  None | number | list (of Emin, Emax).
     """
-    with open(fname, 'r') as myfile:
+    with open(fname, "r") as myfile:
         lines = myfile.readlines()
     n_wann = int(lines[1].strip())
     n_R = int(lines[2].strip())
@@ -51,7 +58,7 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
         n = n - 1
         H_real, H_imag = map(float, t[5:])
         val = H_real + 1j * H_imag
-        if (m == n and np.linalg.norm(R) < 0.001):
+        if m == n and np.linalg.norm(R) < 0.001:
             H_mnR[R][m, n] = val / 2.0
         elif cutoff is not None:
             if abs(val) > cutoff:
@@ -62,22 +69,29 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
 
 
 def parse_cell(fname, unit=Angstrom):
+    """
+    wannier90 hr cell parser.
+
+    :param fname: relative or absolute path to the file.  str.
+    """
 
     uc_regex = re.compile(
-        r'BEGIN\s+UNIT_CELL_CART\s+'
-        r'(?P<units>BOHR|ANG)?'
-        r'(?P<cell>.+)'
-        r'END\s+UNIT_CELL_CART\s+', re.VERBOSE | re.IGNORECASE | re.DOTALL)
+        r"BEGIN\s+UNIT_CELL_CART\s+"
+        r"(?P<units>BOHR|ANG)?"
+        r"(?P<cell>.+)"
+        r"END\s+UNIT_CELL_CART\s+",
+        re.VERBOSE | re.IGNORECASE | re.DOTALL,
+    )
     with open(fname) as myfile:
         text = myfile.read()
     match = uc_regex.search(text)
     if match is None:
         raise Exception(f"Cannot find unit cell information from {fname}")
 
-    cell = np.fromstring(match.group('cell').strip(), sep='\n').reshape((3, 3))
+    cell = np.fromstring(match.group("cell").strip(), sep="\n").reshape((3, 3))
 
-    if match.group('units') is not None:
-        factor = {'ANG': Angstrom, 'BOHR': Bohr}[match.group('units').upper()]
+    if match.group("units") is not None:
+        factor = {"ANG": Angstrom, "BOHR": Bohr}[match.group("units").upper()]
     else:
         factor = Angstrom
     cell = cell * factor / unit
@@ -85,14 +99,21 @@ def parse_cell(fname, unit=Angstrom):
 
 
 def parse_atoms(fname):
+    """
+    wannier90 hr atoms parser.
+
+    :param fname: relative or absolute path to the file.  str.
+    """
     cell = parse_cell(fname)
     atoms_regex = re.compile(
-        r'BEGIN\s+ATOMS_(?P<suffix>(FRAC)|(CART))\s+'
-        r'(?P<units>BOHR|ANG)?'
-        r'(?P<atoms>.+)'
-        r'END\s+ATOMS_(?P=suffix)\s+', re.VERBOSE | re.IGNORECASE | re.DOTALL)
+        r"BEGIN\s+ATOMS_(?P<suffix>(FRAC)|(CART))\s+"
+        r"(?P<units>BOHR|ANG)?"
+        r"(?P<atoms>.+)"
+        r"END\s+ATOMS_(?P=suffix)\s+",
+        re.VERBOSE | re.IGNORECASE | re.DOTALL,
+    )
 
-    with open(fname, 'r') as f:
+    with open(fname, "r") as f:
         match = atoms_regex.search(f.read())
         if match is None:
             raise Exception(f"Cannot read atomic structure from {fname}")
@@ -100,18 +121,18 @@ def parse_atoms(fname):
     symbols = []
     taus = []
 
-    for line in match.group('atoms').strip().splitlines():
+    for line in match.group("atoms").strip().splitlines():
         symbol = line.split()[0].strip()
         symbol = symbol[0].upper() + symbol[1:]
         symbols.append(symbol)
         taus.append(np.array(list(map(float, line.split()[1:]))))
 
     taus = np.asarray(taus)
-    if match.group('suffix').upper() == 'FRAC':
+    if match.group("suffix").upper() == "FRAC":
         atoms = Atoms(symbols=symbols, cell=cell, scaled_positions=taus)
     else:
-        if match.group('units') is not None:
-            factor = unit_dict[match.group('units').upper()]
+        if match.group("units") is not None:
+            factor = unit_dict[match.group("units").upper()]
         else:
             factor = Angstrom
         taus = taus * factor

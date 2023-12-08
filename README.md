@@ -1,3 +1,4 @@
+[![Python application](https://github.com/mailhexu/TB2J/actions/workflows/python-app.yml/badge.svg)](https://github.com/mailhexu/TB2J/actions/workflows/python-app.yml)
 [![Documentation Status](https://readthedocs.org/projects/tb2j/badge/?version=latest)](https://tb2j.readthedocs.io/en/latest/?badge=latest)
 [![Build Status](https://app.travis-ci.com/mailhexu/TB2J.svg?branch=master)](https://app.travis-ci.com/mailhexu/TB2J)
 [![Downloads](https://pepy.tech/badge/tb2j)](https://pepy.tech/project/tb2j)
@@ -33,5 +34,5 @@ For more information, see the documentation on
 pip install TB2J
 
 ## Message:
-- We welcome contributions. If you would like to add the interface to other codes, or extend the capability of TB2J, please contact us! <mailheux_AT_gmail_DOT_com>
+- We welcome contributions. If you would like to add the interface to other codes, or extend the capability of TB2J, please contact us! <mailhexu_AT_gmail_DOT_com>
 

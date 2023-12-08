@@ -6,4 +6,4 @@ ase>=3.19
 tqdm>=4.42.0
 pathos
 packaging>=20.0
-
+pre-commit

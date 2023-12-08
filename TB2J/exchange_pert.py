@@ -7,11 +7,10 @@ from collections import defaultdict
 
 
 class ExchangePert(ExchangeNCL):
-
     def set_dHdx(self, dHdx):
         self.dHdx = dHdx
         self.dHdxR0 = dHdx.ham_R0
-        assert (self.dHdx.nbasis == self.nbasis)
+        assert self.dHdx.nbasis == self.nbasis
         self.AO_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.AT_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
 
@@ -21,7 +20,7 @@ class ExchangePert(ExchangeNCL):
         return pauli_block_sigma_norm(self.dHdxR0[np.ix_(orbs, orbs)])
 
     def get_A_ijR(self, G, dG, iatom, jatom, de):
-        """ calculate A from G for a energy slice (de).
+        """calculate A from G for a energy slice (de).
         It take the
         .. math::
            A^{uv} = p T^u p T^v dE / pi
@@ -68,42 +67,53 @@ class ExchangePert(ExchangeNCL):
                 for b in range(4):
                     AijRab = np.matmul(
                         np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-                        np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
+                        np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]),
+                    )
 
                     A1 = np.matmul(
                         np.matmul(self.get_P_iatom(iatom), dGij_Ixyz[a]),
-                        np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
+                        np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]),
+                    )
                     A2 = np.matmul(
                         np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-                        np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]))
+                        np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]),
+                    )
                     A3 = np.matmul(
                         np.matmul(self.get_dP_iatom(iatom), Gij_Ixyz[a]),
-                        np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
+                        np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]),
+                    )
                     A4 = np.matmul(
                         np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-                        np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]))
+                        np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]),
+                    )
                     AOijRab = A1 + A2 + A3 + A4
 
                     if False:
                         B1 = np.matmul(
                             np.matmul(self.get_dP_iatom(iatom), dGij_Ixyz[a]),
-                            np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]))
+                            np.matmul(self.get_P_iatom(jatom), Gji_Ixyz[b]),
+                        )
                         B2 = np.matmul(
                             np.matmul(self.get_dP_iatom(iatom), Gij_Ixyz[a]),
-                            np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]))
+                            np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]),
+                        )
                         B3 = np.matmul(
                             np.matmul(self.get_dP_iatom(iatom), Gij_Ixyz[a]),
-                            np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]))
+                            np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]),
+                        )
                         B4 = np.matmul(
                             np.matmul(self.get_P_iatom(iatom), dGij_Ixyz[a]),
-                            np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]))
+                            np.matmul(self.get_dP_iatom(jatom), Gji_Ixyz[b]),
+                        )
                         B5 = np.matmul(
                             np.matmul(self.get_P_iatom(iatom), dGij_Ixyz[a]),
-                            np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]))
+                            np.matmul(self.get_P_iatom(jatom), dGji_Ixyz[b]),
+                        )
 
                         B6 = np.matmul(
                             np.matmul(self.get_P_iatom(iatom), Gij_Ixyz[a]),
-                            np.matmul(self.get_dP_iatom(jatom), dGji_Ixyz[b]))
+                            np.matmul(self.get_dP_iatom(jatom), dGji_Ixyz[b]),
+                        )
                         tmp3[a, b] = np.trace(B1 + B2 + B3 + B4 + B5 + B6)
 
                     # trace over orb
@@ -168,25 +178,22 @@ class ExchangePert(ExchangeNCL):
         """
         print("Green's function Calculation started.")
 
-        widgets = [
-            ' [',
-            progressbar.Timer(),
-            '] ',
-            progressbar.Bar(),
-            ' (',
-            progressbar.ETA(),
-            ') ',
-        ]
-        bar = progressbar.ProgressBar(maxval=self.contour.npoints,
-                                      widgets=widgets)
-        bar.start()
+        # widgets = [
+        #    " [",
+        #    progressbar.Timer(),
+        #    "] ",
+        #    progressbar.Bar(),
+        #    " (",
+        #    progressbar.ETA(),
+        #    ") ",
+        # ]
+        # bar = progressbar.ProgressBar(maxval=self.contour.npoints, widgets=widgets)
+        # bar.start()
         for ie in range(self.contour.npoints):
-            bar.update(ie)
+            # bar.update(ie)
             e = self.contour.elist[ie]
             de = self.contour.de[ie]
-            GR, dGdx = self.G.get_GR_and_dGRdx(self.Rlist,
-                                               energy=e,
-                                               dHdx=self.dHdx)
+            GR, dGdx = self.G.get_GR_and_dGRdx(self.Rlist, energy=e, dHdx=self.dHdx)
             self.get_rho_e(GR, de)
             self.get_all_A(GR, dGdx, de)
             if self.calc_NJt:
@@ -196,9 +203,9 @@ class ExchangePert(ExchangeNCL):
         self.A_to_Jtensor()
         if self.calc_NJt:
             self.calculate_DMI_NJT()
-        bar.finish()
+        # bar.finish()
 
-    def write_output(self, path='TB2J_results'):
+    def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
             atoms=self.atoms,

@@ -2,50 +2,44 @@ from collections import defaultdict, OrderedDict
 import os
 import numpy as np
 from TB2J.green import TBGreen
-from TB2J.pauli import (pauli_block_all, pauli_block_sigma_norm, pauli_mat)
-from TB2J.utils import symbol_number, read_basis, kmesh_to_R
-from TB2J.myTB import MyTB
-from ase.io import read
-from TB2J.utils import auto_assign_basis_name
+from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_mat
+from TB2J.utils import symbol_number, kmesh_to_R
 from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
 from TB2J.external import p_map
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
 from TB2J.orbmap import map_orbs_matrix
-from pathos.multiprocessing import ProcessPool
 import pickle
 
 
-class Exchange():
-
+class ExchangeParams:
     def __init__(
-            self,
-            tbmodels,
-            atoms,
-            efermi,
-            basis=None,
-            magnetic_elements=[],
-            include_orbs={},
-            kmesh=[4, 4, 4],
-            emin=-15,  # integration lower bound, relative to fermi energy
-            # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
+        self,
+        efermi,
+        basis=None,
+        magnetic_elements=[],
+        include_orbs={},
+        kmesh=[4, 4, 4],
+        emin=-15,  # integration lower bound, relative to fermi energy
+        # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
         emax=0.05,
-            nz=100,
-            # the delta in the (i delta) in green's function to prevent divergence
-            height=0.5,
-            nz1=150,  # grid from emin to emin+(i delta)
-            nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-            nz3=150,  # grid from emax + (i delta) to emax
-            exclude_orbs=[],  #
-            ne=None,  # number of electrons in Wannier function.
-            Rcut=None,  # Rcut.
-            use_cache=False,
-            np=1,
-            description='',
-            orb_decomposition=False):
-
-        self.atoms = atoms
+        nz=100,
+        # the delta in the (i delta) in green's function to prevent divergence
+        height=0.5,
+        nz1=150,  # grid from emin to emin+(i delta)
+        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
+        nz3=150,  # grid from emax + (i delta) to emax
+        exclude_orbs=[],  #
+        ne=None,  # number of electrons in Wannier function.
+        Rcut=None,  # Rcut.
+        use_cache=False,
+        np=1,
+        description="",
+        write_density_matrix=False,
+        orb_decomposition=False,
+        output_path="TB2J_results",
+    ):
         self.efermi = efermi
         self.emin = emin
         self.emax = emax
@@ -56,7 +50,6 @@ class Exchange():
         self.nz3 = nz3
         if nz is None:
             self.nz = nz1 + nz2 + nz3
-        self._prepare_kmesh(kmesh)
         self.Rcut = Rcut
         self.basis = basis
         self.magnetic_elements = magnetic_elements
@@ -66,13 +59,71 @@ class Exchange():
         self.ne = ne
         self._use_cache = use_cache
         self.np = np
-
+        self._kmesh = kmesh
         self.orb_decomposition = orb_decomposition
+        self.write_density_matrix = write_density_matrix
+        self.description = description
+        self.output_path = output_path
 
+
+class Exchange(ExchangeParams):
+    def __init__(
+        self,
+        tbmodels,
+        atoms,
+        efermi,
+        basis=None,
+        magnetic_elements=[],
+        include_orbs={},
+        kmesh=[4, 4, 4],
+        emin=-15,  # integration lower bound, relative to fermi energy
+        # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
+        emax=0.05,
+        nz=100,
+        # the delta in the (i delta) in green's function to prevent divergence
+        height=0.5,
+        nz1=150,  # grid from emin to emin+(i delta)
+        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
+        nz3=150,  # grid from emax + (i delta) to emax
+        exclude_orbs=[],  #
+        ne=None,  # number of electrons in Wannier function.
+        Rcut=None,  # Rcut.
+        use_cache=False,
+        np=1,
+        description="",
+        write_density_matrix=False,
+        output_path="TB2J_results",
+        orb_decomposition=False,
+    ):
+        self.atoms = atoms
+        super().__init__(
+            efermi=efermi,
+            basis=basis,
+            magnetic_elements=magnetic_elements,
+            include_orbs=include_orbs,
+            kmesh=kmesh,
+            emin=emin,
+            emax=emax,
+            nz=nz,
+            height=height,
+            nz1=nz1,
+            nz2=nz2,
+            nz3=nz3,
+            exclude_orbs=exclude_orbs,
+            ne=ne,
+            Rcut=Rcut,
+            use_cache=use_cache,
+            np=np,
+            description=description,
+            write_density_matrix=write_density_matrix,
+            orb_decomposition=orb_decomposition,
+            output_path=output_path,
+        )
+        self._prepare_kmesh(self._kmesh)
+        self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        self._prepare_elist(method='legendre')
-        self._prepare_Rlist()
+        self._prepare_elist(method="legendre")
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
@@ -84,19 +135,15 @@ class Exchange():
         self.Jdict_NJT = None
         self._is_collinear = True
         self.has_elistc = False
-        self.description = description
         self._clean_tbmodels()
-
-        # self._prepare_Jorb_file()
 
     def _prepare_Jorb_file(self):
         os.makedirs(self.output_path, exist_ok=True)
-        self.orbpath = os.path.join(self.output_path, 'OrbResolve')
+        self.orbpath = os.path.join(self.output_path, "OrbResolve")
         os.makedirs(self.orbpath, exist_ok=True)
 
     def _adjust_emin(self):
-        self.emin = self.G.find_energy_ingap(rbound=self.efermi -
-                                             5.0) - self.efermi
+        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 5.0) - self.efermi
 
     def set_tbmodels(self, tbmodels):
         pass
@@ -109,21 +156,20 @@ class Exchange():
         for k in kmesh:
             self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
-    def _prepare_elist(self, method='legendre'):
+    def _prepare_elist(self, method="legendre"):
         """
         prepare list of energy for integration.
         The path has three segments:
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
         self.contour = Contour(self.emin, self.emax)
-        if method.lower() == 'rectangle':
-            self.contour.build_path_rectangle(height=self.height,
-                                              nz1=self.nz1,
-                                              nz2=self.nz2,
-                                              nz3=self.nz3)
-        elif method.lower() == 'semicircle':
+        if method.lower() == "rectangle":
+            self.contour.build_path_rectangle(
+                height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
+            )
+        elif method.lower() == "semicircle":
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
-        elif method.lower() == 'legendre':
+        elif method.lower() == "legendre":
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
@@ -158,7 +204,7 @@ class Exchange():
             if i not in self.exclude_orbs:
                 # e.g. Fe2, dxy, _, _
                 if isinstance(base, str):
-                    atom_sym, orb_sym = base.split('|')[:2]
+                    atom_sym, orb_sym = base.split("|")[:2]
                 else:
                     atom_sym, orb_sym = base[:2]
 
@@ -174,7 +220,7 @@ class Exchange():
                     self.orb_dict[iatom] += [i]
                     self.labels[iatom] += [orb_sym]
 
-        #self.orb_slice = []
+        # self.orb_slice = []
 
         # for iatom in range(len(self.atoms)):
         #    if iatom in self.orb_dict:
@@ -186,7 +232,7 @@ class Exchange():
         #    else:
         #        self.orb_slice.append(slice(0, 0))
 
-        #self.orb_slice = np.array(self.orb_slice)
+        # self.orb_slice = np.array(self.orb_slice)
 
         # index of magnetic atoms
         for i, sym in enumerate(self.atoms.get_chemical_symbols()):
@@ -199,16 +245,18 @@ class Exchange():
                 raise ValueError(
                     f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
                 )
-            nsorb = len(self.orb_dict[iatom])
-            if (not self._is_collinear) and nsorb % 2 != 0:
-                raise ValueError(
-                    f"""The number of spin-orbitals for atom {iatom} is not even,
+        if not self._is_collinear:
+            for iatom, orb in self.orb_dict.items():
+                nsorb = len(self.orb_dict[iatom])
+                if nsorb % 2 != 0:
+                    raise ValueError(
+                        f"""The number of spin-orbitals for atom {iatom} is not even,
 {nsorb} spin-orbitals are found near this atom.
 which means the spin up/down does not have same number of orbitals. 
 This is often because the Wannier functions are wrongly defined,
 or badly localized. Please check the Wannier centers in the Wannier90 output file. 
 """
-                )
+                    )
         self._spin_dict = {}
         self._atom_dict = {}
         for ispin, iatom in enumerate(self.ind_mag_atoms):
@@ -224,17 +272,16 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         if self.backend_name == "SIESTA":
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
-                if (self.include_orbs
-                        is not None) and syms[iatom] in self.include_orbs:
+                if (self.include_orbs is not None) and syms[iatom] in self.include_orbs:
                     mmat, reduced_orbs = map_orbs_matrix(
                         orbs,
                         spinor=not (self._is_collinear),
-                        include_only=self.include_orbs[syms[iatom]])
+                        include_only=self.include_orbs[syms[iatom]],
+                    )
                 else:
                     mmat, reduced_orbs = map_orbs_matrix(
-                        orbs,
-                        spinor=not (self._is_collinear),
-                        include_only=None)
+                        orbs, spinor=not (self._is_collinear), include_only=None
+                    )
 
                 self.mmats[iatom] = mmat
                 self.orbital_names[iatom] = reduced_orbs
@@ -246,7 +293,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
             for iatom, orbs in self.labels.items():
                 # Note that for siesta, spin up and spin down has same orb name.
                 # thus //2
-                self.norb_reduced[iatom] = len(orbs)//2
+                self.norb_reduced[iatom] = len(orbs) // 2
 
     def ispin(self, iatom):
         return self._spin_dict[iatom]
@@ -264,12 +311,12 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
                 for R in self.Rlist:
                     pos_i = self.atoms.get_positions()[iatom]
                     pos_jR = self.atoms.get_positions()[jatom] + np.dot(
-                        R, self.atoms.get_cell())
+                        R, self.atoms.get_cell()
+                    )
                     vec = pos_jR - pos_i
                     distance = np.sqrt(np.sum(vec**2))
                     if self.Rcut is None or distance < self.Rcut:
-                        self.distance_dict[(tuple(R), ispin,
-                                            jspin)] = (vec, distance)
+                        self.distance_dict[(tuple(R), ispin, jspin)] = (vec, distance)
                         self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
         self.short_Rlist = list(self.R_ijatom_dict.keys())
 
@@ -284,7 +331,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         """
         sum up the contribution of all the orbitals with same (n,l,m)
         """
-        if self.backend_name == 'SIESTA':
+        if self.backend_name == "SIESTA":
             mmat_i = self.mmats[iatom]
             mmat_j = self.mmats[jatom]
             Jorbij = mmat_i.T @ Jorbij @ mmat_j
@@ -292,11 +339,13 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
 
     def calculate_all(self):
         raise NotImplementedError(
-            "calculate all is not implemented in a abstract class. ")
+            "calculate all is not implemented in a abstract class. "
+        )
 
     def write_output(self):
         raise NotImplementedError(
-            "write_output is not implemented in a abstract class. ")
+            "write_output is not implemented in a abstract class. "
+        )
 
 
 class ExchangeNCL(Exchange):
@@ -312,11 +361,13 @@ class ExchangeNCL(Exchange):
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
         # TODO: check if tbmodels are really a tbmodel with SOC.
-        self.G = TBGreen(self.tbmodel,
-                         self.kmesh,
-                         self.efermi,
-                         use_cache=self._use_cache,
-                         nproc=self.np)
+        self.G = TBGreen(
+            self.tbmodel,
+            self.kmesh,
+            self.efermi,
+            use_cache=self._use_cache,
+            nproc=self.np,
+        )
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
@@ -326,6 +377,8 @@ class ExchangeNCL(Exchange):
         self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
+        if self.write_density_matrix:
+            self.G.write_rho_R()
 
     def _prepare_NijR(self):
         self.N = {}
@@ -342,7 +395,7 @@ class ExchangeNCL(Exchange):
         return self.HR0[np.ix_(orbs, orbs)]
 
     def get_P_iatom(self, iatom):
-        """ Calculate the norm of the Hamiltonian vector.
+        """Calculate the norm of the Hamiltonian vector.
         For each atom, the local hamiltonian of each orbital H(2*2 matrix)
         can be written as H0* I + H1* sigma1 + H2*sigma2 + H3 *sigma3
         where sigma is a Pauli matrix. return the norm of (H1, H2, H3) vector
@@ -370,7 +423,7 @@ class ExchangeNCL(Exchange):
         # return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
     def get_A_ijR(self, G, R, iatom, jatom):
-        """ calculate A from G for a energy slice (de).
+        """calculate A from G for a energy slice (de).
         It take the
         .. math::
            A^{uv} = p T^u p T^v dE / pi
@@ -408,14 +461,13 @@ class ExchangeNCL(Exchange):
                 for b in range(4):
                     pjGji = self.get_P_iatom(jatom) @ Gji_Ixyz[b]
                     torb[a, b] = self.simplify_orbital_contributions(
-                        np.einsum('ij, ji -> ij', piGij, pjGji) / np.pi, iatom,
-                        jatom)
+                        np.einsum("ij, ji -> ij", piGij, pjGji) / np.pi, iatom, jatom
+                    )
                     tmp[a, b] = np.sum(torb[a, b])
 
         else:
             for a in range(4):
-                pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
-                    jatom)
+                pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(jatom)
                 for b in range(4):
                     AijRab = pGp @ Gji_Ixyz[b]
                     tmp[a, b] = np.trace(AijRab) / np.pi
@@ -432,7 +484,7 @@ class ExchangeNCL(Exchange):
         A_ijR_list = {}
         Aorb_ijR_list = {}
         for iR, R in enumerate(self.R_ijatom_dict):
-            for (iatom, jatom) in self.R_ijatom_dict[R]:
+            for iatom, jatom in self.R_ijatom_dict[R]:
                 A, A_orb = self.get_A_ijR(G, R, iatom, jatom)
                 A_ijR_list[(R, iatom, jatom)] = A
                 Aorb_ijR_list[(R, iatom, jatom)] = A_orb
@@ -450,7 +502,7 @@ class ExchangeNCL(Exchange):
             for key, val in self.A_ijR_orb.items():
                 R, iatom, jatom = key
                 Rm = tuple(-x for x in R)
-                #valm = self.A_ijR_orb[(Rm, jatom, iatom)]
+                # valm = self.A_ijR_orb[(Rm, jatom, iatom)]
                 ni = self.norb_reduced[iatom]
                 nj = self.norb_reduced[jatom]
 
@@ -466,8 +518,7 @@ class ExchangeNCL(Exchange):
                 Ja = np.zeros((3, 3, ni, nj), dtype=float)
                 for i in range(3):
                     for j in range(3):
-                        Ja[i,
-                           j] = np.imag(val[i + 1, j + 1] + val[j + 1, i + 1])
+                        Ja[i, j] = np.imag(val[i + 1, j + 1] + val[j + 1, i + 1])
                 # DMI
 
                 Dtmp = np.zeros((3, ni, nj), dtype=float)
@@ -495,7 +546,7 @@ class ExchangeNCL(Exchange):
         self.exchange_Jdict = {}
         self.Jiso_orb = {}
 
-        self.debug_dict = {'DMI2': {}}
+        self.debug_dict = {"DMI2": {}}
 
         for key, val in self.A_ijR.items():
             # key:(R, iatom, jatom)
@@ -538,7 +589,7 @@ class ExchangeNCL(Exchange):
             Dtmp2[2] = np.imag(val[1, 2] - val[2, 1])
             if is_nonself:
                 self.DMI[keyspin] = Dtmp
-                self.debug_dict['DMI2'][keyspin] = Dtmp2
+                self.debug_dict["DMI2"][keyspin] = Dtmp2
 
             # isotropic exchange into bilinear and biqudratic parts:
             # Jprime SiSj and B (SiSj)^2
@@ -546,7 +597,8 @@ class ExchangeNCL(Exchange):
                 Si = self.spinat[iatom]
                 Sj = self.spinat[jatom]
                 Jprime = np.imag(val[0, 0] - val[3, 3]) - 2 * np.sign(
-                    np.dot(Si, Sj)) * np.imag(val[3, 3])
+                    np.dot(Si, Sj)
+                ) * np.imag(val[3, 3])
                 # Jprime = np.imag(val[0, 0] - 3*val[3, 3])
                 B = np.imag(val[3, 3])
                 self.B[keyspin] = Jprime, B
@@ -560,7 +612,7 @@ class ExchangeNCL(Exchange):
             self.N[R] += -1.0 / np.pi * np.imag(G * de)
 
     def get_rho_e(self, rhoR):
-        """ add component to density matrix from a green's function
+        """add component to density matrix from a green's function
         :param GR: Green's funciton in real space.
         """
         return -1.0 / np.pi * rhoR[0, 0, 0]
@@ -579,8 +631,7 @@ class ExchangeNCL(Exchange):
             iorb = self.iorb(iatom)
             tmp = self.rho[np.ix_(iorb, iorb)]
             # *2 because there is a 1/2 in the paui_block_all function
-            rho[iatom] = np.array(
-                [np.trace(x) * 2 for x in pauli_block_all(tmp)])
+            rho[iatom] = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)])
             self.charges[iatom] = np.imag(rho[iatom][0])
             self.spinat[iatom, :] = np.imag(rho[iatom][1:])
         self.rho_dict = rho
@@ -612,10 +663,8 @@ class ExchangeNCL(Exchange):
                         # S_j = pauli_mat(nj, dim +
                         #                1)  #*self.rho[np.ix_(orbj, orbj)]
                         # TODO: Note that rho is complex, not the imaginary part
-                        S_i = pauli_mat(ni, dim + 1) * self.rho[np.ix_(
-                            orbi, orbi)]
-                        S_j = pauli_mat(nj, dim + 1) * self.rho[np.ix_(
-                            orbj, orbj)]
+                        S_i = pauli_mat(ni, dim + 1) * self.rho[np.ix_(orbi, orbi)]
+                        S_j = pauli_mat(nj, dim + 1) * self.rho[np.ix_(orbj, orbj)]
 
                         # [S, t]+  = Si tij + tij Sj, where
                         # Si and Sj are the spin operator
@@ -626,8 +675,7 @@ class ExchangeNCL(Exchange):
                         # D = -1/2 Tr Nji [J, tij]
                         # Trace over spin and orb
                         D[dim] = -0.5 * np.imag(np.trace(np.matmul(Nji, Jt)))
-                        J[dim] = -0.5 * np.imag(
-                            np.trace(np.matmul(Nji, Jtminus)))
+                        J[dim] = -0.5 * np.imag(np.trace(np.matmul(Nji, Jtminus)))
                     ispin = self.ispin(iatom)
                     jspin = self.ispin(jatom)
                     Ddict_NJT[(R, ispin, jspin)] = D
@@ -636,24 +684,25 @@ class ExchangeNCL(Exchange):
         self.Ddict_NJT = Ddict_NJT
         return Ddict_NJT
 
-    def integrate(self, rhoRs, AijRs, AijRs_orb=None, method='simpson'):
+    def integrate(self, rhoRs, AijRs, AijRs_orb=None, method="simpson"):
         """
-        AijRs: a list of AijR, 
+        AijRs: a list of AijR,
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
-        elif method == 'simpson':
+        elif method == "simpson":
             integrate = simpson_nonuniform
 
         self.rho = integrate(self.contour.path, rhoRs)
         for iR, R in enumerate(self.R_ijatom_dict):
-            for (iatom, jatom) in self.R_ijatom_dict[R]:
+            for iatom, jatom in self.R_ijatom_dict[R]:
                 f = AijRs[(R, iatom, jatom)]
                 self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
                 if self.orb_decomposition:
                     self.A_ijR_orb[(R, iatom, jatom)] = integrate(
-                        self.contour.path, AijRs_orb[(R, iatom, jatom)])
+                        self.contour.path, AijRs_orb[(R, iatom, jatom)]
+                    )
 
     def get_AijR_rhoR(self, e):
         GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
@@ -662,7 +711,7 @@ class ExchangeNCL(Exchange):
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
-        with open(fname, 'wb') as myfile:
+        with open(fname, "wb") as myfile:
             pickle.dump(result, myfile)
 
     def validate(self):
@@ -685,35 +734,30 @@ class ExchangeNCL(Exchange):
 
         npole = len(self.contour.path)
         if self.np > 1:
-            #executor = ProcessPool(nodes=self.np)
-            #results = executor.map(self.get_AijR_rhoR, self.contour.path)
-            results = p_map(self.get_AijR_rhoR,
-                            self.contour.path,
-                            num_cpus=self.np)
+            # executor = ProcessPool(nodes=self.np)
+            # results = executor.map(self.get_AijR_rhoR, self.contour.path)
+            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
         else:
-            results = map(self.get_AijR_rhoR,
-                          tqdm(self.contour.path, total=npole))
+            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
 
         for i, result in enumerate(results):
             for iR, R in enumerate(self.R_ijatom_dict):
-                for (iatom, jatom) in self.R_ijatom_dict[R]:
+                for iatom, jatom in self.R_ijatom_dict[R]:
                     if (R, iatom, jatom) in AijRs:
-                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
-                                                                  jatom])
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
                         if self.orb_decomposition:
-                            AijRs_orb[(R, iatom,
-                                       jatom)].append(result[1][R, iatom,
-                                                                jatom])
+                            AijRs_orb[(R, iatom, jatom)].append(
+                                result[1][R, iatom, jatom]
+                            )
 
                     else:
                         AijRs[(R, iatom, jatom)] = []
-                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
-                                                                  jatom])
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
                         if self.orb_decomposition:
                             AijRs_orb[(R, iatom, jatom)] = []
-                            AijRs_orb[(R, iatom,
-                                       jatom)].append(result[1][R, iatom,
-                                                                jatom])
+                            AijRs_orb[(R, iatom, jatom)].append(
+                                result[1][R, iatom, jatom]
+                            )
             rhoRs.append(result[2])
         if self.np > 1:
             # executor.close()
@@ -741,7 +785,7 @@ class ExchangeNCL(Exchange):
             else:
                 self.index_spin.append(-1)
 
-    def write_output(self, path='TB2J_results'):
+    def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
             atoms=self.atoms,
@@ -771,14 +815,13 @@ class ExchangeNCL(Exchange):
     def finalize(self):
         self.G.clean_cache()
 
-    def run(self, path='TB2J_results'):
+    def run(self, path="TB2J_results"):
         self.calculate_all()
         self.write_output(path=path)
         self.finalize()
 
 
 class ExchangeCL(ExchangeNCL):
-
     def set_tbmodels(self, tbmodel):
         """
         only difference is a colinear tag.
@@ -786,7 +829,7 @@ class ExchangeCL(ExchangeNCL):
         super().set_tbmodels(tbmodel)
         self._is_collinear = True
 
-    def write_output(self, path='TB2J_results'):
+    def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
             atoms=self.atoms,

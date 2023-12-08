@@ -3,17 +3,17 @@ import os
 from ase.units import Ry
 
 
-def write_uppasd(cls, path='TB2J_results/UppASD'):
+def write_uppasd(cls, path="TB2J_results/UppASD"):
     if not os.path.exists(path):
         os.makedirs(path)
-    cls.write_uppasd_posfile(os.path.join(path, 'posfile'))
-    cls.write_uppasd_momfile(os.path.join(path, 'momfile'))
-    cls.write_uppasd_exchange(os.path.join(path, 'jASD1'))
-    cls.write_uppasd_infile(os.path.join(path, 'input'))
+    cls.write_uppasd_posfile(os.path.join(path, "posfile"))
+    cls.write_uppasd_momfile(os.path.join(path, "momfile"))
+    cls.write_uppasd_exchange(os.path.join(path, "jASD1"))
+    cls.write_uppasd_infile(os.path.join(path, "input"))
 
 
 def write_uppasd_posfile(cls, fname):
-    with open(fname, 'w') as myfile:
+    with open(fname, "w") as myfile:
         natom = len(cls.atoms)
         for i in range(natom):
             text = ""
@@ -31,41 +31,47 @@ def write_uppasd_posfile(cls, fname):
 
 
 def write_uppasd_momfile(cls, fname):
-    with open(fname, 'w') as myfile:
+    with open(fname, "w") as myfile:
         natom = len(cls.atoms)
         for i in range(natom):
             text = ""
             id_spin = cls.index_spin[i]
             if id_spin > -1:
                 pos = cls.atoms.get_scaled_positions()[i]
-                ms = np.sqrt(np.sum(np.array(cls.spinat[i])**2))
+                ms = np.sqrt(np.sum(np.array(cls.spinat[i]) ** 2))
                 spin = np.array(cls.spinat[i]) / ms
                 text = "{id_atom} {id_spin} {ms} 0.0 0.0 1.0\n".format(
-                    id_atom=id_spin + 1, id_spin=id_spin + 1, ms=ms)
+                    id_atom=id_spin + 1, id_spin=id_spin + 1, ms=ms
+                )
                 myfile.write(text)
 
 
 def write_uppasd_exchange(cls, fname):
-    with open(fname, 'w') as myfile:
+    with open(fname, "w") as myfile:
         nexch = len(cls.exchange_Jdict.items())
-        myfile.write("{num_interactions} {type_exchange}\n".format(
-            num_interactions=nexch, type_exchange=0))
+        myfile.write(
+            "{num_interactions} {type_exchange}\n".format(
+                num_interactions=nexch, type_exchange=0
+            )
+        )
 
         counter = -1
         for key, val in cls.exchange_Jdict.items():
             counter += 1  # starts at 0
             R, i, j = key
             pos = cls.atoms.get_positions()
-            d = np.dot(np.array(R),
-                       cls.atoms.get_cell()) + pos[j] - pos[i]
-            myfile.write("{i} {j} {Rx} {Ry} {Rz} {Jij}\n".format(
-                IID=counter,
-                i=i + 1,
-                j=j + 1,
-                Rx=d[0],
-                Ry=d[1],
-                Rz=d[2],
-                Jij=val * 1e3 / Ry))  # mRy
+            d = np.dot(np.array(R), cls.atoms.get_cell()) + pos[j] - pos[i]
+            myfile.write(
+                "{i} {j} {Rx} {Ry} {Rz} {Jij}\n".format(
+                    IID=counter,
+                    i=i + 1,
+                    j=j + 1,
+                    Rx=d[0],
+                    Ry=d[1],
+                    Rz=d[2],
+                    Jij=val * 1e3 / Ry,
+                )
+            )  # mRy
 
 
 def write_uppasd_infile(cls, fname):
@@ -119,5 +125,5 @@ def write_uppasd_infile(cls, fname):
     eta_min 6
     alat 2.83e-10
     """
-    with open(fname, 'w') as myfile:
+    with open(fname, "w") as myfile:
         myfile.write(tmpl)

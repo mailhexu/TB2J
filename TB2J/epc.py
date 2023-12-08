@@ -1,8 +1,8 @@
 import numpy as np
-from numpy.linalg import norm
 from .utils import match_k
 
-class WannierUmat():
+
+class WannierUmat:
     """
     Read Wannier90 Umnk matrix
     For one spin channel only.
@@ -60,12 +60,12 @@ def EPCMat():
         self.nkpts, self.nqpts, self.nph, self.nband, _ = g.shape
 
     def _build_electron_Rlist(self):
-        #TODO: implement this.
+        # TODO: implement this.
         self.Relec_list = []
         self.nRelec = len(self.Rlist_elec)
 
     def _build_phonon_Rlist(self):
-        #TODO: implement this
+        # TODO: implement this
         self.Rph_list = []
 
     def set_electron_Rlist(self, Rlist):
@@ -94,14 +94,17 @@ def EPCMat():
                 self.nkpts,
                 nwann,
                 nwann,
-            ), dtype=complex)
+            ),
+            dtype=complex,
+        )
         for ik, k in enumerate(self.kpts):
             Uk = Umat.get_U(k)
             for iq, q in enumerate(self.qpts):
                 Ukqdagger = Umat.get_U(k + q).T.conj()
                 for iv, v in enumerate(self.vlist):
                     g_ewannk[iq, iv, ik, :, :] = Ukqdagger.dot(
-                        self.g[iq, iv, ik, :, :]).dot(Uk)
+                        self.g[iq, iv, ik, :, :]
+                    ).dot(Uk)
         return g_ewannk
 
     def to_ewannR_pqv(self, Umat):
@@ -116,9 +119,9 @@ def EPCMat():
         for iR, R in enumerate(self.Relect_list):
             for ik, k in enumerate(self.klist):
                 phase = np.exp(-2j * np.pi * np.dot(k, R))
-                g_ewannR[:, :,
-                         iR, :, :] += self.kweight[:] * phase * g_ewannk[:, :,
-                                                                         ik, :, :]
+                g_ewannR[:, :, iR, :, :] += (
+                    self.kweight[:] * phase * g_ewannk[:, :, ik, :, :]
+                )
 
     def to_ewannR_pRv(self, Lmat=None):
         """

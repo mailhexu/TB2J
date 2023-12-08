@@ -25,31 +25,38 @@ def pauli_mat(nbasis, i):
     i: index of pauli dictionary.
     """
     N = nbasis // 2
-    assert (N * 2 == nbasis)
-    M = np.ones((N, N), dtype='complex')
+    assert N * 2 == nbasis
+    M = np.ones((N, N), dtype="complex")
     spm = pauli_dict[i]
-    return np.block([[M * spm[0, 0], M * spm[0, 1]],
-                     [M * spm[1, 0], M * spm[1, 1]]])
+    return np.block([[M * spm[0, 0], M * spm[0, 1]], [M * spm[1, 0], M * spm[1, 1]]])
 
 
 def pauli_decomp(M):
-    """ Given a 2*2 matrix, get the I, x, y, z component.
+    """Given a 2*2 matrix, get the I, x, y, z component.
     :param M: 2*2 matrix
     :returns:  (I, x, y, z) are four scalars.
     :rtype: same as dtype of M
     """
-    return (np.trace(s0.dot(M)) / 2, np.trace(s1.dot(M)) / 2,
-            np.trace(s2.dot(M)) / 2, np.trace(s3.dot(M)) / 2)
+    return (
+        np.trace(s0.dot(M)) / 2,
+        np.trace(s1.dot(M)) / 2,
+        np.trace(s2.dot(M)) / 2,
+        np.trace(s3.dot(M)) / 2,
+    )
 
 
 def pauli_decomp2(M):
-    """ Given a 2*2 matrix, get the I, x, y, z component. (method2)
+    """Given a 2*2 matrix, get the I, x, y, z component. (method2)
     :param M: 2*2 matrix
     :returns:  (I, x, y, z) are four scalars.
     :rtype: same as dtype of M
     """
-    return (np.sum(M * s0T) / 2, np.sum(M * s1T) / 2, np.sum(M * s2T) / 2,
-            np.sum(M * s3T) / 2)
+    return (
+        np.sum(M * s0T) / 2,
+        np.sum(M * s1T) / 2,
+        np.sum(M * s2T) / 2,
+        np.sum(M * s3T) / 2,
+    )
 
 
 def pauli_sigma_norm(M):
@@ -89,7 +96,7 @@ def pauli_block_y(M, norb):
 
 
 def pauli_block_z(M, norb):
-    """ z compoenent of a matrix, see pauli_block
+    """z compoenent of a matrix, see pauli_block
     :param M:
     :param norb:
     :returns:
@@ -103,7 +110,7 @@ def pauli_block_z(M, norb):
 
 
 def pauli_block(M, idim):
-    """ Get the I, x, y, z component of a matrix.
+    """Get the I, x, y, z component of a matrix.
     :param M: The input matrix,  aranged in four blocks:
     [[upup, updn], [dnup, dndn]]. let norb be number of orbitals in
     each block. (so M has dim 2norb1*2norb2)
@@ -148,7 +155,7 @@ def pauli_block_sigma_norm(M):
     """
     MI, Mx, My, Mz = pauli_block_all(M)
     ex, ey, ez = np.trace(Mx), np.trace(My), np.trace(Mz)
-    #ex,ey,ez = op_norm(Mx), op_norm(My), op_norm(Mz)
+    # ex,ey,ez = op_norm(Mx), op_norm(My), op_norm(Mz)
     evec = np.array((ex, ey, ez))
     evec = evec / np.linalg.norm(evec)
     return Mx * evec[0] + My * evec[1] + Mz * evec[2]

@@ -19,7 +19,7 @@ class SupercellMaker(object):
         elif sc_matrix.shape == (3, 3):
             pass
         else:
-            raise ValueError('sc_matrix should be 3 or 3*3 matrix')
+            raise ValueError("sc_matrix should be 3 or 3*3 matrix")
         self.sc_matrix = sc_matrix
         self.inv_scmat = np.linalg.inv(self.sc_matrix.T)
         self.build_sc_vec()
@@ -34,17 +34,27 @@ class SupercellMaker(object):
         """
 
     def build_sc_vec(self):
-        eps_shift = np.sqrt(
-            2.0) * 1.0E-8  # shift of the grid, so to avoid double counting
-        #max_R = np.max(np.abs(self.sc_matrix)) * 3
+        eps_shift = (
+            np.sqrt(2.0) * 1.0e-8
+        )  # shift of the grid, so to avoid double counting
+        # max_R = np.max(np.abs(self.sc_matrix)) * 3
         sc_vec = []
         newcell = self.sc_matrix
-        scorners_newcell = np.array([[0., 0., 0.], [0., 0., 1.], [0., 1., 0.],
-                                     [0., 1., 1.], [1., 0., 0.], [1., 0., 1.],
-                                     [1., 1., 0.], [1., 1., 1.]])
+        scorners_newcell = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 1.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+                [1.0, 1.0, 1.0],
+            ]
+        )
         corners = np.dot(scorners_newcell, newcell)
         scorners = corners
-        rep = np.ceil(scorners.ptp(axis=0)).astype('int') + 1
+        rep = np.ceil(scorners.ptp(axis=0)).astype("int") + 1
 
         # sc_vec: supercell vector (map atom from unit cell to supercell)
         for vec in product(range(rep[0]), range(rep[1]), range(rep[2])):
@@ -52,7 +62,8 @@ class SupercellMaker(object):
             tmp_red = self.to_red_sc(vec)
             # check if in the interior
             if (not (tmp_red <= -1.0 * eps_shift).any()) and (
-                    not (tmp_red > 1.0 - eps_shift).any()):
+                not (tmp_red > 1.0 - eps_shift).any()
+            ):
                 sc_vec.append(np.array(vec))
 
         # number of times unit cell is repeated in the super-cell
@@ -86,8 +97,9 @@ class SupercellMaker(object):
 
         # sc_vec: supercell vector (map atom from unit cell to supercell)
         sc_vec = []
-        eps_shift = np.sqrt(
-            2.0) * 1.0E-8  # shift of the grid, so to avoid double counting
+        eps_shift = (
+            np.sqrt(2.0) * 1.0e-8
+        )  # shift of the grid, so to avoid double counting
         for vec in sc_cands:
             # compute reduced coordinates of this candidate vector in the super-cell frame
             tmp_red = self.to_red_sc(vec)
@@ -157,8 +169,7 @@ class SupercellMaker(object):
         sc_ind = []
         if n_ind is None:
             n_ind = len(indices)
-        for c, cur_sc_vec in enumerate(
-                self.sc_vec):  # go over all super-cell vectors
+        for c, cur_sc_vec in enumerate(self.sc_vec):  # go over all super-cell vectors
             for ind in indices:
                 sc_ind.append(ind + c * n_ind)
         return sc_ind
@@ -194,8 +205,7 @@ class SupercellMaker(object):
         """
         (j, R) in primitive cell to (j', R') in supercell.
         """
-        Rprim, pair_ind = self._sc_R_to_pair_ind(
-            tuple(np.array(R) + np.array(Rv)))
+        Rprim, pair_ind = self._sc_R_to_pair_ind(tuple(np.array(R) + np.array(Rv)))
         return j + pair_ind * n_basis, tuple(Rprim)
 
     @lru_cache(maxsize=10000)
@@ -204,32 +214,25 @@ class SupercellMaker(object):
 
     def sc_ijR_only(self, i, j, R, n_basis):
         ret = []
-        for c, cur_sc_vec in enumerate(
-                self.sc_vec):  # go over all super-cell vectors
-            sc_part, pair_ind = self._sc_R_to_pair_ind(
-                tuple(R + cur_sc_vec))
+        for c, cur_sc_vec in enumerate(self.sc_vec):  # go over all super-cell vectors
+            sc_part, pair_ind = self._sc_R_to_pair_ind(tuple(R + cur_sc_vec))
             sc_i = i + c * n_basis
             sc_j = j + pair_ind * n_basis
             ret.append((sc_i, sc_j, tuple(sc_part)))
         return ret
 
-
     def sc_jR(self, jlist, Rjlist, n_basis):
-        sc_jlist=[]
-        sc_Rjlist=[]
-        for c, cur_sc_vec in enumerate(
-                self.sc_vec):  # go over all super-cell vectors
-            #for i , j, ind_R, val in
+        sc_jlist = []
+        sc_Rjlist = []
+        for c, cur_sc_vec in enumerate(self.sc_vec):  # go over all super-cell vectors
+            # for i , j, ind_R, val in
             for j, Rj in zip(jlist, Rjlist):
-                sc_part, pair_ind = self._sc_R_to_pair_ind(
-                    tuple(Rj + cur_sc_vec))
+                sc_part, pair_ind = self._sc_R_to_pair_ind(tuple(Rj + cur_sc_vec))
                 sc_j = j + pair_ind * n_basis
-                #ret_dict[(sc_i, sc_j, tuple(sc_part))] = val
+                # ret_dict[(sc_i, sc_j, tuple(sc_part))] = val
                 sc_jlist.append(sc_j)
                 sc_Rjlist.append(tuple(sc_part))
         return sc_jlist, sc_Rjlist
-
-
 
     def sc_ijR(self, terms, n_basis):
         """
@@ -244,16 +247,14 @@ class SupercellMaker(object):
         =======================
         """
         ret_dict = OrderedDict()
-        for c, cur_sc_vec in enumerate(
-                self.sc_vec):  # go over all super-cell vectors
-            #for i , j, ind_R, val in
+        for c, cur_sc_vec in enumerate(self.sc_vec):  # go over all super-cell vectors
+            # for i , j, ind_R, val in
             for (i, j, ind_R), val in terms.items():
-                #sc_part = np.floor(
+                # sc_part = np.floor(
                 # self.to_red_sc(ind_R + cur_sc_vec))  # round down!
 
-                #pair_ind=self._sc_R_to_pair_ind(tuple(ind_R), tuple(cur_sc_vec))
-                sc_part, pair_ind = self._sc_R_to_pair_ind(
-                    tuple(ind_R + cur_sc_vec))
+                # pair_ind=self._sc_R_to_pair_ind(tuple(ind_R), tuple(cur_sc_vec))
+                sc_part, pair_ind = self._sc_R_to_pair_ind(tuple(ind_R + cur_sc_vec))
                 # index of "from" and "to" hopping indices
                 sc_i = i + c * n_basis
                 sc_j = j + pair_ind * n_basis
@@ -269,19 +270,20 @@ class SupercellMaker(object):
         They should produce the same result.
         """
         from ase.atoms import Atoms
+
         sc_cell = self.sc_cell(atoms.get_cell())
         sc_pos = self.sc_pos(atoms.get_scaled_positions())
         sc_numbers = self.sc_trans_invariant(atoms.get_atomic_numbers())
-        sc_magmoms = self.sc_trans_invariant(
-            atoms.get_initial_magnetic_moments())
+        sc_magmoms = self.sc_trans_invariant(atoms.get_initial_magnetic_moments())
         return Atoms(
             cell=sc_cell,
             scaled_positions=sc_pos,
             numbers=sc_numbers,
-            magmoms=sc_magmoms)
+            magmoms=sc_magmoms,
+        )
 
     def phase(self, qpoint):
-        return np.exp(2j*np.pi* np.einsum('i, ji -> j', qpoint, self.sc_vec))
+        return np.exp(2j * np.pi * np.einsum("i, ji -> j", qpoint, self.sc_vec))
 
 
 def smod(x):
@@ -316,28 +318,34 @@ def map_to_primitive(atoms, primitive_atoms, offset=(0, 0, 0)):
 
 def test():
     sc_mat = np.diag([1, 1, 2])
-    #sc_mat[0, 1] = 2
-    spm = supercell_maker(sc_matrix=sc_mat)
+    # sc_mat[0, 1] = 2
+    spm = SupercellMaker(sc_matrix=sc_mat)
     print(spm.sc_cell([1, 1, 1]))
     print(spm.sc_pos([[0.5, 1, 1]]))
-    print(spm.sc_trans_invariant(['Fe']))
+    print(spm.sc_trans_invariant(["Fe"]))
     print(
-        spm.sc_ijR({
-            (0, 0, (0, 0, 1)): 1.2,
-            (1, 1, (0, 0, 1)): 1.2,
-        }, [(0, 0, 0)]))
+        spm.sc_ijR(
+            {
+                (0, 0, (0, 0, 1)): 1.2,
+                (1, 1, (0, 0, 1)): 1.2,
+            },
+            [(0, 0, 0)],
+        )
+    )
     print(spm.sc_index(indices=(1, 2)))
     print(spm.sc_index(indices=(1, 2), n_ind=4))
     from ase.atoms import Atoms
-    atoms = Atoms('HO', positions=[[0, 0, 0], [0, 0.2, 0]], cell=[1, 1, 1])
+
+    atoms = Atoms("HO", positions=[[0, 0, 0], [0, 0.2, 0]], cell=[1, 1, 1])
     from ase.build import make_supercell
+
     atoms2 = make_supercell(atoms, sc_mat)
     atoms3 = spm.sc_atoms(atoms)
-    #print(atoms2.get_positions())
-    #print(atoms3.get_positions())
-    assert (atoms2 == atoms3)
+    # print(atoms2.get_positions())
+    # print(atoms3.get_positions())
+    assert atoms2 == atoms3
     assert (atoms2.get_positions() == atoms3.get_positions()).all()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test()

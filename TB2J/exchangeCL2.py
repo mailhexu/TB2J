@@ -1,44 +1,45 @@
 """
 Exchange from Green's function
 """
-
-from collections import defaultdict
 import os
-import shutil
+from collections import defaultdict
 import numpy as np
 from TB2J.green import TBGreen
-from TB2J.utils import symbol_number, read_basis
-from TB2J.myTB import MyTB
-from ase.io import read
-from TB2J.utils import auto_assign_basis_name
 from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
 from TB2J.external import p_map
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
-from pathos.multiprocessing import ProcessPool
 
 
 class ExchangeCL2(ExchangeCL):
-
     def set_tbmodels(self, tbmodels):
         """
         only difference is a colinear tag.
         """
         self.tbmodel_up, self.tbmodel_dn = tbmodels
         self.backend_name = self.tbmodel_up.name
-        self.Gup = TBGreen(self.tbmodel_up,
-                           self.kmesh,
-                           self.efermi,
-                           use_cache=self._use_cache,
-                           # cache_path='TB2J_results/cache/spinup',
-                           nproc=self.np)
-        self.Gdn = TBGreen(self.tbmodel_dn,
-                           self.kmesh,
-                           self.efermi,
-                           use_cache=self._use_cache,
-                           # cache_path='TB2J_results/cache/spindn',
-                           nproc=self.np)
+        self.Gup = TBGreen(
+            self.tbmodel_up,
+            self.kmesh,
+            self.efermi,
+            use_cache=self._use_cache,
+            nproc=self.np,
+        )
+        self.Gdn = TBGreen(
+            self.tbmodel_dn,
+            self.kmesh,
+            self.efermi,
+            use_cache=self._use_cache,
+            nproc=self.np,
+        )
+        if self.write_density_matrix:
+            self.Gup.write_rho_R(
+                Rlist=self.Rlist, fname=os.path.join(self.output_path, "rho_up.pickle")
+            )
+            self.Gdn.write_rho_R(
+                Rlist=self.Rlist, fname=os.path.join(self.output_path, "rho_dn.pickle")
+            )
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
         self.rho_up_list = []
@@ -72,17 +73,15 @@ class ExchangeCL2(ExchangeCL):
         del self.Gdn.tbmodel
 
     def _adjust_emin(self):
-        emin_up = self.Gup.find_energy_ingap(rbound=self.efermi -
-                                             5.0) - self.efermi
-        emin_dn = self.Gdn.find_energy_ingap(rbound=self.efermi -
-                                             5.0) - self.efermi
+        emin_up = self.Gup.find_energy_ingap(rbound=self.efermi - 5.0) - self.efermi
+        emin_dn = self.Gdn.find_energy_ingap(rbound=self.efermi - 5.0) - self.efermi
         self.emin = min(emin_up, emin_dn)
         print(f"A gap is found at {self.emin}, set emin to it.")
 
     def get_Delta(self, iatom):
         orbs = self.iorb(iatom)
         return self.Delta[np.ix_(orbs, orbs)]
-        #s = self.orb_slice[iatom]
+        # s = self.orb_slice[iatom]
         # return self.Delta[s, s]
 
     def GR_atom(self, GR, iatom, jatom):
@@ -114,14 +113,21 @@ class ExchangeCL2(ExchangeCL):
                 tmp = 0.0j
                 Deltai = self.get_Delta(iatom)
                 Deltaj = self.get_Delta(jatom)
-                t = np.einsum('ij, ji-> ij', np.matmul(Deltai, Gij_up),
-                              np.matmul(Deltaj, Gji_dn))
+                t = np.einsum(
+                    "ij, ji-> ij", np.matmul(Deltai, Gij_up), np.matmul(Deltaj, Gji_dn)
+                )
 
-                if self.biquadratic:
-                    A = np.einsum('ij, ji-> ij', np.matmul(Deltai, Gij_up),
-                                  np.matmul(Deltaj, Gji_up))
-                    C = np.einsum('ij, ji-> ij', np.matmul(Deltai, Gij_down),
-                                  np.matmul(Deltaj, Gji_down))
+                # if self.biquadratic:
+                #    A = np.einsum(
+                #        "ij, ji-> ij",
+                #        np.matmul(Deltai, Gij_up),
+                #        np.matmul(Deltaj, Gji_up),
+                #    )
+                #    C = np.einsum(
+                #        "ij, ji-> ij",
+                #        np.matmul(Deltai, Gij_down),
+                #        np.matmul(Deltaj, Gji_down),
+                #    )
                 tmp = np.sum(t)
                 self.Jorb_list[(R, iatom, jatom)].append(t / (4.0 * np.pi))
                 self.JJ_list[(R, iatom, jatom)].append(tmp / (4.0 * np.pi))
@@ -153,10 +159,12 @@ class ExchangeCL2(ExchangeCL):
                     Gij_up = self.GR_atom(Gup[R], iatom, jatom)
                     Gji_dn = self.GR_atom(Gdn[Rm], jatom, iatom)
                     tmp = 0.0j
-                    #t = self.get_Delta(iatom) @ Gij_up @ self.get_Delta(jatom) @ Gji_dn
-                    t = np.einsum('ij, ji-> ij',
-                                  np.matmul(self.get_Delta(iatom), Gij_up),
-                                  np.matmul(self.get_Delta(jatom), Gji_dn))
+                    # t = self.get_Delta(iatom) @ Gij_up @ self.get_Delta(jatom) @ Gji_dn
+                    t = np.einsum(
+                        "ij, ji-> ij",
+                        np.matmul(self.get_Delta(iatom), Gij_up),
+                        np.matmul(self.get_Delta(jatom), Gji_dn),
+                    )
                     tmp = np.sum(t)
                     Jorb_list[(R, iatom, jatom)] = t / (4.0 * np.pi)
                     JJ_list[(R, iatom, jatom)] = tmp / (4.0 * np.pi)
@@ -175,18 +183,19 @@ class ExchangeCL2(ExchangeCL):
             jspin = self.ispin(jatom)
             keyspin = (R, ispin, jspin)
             is_nonself = not (R == (0, 0, 0) and iatom == jatom)
-            Jij = np.imag(val) / np.sign(
-                np.dot(self.spinat[iatom], self.spinat[jatom]))
+            Jij = np.imag(val) / np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
             Jorbij = np.imag(self.Jorb[key]) / np.sign(
-                np.dot(self.spinat[iatom], self.spinat[jatom]))
+                np.dot(self.spinat[iatom], self.spinat[jatom])
+            )
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jij
                 self.Jiso_orb[keyspin] = self.simplify_orbital_contributions(
-                    Jorbij, iatom, jatom)
+                    Jorbij, iatom, jatom
+                )
 
     def get_rho_e(self, rho_up, rho_dn):
-        #self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))
-        #self.rho_dn_list.append(-1.0 / np.pi * np.imag(rho_dn[(0,0,0)]))
+        # self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))
+        # self.rho_dn_list.append(-1.0 / np.pi * np.imag(rho_dn[(0,0,0)]))
         rup = -1.0 / np.pi * rho_up[(0, 0, 0)]
         rdn = -1.0 / np.pi * rho_dn[(0, 0, 0)]
         return rup, rdn
@@ -207,32 +216,29 @@ class ExchangeCL2(ExchangeCL):
     def finalize(self):
         self.Gup.clean_cache()
         self.Gdn.clean_cache()
-        #path = 'TB2J_results/cache'
+        # path = 'TB2J_results/cache'
         # if os.path.exists(path):
         #    shutil.rmtree(path)
 
     def integrate(self, method="simpson"):
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
-        elif method == 'simpson':
+        elif method == "simpson":
             integrate = simpson_nonuniform
         self.rho_up = np.imag(integrate(self.contour.path, self.rho_up_list))
         self.rho_dn = np.imag(integrate(self.contour.path, self.rho_dn_list))
         for R, ijpairs in self.R_ijatom_dict.items():
             for iatom, jatom in ijpairs:
                 self.Jorb[(R, iatom, jatom)] = integrate(
-                    self.contour.path, self.Jorb_list[(R, iatom, jatom)])
-                self.JJ[(R, iatom,
-                         jatom)] = integrate(self.contour.path,
-                                             self.JJ_list[(R, iatom, jatom)])
+                    self.contour.path, self.Jorb_list[(R, iatom, jatom)]
+                )
+                self.JJ[(R, iatom, jatom)] = integrate(
+                    self.contour.path, self.JJ_list[(R, iatom, jatom)]
+                )
 
     def get_AijR_rhoR(self, e):
-        GR_up, rho_up = self.Gup.get_GR(self.short_Rlist,
-                                        energy=e,
-                                        get_rho=True)
-        GR_dn, rho_dn = self.Gdn.get_GR(self.short_Rlist,
-                                        energy=e,
-                                        get_rho=True)
+        GR_up, rho_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=True)
+        GR_dn, rho_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=True)
         rup, rdn = self.get_rho_e(rho_up, rho_dn)
         Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
         return rup, rdn, Jorb_list, JJ_list
@@ -245,33 +251,27 @@ class ExchangeCL2(ExchangeCL):
 
         npole = len(self.contour.path)
         if self.np == 1:
-            results = map(self.get_AijR_rhoR,
-                          tqdm(self.contour.path, total=npole))
+            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
         else:
-            #pool = ProcessPool(nodes=self.np)
-            #results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_map(self.get_AijR_rhoR,
-                            self.contour.path,
-                            num_cpus=self.np)
+            # pool = ProcessPool(nodes=self.np)
+            # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
+            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
         for i, result in enumerate(results):
             rup, rdn, Jorb_list, JJ_list = result
             self.rho_up_list.append(rup)
             self.rho_dn_list.append(rdn)
             for iR, R in enumerate(self.R_ijatom_dict):
-                for (iatom, jatom) in self.R_ijatom_dict[R]:
+                for iatom, jatom in self.R_ijatom_dict[R]:
                     key = (R, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
         if self.np > 1:
             pass
-            # pool.close()
-            # pool.join()
-            # pool.clear()
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()
 
-    def write_output(self, path='TB2J_results'):
+    def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
             atoms=self.atoms,

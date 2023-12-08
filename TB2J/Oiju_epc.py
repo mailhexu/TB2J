@@ -10,25 +10,26 @@ from collections import defaultdict
 
 class OijuWannEPC(ExchangeCL2):
     def __init__(
-            self,
-            tbmodels,
-            atoms,
-            efermi,
-            basis=None,
-            magnetic_elements=[],
-            kmesh=[4, 4, 4],
-            emin=-15,  # integration lower bound, relative to fermi energy
-            emax=0.05,  # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-            height=0.5,  # the delta in the (i delta) in green's function to prevent divergence
-            nz1=150,  # grid from emin to emin+(i delta)
-            nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-            nz3=150,  # grid from emax + (i delta) to emax
-            exclude_orbs=[],  #
-            Rmesh=[0, 0, 0],  # Rmesh.
-            description='',
-            qmesh=[2, 2, 2],
-            EPCmats=None,
-            WannUmats=None):
+        self,
+        tbmodels,
+        atoms,
+        efermi,
+        basis=None,
+        magnetic_elements=[],
+        kmesh=[4, 4, 4],
+        emin=-15,  # integration lower bound, relative to fermi energy
+        emax=0.05,  # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
+        height=0.5,  # the delta in the (i delta) in green's function to prevent divergence
+        nz1=150,  # grid from emin to emin+(i delta)
+        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
+        nz3=150,  # grid from emax + (i delta) to emax
+        exclude_orbs=[],  #
+        Rmesh=[0, 0, 0],  # Rmesh.
+        description="",
+        qmesh=[2, 2, 2],
+        EPCmats=None,
+        WannUmats=None,
+    ):
         super(self).__init__(
             tbmodels,
             atoms,
@@ -45,7 +46,7 @@ class OijuWannEPC(ExchangeCL2):
             nz3=150,  # grid from emax + (i delta) to emax
             exclude_orbs=[],  #
             Rmesh=[0, 0, 0],  # Rmesh.
-            description='',
+            description="",
         )
 
         # prepare EPC in electron wannier space
@@ -56,12 +57,20 @@ class OijuWannEPC(ExchangeCL2):
         # prepare dDelta
         self.calc_dDelta()
 
+        self._kmap = None
+
     def prepare_epc_wann(self):
         """
         prepare EPC in electron wannier function representation
         """
         self.EPCmat_wann_up = self.EPCmat_up.to_wann(self.Umat_up)
         self.EPCmat_wann_dn = self.EPCmat_dn.to_wann(self.Umat_dn)
+
+    def get_iq(self, q):
+        if self._kmap is None:
+            self._kmap = {}
+        for i, q in enumerate(self.klist):
+            self._kmap[tuple(q)] = i
 
     def calc_dDelta(self):
         """
@@ -75,14 +84,16 @@ class OijuWannEPC(ExchangeCL2):
         the result will be a matrix[nphon, nwann, nwann]
         """
         self.dDelta = np.zeros((self.nphon, self.nwann, self.nwann))
-        #iq, iv, iR
-        iq0 = iqlist[(0, 0, 0)]
+        # iq, iv, iR
+        # iq0 = self.iqlist[(0, 0, 0)]
+        iq0 = self.get_iq((0, 0, 0))
 
         for iv in range(self.nphon):
             for ik, k in enumerate(self.klist):
                 self.dDelta[iv] += self.kweight[ik] * (
-                    self.EPCmat_wann_up[iq0, iv, ik, :, :] -
-                    self.EPCmat_wann_dn[iq0, iv, ik, :, :])
+                    self.EPCmat_wann_up[iq0, iv, ik, :, :]
+                    - self.EPCmat_wann_dn[iq0, iv, ik, :, :]
+                )
 
     def deltaG_kvq(self, Gk, Umat, EPCmat):
         pass
@@ -94,8 +105,9 @@ class OijuWannEPC(ExchangeCL2):
         iorbs = self.iorb(iatom)
         jorbs = self.iorb(jatom)
 
-        self.get_Delta(iatom) @ dGR_vq_up[np.ix_(
-            iorbs, jorbs)] @ self.get_Delta(jatom) @ GR_dn
+        self.get_Delta(iatom) @ dGR_vq_up[np.ix_(iorbs, jorbs)] @ self.get_Delta(
+            jatom
+        ) @ GR_dn
 
     def _build_Rjdict(self, Rjlist):
         for iRj, Rj in enumerate(Rjlist):
@@ -130,10 +142,8 @@ class OijuWannEPC(ExchangeCL2):
                     for iR, Rj in enumerate(Rj_list):
                         Rj = np.array(Rj)
                         phase = np.exp(-2j * np.pi * np.dot(Rj, k))
-                        GR_up[self.iRj(
-                            Rj)] += Gk_up * (phase * self.kweights[ik])
-                        GR_dn[self.iRj(
-                            Rj)] += Gk_dn * (phase * self.kweights[ik])
+                        GR_up[self.iRj(Rj)] += Gk_up * (phase * self.kweights[ik])
+                        GR_dn[self.iRj(Rj)] += Gk_dn * (phase * self.kweights[ik])
 
                     # deltaG(k, v, q, energy)
                     dGk_vq_up = self.deltaG_kvq(Gk_up, self.EPCmat_wann_up)
@@ -142,43 +152,39 @@ class OijuWannEPC(ExchangeCL2):
                     for iR, Rj in enumerate(Rj_list):
                         phase = np.exp(-2j * np.pi * np.dot(Rj, k))
                         # nwann*nwann matrix
-                        dGR_vq_up[
-                            Rj] += dGk_vq_up * (phase * self.kweights[ik])
-                        dGR_vq_dn[
-                            Rj] += dGk_vq_dn * (phase * self.kweights[ik])
+                        dGR_vq_up[Rj] += dGk_vq_up * (phase * self.kweights[ik])
+                        dGR_vq_dn[Rj] += dGk_vq_dn * (phase * self.kweights[ik])
 
                     for iatom in self.iatom_list:
                         for jatom in self.iatom_list:
-                            self.Oijvq[(iatom, jatom, Rj, v,
-                                        q)] += self.get_Oijvq(
-                                            GR_up,
-                                            GR_dn,
-                                            dGR_vq_up,
-                                            dGR_vq_dn,
-                                            iatom,
-                                            jatom,
-                                            Rj,
-                                        )
+                            self.Oijvq[(iatom, jatom, Rj, v, q)] += self.get_Oijvq(
+                                GR_up,
+                                GR_dn,
+                                dGR_vq_up,
+                                dGR_vq_dn,
+                                iatom,
+                                jatom,
+                                Rj,
+                            )
                             for iRu, Ru in enumerate(self.Rulist):
                                 phase_Ru = np.exp(-2j * np.pi * np.dot(q, Ru))
                                 # u=v for atomic displacement.
-                                self.Oiju[(iatom, jatom, Rj, v,
-                                           Ru)] += phase_Ru * self.Oijvq[(
-                                               iatom, jatom, Rj, v, q)]
+                                self.Oiju[(iatom, jatom, Rj, v, Ru)] += (
+                                    phase_Ru * self.Oijvq[(iatom, jatom, Rj, v, q)]
+                                )
 
     def calculate_all(self):
         print("Green's function Calculation started.")
         widgets = [
-            ' [',
+            " [",
             progressbar.Timer(),
-            '] ',
+            "] ",
             progressbar.Bar(),
-            ' (',
+            " (",
             progressbar.ETA(),
-            ') ',
+            ") ",
         ]
-        bar = progressbar.ProgressBar(
-            maxval=len(self.elist) - 1, widgets=widgets)
+        bar = progressbar.ProgressBar(maxval=len(self.elist) - 1, widgets=widgets)
         bar.start()
         for ie in range(len(self.elist[:-1])):
             bar.update(ie)

@@ -1,5 +1,4 @@
-
-TB2J_ref="""
+TB2J_ref = """
 % The implementation of TB2J:
 
 @article{he2021tb2j,
@@ -18,7 +17,7 @@ author = {Xu He and Nicole Helbig and Matthieu J. Verstraete and Eric Bousquet},
 """
 
 
-LKAG_ref="""
+LKAG_ref = """
 % The original idea of the magnetic force theorem method: 
 
 @article{LKAG,
@@ -38,7 +37,7 @@ author = {A.I. Liechtenstein and M.I. Katsnelson and V.P. Antropov and V.A. Guba
 """
 
 
-Wannier_LKAG_ref="""
+Wannier_LKAG_ref = """
 % Uisng Wannier function Hamiltonian:
 
 @article{PhysRevB.91.224405,
@@ -60,7 +59,7 @@ Wannier_LKAG_ref="""
 """
 
 
-NonCollinear_ref="""
+NonCollinear_ref = """
 % Extension to DMI and anisotropic exchange:
 
 @article{Antropov1997,
@@ -77,7 +76,7 @@ NonCollinear_ref="""
 """
 
 
-downfolding_ref="""
+downfolding_ref = """
 % Downfolding method to include the ligand contribution:
 
 @article{PhysRevB.103.104428,
@@ -101,7 +100,7 @@ downfolding_ref="""
 
 def print_bib():
     print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-    print("%     We recommend to cite the following references:       %") 
+    print("%     We recommend to cite the following references:       %")
     print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
     print(TB2J_ref)
 
@@ -111,8 +110,5 @@ def print_bib():
     print(downfolding_ref)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     print_bib()
-
-
-

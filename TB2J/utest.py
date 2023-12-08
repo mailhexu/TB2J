@@ -4,7 +4,7 @@ from TB2J.myTB2 import MyTB
 from TB2J.pauli import *  # pauli_block
 from TB2J.green_SOC import TBGreen
 from TB2J.utils import auto_assign_basis_name
-from TB2J.exchange import ExchangeNCL, gen_exchange
+from TB2J.manager import gen_exchange
 
 
 class AssignTest(unittest.TestCase):
@@ -15,40 +15,41 @@ class AssignTest(unittest.TestCase):
 class PauliTest(unittest.TestCase):
     def test_pauli(self):
         M = np.array([[1 - 3j, 9 + 2j], [3 - 9j, -4]])
-        #print(np.sum(M * s1T) * s1)
+        # print(np.sum(M * s1T) * s1)
         M0, Mx, My, Mz = pauli_decomp(M)
-        #print(M0, Mx, My, Mz)
-        #print(sum([M0 * s0, Mx * s1, My * s2, Mz * s3]))
+        # print(M0, Mx, My, Mz)
+        # print(sum([M0 * s0, Mx * s1, My * s2, Mz * s3]))
 
-        MI = (pauli_block_I(M, 1))
-        Mx = (pauli_block_x(M, 1))
-        My = (pauli_block_y(M, 1))
-        Mz = (pauli_block_z(M, 1))
+        MI = pauli_block_I(M, 1)
+        Mx = pauli_block_x(M, 1)
+        My = pauli_block_y(M, 1)
+        Mz = pauli_block_z(M, 1)
 
         n = 8
         hn = n // 2
         M = np.random.random([n, n]) + 0.0j
-        MI = (pauli_block_I(M, hn))
-        Mx = (pauli_block_x(M, hn))
-        My = (pauli_block_y(M, hn))
-        Mz = (pauli_block_z(M, hn))
+        MI = pauli_block_I(M, hn)
+        Mx = pauli_block_x(M, hn)
+        My = pauli_block_y(M, hn)
+        Mz = pauli_block_z(M, hn)
 
 
 class TBTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.path = '/media/hexu/Backup/materials/SOC/RuCl3_FM_SOC/'
+        cls.path = "/media/hexu/Backup/materials/SOC/RuCl3_FM_SOC/"
         # m = MyTB.read_from_wannier_dir(
         #    path=self.path, prefix='wannier90', poscar='POSCAR', nls=True)
         # m.save('RuCl3.nc')
-        cls.tbmodel = MyTB.load_MyTB('RuCl3.nc')
+        cls.tbmodel = MyTB.load_MyTB("RuCl3.nc")
         cls.positions = cls.tbmodel.xred
         cls.atoms = cls.tbmodel.atoms
 
     def test_read_wannier(self):
         m = MyTB.read_from_wannier_dir(
-            path=self.path, prefix='wannier90', poscar='POSCAR', nls=True)
-        m.save('RuCl3.nc')
+            path=self.path, prefix="wannier90", poscar="POSCAR", nls=True
+        )
+        m.save("RuCl3.nc")
 
     def test_saveload_wannier(self):
         # test onsite energy
@@ -73,10 +74,11 @@ class TBTest(unittest.TestCase):
 
     def test_assign_basis(self):
         basis_dict, shifted_pos = auto_assign_basis_name(
-            positions=self.tbmodel.xred, atoms=self.atoms)
+            positions=self.tbmodel.xred, atoms=self.atoms
+        )
         # Note that it starts from 1.
-        self.assertEqual(basis_dict['Ru1|orb_1'], 1)
-        self.assertEqual(basis_dict['Ru1|orb_6'], 29)
+        self.assertEqual(basis_dict["Ru1|orb_1"], 1)
+        self.assertEqual(basis_dict["Ru1|orb_6"], 29)
 
     def test_Green(self):
         G = TBGreen(
@@ -93,7 +95,7 @@ class TBTest(unittest.TestCase):
 class ExchangeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = '/media/hexu/Backup/materials/SOC/RuCl3_FM_SOC/'
+        path = "/media/hexu/Backup/materials/SOC/RuCl3_FM_SOC/"
         cls.exchange = gen_exchange(
             kmesh=[6, 6, 3],
             Rmesh=[1, 1, 1],
@@ -102,7 +104,8 @@ class ExchangeTest(unittest.TestCase):
             nz2=300,
             path=path,
             efermi=-3.25,
-            magnetic_elements=['Ru'])
+            magnetic_elements=["Ru"],
+        )
 
     def test_orb_dict(self):
         print(self.exchange.orb_dict)

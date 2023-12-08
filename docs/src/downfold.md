@@ -2,7 +2,7 @@
 
 In some structures, the spin magnetic momentum on the ligand are . They are however, not due to the spin splitting of the ligand atom, but the hybridization to the orbitals of surrounding  atoms (often transitional metals). The refore, the spin will move with the 
 
-In these cases, a "downfolding" method could be used to used to get an effective Heisenberg model with only the transitional metal spins as independent variables from the exchange parameters with both transitional metal spins and ligand spins. 
+In these cases, a "downfolding" method could be used to used to get an effective Heisenberg model with only the transitional metal spins as independent variables from the exchange parameters with both transitional metal spins and ligand spins.  Note that the current method is only valid for ferromagnetic structures. The extenstion to antiferromagnetic and non-collinear magnetic structures are under development.  
 
 
 

@@ -1,5 +1,4 @@
 import numpy as np
-from ase.units import eV, Hartree, Bohr, Ry, J
 import os
 from itertools import groupby
 
@@ -12,7 +11,7 @@ def write_tom_ucf(cls, fname):
     """
     natom = len(cls.atoms)
     nmatom = len(list(filter(lambda x: x > -1, cls.index_spin)))
-    with open(fname, 'w') as myfile:
+    with open(fname, "w") as myfile:
         myfile.write("%s\n" % nmatom)
         myfile.write("%s\n" % nmatom)
         for i in range(natom):
@@ -20,7 +19,7 @@ def write_tom_ucf(cls, fname):
             id_spin = cls.index_spin[i]
             if id_spin > -1:
                 pos = cls.atoms.get_scaled_positions()[i]
-                ms = np.sqrt(np.sum(np.array(cls.spinat[i])**2))
+                ms = np.sqrt(np.sum(np.array(cls.spinat[i]) ** 2))
                 spin = np.array(cls.spinat[i]) / ms
                 damping = cls.damping[i]
                 gyro_ratio = cls.gyro_ratio[i]
@@ -60,14 +59,14 @@ def write_tom_exch(cls, fname):
     # prepare
     maxInt = 0
     if cls.has_exchange:
-        for key, group in groupby(
-                cls.exchange_Jdict.keys(), lambda x: (x[1], x[2])):
+        for key, group in groupby(cls.exchange_Jdict.keys(), lambda x: (x[1], x[2])):
             l = len(list(group))
             if l > maxInt:
                 maxInt = l
 
-    with open(fname, 'w') as myfile:
-        myfile.write("""exchange:
+    with open(fname, "w") as myfile:
+        myfile.write(
+            """exchange:
 {
 FourSpin = FALSE;
 Scale = [ 1.0 , 1.0 , 1.0 ];
@@ -75,35 +74,46 @@ MaxInteractions = %s;
 TruncateExchange = FALSE;
 };
 
-        """ % maxInt)
+        """
+            % maxInt
+        )
         if cls.has_exchange:
             for key, group in groupby(
-                    cls.exchange_Jdict.keys(), lambda x: (x[1], x[2])):
+                cls.exchange_Jdict.keys(), lambda x: (x[1], x[2])
+            ):
                 group = list(group)
                 myfile.write("exchange_{}_{}:\n".format(key[0], key[1]))
                 myfile.write("{ \n")
-                myfile.write("Num_Interactions = {};\n".format(
-                    len(list(group))))
+                myfile.write("Num_Interactions = {};\n".format(len(list(group))))
                 myfile.write('units = "eV";\n')
                 for i, k in enumerate(group):
                     myfile.write(
-                        "UnitCell{} = [{:.5e} , {:.5e} , {:.5e} ];\n".
-                        format(i + 1, k[0][0], k[0][1], k[0][2]))
+                        "UnitCell{} = [{:.5e} , {:.5e} , {:.5e} ];\n".format(
+                            i + 1, k[0][0], k[0][1], k[0][2]
+                        )
+                    )
                     myfile.write(
                         "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
-                            i + 1, 1, cls.exchange_Jdict[k], 0.0, 0.0))
+                            i + 1, 1, cls.exchange_Jdict[k], 0.0, 0.0
+                        )
+                    )
                     myfile.write(
                         "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
-                            i + 1, 2, 0.0, cls.exchange_Jdict[k], 0.0))
+                            i + 1, 2, 0.0, cls.exchange_Jdict[k], 0.0
+                        )
+                    )
                     myfile.write(
                         "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
-                            i + 1, 3, 0.0, 0.0, cls.exchange_Jdict[k]))
+                            i + 1, 3, 0.0, 0.0, cls.exchange_Jdict[k]
+                        )
+                    )
                 myfile.write("};\n")
+
 
 # Tom's ASD code
 
 
-def write_tom_format(cls, path='TB2J_results/TomASD', prefix='exchange'):
+def write_tom_format(cls, path="TB2J_results/TomASD", prefix="exchange"):
     if not os.path.exists(path):
         os.makedirs(path)
     exch_fname = os.path.join(path, "%s.exch" % prefix)
