@@ -1,7 +1,6 @@
 import os
 import copy
 import numpy as np
-from itertools import product
 from TB2J.io_exchange import SpinIO
 
 I = np.eye(3)
