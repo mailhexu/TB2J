@@ -4,6 +4,7 @@ import numpy as np
 from itertools import product
 from TB2J.io_exchange import SpinIO
 
+I = np.eye(3)
 uz = np.array([[0.0, 0.0, 1.0]])
 
 def get_rotation_matrix(magmoms):
