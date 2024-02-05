@@ -19,6 +19,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from TB2J.spinham.spin_api import SpinModel
 from TB2J.io_exchange.io_txt import write_Jq_info
+from TB2J.utils import symbol_number
 
 
 class SpinIO(object):
@@ -212,7 +213,23 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def get_spin_ispin(self, i):
         return self.spinat[self.iatom(i)]
 
+    def get_symbol_number_ispin(self, symnum):
+        """
+        Return the spin index for a given symbol number.
+        """
+        symdict = symbol_number(self.atoms)
+        return self.index_spin[symdict[symnum]]
+
+    def i_spin(self, i):
+        if isinstance(i, int):
+            return i
+        elif isinstance(i, str):
+            return self.get_symbol_number_ispin(i)
+        else:
+            raise ValueError("i must be either an integer or a string.")
+
     def get_charge_ispin(self, i):
+        i = self.i_spin(i)
         return self.charges[self.iatom(i)]
 
     def get_spin_iatom(self, iatom):
@@ -222,6 +239,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return self.charges[iatom]
 
     def get_J(self, i, j, R, default=None):
+        i = self.i_spin(i)
+        j = self.i_spin(j)
         key = (
             tuple(R),
             i,
@@ -233,6 +252,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             return default
 
     def get_Jiso(self, i, j, R, default=None):
+        i = self.i_spin(i)
+        j = self.i_spin(j)
         key = (
             tuple(R),
             i,
@@ -244,6 +265,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             return default
 
     def get_DMI(self, i, j, R, default=None):
+        i = self.i_spin(i)
+        j = self.i_spin(j)
         key = (
             tuple(R),
             i,
@@ -261,6 +284,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         param j: spin index j
         param R (tuple of integers): cell index R
         """
+        i = self.i_spin(i)
+        j = self.i_spin(j)
         key = (
             tuple(R),
             i,
@@ -278,6 +303,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         param j: spin index j
         param R (tuple of integers): cell index R
         """
+        i = self.i_spin(i)
+        j = self.i_spin(j)
         if iso_only:
             Jtensor = np.eye(3) * self.get_J(i, j, R)
         else:
@@ -295,6 +322,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         returns:
             Jmat: (3*nspin,3*nspin) matrix.
         """
+        i = self.i_spin(i)
+        j = self.i_spin(j)
         n3 = self.nspin * 3
         Jmat = np.zeros((n3, n3), dtype=float)
         for i in range(self.nspin):

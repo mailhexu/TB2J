@@ -284,6 +284,21 @@ def gen_exchange_siesta(
         raise ImportError(
             f"sisl version is {sisl.__version__}, but should be larger than 0.10.0."
         )
+
+    include_orbs = {}
+    if isinstance(magnetic_elements, str):
+        magnetic_elements = [magnetic_elements]
+    for element in magnetic_elements:
+        if "_" in element:
+            elem = element.split("_")[0]
+            orb = element.split("_")[1:]
+            include_orbs[elem] = orb
+        else:
+            include_orbs[element] = None
+    magnetic_elements = list(include_orbs.keys())
+    print(magnetic_elements)
+    print(include_orbs)
+
     fdf = sisl.get_sile(fdf_fname)
     geom = fdf.read_geometry()
     H = fdf.read_hamiltonian()
