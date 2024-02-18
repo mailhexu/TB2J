@@ -77,7 +77,6 @@ class AbacusWrapper(AbstractTB):
     def HSE_k(self, kpt, convention=2):
         H, S = self.gen_ham(tuple(kpt), convention=convention)
         evals, evecs = eigh(H, S)
-        print(f"eigenvalues at k={kpt} is {evals}")
         return H, S, evals, evecs
 
     def HS_and_eigen(self, kpts, convention=2):
@@ -98,19 +97,19 @@ class AbacusWrapper(AbstractTB):
 
 class AbacusParser:
     def __init__(self, spin=None, outpath=None, binary=False):
+        self.outpath = outpath
         if spin is None:
-            self.spin = self.get_nspin()
+            self.spin = self.read_spin()
         else:
             self.spin = spin
-        self.prefix = outpath
         self.binary = binary
         # read the information
         self.read_atoms()
         self.efermi = self.read_efermi()
         self.read_basis()
 
-    def get_nspin(self):
-        with open(str(Path(self.prefix) / "running_scf.log")) as myfile:
+    def read_spin(self):
+        with open(str(Path(self.outpath) / "running_scf.log")) as myfile:
             for line in myfile:
                 if line.strip().startswith("nspin"):
                     nspin = int(line.strip().split()[-1])
@@ -124,16 +123,16 @@ class AbacusParser:
                         raise ValueError("nspin should be either 1 or 4.")
 
     def read_atoms(self):
-        self.atoms = read_abacus(str(Path(self.prefix) / "../Stru"))
+        self.atoms = read_abacus(str(Path(self.outpath) / "../Stru"))
         return self.atoms
 
     def read_basis(self):
-        fname = str(Path(self.prefix) / "Orbital")
+        fname = str(Path(self.outpath) / "Orbital")
         self.basis = parse_abacus_orbital(fname)
         return self.basis
 
     def read_HSR_collinear(self, binary=None):
-        p = Path(self.prefix)
+        p = Path(self.outpath)
         SR_filename = p / "data-SR-sparse_SPIN0.csr"
         HR_filename = [p / "data-HR-sparse_SPIN0.csr", p / "data-HR-sparse_SPIN1.csr"]
         nbasis, Rlist, HR_up, HR_dn, SR = read_HR_SR(
@@ -144,8 +143,8 @@ class AbacusParser:
         )
         return nbasis, Rlist, HR_up, HR_dn, SR
 
-    def Read_HSR_noncollinear(self, prefix, binary=None, nspin=None):
-        p = Path(self.prefix)
+    def Read_HSR_noncollinear(self, binary=None):
+        p = Path(self.outpath)
         SR_filename = (p / "data-SR-sparse_SPIN0.csr").as_posix()
         HR_filename = p / "data-HR-sparse_SPIN0.csr".as_posix()
         self.nbasis, self.Rlist, self.HR, self.SR = read_HR_SR(
@@ -179,7 +178,7 @@ class AbacusParser:
         Reading the efermi from the scf log file.
         Search for the line EFERMI = xxxxx eV
         """
-        fname = str(Path(self.prefix) / "running_scf.log")
+        fname = str(Path(self.outpath) / "running_scf.log")
         efermi = None
         with open(fname, "r") as myfile:
             for line in myfile:

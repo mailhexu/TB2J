@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+The main function to compute exchange interaction from abacus data
+"""
+
 import os
 from pathlib import Path
 from TB2J.abacus.abacus_wrapper import AbacusParser
@@ -11,7 +17,7 @@ def gen_exchange_abacus(
     binary=False,
     magnetic_elements=[],
     include_orbs=[],
-    kmesh=[5, 5, 5],
+    kmesh=[7, 7, 7],
     emin=-13.0,
     emax=0.00,
     nz=100,

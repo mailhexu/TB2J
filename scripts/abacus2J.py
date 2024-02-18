@@ -16,8 +16,8 @@ def run_abacus2J():
     )
 
     parser.add_argument(
-        "--label",
-        help="the label of the abacus calculation. There should be an output directory called OUT.label",
+        "--suffix",
+        help="the label of the abacus calculation. There should be an output directory called OUT.suffix",
         default="abacus",
         type=str,
     )
@@ -131,13 +131,12 @@ def run_abacus2J():
 
     gen_exchange_abacus(
         path=args.path,
-        label=args.label,
+        suffix=args.suffix,
         kmesh=args.kmesh,
         magnetic_elements=list(include_orbs.keys()),
         include_orbs=include_orbs,
         Rcut=args.rcut,
         emin=args.emin,
-        emax=args.emax,
         nz=args.nz,
         description=args.description,
         output_path=args.output_path,
