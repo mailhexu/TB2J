@@ -24,6 +24,11 @@ def symbol_number(symbols):
     return result
 
 
+def symbol_number_list(symbols):
+    sdict = symbol_number(symbols)
+    return tuple(sdict.keys())
+
+
 def read_basis(fname):
     """
     return basis names from file (often named as basis.txt). Return a dict. key: basis name. value: basis index, from 0
