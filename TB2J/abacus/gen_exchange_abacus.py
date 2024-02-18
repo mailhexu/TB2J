@@ -7,8 +7,7 @@ from TB2J.exchangeCL2 import ExchangeCL2
 
 def gen_exchange_abacus(
     path,
-    label="Abacus",
-    collinear=True,
+    suffix="Abacus",
     binary=False,
     magnetic_elements=[],
     include_orbs=[],
@@ -24,15 +23,15 @@ def gen_exchange_abacus(
     orb_decomposition=False,
     description=None,
 ):
-    outpath = Path(path) / f"OUT.{label}"
+    outpath = Path(path) / f"OUT.{suffix}"
 
     if not os.path.exists(outpath):
         raise ValueError(
-            f"The path {outpath} does not exist. Please check if the path and the label is correct"
+            f"The path {outpath} does not exist. Please check if the path and the suffix is correct"
         )
-
-    if collinear:
-        parser = AbacusParser(outpath=outpath, spin="collinear", binary=binary)
+    parser = AbacusParser(outpath=outpath, spin=None, binary=binary)
+    spin = parser.read_spin()
+    if spin == "collinear":
         tbmodel_up, tbmodel_dn = parser.get_models()
         efermi = parser.read_efermi()
         print("Starting to calculate exchange.")
@@ -61,7 +60,6 @@ data directory: {outpath}
         print("\n")
         print(f"All calculation finsihed. The results are in {output_path} directory.")
     else:
-        parser = AbacusParser(outpath=outpath, spin="noncollinear", binary=binary)
         tbmodel = parser.get_models()
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Abacus data.
