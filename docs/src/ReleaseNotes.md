@@ -1,5 +1,9 @@
 ## Release Notes
 ------------------------------------------------------------------------
+#### v0.8.0 Febrary 18, 2024
+Add a new DFT code interface to Abacus! Thanks to Zhenxiong Shen and Gan Jin from the Abacus 
+ team for providing the coding for parsing the Abacus output files. 
+In this version the colliear spin is implemented and the non-collinear will be soon added. 
 
 
 #### v0.7.7 October 11, 2023
