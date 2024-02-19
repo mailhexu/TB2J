@@ -78,6 +78,7 @@ def parse_tb_file(filename):
             io.readline()  # empty line
         # set the onsite term to half
         np.fill_diagonal(H[(0, 0, 0)], H[(0, 0, 0)].diagonal() / 2.0)
+        print("onsite H from TB: ", H[(0, 0, 0)].diagonal())
 
         iR0 = find_Rvectors(Rvectors, [0, 0, 0])
         for iR in range(n_Rvecs):
@@ -97,7 +98,6 @@ def parse_tb_file(filename):
                     pos_operator[iR, m, n, 0] = complex(float(line[2]), float(line[3]))
                     pos_operator[iR, m, n, 1] = complex(float(line[4]), float(line[5]))
                     pos_operator[iR, m, n, 2] = complex(float(line[6]), float(line[7]))
-
             io.readline()
 
         print(

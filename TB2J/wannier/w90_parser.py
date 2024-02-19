@@ -67,6 +67,7 @@ def parse_ham(fname="wannier90_hr.dat", cutoff=None):
                 H_mnR[R][m, n] = val / 2.0
         else:
             H_mnR[R][m, n] = val / 2.0
+        print("onsite H form hr:", H_mnR[(0, 0, 0)].diagonal())
     return n_wann, H_mnR, R_degens
 
 
