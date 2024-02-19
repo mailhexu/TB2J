@@ -10,7 +10,7 @@ TB2J is a open source python package for calculating the magnetic interaction pa
 The features include:
  - Calculates  parameters in Heisenberg model, including isotropic exchange, anisotropic exchange, Dyzanoshinskii-Moriya interaction.
  - Can use the input from many DFT codes with Wannier90, e.g. Abinit, Quantum Espresso, Siesta, VASP, etc.
- - Can use input from DFT codes with numerical orbitals from Siesta.
+ - Can use input from DFT codes with numerical orbitals from Siesta, OpenMX and Abacus.
  - Calculate magnon band structure from the Heisenberg Hamiltonian.
  - Generate input for spin dynamics/Monte Carlo codes MULTIBINIT.
  - Require only ground state DFT calculation.

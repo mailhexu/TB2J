@@ -1,17 +1,27 @@
 ### Use TB2J with Abacus
 
-In this tutorial we will learn how to use TB2J with Abacus.  The TB2J-Abacus interface is available since TB2J version 0.8.0.
+In this tutorial we will learn how to use TB2J with Abacus.  The TB2J-Abacus interface is available since TB2J version 0.8.0. There are three types of basis set in Abacus, the plane-wave (PW), the linear-combinatio of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. For the other type of basis set, the Wannier90 interace can be used instead.  In this tutorial we will use LCAO. 
 
 
 #### Collinear calculation without SOC
 
-Let's start from the example of Fe. The input files used can be found in the examples/Abacus/Fe directory. 
+Let's start from the example of Fe. The example files can be found here: https://github.com/mailhexu/TB2J_examples/tree/master/Abacus/Fe_no_SOC . 
 
-First do the abacus calculation there. There are three types of basis set in Abacus, the plane-wave (PW), the linear-combinatio of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. In this tutorial we will take this approach. 
+First do the abacus calculation. Note that the Kohn-Sham Hamiltonian and the overlap matrix is needed as the input to TB2J. We need to put 
 
-For the other type of basis set, the Wannier90 interace can be used instead. 
+``` 
+out_mat_hs2  1 
+```
 
- In this calculation, we set the suffix to Fe. When the DFT calculation is finished. 
+in the Abucus INPUT file, so that the two files will be written. In the INPUT, the line
+
+```
+sufffix Fe
+```
+
+specifies the suffix of the output. Thus the output will be in the directory OUT.Fe when the DFT calculation is finished.
+
+ In this calculation, we set the  path to the directory of the DFT calculation, which is the current directory (". ") and the suffix to Fe. 
 
 Now we can run the abacus2J.py command to calculate the exchange parameters:
 
@@ -19,9 +29,13 @@ Now we can run the abacus2J.py command to calculate the exchange parameters:
 abacus2J.py --path . --suffix Fe --elements Fe  --kmesh 7 7 7
 ```
 
-This first read the siesta.fdf, the input file for Siesta. It then read the Hamiltonian and the overlap matrices, calculate the J with a 7x7x7 k-point grid. This allows for the calculation of exchange between spin pairs between 7x7x7 supercell. 
+This first read the atomic structures from th STRU file,  then read the Hamiltonian and the overlap matrices stored in the files named starting from "data-HR-" and "data-SR-" files.  It also read the fermi energy from the OUT.Fe/running_scf.log file. 
+
+With the command above, we can calculate the J with a 7x7x7 k-point grid. This allows for the calculation of exchange between spin pairs between 7x7x7 supercell. 
 
 
+
+#### Parameters of abacus2J.py
 
 We can use the command 
 
