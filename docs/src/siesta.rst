@@ -27,7 +27,9 @@ Now we can run the siesta2J.py command to calculate the exchange parameters:
 
    siesta2J.py --fdf_fname siesta.fdf --elements Fe --kmesh 7 7 7
 
-This first read the siesta.fdf, the input file for Siesta. It then read the Hamiltonian and the overlap matrices, calculate the J with a :math:`7\times 7 \times 7` k-point grid. This allows for the calculation of exchange between spin pairs between :math:`i` and :math:`j` in a :math:`7\times 7 \times 7` supercell, where :math:`i` is fixed in the center cell.
+This first read the siesta.fdf, the input file for Siesta. It then read the Hamiltonian and the overlap matrices, calculate the J with a :math:`7\times 7 \times 7` k-point grid. This allows for the calculation of exchange between spin pairs between :math:`i` and :math:`j` in a :math:`7\times 7 \times 7` supercell, where :math:`i` is fixed in the center cell. Note: the kmesh is not dense enough for a practical calculation. Please check the convergence. 
+
+
 
 Non-collinear calculation
 -----------------------------------------
