@@ -33,6 +33,17 @@ This first read the atomic structures from th STRU file,  then read the Hamilton
 
 With the command above, we can calculate the J with a 7x7x7 k-point grid. This allows for the calculation of exchange between spin pairs between 7x7x7 supercell.  Note: the kmesh is not dense enough for a practical calculation. For a very dense k-mesh, the --rcut option can be used to set the maximum distance of the magnetic interactions and thus reduce the computation cost. But be sure that the cutoff is not too small. 
 
+#### Non-collinear calculation with SOC
+
+The DMI and anisotropic exchange are result of the SOC, therefore requires the DFT calculation to be done with SOC enabled. To get the full set of exchange parameters, a "rotate and merge" procedure is needed, in which several DFT calculations with either the structure or the spin rotated are needed. 
+For each of the non-collinear calcualtion, we compute the exchange parameters from the DFT calculation with the  same command as in the collienar case. 
+
+```bash
+abacus2J.py --path . --suffix Fe --elements Fe  --kmesh 7 7 7
+```
+
+And then the "TB2J_merge.py" command can be used to get the final spin interaction parameters. 
+
 
 
 #### Parameters of abacus2J.py
@@ -87,8 +98,4 @@ options:
                         The path of the output directory, default is TB2J_results
 ```
 
-Non-collinear calculation
------------------------------------------
-
-The non-collinear calculation with TB2J-Abacus interace is currently under development. It will be available soon. 
 

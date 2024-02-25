@@ -68,7 +68,7 @@ data directory: {outpath}
     else:
         tbmodel = parser.get_models()
         print("Starting to calculate exchange.")
-        description = f""" Input from collinear Abacus data.
+        description = f""" Input from non-collinear Abacus data.
 data directory: {outpath}
 \n"""
         exchange = ExchangeNCL(
@@ -83,6 +83,7 @@ data directory: {outpath}
             nz=nz,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
+            np=np,
             use_cache=use_cache,
             description=description,
         )
@@ -93,8 +94,8 @@ data directory: {outpath}
 
 if __name__ == "__main__":
     gen_exchange_abacus(
-        path="/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/1_no_soc",
-        label="Fe",
+        path="/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/2_soc",
+        suffix="Fe",
         magnetic_elements=["Fe"],
         nz=50,
         Rcut=8,

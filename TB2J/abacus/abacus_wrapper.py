@@ -117,7 +117,7 @@ class AbacusParser:
                         return "non-polarized"
                     elif nspin == 2:
                         return "collinear"
-                    elif nspin == 2:
+                    elif nspin == 4:
                         return "noncollinear"
                     else:
                         raise ValueError("nspin should be either 1 or 4.")
@@ -145,14 +145,15 @@ class AbacusParser:
 
     def Read_HSR_noncollinear(self, binary=None):
         p = Path(self.outpath)
-        SR_filename = (p / "data-SR-sparse_SPIN0.csr").as_posix()
-        HR_filename = p / "data-HR-sparse_SPIN0.csr".as_posix()
-        self.nbasis, self.Rlist, self.HR, self.SR = read_HR_SR(
+        SR_filename = str(p / "data-SR-sparse_SPIN0.csr")
+        HR_filename = str(p / "data-HR-sparse_SPIN0.csr")
+        nbasis, Rlist, HR, SR = read_HR_SR(
             nspin=4,
             binary=self.binary,
             HR_fileName=HR_filename,
             SR_fileName=SR_filename,
         )
+        return nbasis, Rlist, HR, SR
 
     def get_models(self):
         if self.spin == "collinear":
@@ -205,7 +206,7 @@ class AbacusParser:
             return basis
 
 
-def test_abacus_wrapper():
+def test_abacus_wrapper_collinear():
     outpath = "/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/1_no_soc/OUT.Fe"
     parser = AbacusParser(outpath=outpath, spin=None, binary=False)
     atoms = parser.read_atoms()
@@ -216,8 +217,19 @@ def test_abacus_wrapper():
     # print(H.shape)
     # print(H.diagonal().real)
     # print(model_up.get_HR0().diagonal().real)
-    print(parser.get_efermi())
+    print(parser.efermi)
+
+
+def test_abacus_wrapper_ncl():
+    outpath = "/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/2_soc/OUT.Fe"
+
+    parser = AbacusParser(outpath=outpath, spin=None, binary=False)
+    atoms = parser.read_atoms()
+    model = parser.get_models()
+    H, S, E, V = model.HSE_k([0, 0, 0])
+    print(parser.efermi)
 
 
 if __name__ == "__main__":
-    test_abacus_wrapper()
+    # test_abacus_wrapper()
+    test_abacus_wrapper_ncl()
