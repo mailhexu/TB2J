@@ -9,7 +9,7 @@ from collections import defaultdict
 # from tbmodels import Model
 from ase.atoms import Atoms
 from TB2J.utils import auto_assign_basis_name
-from TB2J.wannier import parse_ham, parse_xyz, parse_atoms
+from TB2J.wannier import parse_ham, parse_xyz, parse_atoms, parse_tb
 
 
 class AbstractTB:
@@ -84,6 +84,7 @@ class MyTB(AbstractTB):
         self,
         nbasis,
         data=None,
+        R_degens=None,
         positions=None,
         sparse=False,
         ndim=3,
@@ -93,6 +94,7 @@ class MyTB(AbstractTB):
         """
         :param nbasis: number of basis.
         :param data: a dictionary of {R: matrix}. R is a tuple, matrix is a nbasis*nbasis matrix.
+        :param R_degens: degeneracy of R.
         :param positions: reduced positions.
         :param sparse: Bool, whether to use a sparse matrix.
         :param ndim: number of dimensions.
@@ -107,6 +109,11 @@ class MyTB(AbstractTB):
         self._nspin = nspin
         self._norb = nbasis // nspin
         self._ndim = ndim
+        if R_degens is not None:
+            self.R_degens = R_degens
+        else:
+            self.R_degens = np.ones(len(self.data.keys()), dtype=int)
+        print(f"{R_degens=} init")
         if positions is None:
             self._positions = np.zeros((nbasis, self.ndim))
         else:
@@ -121,7 +128,6 @@ class MyTB(AbstractTB):
         self.k2Rfactor = -2.0j * np.pi
         self.is_siesta = False
         self.is_orthogonal = True
-
         self._name = "Wannier"
 
     def set_atoms(self, atoms):
@@ -178,12 +184,20 @@ class MyTB(AbstractTB):
         :param path: path
         :param prefix: prefix to the wannier files, often wannier90, or wannier90_up, or wannier90_dn for vasp.
         """
-        # tbmodel = Model.from_wannier_folder(
-        #    folder=path, prefix=prefix)
-        # m = MyTB.from_tbmodel(tbmodel)
 
-        nbasis, data = parse_ham(fname=os.path.join(path, prefix + "_hr.dat"))
-        xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix + "_centres.xyz"))
+        tb_fname = os.path.join(path, prefix + "_tb.dat")
+        hr_fname = os.path.join(path, prefix + "_hr.dat")
+        if os.path.exists(tb_fname):
+            xcart, nbasis, data, R_degens = parse_tb(fname=tb_fname)
+            print(f"{R_degens=} here")
+        else:
+            pass
+        if True:
+            nbasis, data, R_degens = parse_ham(
+                fname=os.path.join(path, prefix + "_hr.dat")
+            )
+            xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix + "_centres.xyz"))
+
         if atoms is None:
             atoms = parse_atoms(os.path.join(path, prefix + ".win"))
         cell = atoms.get_cell()
@@ -200,7 +214,7 @@ class MyTB(AbstractTB):
                 data[key][1::2, ::2] = dtmp[norb:, :norb]
                 data[key][1::2, 1::2] = dtmp[norb:, norb:]
         ind, positions = auto_assign_basis_name(xred, atoms)
-        m = MyTB(nbasis=nbasis, data=data, positions=xred)
+        m = MyTB(nbasis=nbasis, data=data, positions=xred, R_degens=R_degens)
         nm = m.shift_position(positions)
         nm.set_atoms(atoms)
         return nm
@@ -243,13 +257,16 @@ class MyTB(AbstractTB):
         """
         Hk = np.zeros((self.nbasis, self.nbasis), dtype="complex")
         if convention == 2:
-            for R, mat in self.data.items():
-                phase = np.exp(self.R2kfactor * np.dot(k, R))
+            for iR, (R, mat) in enumerate(self.data.items()):
+                phase = np.exp(self.R2kfactor * np.dot(k, R))  # /self.R_degens[iR]
                 H = mat * phase
                 Hk += H + H.conjugate().T
         elif convention == 1:
-            for R, mat in self.data.items():
-                phase = np.exp(self.R2kfactor * np.dot(k, R + self.rjminusri))
+            for iR, (R, mat) in enumerate(self.data.items()):
+                phase = (
+                    np.exp(self.R2kfactor * np.dot(k, R + self.rjminusri))
+                    / self.R_degens[iR]
+                )
                 H = mat * phase
                 Hk += H + H.conjugate().T
         else:
@@ -369,7 +386,7 @@ class MyTB(AbstractTB):
         newpos = copy.deepcopy(pos)
         for i in range(self.nbasis):
             newpos[i] = pos[i] - shift[i]
-        d = MyTB(self.nbasis, ndim=self.ndim, nspin=self.nspin)
+        d = MyTB(self.nbasis, ndim=self.ndim, nspin=self.nspin, R_degens=self.R_degens)
         d._positions = newpos
 
         for R, v in self.data.items():
