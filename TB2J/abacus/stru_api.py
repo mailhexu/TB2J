@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Jun 13 10:31:30 2018
-@author: shenzx
+@author: Zhen-Xiong Shen
+@email: shenzx@iai.ustc.edu.cn
+@workplace: Institute of Artificial Intelligence, Hefei Comprehensive National Science Center
 
 Modified on Wed Aug 01 11:44:51 2022
 @author: Ji Yu-yang
