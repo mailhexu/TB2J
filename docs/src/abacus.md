@@ -1,19 +1,19 @@
-### Use TB2J with Abacus
+### Use TB2J with ABACUS
 
-In this tutorial we will learn how to use TB2J with Abacus.  The TB2J-Abacus interface is available since TB2J version 0.8.0. There are three types of basis set in Abacus, the plane-wave (PW), the linear-combinatio of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. For the other type of basis set, the Wannier90 interace can be used instead.  In this tutorial we will use LCAO. 
+In this tutorial we will learn how to use TB2J with ABACUS.  The TB2J-ABACUS interface is available since TB2J version 0.8.0. There are three types of basis set in ABACUS, the plane-wave (PW), the linear-combinatio of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. For the other type of basis set, the Wannier90 interace can be used instead.  In this tutorial we will use LCAO. 
 
 
 #### Collinear calculation without SOC
 
 Let's start from the example of Fe. The example files can be found here: https://github.com/mailhexu/TB2J_examples/tree/master/Abacus/Fe_no_SOC . 
 
-First do the abacus calculation. Note that the Kohn-Sham Hamiltonian and the overlap matrix is needed as the input to TB2J. We need to put 
+First do the ABACUS calculation. Note that the Kohn-Sham Hamiltonian and the overlap matrix is needed as the input to TB2J. We need to put 
 
 ``` 
 out_mat_hs2  1 
 ```
 
-in the Abucus INPUT file, so that the two files will be written. In the INPUT, the line
+in the ABACUS INPUT file, so that the Hamiltonian matrix H(R) (in Ry) and overlap matrix S(R) will be written into files in the directory `OUT.${suffix}` . In the INPUT, the line
 
 ```
 sufffix Fe
@@ -68,12 +68,12 @@ usage: abacus2J.py [-h] [--path PATH] [--suffix SUFFIX] [--elements [ELEMENTS ..
                    [--exclude_orbs EXCLUDE_ORBS [EXCLUDE_ORBS ...]] [--np NP] [--description DESCRIPTION]
                    [--orb_decomposition] [--fname FNAME] [--output_path OUTPUT_PATH]
 
-abacus2J: Using magnetic force theorem to calculate exchange parameter J from abacus Hamiltonian in the LCAO mode
+abacus2J: Using magnetic force theorem to calculate exchange parameter J from ABACUS Hamiltonian in the LCAO mode
 
 options:
   -h, --help            show this help message and exit
-  --path PATH           the path of the abacus calculation
-  --suffix SUFFIX       the label of the abacus calculation. There should be an output directory called OUT.suffix
+  --path PATH           the path of the ABACUS calculation
+  --suffix SUFFIX       the label of the ABACUS calculation. There should be an output directory called OUT.suffix
   --elements [ELEMENTS ...]
                         list of elements to be considered in Heisenberg model.
   --rcut RCUT           range of R. The default is all the commesurate R to the kmesh

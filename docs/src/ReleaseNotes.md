@@ -1,12 +1,12 @@
 ## Release Notes
 ------------------------------------------------------------------------
 #### v0.8.1 Febrary 25, 2024
-Interface with Abacus for non-collinaer spin calculations is inplemented. 
+Interface with ABACUS for non-collinaer spin calculations is inplemented. 
 
 
 #### v0.8.0 Febrary 18, 2024
-Add a new DFT code interface to Abacus! Thanks to Zhenxiong Shen and Gan Jin from the Abacus 
- team for providing the coding for parsing the Abacus output files. 
+Add a new DFT code interface to ABACUS! Thanks to Zhen-Xiong Shen and Gan Jin from the ABACUS 
+ team for providing the coding for parsing the ABACUS output files. 
 In this version the colliear spin is implemented and the non-collinear will be soon added. 
 
 
