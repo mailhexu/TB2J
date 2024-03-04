@@ -33,7 +33,6 @@ def find_Rvectors(Rvectors, R):
 def parse_tb_file(filename):
     with open(filename, "r") as io:
         header = io.readline().strip()
-        print(header)
         a1 = np.fromstring(io.readline().strip(), sep=" ")
         a2 = np.fromstring(io.readline().strip(), sep=" ")
         a3 = np.fromstring(io.readline().strip(), sep=" ")
@@ -74,20 +73,18 @@ def parse_tb_file(filename):
                     ), "Unexpected indices"
                     reH, imH = float(line[2]), float(line[3])
                     # H[iR][m, n] = reH + 1j * imH
-                    H[R][m, n] = reH + 1j * imH
+                    H[R][m, n] = (reH + 1j * imH) / 2.0
             io.readline()  # empty line
         # set the onsite term to half
-        np.fill_diagonal(H[(0, 0, 0)], H[(0, 0, 0)].diagonal() / 2.0)
-        print("onsite H from TB: ", H[(0, 0, 0)].diagonal())
+        # np.fill_diagonal(H[(0, 0, 0)], H[(0, 0, 0)].diagonal() / 2.0)
+        # print("onsite H from TB: ", H[(0, 0, 0)].diagonal())
 
         iR0 = find_Rvectors(Rvectors, [0, 0, 0])
         for iR in range(n_Rvecs):
             # read Rvectors
             line = io.readline().strip()
-            print(line)
             Rvectors[iR] = np.fromstring(line, sep=" ")
             Rvectors[iR] = Rvectors[iR].astype(np.int32)
-            print(iR, Rvectors[iR])
             # read r_x, r_y, r_z
             for n in range(n_wann):
                 for m in range(n_wann):
@@ -100,9 +97,9 @@ def parse_tb_file(filename):
                     pos_operator[iR, m, n, 2] = complex(float(line[6]), float(line[7]))
             io.readline()
 
-        print(
-            f"Reading tb.dat file: {filename} | Header: {header} | n_wann: {n_wann} | n_Rvecs: {n_Rvecs}"
-        )
+        # print(
+        #    f"Reading tb.dat file: {filename} | Header: {header} | n_wann: {n_wann} | n_Rvecs: {n_Rvecs}"
+        # )
 
         centers = pos_operator[iR0, :, :, :].diagonal(offset=0, axis1=0, axis2=1).T.real
 

@@ -113,7 +113,6 @@ class MyTB(AbstractTB):
             self.R_degens = R_degens
         else:
             self.R_degens = np.ones(len(self.data.keys()), dtype=int)
-        print(f"{R_degens=} init")
         if positions is None:
             self._positions = np.zeros((nbasis, self.ndim))
         else:
@@ -189,10 +188,7 @@ class MyTB(AbstractTB):
         hr_fname = os.path.join(path, prefix + "_hr.dat")
         if os.path.exists(tb_fname):
             xcart, nbasis, data, R_degens = parse_tb(fname=tb_fname)
-            print(f"{R_degens=} here")
         else:
-            pass
-        if True:
             nbasis, data, R_degens = parse_ham(
                 fname=os.path.join(path, prefix + "_hr.dat")
             )
