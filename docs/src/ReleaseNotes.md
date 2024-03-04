@@ -1,5 +1,8 @@
 ## Release Notes
 ------------------------------------------------------------------------
+#### v0.8.2 March 4, 2024
+TB2J can now read the "tb.dat" file instead of the "hr.dat"+"centers.xyz" files. 
+
 #### v0.8.1 Febrary 25, 2024
 Interface with ABACUS for non-collinaer spin calculations is inplemented. 
 
