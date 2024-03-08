@@ -215,9 +215,9 @@ class Merger2:
                 )
                 w = Jani_removed / Jani
                 Jani_sum += Jani * w  # Jani_removed
-                print(f"{Jani* w=}")
+                # print(f"{Jani* w=}")
                 weights += w
-            print(f"{weights=}")
+            # print(f"{weights=}")
             if np.any(weights == 0):
                 raise RuntimeError(
                     "The data set to be merged does not give a complete anisotropic J tensor, please add more data"

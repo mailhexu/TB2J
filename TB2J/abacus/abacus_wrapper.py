@@ -4,6 +4,7 @@
 The abacus wrapper
 """
 from pathlib import Path
+import os
 import numpy as np
 from scipy.linalg import eigh
 from TB2J.utils import symbol_number_list
@@ -123,7 +124,14 @@ class AbacusParser:
                         raise ValueError("nspin should be either 1 or 4.")
 
     def read_atoms(self):
-        self.atoms = read_abacus(str(Path(self.outpath) / "../Stru"))
+        path1 = str(Path(self.outpath) / "../STRU")
+        path2 = str(Path(self.outpath) / "../Stru")
+        if os.path.exists(path1):
+            self.atoms = read_abacus(path1)
+        elif os.path.exists(path2):
+            self.atoms = read_abacus(path2)
+        else:
+            raise Exception("The STRU or Stru file cannot be found.")
         return self.atoms
 
     def read_basis(self):
