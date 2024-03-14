@@ -6,6 +6,7 @@ from ase.io import read
 from ase.atoms import Atoms
 from ase.units import Angstrom, Bohr
 from .w90_tb_parser import parse_tb_file
+from TB2J.utils import split_symbol_number
 
 unit_dict = {"ANG": Angstrom, "BOHR": Bohr}
 
@@ -122,16 +123,21 @@ def parse_atoms(fname):
 
     symbols = []
     taus = []
+    tags = []
 
     for line in match.group("atoms").strip().splitlines():
         symbol = line.split()[0].strip()
         symbol = symbol[0].upper() + symbol[1:]
+        symbol, tag = split_symbol_number(symbol)
         symbols.append(symbol)
+        tags.append(tag)
         taus.append(np.array(list(map(float, line.split()[1:]))))
 
     taus = np.asarray(taus)
     if match.group("suffix").upper() == "FRAC":
         atoms = Atoms(symbols=symbols, cell=cell, scaled_positions=taus)
+        atoms.set_tags(tags)
+        print(atoms.get_tags)
     else:
         if match.group("units") is not None:
             factor = unit_dict[match.group("units").upper()]

@@ -8,7 +8,7 @@ from TB2J.io_exchange import SpinIO
 from tqdm import tqdm
 from TB2J.external import p_map
 from TB2J.contour import Contour
-from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
+from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform, split_symbol_number
 from TB2J.orbmap import map_orbs_matrix
 import pickle
 
@@ -221,8 +221,10 @@ class Exchange(ExchangeParams):
                     self.labels[iatom] += [orb_sym]
 
         # index of magnetic atoms
-        for i, sym in enumerate(self.atoms.get_chemical_symbols()):
-            if sym in self.magnetic_elements:
+        symbols = self.atoms.get_chemical_symbols()
+        tags = self.atoms.get_tags()
+        for i, (sym, tag) in enumerate(zip(symbols, tags)):
+            if sym in self.magnetic_elements or f"{sym}{tag}" in self.magnetic_elements:
                 self.ind_mag_atoms.append(i)
 
         # sanity check to see if some magnetic atom has no orbital.
@@ -766,8 +768,10 @@ class ExchangeNCL(Exchange):
         ind_matoms = []
         self.index_spin = []
         ispin = 0
-        for i, sym in enumerate(self.atoms.get_chemical_symbols()):
-            if sym in self.magnetic_elements:
+        symbols = self.atoms.get_chemical_symbols()
+        tags = self.atoms.get_tags()
+        for i, (sym, tag) in enumerate(zip(symbols, tags)):
+            if sym in self.magnetic_elements or f"{sym}{tag}" in self.magnetic_elements:
                 ind_matoms.append(i)
                 self.index_spin.append(ispin)
                 ispin += 1
