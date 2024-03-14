@@ -137,7 +137,6 @@ def parse_atoms(fname):
     if match.group("suffix").upper() == "FRAC":
         atoms = Atoms(symbols=symbols, cell=cell, scaled_positions=taus)
         atoms.set_tags(tags)
-        print(atoms.get_tags)
     else:
         if match.group("units") is not None:
             factor = unit_dict[match.group("units").upper()]
