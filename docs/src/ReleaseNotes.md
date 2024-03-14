@@ -3,7 +3,7 @@
 #### v0.8.2 March 4, 2024
 TB2J can now read the "tb.dat" file instead of the "hr.dat"+"centers.xyz" files. 
 
-Allow atom symbols+number format (e.g. Fe1, Fe2) in Wannier .win file, and in the --magnetic\_elements option
+(>=0.8.2.2) Allow atom symbols+number format (e.g. Fe1, Fe2) in Wannier .win file, and in the --magnetic\_elements option
 
 #### v0.8.1 Febrary 25, 2024
 Interface with ABACUS for non-collinaer spin calculations is inplemented. 
