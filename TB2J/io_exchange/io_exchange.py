@@ -322,8 +322,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         returns:
             Jmat: (3*nspin,3*nspin) matrix.
         """
-        i = self.i_spin(i)
-        j = self.i_spin(j)
         n3 = self.nspin * 3
         Jmat = np.zeros((n3, n3), dtype=float)
         for i in range(self.nspin):
