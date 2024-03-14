@@ -276,9 +276,11 @@ class SislWFSXWrapper(SislWrapper):
         energy shift to be applied to all energies. If `None` no shift is applied. (default: None)
     """
 
-    def __init__(self, geom, wfsx_sile, spin, ispin=None, shift_fermi=None):
+    def __init__(
+        self, sisl_hamiltonian, geom, wfsx_sile, spin, ispin=None, shift_fermi=None
+    ):
         # super().__init__(geom, spin=spin, ispin=ispin, shift_fermi=shift_fermi)
-        super().__init__(sisl_hamiltonian, geom=None, spin=None)
+        super().__init__(sisl_hamiltonian, geom=geom, spin=spin)
         self.geom = geom
         self.wfsx_sile = wfsx_sile
         self.read_all()
