@@ -296,12 +296,11 @@ def gen_exchange_siesta(
         else:
             include_orbs[element] = None
     magnetic_elements = list(include_orbs.keys())
-    print(magnetic_elements)
-    print(include_orbs)
 
     fdf = sisl.get_sile(fdf_fname)
-    geom = fdf.read_geometry()
+    # geom = fdf.read_geometry()
     H = fdf.read_hamiltonian()
+    geom = H.geometry
     if H.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
         tbmodel_up = SislWrapper(H, spin=0, geom=geom)

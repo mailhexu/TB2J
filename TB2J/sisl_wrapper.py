@@ -33,7 +33,7 @@ class SislWrapper(AbstractTB):
         self.positions = g.xyz
         self.cell = np.array(g.sc.cell)
         for ia, a in enumerate(_atoms):
-            atomic_numbers.append(a.Z)
+            atomic_numbers.append(a.Z % 200)
         self.atoms = Atoms(
             numbers=atomic_numbers, cell=self.cell, positions=self.positions
         )
