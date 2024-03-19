@@ -185,8 +185,7 @@ The parameters are:
 -  prefix_down: prefix for spin down channel of Wannier90 output.
 -  emin: the lower limit of the electron energy. (in eV, relative to
    Fermi energy.)
--  emax: the upper limit of the electron energy. Should be close to
-   zero.
+-  emax: the upper limit of the electron energy. Should be zero. (Note: this parameter is no more useful will be deprecated soon). 
 
 Now we should have the files containing the J parameters in the
 TB2J_results directory.
