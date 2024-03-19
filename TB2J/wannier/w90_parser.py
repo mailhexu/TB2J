@@ -5,6 +5,8 @@ import numpy as np
 from ase.io import read
 from ase.atoms import Atoms
 from ase.units import Angstrom, Bohr
+from .w90_tb_parser import parse_tb_file
+from TB2J.utils import split_symbol_number
 
 unit_dict = {"ANG": Angstrom, "BOHR": Bohr}
 
@@ -49,6 +51,7 @@ def parse_ham(fname="wannier90_hr.dat", cutoff=None):
     for i in range(3, 3 + nline):
         d = map(float, lines[i].strip().split())
         dlist += d
+    R_degens = np.array(dlist, dtype=int)
     H_mnR = defaultdict(lambda: np.zeros((n_wann, n_wann), dtype=complex))
     for i in range(3 + nline, 3 + nline + n_wann**2 * n_R):
         t = lines[i].strip().split()
@@ -65,7 +68,7 @@ def parse_ham(fname="wannier90_hr.dat", cutoff=None):
                 H_mnR[R][m, n] = val / 2.0
         else:
             H_mnR[R][m, n] = val / 2.0
-    return n_wann, H_mnR
+    return n_wann, H_mnR, R_degens
 
 
 def parse_cell(fname, unit=Angstrom):
@@ -120,16 +123,20 @@ def parse_atoms(fname):
 
     symbols = []
     taus = []
+    tags = []
 
     for line in match.group("atoms").strip().splitlines():
         symbol = line.split()[0].strip()
         symbol = symbol[0].upper() + symbol[1:]
+        symbol, tag = split_symbol_number(symbol)
         symbols.append(symbol)
+        tags.append(tag)
         taus.append(np.array(list(map(float, line.split()[1:]))))
 
     taus = np.asarray(taus)
     if match.group("suffix").upper() == "FRAC":
         atoms = Atoms(symbols=symbols, cell=cell, scaled_positions=taus)
+        atoms.set_tags(tags)
     else:
         if match.group("units") is not None:
             factor = unit_dict[match.group("units").upper()]
@@ -138,3 +145,11 @@ def parse_atoms(fname):
         taus = taus * factor
         atoms = Atoms(symbols=symbols, cell=cell, positions=taus)
     return atoms
+
+
+def parse_tb(fname):
+    """
+    return the wannier center, number of wannier functions and the Hamiltonian from the wannier90 _tb.dat file.
+    """
+    result = parse_tb_file(fname)
+    return result["centers"], result["n_wann"], result["H"], result["Rdegens"]

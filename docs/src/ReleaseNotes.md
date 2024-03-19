@@ -1,6 +1,22 @@
 ## Release Notes
-
 ------------------------------------------------------------------------
+#### v0.8.2 March 4, 2024
+TB2J can now read the "tb.dat" file instead of the "hr.dat"+"centers.xyz" files. 
+
+(>=0.8.2.2) Allow atom symbols+number format (e.g. Fe1, Fe2) in Wannier .win file, and in the --magnetic\_elements option. ([issue46](https://github.com/mailhexu/TB2J/issues/46#issue-2167665710))
+
+Allow synthetic atom in siesta (>=0.8.2.4).
+
+#### v0.8.1 Febrary 25, 2024
+Interface with ABACUS for non-collinaer spin calculations is implemented. 
+
+
+#### v0.8.0 Febrary 18, 2024
+Add a new DFT code interface to ABACUS! Thanks to Zhen-Xiong Shen and Gan Jin from the ABACUS 
+ team for providing the coding for parsing the ABACUS output files. 
+In this version the colliear spin is implemented and the non-collinear will be soon added. 
+
+
 #### v0.7.7 October 11, 2023
 Added script: TB2J\_magnon\_dos.py for plotting the magnon density of states. 
 See https://tb2j.readthedocs.io/en/latest/src/magnon\_band.html

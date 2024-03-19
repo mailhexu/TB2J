@@ -2,6 +2,7 @@ from collections import OrderedDict, defaultdict
 import copy
 import numpy as np
 from pathlib import Path
+import re
 
 
 def symbol_number(symbols):
@@ -22,6 +23,31 @@ def symbol_number(symbols):
             symdict[sym] = 1
         result[sym + str(symdict[sym])] = i
     return result
+
+
+def symbol_number_list(symbols):
+    sdict = symbol_number(symbols)
+    return tuple(sdict.keys())
+
+
+def split_symbol_number(symnum):
+    """
+    split the chemical symbol and the number. e.g. Fe1 -> Fe, 1
+    if there is no number in the string, set the number to 0.
+    """
+    m = re.match(r"([a-zA-Z]+)([0-9]+)", symnum)
+    if m:
+        return m.group(1), int(m.group(2))
+    else:
+        return symnum, 0
+
+
+def test_split_symbol_number():
+    assert split_symbol_number("Fe1") == ("Fe", 1)
+    assert split_symbol_number("Fe") == ("Fe", 0)
+    assert split_symbol_number("Fe10") == ("Fe", 10)
+    assert split_symbol_number("H10") == ("H", 10)
+    assert split_symbol_number("Udd10") == ("Udd", 10)
 
 
 def read_basis(fname):

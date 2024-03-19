@@ -84,6 +84,14 @@ functions.
 
    # write the WF Hamiltonian (Note for W90 version<2.1, it is hr_plot)
    write_hr = true                 
+
+Alternatively, the Wannier hamiltonian and the position operator can be
+written into one "_tb.dat" file, which can be read by TB2J since version 0.8.2
+
+::
+
+   # write the WF Hamiltonian and the position operator
+   write_tb=ture
     
 
 The following lines need to be added to the abinit input file to

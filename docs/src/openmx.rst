@@ -19,9 +19,9 @@ In the DFT calculation, the ”HS.fileout on” options should be enabled, so th
 
 ::
 
-    openmx2J.py -- prefix openmx --elements Fe
+    openmx2J.py -- prefix openmx --elements Fe --kmesh 7 7 7
 
 
-openmx2J.py then read the openmx.xyz and the openmx.scfout files from the OpenMX output, and output the results to TB2J_results. 
+openmx2J.py then read the openmx.xyz and the openmx.scfout files from the OpenMX output, and output the results to TB2J_results.  Note: the kmesh is not dense enough for a practical calculation.
 
 

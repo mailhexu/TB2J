@@ -7,6 +7,7 @@ Tutorial
    wannier.rst
    siesta.rst
    openmx.rst
+   abacus.rst
    parameters.rst
    rotate_and_merge.rst
    downfold.md
