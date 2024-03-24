@@ -2,7 +2,7 @@
 import argparse
 import os
 import sys
-from TB2J.io_merge import merge, merge2
+from TB2J.io_merge import merge
 
 
 def main():
@@ -28,11 +28,18 @@ def main():
         type=str,
         default="TB2J_results",
     )
+    parser.add_argument(
+        "--main_path",
+        help="The path containning the reference structure.",
+        type=str,
+        default=None
+    )
 
     args = parser.parse_args()
     # merge(*(args.directories), args.type.strip().lower(), path=args.output_path)
     # merge(*(args.directories), method=args.type.strip().lower(), path=args.output_path)
-    merge2(args.directories, args.type.strip().lower(), path=args.output_path)
+    #merge2(args.directories, args.type.strip().lower(), path=args.output_path)
+    merge(*args.directories, main_path=args.main_path, write_path=args.output_path)
 
 
 main()
