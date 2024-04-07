@@ -26,10 +26,6 @@ class ExchangeParams:
         emax=0.05,
         nz=100,
         # the delta in the (i delta) in green's function to prevent divergence
-        height=0.5,
-        nz1=150,  # grid from emin to emin+(i delta)
-        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-        nz3=150,  # grid from emax + (i delta) to emax
         exclude_orbs=[],  #
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut.
@@ -44,12 +40,6 @@ class ExchangeParams:
         self.emin = emin
         self.emax = emax
         self.nz = nz
-        self.height = height
-        self.nz1 = nz1
-        self.nz2 = nz2
-        self.nz3 = nz3
-        if nz is None:
-            self.nz = nz1 + nz2 + nz3
         self.Rcut = Rcut
         self.basis = basis
         self.magnetic_elements = magnetic_elements
@@ -81,10 +71,6 @@ class Exchange(ExchangeParams):
         emax=0.05,
         nz=100,
         # the delta in the (i delta) in green's function to prevent divergence
-        height=0.5,
-        nz1=150,  # grid from emin to emin+(i delta)
-        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-        nz3=150,  # grid from emax + (i delta) to emax
         exclude_orbs=[],  #
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut.
@@ -105,10 +91,6 @@ class Exchange(ExchangeParams):
             emin=emin,
             emax=emax,
             nz=nz,
-            height=height,
-            nz1=nz1,
-            nz2=nz2,
-            nz3=nz3,
             exclude_orbs=exclude_orbs,
             ne=ne,
             Rcut=Rcut,
@@ -164,11 +146,11 @@ class Exchange(ExchangeParams):
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
         self.contour = Contour(self.emin, self.emax)
-        if method.lower() == "rectangle":
-            self.contour.build_path_rectangle(
-                height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
-            )
-        elif method.lower() == "semicircle":
+        # if method.lower() == "rectangle":
+        #    self.contour.build_path_rectangle(
+        #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
+        #    )
+        if method.lower() == "semicircle":
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
         elif method.lower() == "legendre":
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)

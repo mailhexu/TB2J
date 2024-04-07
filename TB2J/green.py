@@ -238,9 +238,6 @@ class TBGreen:
         rho_R = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
         for ik, kpt in enumerate(self.kpts):
             evec = self.get_evecs(ik)
-            # rhok=(evec * fermi(self.evals[ik], self.efermi)
-            #        ) @ evec.T.conj()
-            # print(fermi(self.evals[ik] , self.efermi))
             rhok = np.einsum(
                 "ib,b, bj-> ij", evec, fermi(self.evals[ik], self.efermi), evec.conj().T
             )
