@@ -252,7 +252,7 @@ class ExchangeCL2(ExchangeCL):
         else:
             # pool = ProcessPool(nodes=self.np)
             # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
+            results = p_map(self.get_AijR, self.contour.path, num_cpus=self.np)
         for i, result in enumerate(results):
             Jorb_list, JJ_list = result
             for iR, R in enumerate(self.R_ijatom_dict):
