@@ -42,10 +42,10 @@ class ExchangeCL2(ExchangeCL):
             )
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
-        self.rho_up_list = []
-        self.rho_dn_list = []
-        self.rho_up = np.zeros((self.norb, self.norb), dtype=float)
-        self.rho_dn = np.zeros((self.norb, self.norb), dtype=float)
+        # self.rho_up_list = []
+        # self.rho_dn_list = []
+        self.rho_up = self.Gup.get_density_matrix()
+        self.rho_dn = self.Gdn.get_density_matrix()
         self.Jorb_list = defaultdict(lambda: [])
         self.JJ_list = defaultdict(lambda: [])
         self.JJ = defaultdict(lambda: 0.0j)
@@ -225,8 +225,6 @@ class ExchangeCL2(ExchangeCL):
             integrate = trapezoidal_nonuniform
         elif method == "simpson":
             integrate = simpson_nonuniform
-        self.rho_up = np.imag(integrate(self.contour.path, self.rho_up_list))
-        self.rho_dn = np.imag(integrate(self.contour.path, self.rho_dn_list))
         for R, ijpairs in self.R_ijatom_dict.items():
             for iatom, jatom in ijpairs:
                 self.Jorb[(R, iatom, jatom)] = integrate(
@@ -236,12 +234,11 @@ class ExchangeCL2(ExchangeCL):
                     self.contour.path, self.JJ_list[(R, iatom, jatom)]
                 )
 
-    def get_AijR_rhoR(self, e):
-        GR_up, rho_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=True)
-        GR_dn, rho_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=True)
-        rup, rdn = self.get_rho_e(rho_up, rho_dn)
+    def get_AijR(self, e):
+        GR_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=False)
+        GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=False)
         Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
-        return rup, rdn, Jorb_list, JJ_list
+        return Jorb_list, JJ_list
 
     def calculate_all(self):
         """
@@ -251,15 +248,13 @@ class ExchangeCL2(ExchangeCL):
 
         npole = len(self.contour.path)
         if self.np == 1:
-            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
+            results = map(self.get_AijR, tqdm(self.contour.path, total=npole))
         else:
             # pool = ProcessPool(nodes=self.np)
             # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
             results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
         for i, result in enumerate(results):
-            rup, rdn, Jorb_list, JJ_list = result
-            self.rho_up_list.append(rup)
-            self.rho_dn_list.append(rdn)
+            Jorb_list, JJ_list = result
             for iR, R in enumerate(self.R_ijatom_dict):
                 for iatom, jatom in self.R_ijatom_dict[R]:
                     key = (R, iatom, jatom)
