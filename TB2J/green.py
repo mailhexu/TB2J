@@ -225,12 +225,22 @@ class TBGreen:
 
     def get_density_matrix(self):
         rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        for ik, _ in enumerate(self.kpts):
-            rho += (
-                (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
-                @ self.get_evecs(ik).T.conj()
-                * self.kweights[ik]
-            )
+        if self.is_orthogonal:
+            for ik, _ in enumerate(self.kpts):
+                rho += (
+                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
+                    @ self.get_evecs(ik).T.conj()
+                    * self.kweights[ik]
+                )
+        else:
+            for ik, _ in enumerate(self.kpts):
+                rho += (
+                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
+                    @ self.get_evecs(ik).T.conj()
+                    @ self.get_Sk(ik)
+                    * self.kweights[ik]
+                )
+
         return rho
 
     def get_rho_R(self, Rlist):
