@@ -1,5 +1,6 @@
 import os
 import copy
+import warnings
 import numpy as np
 from itertools import combinations_with_replacement, product
 from TB2J.io_exchange import SpinIO
@@ -106,6 +107,14 @@ class Merger():
             coeff_matrix[key] = np.vstack(coefficients)
             proju[key] = np.stack(u)
             projv[key] = np.stack(v)
+            if np.linalg.matrix_rank(coeff_matrix[key], tol=1e-2) < 6:
+                warnings.warn('''
+                    WARNING: The matrix of equations to reconstruct the exchange tensors is
+                    close to being singular. This happens when the magnetic moments between
+                    different configurations are cloes to being parallel. You need to consider 
+                    more rotated spin configurations, otherwise the results might have a large 
+                    error.'''
+                )
         
         self.proju = proju
         self.projv = projv
@@ -126,7 +135,7 @@ class Merger():
                 raise KeyError(
                     "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
                     % err)
-            newJani = np.linalg.lstsq(coeff_matrix[i, j], projections, rcond=4e-1)[0]
+            newJani = np.linalg.lstsq(coeff_matrix[i, j], projections, rcond=1e-2)[0]
             Jani_dict[key] = np.array([
                 [newJani[0], newJani[3], newJani[5]],
                 [newJani[3], newJani[1], newJani[4]],
