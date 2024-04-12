@@ -19,6 +19,7 @@ setup(
         "scripts/siesta2J.py",
         "scripts/abacus2J.py",
         "scripts/TB2J_rotate.py",
+        "scripts/TB2J_rotateDM.py",
         "scripts/TB2J_merge.py",
         "scripts/TB2J_magnon.py",
         "scripts/TB2J_magnon_dos.py",
