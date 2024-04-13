@@ -3,7 +3,7 @@
 Averaging multiple parameters
 ===============================
 
-When the spins of sites :math:`i` and :math:`j` are along the directions :math:`\hat{\mathbff{m}}_i` and :math:`\hat{\mathbf{m}}_j`, respectively, the components of :math:`\mathbf{J}^{ani}_{ij}` and :math:`\mathbf{D}_{ij}` along those directions will be unphysical. In other words, if :math:`\hat{\mathbf{u}}` is a unit vector orthogonal to both :math:`\hat{\mathbff{m}}_i` and :math:`\hat{\mathbf{m}}_j`, we can only obtain the projections :math:`\hat{\mathbf{u}}^T \mathbf{J}^{ani}_{ij} \hat{\mathbf{u}}` and :math:`\hat{\mathbf{u}}^T \mathbf{D}_{ij} \hat{\mathbf{u}}`. Notice that for collinear systems, there will be two orthonormal vectors :math:`\hat{\mathbf{u}}` and :math:`\hat{\mathbf{v}}` that are also orthogonal to :math:`\hat{\mathbff{m}}_i` and :math:`\hat{\mathbf{m}}_j`. 
+When the spins of sites :math:`i` and :math:`j` are along the directions :math:`\hat{\mathbf{m}}_i` and :math:`\hat{\mathbf{m}}_j`, respectively, the components of :math:`\mathbf{J}^{ani}_{ij}` and :math:`\mathbf{D}_{ij}` along those directions will be unphysical. In other words, if :math:`\hat{\mathbf{u}}` is a unit vector orthogonal to both :math:`\hat{\mathbf{m}}_i` and :math:`\hat{\mathbf{m}}_j`, we can only obtain the projections :math:`\hat{\mathbf{u}}^T \mathbf{J}^{ani}_{ij} \hat{\mathbf{u}}` and :math:`\hat{\mathbf{u}}^T \mathbf{D}_{ij} \hat{\mathbf{u}}`. Notice that for collinear systems, there will be two orthonormal vectors :math:`\hat{\mathbf{u}}` and :math:`\hat{\mathbf{v}}` that are also orthogonal to :math:`\hat{\mathbf{m}}_i` and :math:`\hat{\mathbf{m}}_j`. 
 
 The projection for :math:`\mathbf{J}^{ani}_{ij}` can be written as
 
