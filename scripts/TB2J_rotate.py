@@ -14,9 +14,14 @@ def main():
         default="xyz",
         type=str,
     )
+    parser.add_argument(
+        "--noncollinear",
+        action="store_true",
+        help="If present, six different configurations will be generated. These are required for non-collinear systems."
+    )
 
     args = parser.parse_args()
-    rotate_xyz(args.fname, ftype=args.ftype)
+    rotate_xyz(args.fname, ftype=args.ftype, noncollinear=args.noncollinear)
 
 
 if __name__ == "__main__":

@@ -5,19 +5,24 @@ import numpy as np
 from TB2J.tensor_rotate import Rxx, Rxy, Rxz, Ryx, Ryy, Ryz, Rzx, Rzy, Rzz
 
 
-def rotate_atom_xyz(atoms):
+def rotate_atom_xyz(atoms, noncollinear=False):
     """
-    given a atoms, return:
-    - 'z'->'x'
-    - 'z'->'y'
-    - 'z'->'z'
+    given a atoms, return rotated atoms:
+    atoms_1, ..., atoms_n,
+    where we considered n diffeerent roation axes.
+
+    When noncollinear == True, more rotated structures
+    will be generated.
     """
-    atoms_x = copy.deepcopy(atoms)
-    atoms_x.rotate(90, "y", rotate_cell=True)
-    atoms_y = copy.deepcopy(atoms)
-    atoms_y.rotate(90, "x", rotate_cell=True)
-    atoms_z = atoms
-    return atoms_x, atoms_y, atoms_z
+
+    rotation_axes = [(1, 0, 0), (0, 1, 0)]
+    if noncollinear:
+        rotation_axes += [(1, 1, 0), (1, 0, 1), (0, 1, 1)]
+    
+    for axis in rotation_axes:
+        rotated_atoms = copy.deepcopy(atoms)
+        rotated_atoms.rotate(90, axis, rotate_cell=True)
+        yield rotated_atoms
 
 
 def rotate_atom_spin_one_rotation(atoms, Rotation):
@@ -96,18 +101,15 @@ def check_ftype(ftype):
         print("=" * 40)
 
 
-def rotate_xyz(fname, ftype="xyz"):
+def rotate_xyz(fname, ftype="xyz", noncollinear=False):
     check_ftype(ftype)
     atoms = read(fname)
     atoms.set_pbc(True)
 
-    atoms_x, atoms_y, atoms_z = rotate_atom_xyz(atoms)
+    rotated = rotate_atom_xyz(atoms, noncollinear=noncollinear)
 
-    fname_x = f"atoms_x.{ftype}"
-    fname_y = f"atoms_y.{ftype}"
-    fname_z = f"atoms_z.{ftype}"
+    for i, rotated_atoms in enumerate(rotated):
+        write(f"atoms_{i+1}.{ftype}", rotated_atoms)
+    write(f"atoms_0.{ftype}", atoms)
 
-    write(fname_x, atoms_x)
-    write(fname_y, atoms_y)
-    write(fname_z, atoms_z)
-    print(f"The output has been written to {fname_x}, {fname_y}, {fname_z}")
+    print(f"The output has been written to the atoms_i.{ftype} files. atoms_0.{ftype} contains the reference structure.")
