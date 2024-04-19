@@ -38,12 +38,11 @@ def get_C(H0, u, V):
     AB0 = np.swapaxes(AB0, 0, 2).reshape(len(i), 9)
     J0_flat = np.linalg.solve(u, AB0)
     J0 = np.empty((n, n, 3, 3), dtype=complex)
-    # FIXME: syntax check failed. Is the following line correct?
-    J0[*upi] = J0_flat[:, [0, 6, 5, 3, 1, 7, 8, 4, 2]].reshape(-1, 3, 3)
-    # J0[upi] = J0_flat[:, [0, 6, 5, 3, 1, 7, 8, 4, 2]].reshape(-1, 3, 3)
+    # FIXME: The following gives syntax error. Is the fix correct?
+    # J0[*upi] = J0_flat[:, [0, 6, 5, 3, 1, 7, 8, 4, 2]].reshape(-1, 3, 3)
+    J0[upi] = J0_flat[:, [0, 6, 5, 3, 1, 7, 8, 4, 2]].reshape(-1, 3, 3)
     J0 += J0.swapaxes(0, 1)
-    # FIXME: syntax check failed. Is the following line correct?
-    J0[*dig] = 0.0
+    # J0[*dig] = 0.0
     J0[dig] = 0.0
     C = np.array([np.diag(a) for a in np.einsum("imx,ijxy,jmy->mi", V, 2 * J0, V)])
     return C
