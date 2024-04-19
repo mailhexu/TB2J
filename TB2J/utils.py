@@ -330,3 +330,82 @@ def simpson_nonuniform(x, f):
         result += f[N - 1] * (h[N - 1] ** 2 + 3 * h[N - 1] * h[N - 2]) / (6 * h[N - 2])
         result -= f[N - 2] * h[N - 1] ** 3 / (6 * h[N - 2] * (h[N - 2] + h[N - 1]))
     return result
+
+
+def simpson_nonuniform_weight(x):
+    """
+    Simpson rule for irregularly spaced data.
+    x: list or np.array of floats
+        Sampling points for the function values
+    Returns
+    -------
+    weight : list or np.array of floats
+        weight for the Simpson rule
+    For the function f(x), the integral is approximated as
+    $\int f(x) dx \approx \sum_i weight[i] * f(x[i])$
+    """
+
+    weight = np.zeros_like(x)
+    N = len(x) - 1
+    h = np.diff(x)
+
+    for i in range(1, N, 2):
+        hph = h[i] + h[i - 1]
+        weight[i] += (h[i] ** 3 + h[i - 1] ** 3 + 3.0 * h[i] * h[i - 1] * hph) / (
+            6 * h[i] * h[i - 1]
+        )
+        weight[i - 1] += (
+            2.0 * h[i - 1] ** 3 - h[i] ** 3 + 3.0 * h[i] * h[i - 1] ** 2
+        ) / (6 * h[i - 1] * hph)
+        weight[i + 1] += (
+            2.0 * h[i] ** 3 - h[i - 1] ** 3 + 3.0 * h[i - 1] * h[i] ** 2
+        ) / (6 * h[i] * hph)
+
+    if (N + 1) % 2 == 0:
+        weight[N] += (2 * h[N - 1] ** 2 + 3.0 * h[N - 2] * h[N - 1]) / (
+            6 * (h[N - 2] + h[N - 1])
+        )
+        weight[N - 1] += (h[N - 1] ** 2 + 3 * h[N - 1] * h[N - 2]) / (6 * h[N - 2])
+        weight[N - 2] -= h[N - 1] ** 3 / (6 * h[N - 2] * (h[N - 2] + h[N - 1]))
+    return weight
+
+
+def trapz_nonuniform_weight(x):
+    """
+    trapezoidal rule for irregularly spaced data.
+    x: list or np.array of floats
+        Sampling points for the function values
+    Returns
+    -------
+    weight : list or np.array of floats
+        weight for the trapezoidal rule
+    For the function f(x), the integral is approximated as
+    $\int f(x) dx \approx \sum_i weight[i] * f(x[i])$
+    """
+    h = np.diff(x)
+    weight = np.zeros_like(x)
+    weight[0] = h[0] / 2.0
+    weight[1:-1] = (h[1:] + h[:-1]) / 2.0
+    weight[-1] = h[-1] / 2.0
+    return weight
+
+
+def test_simpson_nonuniform():
+    x = np.array([0.0, 0.1, 0.3, 0.5, 0.8, 1.0])
+    w = simpson_nonuniform_weight(x)
+    # assert np.allclose(w, [0.1, 0.4, 0.4, 0.4, 0.4, 0.1])
+    assert np.allclose(simpson_nonuniform(x, x**8), 0.12714277533333335)
+    print("simpson_weight:", simpson_nonuniform_weight(x) @ x**8, 0.12714277533333335)
+    print("trapz_weight:", trapz_nonuniform_weight(x) @ x**8)
+
+    x2 = np.linspace(0, 1, 500)
+    print(simpson_nonuniform_weight(x2) @ x2**8, 1 / 9.0)
+    print(simpson_nonuniform_weight(x2) @ x2**8)
+    print("simpson_weight:", simpson_nonuniform_weight(x2) @ x2**8)
+    print("trapz_weight:", trapz_nonuniform_weight(x2) @ x2**8)
+
+    assert np.allclose(simpson_nonuniform(x, x**8), 1 / 9.0)
+
+
+if __name__ == "__main__":
+    test_simpson_nonuniform()

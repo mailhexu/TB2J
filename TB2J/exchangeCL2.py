@@ -11,6 +11,14 @@ from TB2J.external import p_map
 from .exchange import ExchangeCL
 from .utils import simpson_nonuniform, trapezoidal_nonuniform
 
+import dataclasses
+
+
+@dataclasses.dataclass
+class ResultPerEnergy:
+    AijR: dict = {}
+    AijR_orb: dict = {}
+
 
 class ExchangeCL2(ExchangeCL):
     def set_tbmodels(self, tbmodels):
