@@ -18,8 +18,7 @@ class AbacusWrapper(AbstractTB):
     def __init__(self, HR, SR, Rlist, nbasis, nspin=1):
         self.R2kfactor = -2j * np.pi
         self.is_orthogonal = False
-        self.is_siesta = False
-        self._name = "Abacus"
+        self._name = "ABACUS"
         self.HR = HR
         self.SR = SR
         self.Rlist = Rlist

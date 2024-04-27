@@ -10,7 +10,6 @@ from TB2J.mathutils import Lowdin
 
 class SislWrapper(AbstractTB):
     def __init__(self, sisl_hamiltonian, geom=None, spin=None):
-        self.is_siesta = False
         self.is_orthogonal = False
         self.ham = sisl_hamiltonian
         # k2Rfactor : H(k) = \int_R H(R) * e^(k2Rfactor * k.R)

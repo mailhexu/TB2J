@@ -305,7 +305,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         """
         sum up the contribution of all the orbitals with same (n,l,m)
         """
-        if self.backend_name == "SIESTA":
+        if self.backend_name.upper() == "SIESTA":
             mmat_i = self.mmats[iatom]
             mmat_j = self.mmats[jatom]
             Jorbij = mmat_i.T @ Jorbij @ mmat_j
@@ -333,7 +333,7 @@ class ExchangeNCL(Exchange):
         The basis should be orb1_up, orb2_up,...orbn_up, orb1_dn, orb2_dn....
         """
         self.tbmodel = tbmodels
-        self.backend_name = self.tbmodel.name
+        self.backend_name.upper() = self.tbmodel.name
         # TODO: check if tbmodels are really a tbmodel with SOC.
         self.G = TBGreen(
             self.tbmodel,
