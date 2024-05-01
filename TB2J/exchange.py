@@ -240,7 +240,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         self.mmats = {}
         self.orbital_names = {}
         self.norb_reduced = {}
-        if self.backend_name == "SIESTA":
+        if self.backend_name.upper() == "SIESTA":
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
                 if (self.include_orbs is not None) and syms[iatom] in self.include_orbs:
@@ -333,7 +333,7 @@ class ExchangeNCL(Exchange):
         The basis should be orb1_up, orb2_up,...orbn_up, orb1_dn, orb2_dn....
         """
         self.tbmodel = tbmodels
-        self.backend_name.upper() = self.tbmodel.name
+        self.backend_name = self.tbmodel.name
         # TODO: check if tbmodels are really a tbmodel with SOC.
         self.G = TBGreen(
             self.tbmodel,
