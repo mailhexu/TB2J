@@ -38,6 +38,7 @@ spin_ntime =100000             ! number of steps.
 spin_nctime=100               ! number of time steps between two nc file write
 spin_dt=5e-16 s               ! time step. 
 spin_init_state = 1           ! random initial spin
+spin_damping = 0.3            ! damping factor, between 0 and 1. If not specified, it will read from the xml file. 
 
 spin_temperature=0.0
 
