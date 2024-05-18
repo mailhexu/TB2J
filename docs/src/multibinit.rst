@@ -54,7 +54,7 @@ In the TB2J\_results/Mutlbinit directory, there are three files: exchange.xml, m
 
 We can modify the default supercell size (ncell) and the temperature range to do spin dynamics in a temperature from 0K to 1300K in order to calculate the Neel temperature. We can run ::
 
-  mpirun -np 4 multibinit < mb.files
+  mpirun -np 4 multibinit --F03 < mb.files
 
 to run the spin dynamics. A mb.out.varT file is then generated, which has the volume heat capacit :math:`C_v`, magnetic susceptibility :math:`\\chi`, and normalized total magnetic moment. They can be plotted as function of temperature as below, from which we can find the Neel temperature.
 

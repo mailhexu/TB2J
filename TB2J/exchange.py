@@ -26,10 +26,6 @@ class ExchangeParams:
         emax=0.05,
         nz=100,
         # the delta in the (i delta) in green's function to prevent divergence
-        height=0.5,
-        nz1=150,  # grid from emin to emin+(i delta)
-        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-        nz3=150,  # grid from emax + (i delta) to emax
         exclude_orbs=[],  #
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut.
@@ -44,12 +40,6 @@ class ExchangeParams:
         self.emin = emin
         self.emax = emax
         self.nz = nz
-        self.height = height
-        self.nz1 = nz1
-        self.nz2 = nz2
-        self.nz3 = nz3
-        if nz is None:
-            self.nz = nz1 + nz2 + nz3
         self.Rcut = Rcut
         self.basis = basis
         self.magnetic_elements = magnetic_elements
@@ -81,10 +71,6 @@ class Exchange(ExchangeParams):
         emax=0.05,
         nz=100,
         # the delta in the (i delta) in green's function to prevent divergence
-        height=0.5,
-        nz1=150,  # grid from emin to emin+(i delta)
-        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-        nz3=150,  # grid from emax + (i delta) to emax
         exclude_orbs=[],  #
         ne=None,  # number of electrons in Wannier function.
         Rcut=None,  # Rcut.
@@ -105,10 +91,6 @@ class Exchange(ExchangeParams):
             emin=emin,
             emax=emax,
             nz=nz,
-            height=height,
-            nz1=nz1,
-            nz2=nz2,
-            nz3=nz3,
             exclude_orbs=exclude_orbs,
             ne=ne,
             Rcut=Rcut,
@@ -144,6 +126,7 @@ class Exchange(ExchangeParams):
 
     def _adjust_emin(self):
         self.emin = self.G.find_energy_ingap(rbound=self.efermi - 5.0) - self.efermi
+        print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
         pass
@@ -163,11 +146,11 @@ class Exchange(ExchangeParams):
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
         self.contour = Contour(self.emin, self.emax)
-        if method.lower() == "rectangle":
-            self.contour.build_path_rectangle(
-                height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
-            )
-        elif method.lower() == "semicircle":
+        # if method.lower() == "rectangle":
+        #    self.contour.build_path_rectangle(
+        #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
+        #    )
+        if method.lower() == "semicircle":
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
         elif method.lower() == "legendre":
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
@@ -257,7 +240,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         self.mmats = {}
         self.orbital_names = {}
         self.norb_reduced = {}
-        if self.backend_name == "SIESTA":
+        if self.backend_name.upper() == "SIESTA":
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
                 if (self.include_orbs is not None) and syms[iatom] in self.include_orbs:
@@ -322,7 +305,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         """
         sum up the contribution of all the orbitals with same (n,l,m)
         """
-        if self.backend_name == "SIESTA":
+        if self.backend_name.upper() == "SIESTA":
             mmat_i = self.mmats[iatom]
             mmat_j = self.mmats[jatom]
             Jorbij = mmat_i.T @ Jorbij @ mmat_j
@@ -361,7 +344,8 @@ class ExchangeNCL(Exchange):
         )
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
-        self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+        # self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+        self.rho = self.G.get_density_matrix().real
         self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
@@ -594,22 +578,22 @@ class ExchangeNCL(Exchange):
                 B = np.imag(val[3, 3])
                 self.B[keyspin] = Jprime, B
 
-    def get_N_e(self, GR, de):
-        """
-        calcualte density matrix for all R,i, j
-        """
-        self.N = defaultdict(lambda: 0.0)
-        for R, G in GR.items():
-            self.N[R] += -1.0 / np.pi * np.imag(G * de)
+    # def get_N_e(self, GR, de):
+    #    """
+    #    calcualte density matrix for all R,i, j
+    #    """
+    #    self.N = defaultdict(lambda: 0.0)
+    #    for R, G in GR.items():
+    #        self.N[R] += -1.0 / np.pi * np.imag(G * de)
 
-    def get_rho_e(self, rhoR):
-        """add component to density matrix from a green's function
-        :param GR: Green's funciton in real space.
-        """
-        return -1.0 / np.pi * rhoR[0, 0, 0]
+    # def get_rho_e(self, rhoR):
+    #    """add component to density matrix from a green's function
+    #    :param GR: Green's funciton in real space.
+    #    """
+    #    return -1.0 / np.pi * rhoR[0, 0, 0]
 
-    def get_total_charges(self):
-        return np.sum(np.imag(np.diag(self.rho)))
+    # def get_total_charges(self):
+    #    return np.sum(np.imag(np.diag(self.rho)))
 
     def get_rho_atom(self):
         """
@@ -622,9 +606,9 @@ class ExchangeNCL(Exchange):
             iorb = self.iorb(iatom)
             tmp = self.rho[np.ix_(iorb, iorb)]
             # *2 because there is a 1/2 in the paui_block_all function
-            rho[iatom] = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)])
-            self.charges[iatom] = np.imag(rho[iatom][0])
-            self.spinat[iatom, :] = np.imag(rho[iatom][1:])
+            rho[iatom] = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)]).real
+            self.charges[iatom] = rho[iatom][0]
+            self.spinat[iatom, :] = rho[iatom][1:]
         self.rho_dict = rho
         return self.rho_dict
 
@@ -675,7 +659,7 @@ class ExchangeNCL(Exchange):
         self.Ddict_NJT = Ddict_NJT
         return Ddict_NJT
 
-    def integrate(self, rhoRs, AijRs, AijRs_orb=None, method="simpson"):
+    def integrate(self, AijRs, AijRs_orb=None, method="simpson"):
         """
         AijRs: a list of AijR,
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
@@ -685,7 +669,7 @@ class ExchangeNCL(Exchange):
         elif method == "simpson":
             integrate = simpson_nonuniform
 
-        self.rho = integrate(self.contour.path, rhoRs)
+        # self.rho = integrate(self.contour.path, rhoRs)
         for iR, R in enumerate(self.R_ijatom_dict):
             for iatom, jatom in self.R_ijatom_dict[R]:
                 f = AijRs[(R, iatom, jatom)]
@@ -695,10 +679,10 @@ class ExchangeNCL(Exchange):
                         self.contour.path, AijRs_orb[(R, iatom, jatom)]
                     )
 
-    def get_AijR_rhoR(self, e):
-        GR, rhoR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=True)
+    def get_AijR(self, e):
+        GR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=False)
         AijR, AijR_orb = self.get_all_A(GR)
-        return AijR, AijR_orb, self.get_rho_e(rhoR)
+        return AijR, AijR_orb
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
@@ -716,7 +700,6 @@ class ExchangeNCL(Exchange):
         """
         print("Green's function Calculation started.")
 
-        rhoRs = []
         AijRs = {}
 
         AijRs_orb = {}
@@ -725,11 +708,9 @@ class ExchangeNCL(Exchange):
 
         npole = len(self.contour.path)
         if self.np > 1:
-            # executor = ProcessPool(nodes=self.np)
-            # results = executor.map(self.get_AijR_rhoR, self.contour.path)
-            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
+            results = p_map(self.get_AijR, self.contour.path, num_cpus=self.np)
         else:
-            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
+            results = map(self.get_AijR, tqdm(self.contour.path, total=npole))
 
         for i, result in enumerate(results):
             for iR, R in enumerate(self.R_ijatom_dict):
@@ -749,7 +730,6 @@ class ExchangeNCL(Exchange):
                             AijRs_orb[(R, iatom, jatom)].append(
                                 result[1][R, iatom, jatom]
                             )
-            rhoRs.append(result[2])
         if self.np > 1:
             # executor.close()
             # executor.join()
@@ -757,8 +737,7 @@ class ExchangeNCL(Exchange):
             pass
 
         # self.save_AijRs(AijRs)
-        self.integrate(rhoRs, AijRs, AijRs_orb)
-
+        self.integrate(AijRs, AijRs_orb)
         self.get_rho_atom()
         self.A_to_Jtensor()
         self.A_to_Jtensor_orb()

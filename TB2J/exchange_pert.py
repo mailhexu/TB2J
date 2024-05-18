@@ -194,7 +194,7 @@ class ExchangePert(ExchangeNCL):
             e = self.contour.elist[ie]
             de = self.contour.de[ie]
             GR, dGdx = self.G.get_GR_and_dGRdx(self.Rlist, energy=e, dHdx=self.dHdx)
-            self.get_rho_e(GR, de)
+            # self.get_rho_e(GR, de)
             self.get_all_A(GR, dGdx, de)
             if self.calc_NJt:
                 self.get_N_e(GR, de)

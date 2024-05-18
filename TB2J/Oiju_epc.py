@@ -19,10 +19,6 @@ class OijuWannEPC(ExchangeCL2):
         kmesh=[4, 4, 4],
         emin=-15,  # integration lower bound, relative to fermi energy
         emax=0.05,  # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-        height=0.5,  # the delta in the (i delta) in green's function to prevent divergence
-        nz1=150,  # grid from emin to emin+(i delta)
-        nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-        nz3=150,  # grid from emax + (i delta) to emax
         exclude_orbs=[],  #
         Rmesh=[0, 0, 0],  # Rmesh.
         description="",
@@ -40,10 +36,6 @@ class OijuWannEPC(ExchangeCL2):
             emin=-15,  # integration lower bound, relative to fermi energy
             emax=0.05,  # integration upper bound. Should be 0 (fermi energy).
             # But DFT codes define Fermi energy in various ways.
-            height=0.5,  # the delta in the (i delta) in green's function.
-            nz1=150,  # grid from emin to emin+(i delta)
-            nz2=300,  # grid from emin +(i delta) to emax+(i delta)
-            nz3=150,  # grid from emax + (i delta) to emax
             exclude_orbs=[],  #
             Rmesh=[0, 0, 0],  # Rmesh.
             description="",

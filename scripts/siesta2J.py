@@ -54,19 +54,9 @@ def run_siesta2J():
         action="store_true",
         default=False,
     )
-    # parser.add_argument(
-    #    '--height',
-    #    help=
-    #    'energy contour, a small number (often between 0.1 to 0.5, default 0.2)',
-    #    type=float,
-    #    default=0.1)
     parser.add_argument(
         "--nz", help="number of integration steps. Default: 50", default=50, type=int
     )
-    # parser.add_argument(
-    #    '--nz2', help='number of steps 2, default: 200', default=200, type=int)
-    # parser.add_argument(
-    #    '--nz3', help='number of steps 3, default: 50', default=50, type=int)
     parser.add_argument(
         "--cutoff",
         help="The minimum of J amplitude to write, (in eV). Default: 1e-5 eV",

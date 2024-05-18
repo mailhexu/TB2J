@@ -86,24 +86,6 @@ def run_wann2J():
         default=100,
         type=int,
     )
-    # parser.add_argument(
-    #    '--height',
-    #    help=
-    #    'energy contour, a small number (often between 0.1 to 0.5, default 0.1)',
-    #    type=float,
-    #    default=0.1)
-    # parser.add_argument('--nz1',
-    #                    help='number of steps 1, default: 50',
-    #                    default=50,
-    #                    type=int)
-    # parser.add_argument('--nz2',
-    #                    help='number of steps 2, default: 200',
-    #                    default=200,
-    #                    type=int)
-    # parser.add_argument('--nz3',
-    #                    help='number of steps 3, default: 50',
-    #                    default=50,
-    #                    type=int)
     parser.add_argument(
         "--cutoff",
         help="The minimum of J amplitude to write, (in eV), default is 1e-5 eV",
@@ -196,10 +178,6 @@ def run_wann2J():
         emin=args.emin,
         emax=args.emax,
         nz=args.nz,
-        # height=args.height,
-        # nz1=args.nz1,
-        # nz2=args.nz2,
-        # nz3=args.nz3,
         use_cache=args.use_cache,
         np=args.np,
         description=args.description,
