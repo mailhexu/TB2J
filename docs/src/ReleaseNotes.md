@@ -1,5 +1,9 @@
 ## Release Notes
 ------------------------------------------------------------------------
+#### v0.9.0 March 22, 2024
+Improved merge method for anisotropic exchange and DMI. (thanks to Andres Tellez Mora!)
+
+
 #### v0.8.2 March 4, 2024
 TB2J can now read the "tb.dat" file instead of the "hr.dat"+"centers.xyz" files. 
 
