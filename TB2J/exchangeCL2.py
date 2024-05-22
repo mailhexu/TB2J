@@ -52,8 +52,8 @@ class ExchangeCL2(ExchangeCL):
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
         # self.rho_up_list = []
         # self.rho_dn_list = []
-        self.rho_up = self.Gup.get_density_matrix()
-        self.rho_dn = self.Gdn.get_density_matrix()
+        self.rho_up = self.Gup.get_density_matrix().real
+        self.rho_dn = self.Gdn.get_density_matrix().real
         self.Jorb_list = defaultdict(lambda: [])
         self.JJ_list = defaultdict(lambda: [])
         self.JJ = defaultdict(lambda: 0.0j)
@@ -216,8 +216,8 @@ class ExchangeCL2(ExchangeCL):
         self.spinat = np.zeros((len(self.atoms), 3), dtype=float)
         for iatom in self.orb_dict:
             iorb = self.iorb(iatom)
-            tup = np.real(np.trace(self.rho_up[np.ix_(iorb, iorb)]))
-            tdn = np.real(np.trace(self.rho_dn[np.ix_(iorb, iorb)]))
+            tup = np.trace(self.rho_up[np.ix_(iorb, iorb)])
+            tdn = np.trace(self.rho_dn[np.ix_(iorb, iorb)])
             self.charges[iatom] = tup + tdn
             self.spinat[iatom, 2] = tup - tdn
 
