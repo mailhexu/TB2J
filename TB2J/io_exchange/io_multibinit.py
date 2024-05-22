@@ -31,29 +31,43 @@ ncell =   16 16 16  ! size of supercell.
 #-------------------------------------------------------------
 #Spin dynamics
 #------------------------------------------------------------
-spin_dynamics=1  ! enable spin dynamics
-spin_mag_field= 0.0 0.0 0.0   ! external magnetic field
-spin_ntime_pre =10000          ! warming up steps. 
-spin_ntime =100000             ! number of steps. 
+spin_dynamics=1               ! enable spin dynamics  1: HuenP 2: spin-length conserving dynamics 3. Monte Carlo
+spin_mag_field= 0.0 0.0 0.0   ! external magnetic field, in atomic unit. Add "T" or "Tesla" in the end to use Tesla as unit.
+spin_ntime =100000            ! number of steps. 
 spin_nctime=100               ! number of time steps between two nc file write
 spin_dt=5e-16 s               ! time step. 
 spin_init_state = 1           ! random initial spin
 spin_damping = 0.3            ! damping factor, between 0 and 1. If not specified, it will read from the xml file. 
 
-spin_temperature=0.0
+spin_temperature=0.0          ! Temperature. If spin_var_temperature=1, this value is ignored.
 
 spin_var_temperature=1        ! switch on variable temperature calculation
 spin_temperature_start=0      ! starting point of temperature
 spin_temperature_end=500      ! ending point of temperature. 
 spin_temperature_nstep=6      ! number of temperature steps.
 
-spin_sia_add = 1              ! add a single ion anistropy (SIA) term?
-spin_sia_k1amp = 1e-6         ! amplitude of SIA (in Ha), how large should be used?
+spin_sia_add = 0              ! add a single ion anistropy (SIA) term, 0: no, 1: yes
+                              ! Note that if yes, it will overwrite the SIA terms in the xml file.
+spin_sia_k1amp = 1e-6         ! amplitude of SIA (in Ha), positive for hard axis, negative for easy axis
 spin_sia_k1dir = 0.0 0.0 1.0  ! direction of SIA
 
-spin_calc_thermo_obs = 1      ! calculate thermodynamics related observables
+spin_calc_thermo_obs = 1      ! calculate thermodynamics related observables (specific heat, magnetic susceptibility.)
+spin_write_traj = 1           ! write spin trajectory to the hist netcdf file
         """
         myfile.write(infile_template)
+
+
+def write_multibinit_command(cls, path="TB2J_results/Multibinit"):
+    if not os.path.exists(path):
+        os.makedirs(path)
+    # run.sh file
+    runfname = os.path.join(path, "run.sh")
+    with open(runfname, "w") as myfile:
+        myfile.write(
+            """#!/usr/bin/env bash
+multibinit --F03 < mb.files > log 2> err
+"""
+        )
 
 
 def write_xml(cls, fname):
@@ -178,3 +192,4 @@ def write_multibinit(cls, path):
     write_multibinit_inp(cls, path=path)
     xmlfname = os.path.join(path, "exchange.xml")
     write_xml(cls, xmlfname)
+    write_multibinit_command(cls, path=path)

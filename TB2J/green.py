@@ -36,7 +36,9 @@ def fermi(e, mu, width=0.01):
     """
 
     x = (e - mu) / width
-    return np.where(x < MAX_EXP_ARGUMENT, 1 / (1.0 + np.exp(x)), 0.0)
+    x2 = np.where(x > MAX_EXP_ARGUMENT, MAX_EXP_ARGUMENT, x)
+    return 1.0 / (1.0 + np.exp(x2))
+    # return np.where(x < MAX_EXP_ARGUMENT, 1 / (1.0 + np.exp(x)), 0.0)
 
 
 def find_energy_ingap(evals, rbound, gap=4.0):

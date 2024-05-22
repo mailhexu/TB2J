@@ -14,10 +14,10 @@ from .utils import simpson_nonuniform, trapezoidal_nonuniform
 import dataclasses
 
 
-@dataclasses.dataclass
-class ResultPerEnergy:
-    AijR: dict = {}
-    AijR_orb: dict = {}
+# @dataclasses.dataclass
+# class ResultPerEnergy:
+#    AijR: dict = {}
+#    AijR_orb: dict = {}
 
 
 class ExchangeCL2(ExchangeCL):
