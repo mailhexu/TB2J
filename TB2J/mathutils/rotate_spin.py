@@ -10,9 +10,7 @@ def rotate_Matrix_from_z_to_axis(M, axis, normalize=True):
     MI, Mx, My, Mz = pauli_block_all(M)
     axis = axis / np.linalg.norm(axis)
     # M_new = s0* MI +  Mz * (axis[0] * s1 + axis[1] * s2 + axis[2] * s3) *2
-    M_new = gather_pauli_blocks(
-        MI, Mz * axis[0] * 2, Mz * axis[1] * 2, Mz * axis[2] * 2
-    )
+    M_new = gather_pauli_blocks(MI, Mz * axis[0], Mz * axis[1], Mz * axis[2])
     return M_new
 
 
@@ -22,6 +20,15 @@ def test_rotate_Matrix_from_z_to_axis():
     Mnew = rotate_Matrix_from_z_to_axis(M, [1, 1, 1])
     print(pauli_block_all(Mnew))
     print(Mnew)
+
+    M = np.array(
+        [
+            [-9.90532976e-06 + 0.0j, 0.00000000e00 + 0.0j],
+            [0.00000000e00 + 0.0j, -9.88431291e-06 + 0.0j],
+        ]
+    )
+    print(M)
+    print(rotate_Matrix_from_z_to_axis(M, [0, 0, 1]))
 
 
 if __name__ == "__main__":
