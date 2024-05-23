@@ -47,6 +47,12 @@ class AbacusSplitSOCWrapper(AbacusWrapper):
     def get_density_matrix(self, kpts, kweights):
         evals, evecs = self.solve_all(kpts)
         nkpt = len(kpts)
+        rho = np.einsum(
+            "kb,kib,kjb->kij",
+            fermi(evals, self.efermi, width=0.05),
+            evecs,
+            evecs.conj(),
+        )
         rho = np.zeros((nkpt, self.nbasis, self.nbasis), dtype=complex)
         for ik, k in enumerate(kpts):
             rho[ik] = (
@@ -96,7 +102,7 @@ class RotateHam:
         eband = 0.0
         for ik, k in enumerate(self.kpts):
             rho = rotate_Matrix_from_z_to_axis(self.rho_ref[ik], axis)
-            Hk_xc = rotate_Matrix_from_z_to_axis(self.Hk_xc_ref[ik], -axis)
+            Hk_xc = rotate_Matrix_from_z_to_axis(self.Hk_xc_ref[ik], axis)
             Hk_soc = self.Hk_soc_ref[ik]
             eband += np.trace(rho @ (Hk_xc + Hk_soc))
         return eband
