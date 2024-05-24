@@ -4,6 +4,7 @@ from TB2J.mathutils.rotate_spin import rotate_Matrix_from_z_to_axis
 from TB2J.kpoints import monkhorst_pack
 from TB2J.mathutils.fermi import fermi
 from TB2J.mathutils.kR_convert import k_to_R, R_to_k
+from scipy.linalg import eigh
 from copy import deepcopy
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
@@ -25,10 +26,11 @@ class AbacusSplitSOCWrapper(AbacusWrapper):
         super().__init__(*args, **kwargs)
         self._HR_copy = deepcopy(self._HR)
         self.HR_soc = HR_soc
+        self.soc_lambda = 0.1
 
     @property
     def HR(self):
-        return self._HR + self.HR_soc
+        return self._HR + self.HR_soc * self.soc_lambda
 
     def rotate_HR_xc(self, axis):
         """
@@ -44,25 +46,28 @@ class AbacusSplitSOCWrapper(AbacusWrapper):
         for ik in range(len(self._Hk)):
             self._Hk[ik] = rotate_Matrix_from_z_to_axis(self._Hk_copy[ik], axis)
 
-    def get_density_matrix(self, kpts, kweights):
-        evals, evecs = self.solve_all(kpts)
-        nkpt = len(kpts)
-        rho = np.einsum(
-            "kb,kib,kjb->kij",
-            fermi(evals, self.efermi, width=0.05),
-            evecs,
-            evecs.conj(),
-        )
-        rho = np.zeros((nkpt, self.nbasis, self.nbasis), dtype=complex)
-        for ik, k in enumerate(kpts):
-            rho[ik] = (
-                evecs[ik]
-                * fermi(evals[ik], self.efermi, width=0.05)
-                @ evecs[ik].T.conj()
-                * kweights[ik]
+    def get_density_matrix(self, kpts):
+        rho = np.zeros((len(kpts), self.nbasis, self.nbasis), dtype=complex)
+        for ik, kpt in enumerate(kpts):
+            Hk, Sk = self.gen_ham(kpt)
+            evals, evecs = eigh(Hk, Sk)
+            rho[ik] = np.einsum(
+                "ib, b, jb -> ij",
+                evecs,
+                fermi(evals, self.efermi, width=0.05),
+                evecs.conj(),
             )
-        print(np.trace(np.sum(rho, axis=0)))
         return rho
+        # rho = np.zeros((nkpt, self.nbasis, self.nbasis), dtype=complex)
+        # for ik, k in enumerate(kpts):
+        #    rho[ik] = (
+        #        evecs[ik]
+        #        * fermi(evals[ik], self.efermi, width=0.05)
+        #        @ evecs[ik].T.conj()
+        #        * kweights[ik]
+        #    )
+        # print(np.trace(np.sum(rho, axis=0)))
+        # return rho
 
     def rotate_DM(self, rho, axis):
         """
@@ -79,6 +84,20 @@ class RotateHam:
         self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
         self.kweights = np.ones(len(self.kpts), dtype=float) / len(self.kpts)
 
+    def get_band_energy2(self):
+        for ik, kpt in enumerate(self.kpts):
+            Hk, Sk = self.model.gen_ham(kpt)
+            evals, evecs = eigh(Hk, Sk)
+            rho = np.einsum(
+                "ib, b, jb -> ij",
+                evecs,
+                fermi(evals, self.model.efermi, width=0.05),
+                evecs.conj(),
+            )
+            eband1 = np.sum(evals * fermi(evals, self.model.efermi, width=0.05))
+            eband2 = np.trace(Hk @ rho)
+            print(eband1, eband2)
+
     def get_band_energy(self, dm=False):
         evals, evecs = self.model.solve_all(self.kpts)
         eband = np.sum(
@@ -94,9 +113,24 @@ class RotateHam:
 
     def calc_ref(self):
         # calculate the Hk_ref, Sk_ref, Hk_soc_ref, and rho_ref
-        self.rho_ref = self.model.get_density_matrix(self.kpts, self.kweights)
-        self.Hk_xc_ref = R_to_k(self.kpts, self.model.Rlist, self.model.HR)
+        self.Sk_ref = R_to_k(self.kpts, self.model.Rlist, self.model.SR)
+        self.Hk_xc_ref = R_to_k(self.kpts, self.model.Rlist, self.model._HR_copy)
         self.Hk_soc_ref = R_to_k(self.kpts, self.model.Rlist, self.model.HR_soc)
+        self.rho_ref = np.zeros(
+            (len(self.kpts), self.model.nbasis, self.model.nbasis), dtype=complex
+        )
+        print(f"{self.Hk_xc_ref[0][:4,0:4].real=}")
+        print(f"{self.Sk_ref[0][:4,0:4].real=}")
+        for ik, kpt in enumerate(self.kpts):
+            # evals, evecs = eigh(self.Hk_xc_ref[ik]+self.Hk_soc_ref[ik], self.Sk_ref[ik])
+            evals, evecs = eigh(self.Hk_xc_ref[ik], self.Sk_ref[ik])
+            self.rho_ref[ik] = np.einsum(
+                "ib, b, jb -> ij",
+                evecs,
+                fermi(evals, self.model.efermi, width=0.05),
+                evecs.conj(),
+            )  # @self.Sk_ref[ik]
+        print(f"{self.rho_ref[0][:4,0:4].real=}")
 
     def get_band_energy_from_rho(self, axis):
         eband = 0.0
@@ -104,7 +138,23 @@ class RotateHam:
             rho = rotate_Matrix_from_z_to_axis(self.rho_ref[ik], axis)
             Hk_xc = rotate_Matrix_from_z_to_axis(self.Hk_xc_ref[ik], axis)
             Hk_soc = self.Hk_soc_ref[ik]
-            eband += np.trace(rho @ (Hk_xc + Hk_soc))
+            Htot = Hk_xc + Hk_soc * self.model.soc_lambda
+            Sk = self.Sk_ref[ik]
+            # evals, evecs = eigh(Htot, Sk)
+            # rho2= np.einsum("ib, b, jb -> ij", evecs, fermi(evals, self.model.efermi, width=0.05), evecs.conj())
+            if ik == 0 and False:
+                print(f"{evecs[:4,0:4].real=}")
+                print(f"{evals[:4]=}")
+                print(f"{Hk_xc[:4,0:4].real=}")
+                print(f"{Htot[:4,0:4].real=}")
+                print(f"{Sk[:4,0:4].real=}")
+                print(f"{rho[:4,0:4].real=}")
+                print(f"{rho2[:4,0:4].real=}")
+            # eband1 = np.sum(evals * fermi(evals, self.model.efermi, width=0.05))
+            # eband2 = np.trace(Htot @ rho2).real
+            # eband3 = np.trace(Htot @ rho).real
+            # print(eband1, eband2, eband3)
+            eband += np.trace(Hk_soc @ rho) * self.kweights[ik] * self.model.soc_lambda
         return eband
 
     def get_band_energy_vs_theta(
@@ -118,12 +168,15 @@ class RotateHam:
         es2 = []
         # e,rho = self.model.get_band_energy(dm=True)
         self.calc_ref()
-        thetas = np.linspace(*angle_range)
+        thetas = np.linspace(*angle_range, npoints)
         for theta in thetas:
             axis = Rotation.from_euler(rotation_axis, theta).apply(initial_direction)
             self.model.rotate_HR_xc(axis)
+            # self.get_band_energy2()
             e = self.get_band_energy()
+            # e=0
             e2 = self.get_band_energy_from_rho(axis)
+            # e2=0
             es.append(e)
             es2.append(e2)
             print(f"{e=}, {e2=}")
@@ -164,8 +217,8 @@ class AbacusSplitSOCParser:
 
 
 def test_AbacusSplitSOCWrapper():
-    # path = Path("~/projects/2D_Fe").expanduser()
-    path = Path("/home/hexu/projects/TB2Jflows/examples/2D_Fe")
+    path = Path("~/projects/2D_Fe").expanduser()
+    # path = Path("~/projects/TB2Jflows/examples/2D_Fe")
     outpath_nosoc = f"{path}/Fe_soc0/OUT.ABACUS"
     outpath_soc = f"{path}/Fe_soc1_nscf/OUT.ABACUS"
     parser = AbacusSplitSOCParser(
@@ -173,16 +226,16 @@ def test_AbacusSplitSOCWrapper():
     )
     model = parser.parse()
     kmesh = [4, 4, 1]
-    e_z = get_model_energy(model, kmesh=kmesh, gamma=True)
-    print(e_z)
+    # e_z = get_model_energy(model, kmesh=kmesh, gamma=True)
+    # print(e_z)
 
-    model.rotate_HR_xc([0, 0, 1])
-    e_z = get_model_energy(model, kmesh=kmesh, gamma=True)
-    print(e_z)
+    # model.rotate_HR_xc([0, 0, 1])
+    # e_z = get_model_energy(model, kmesh=kmesh, gamma=True)
+    # print(e_z)
 
-    model.rotate_HR_xc([1, 0, 0])
-    e_x = get_model_energy(model, kmesh=kmesh, gamma=True)
-    print(e_x)
+    # model.rotate_HR_xc([1, 0, 0])
+    # e_x = get_model_energy(model, kmesh=kmesh, gamma=True)
+    # print(e_x)
 
     r = RotateHam(model, kmesh)
     # thetas, es = r.get_band_energy_vs_theta(angle_range=(0, np.pi*2), rotation_axis="z", initial_direction=(1,0,0),  npoints=21)
@@ -190,11 +243,15 @@ def test_AbacusSplitSOCWrapper():
         angle_range=(0, np.pi * 2),
         rotation_axis="y",
         initial_direction=(0, 0, 1),
-        npoints=21,
+        npoints=11,
     )
+    # print the table of thetas and es, es2
+    print("theta, e, e2")
+    for theta, e, e2 in zip(thetas, es, es2):
+        print(f"{theta=}, {e=}, {e2=}")
 
-    # plt.plot(thetas / np.pi, es, marker="o")
-    plt.plot(thetas / np.pi, es2, marker=".")
+    plt.plot(thetas / np.pi, es - es[0], marker="o")
+    plt.plot(thetas / np.pi, es2 - es2[0], marker=".")
     plt.savefig("E_along_z_x_z.png")
     plt.show()
 

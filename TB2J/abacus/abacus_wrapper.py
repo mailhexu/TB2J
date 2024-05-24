@@ -16,7 +16,7 @@ from TB2J.abacus.stru_api import read_abacus, read_abacus_out
 
 class AbacusWrapper(AbstractTB):
     def __init__(self, HR, SR, Rlist, nbasis, nspin=1):
-        self.R2kfactor = -2j * np.pi
+        self.R2kfactor = 2j * np.pi
         self.is_orthogonal = False
         self._name = "ABACUS"
         self._HR = HR
@@ -70,6 +70,8 @@ class AbacusWrapper(AbstractTB):
                 S = self.SR[iR] * phase
                 # Sk += S + S.conjugate().T
                 Sk += S
+                # Hk = (Hk + Hk.conj().T)/2
+                # Sk = (Sk + Sk.conj().T)/2
         elif convention == 1:
             # TODO: implement the first convention (the r convention)
             raise NotImplementedError("convention 1 is not implemented yet.")

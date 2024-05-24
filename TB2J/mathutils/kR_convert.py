@@ -59,12 +59,12 @@ def R_to_k(kpts, Rlist, MR):
     phase = np.exp(2.0 * np.pi * 1j * np.tensordot(kpts, Rlist, axes=([1], [1])))
     Mk = np.einsum("rlm, kr -> klm", MR, phase)
 
-    nkpt, n1, n2 = Mk.shape
-    nR = Rlist.shape[0]
-    Mk = np.zeros((nkpt, n1, n2), dtype=complex)
-    for iR, R in enumerate(Rlist):
-        for ik in range(nkpt):
-            Mk[ik] += MR[iR] * np.exp(2.0 * np.pi * 1j * np.dot(kpts[ik], R))
+    # nkpt, n1, n2 = Mk.shape
+    # nR = Rlist.shape[0]
+    # Mk = np.zeros((nkpt, n1, n2), dtype=complex)
+    # for iR, R in enumerate(Rlist):
+    #    for ik in range(nkpt):
+    #        Mk[ik] += MR[iR] * np.exp(2.0 * np.pi * 1j * np.dot(kpts[ik], R))
     return Mk
 
 
