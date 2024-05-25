@@ -26,7 +26,7 @@ class AbacusSplitSOCWrapper(AbacusWrapper):
         super().__init__(*args, **kwargs)
         self._HR_copy = deepcopy(self._HR)
         self.HR_soc = HR_soc
-        self.soc_lambda = 0.1
+        self.soc_lambda = 1
 
     @property
     def HR(self):
@@ -217,10 +217,10 @@ class AbacusSplitSOCParser:
 
 
 def test_AbacusSplitSOCWrapper():
-    path = Path("~/projects/2D_Fe").expanduser()
+    path = Path("~/projects/2D_Fe/Fe_z").expanduser()
     # path = Path("~/projects/TB2Jflows/examples/2D_Fe")
-    outpath_nosoc = f"{path}/Fe_soc0/OUT.ABACUS"
-    outpath_soc = f"{path}/Fe_soc1_nscf/OUT.ABACUS"
+    outpath_nosoc = f"{path}/soc0/OUT.ABACUS"
+    outpath_soc = f"{path}/soc1/OUT.ABACUS"
     parser = AbacusSplitSOCParser(
         outpath_nosoc=outpath_nosoc, outpath_soc=outpath_soc, binary=False
     )
