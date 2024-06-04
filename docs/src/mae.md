@@ -5,15 +5,16 @@
 
 
 To compute the magnetocrystalline anisotropy energy (MAE) of a magnetic system with the magnetic force theorem, two steps of DFT calculations are needed.
+
 - The first step is to do  an collinear spin calculation. The density and the Hamiltonian is saved at this step. Note that the current implementation requires the SOC to be turned on in ABACUS, but setting the SOC strength to zero (soc_lambda=0).
+
 - The second step is to do a non-SCF non-collinear spin calculation with SOC turned on. The density is read from the previous step. In practice, one step of SCF calculation is done (as the current implementation does not write the Hamiltonian and the energy). The Hamiltonian should be saved in this step, too. 
 
 Here is one example: 
 Step one: collinear spin calculation.  Note that  instead of using  nspin=2, we use nspin=4, and  lspinorb=1 to enable the SOC but set the soc\_lambda  to 0.0 to turn off the SOC.  This is to make the Hamiltonian saved in the spinor form, so it can be easily compared with the next step of a real calculation with SOC. 
 
-```text
 
-```
+``` text
 INPUT_PARAMETERS
 # SCF calculation with SOC turned on, but soc_lambda=0. 
 calculation                             scf
