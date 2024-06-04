@@ -154,8 +154,6 @@ def test_gather_pauli_blocks():
     M = np.random.rand(4, 4)
     MI, Mx, My, Mz = pauli_block_all(M)
     M2 = gather_pauli_blocks(MI, Mx, My, Mz)
-    print(M)
-    print(M2)
     assert np.allclose(M, M2)
 
 
