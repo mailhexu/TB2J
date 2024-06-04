@@ -28,6 +28,19 @@ def get_density_matrix(evals=None, evecs=None, kweights=None, nel=None, width=0.
     return rho
 
 
+def spherical_to_cartesian(theta, phi, normalize=True):
+    """
+    Convert spherical coordinates to cartesian
+    """
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+    vec = np.array([x, y, z])
+    if normalize:
+        vec = vec / np.linalg.norm(vec)
+    return vec
+
+
 class AbacusSplitSOCWrapper(AbacusWrapper):
     """
     Abacus wrapper with Hamiltonian split to SOC and non-SOC parts
@@ -65,30 +78,11 @@ class AbacusSplitSOCWrapper(AbacusWrapper):
     def get_density_matrix(self, kpts, kweights=None):
         rho = np.zeros((len(kpts), self.nbasis, self.nbasis), dtype=complex)
         evals, evecs = self.solve_all(kpts)
-        # occ = Occupations(self.efermi, width=self.width, wk=self.nel, nspin=1)
         occ = get_occupation(evals, kweights, self.nel, width=self.width)
-        rho = np.einsum("kib, kb, kjb -> kij", evecs, occ, evecs.conj())
-
-        # for ik, kpt in enumerate(kpts):
-        #    Hk, Sk = self.gen_ham(kpt)
-        #    evals, evecs = eigh(Hk, Sk)
-        #    rho[ik] = np.einsum(
-        #        "ib, b, jb -> ij",
-        #        evecs,
-        #        fermi(evals, self.efermi, width=0.05),
-        #        evecs.conj(),
-        #    )
+        rho = np.einsum(
+            "kib, kb, kjb -> kij", evecs, occ, evecs.conj()
+        )  # should multiply S to the the real DM.
         return rho
-        # rho = np.zeros((nkpt, self.nbasis, self.nbasis), dtype=complex)
-        # for ik, k in enumerate(kpts):
-        #    rho[ik] = (
-        #        evecs[ik]
-        #        * fermi(evals[ik], self.efermi, width=0.05)
-        #        @ evecs[ik].T.conj()
-        #        * kweights[ik]
-        #    )
-        # print(np.trace(np.sum(rho, axis=0)))
-        # return rho
 
     def rotate_DM(self, rho, axis):
         """
@@ -149,16 +143,16 @@ class RotateHam:
         for ik, kpt in enumerate(self.kpts):
             # evals, evecs = eigh(self.Hk_xc_ref[ik]+self.Hk_soc_ref[ik], self.Sk_ref[ik])
             evals[ik], evecs[ik] = eigh(self.Hk_xc_ref[ik], self.Sk_ref[ik])
-        print(f"{evals.shape=}, {evecs.shape=}")
-        print(f" {self.kweights=}, {self.model.nel=}, {self.model.width=} ")
         occ = get_occupation(
             evals, self.kweights, self.model.nel, width=self.model.width
         )
         # occ = fermi(evals, self.model.efermi, width=self.model.width)
         self.rho_ref = np.einsum("kib, kb, kjb -> kij", evecs, occ, evecs.conj())
-        print(f"{self.rho_ref[0][:4, :4].real}")
 
     def get_band_energy_from_rho(self, axis):
+        """
+        This is wrong!! Should use second order perturbation theory to get the band energy instead.
+        """
         eband = 0.0
         for ik, k in enumerate(self.kpts):
             rho = rotate_Matrix_from_z_to_axis(self.rho_ref[ik], axis)
@@ -180,37 +174,28 @@ class RotateHam:
             # eband2 = np.trace(Htot @ rho2).real
             # eband3 = np.trace(Htot @ rho).real
             # print(eband1, eband2, eband3)
-            print(rho[:4, :4].real)
             e_soc = np.trace(Hk_soc @ rho) * self.kweights[ik] * self.model.soc_lambda
-
             eband += e_soc
-        print(eband)
         return eband
 
-    def get_band_energy_vs_theta(
+    def get_band_energy_vs_angles(
         self,
-        angle_range=(0, np.pi * 2),
-        rotation_axis="y",
-        initial_direction=(0, 0, 1),
-        npoints=21,
+        thetas,
+        phis,
     ):
         es = []
-        es2 = []
+        # es2 = []
         # e,rho = self.model.get_band_energy(dm=True)
-        self.calc_ref()
+        # self.calc_ref()
         thetas = np.linspace(*angle_range, npoints)
-        for theta in thetas:
-            axis = Rotation.from_euler(rotation_axis, theta).apply(initial_direction)
+        for i, theta, phi in thetas:
+            axis = spherical_to_cartesian(theta, phi)
             self.model.rotate_HR_xc(axis)
             # self.get_band_energy2()
             e = self.get_band_energy()
-            # e=0
-            e2 = self.get_band_energy_from_rho(axis)
-            # e2=0
             es.append(e)
-            es2.append(e2)
-            print(f"{e=}, {e2=}")
-        return thetas, es, es2
+            # es2.append(e2)
+        return es
 
 
 def get_model_energy(model, kmesh, gamma=True):
@@ -246,26 +231,39 @@ class AbacusSplitSOCParser:
         return model
 
 
+def abacus_get_MAE(
+    path_nosoc, path_soc, kmesh, thetas, psis, gamma=True, outfile="MAE.txt"
+):
+    """Get MAE from Abacus with magnetic force theorem. Two calculations are needed. First we do an calculation with SOC but the soc_lambda is set to 0. Save the density. The next calculatin we start with the density from the first calculation and set the SOC prefactor to 1. With the information from the two calcualtions, we can get the band energy with magnetic moments in the direction, specified in two list, thetas, and phis."""
+    parser = AbacusSplitSOCParser(
+        outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
+    )
+    model = parser.parse()
+    ham = RotateHam(model, kmesh, gamma=gamma)
+    es = []
+    for theta, psi in zip(thetas, psis):
+        axis = spherical_to_cartesian(theta, psi)
+        model.rotate_HR_xc(axis)
+        e = ham.get_band_energy()
+        es.append(ham.get_band_energy())
+    if outfile:
+        with open(outfile, "w") as f:
+            f.write("theta, psi, energy\n")
+            for theta, psi, e in zip(thetas, psis, es):
+                f.write(f"{theta}, {psi}, {e}\n")
+    return es
+
+
 def test_AbacusSplitSOCWrapper():
     # path = Path("~/projects/2D_Fe").expanduser()
-    path = Path("~/projects/TB2Jflows/examples/2D_Fe").expanduser()
-    outpath_nosoc = f"{path}/Fe_soc0/OUT.ABACUS"
-    outpath_soc = f"{path}/Fe_soc1_nscf/OUT.ABACUS"
+    path = Path("~/projects/TB2Jflows/examples/2D_Fe/Fe_z").expanduser()
+    outpath_nosoc = f"{path}/soc0/OUT.ABACUS"
+    outpath_soc = f"{path}/soc1/OUT.ABACUS"
     parser = AbacusSplitSOCParser(
         outpath_nosoc=outpath_nosoc, outpath_soc=outpath_soc, binary=False
     )
     model = parser.parse()
     kmesh = [6, 6, 1]
-    # e_z = get_model_energy(model, kmesh=kmesh, gamma=True)
-    # print(e_z)
-
-    # model.rotate_HR_xc([0, 0, 1])
-    # e_z = get_model_energy(model, kmesh=kmesh, gamma=True)
-    # print(e_z)
-
-    # model.rotate_HR_xc([1, 0, 0])
-    # e_x = get_model_energy(model, kmesh=kmesh, gamma=True)
-    # print(e_x)
 
     r = RotateHam(model, kmesh)
     # thetas, es = r.get_band_energy_vs_theta(angle_range=(0, np.pi*2), rotation_axis="z", initial_direction=(1,0,0),  npoints=21)
@@ -286,5 +284,36 @@ def test_AbacusSplitSOCWrapper():
     plt.show()
 
 
+def abacus_get_MAE_cli():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Get MAE from Abacus with magnetic force theorem. Two calculations are needed. First we do an calculation with SOC but the soc_lambda is set to 0. Save the density. The next calculatin we start with the density from the first calculation and set the SOC prefactor to 1. With the information from the two calcualtions, we can get the band energy with magnetic moments in the direction, specified in two list, thetas, and phis. "
+    )
+    parser.add_argument("path_nosoc", type=str, help="Path to the  calculation with ")
+    parser.add_argument("path_soc", type=str, help="Path to the SOC calculation")
+    parser.add_argument("thetas", type=float, nargs="+", help="Thetas")
+    parser.add_argument("psis", type=float, nargs="+", help="Phis")
+    parser.add_argument("kmesh", type=int, nargs=3, help="K-mesh")
+    parser.add_argument(
+        "--gamma", action="store_true", help="Use Gamma centered kpoints"
+    )
+    parser.add_argument(
+        "--outfile",
+        type=str,
+        help="The angles and the energey will be saved in this file.",
+    )
+    args = parser.parse_args()
+    abacus_get_MAE(
+        args.path_nosoc,
+        args.path_soc,
+        args.kmesh,
+        args.thetas,
+        args.psis,
+        gamma=args.gamma,
+        outfile=args.outfile,
+    )
+
+
 if __name__ == "__main__":
-    test_AbacusSplitSOCWrapper()
+    abacus_get_MAE_cli()
