@@ -14,7 +14,7 @@ from TB2J.abacus.occupations import Occupations
 # TODO List:
 # - [x] Add the class AbacusSplitSOCWrapper
 # - [x] Add the function to rotate the XC part
-# - [x] Compute the band energy at arbitrary
+# - [x] Compute the band energy at arbitrary angle
 
 
 def get_occupation(evals, kweights, nel, width=0.1):
