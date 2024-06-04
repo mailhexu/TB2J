@@ -143,7 +143,26 @@ def pauli_block_all(M):
     return MI, Mx, My, Mz
 
 
+def gather_pauli_blocks(MI, Mx, My, Mz):
+    """
+    Gather the I, x, y, z component of a matrix.
+    """
+    return np.kron(MI, s0) + np.kron(Mx, s1) + np.kron(My, s2) + np.kron(Mz, s3)
+
+
+def test_gather_pauli_blocks():
+    M = np.random.rand(4, 4)
+    MI, Mx, My, Mz = pauli_block_all(M)
+    M2 = gather_pauli_blocks(MI, Mx, My, Mz)
+    print(M)
+    print(M2)
+    assert np.allclose(M, M2)
+
+
 def op_norm(M):
+    """
+    Return the operator norm of a matrix.
+    """
     return max(svd(M)[1])
 
 
