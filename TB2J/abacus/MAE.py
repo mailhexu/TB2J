@@ -3,7 +3,7 @@ from TB2J.abacus.abacus_wrapper import AbacusWrapper, AbacusParser
 from TB2J.mathutils.rotate_spin import rotate_Matrix_from_z_to_axis
 from TB2J.kpoints import monkhorst_pack
 from TB2J.mathutils.fermi import fermi
-from TB2J.mathutils.kR_convert import k_to_R, R_to_k
+from TB2J.mathutils.kR_convert import R_to_k
 from scipy.linalg import eigh
 from copy import deepcopy
 from scipy.spatial.transform import Rotation
@@ -159,17 +159,18 @@ class RotateHam:
             Hk_xc = rotate_Matrix_from_z_to_axis(self.Hk_xc_ref[ik], axis)
             Hk_soc = self.Hk_soc_ref[ik]
             Htot = Hk_xc + Hk_soc * self.model.soc_lambda
-            Sk = self.Sk_ref[ik]
+            # Sk = self.Sk_ref[ik]
             # evals, evecs = eigh(Htot, Sk)
             # rho2= np.einsum("ib, b, jb -> ij", evecs, fermi(evals, self.model.efermi, width=0.05), evecs.conj())
             if ik == 0 and False:
-                print(f"{evecs[:4,0:4].real=}")
-                print(f"{evals[:4]=}")
-                print(f"{Hk_xc[:4,0:4].real=}")
-                print(f"{Htot[:4,0:4].real=}")
-                print(f"{Sk[:4,0:4].real=}")
-                print(f"{rho[:4,0:4].real=}")
-                print(f"{rho2[:4,0:4].real=}")
+                pass
+                # print(f"{evecs[:4,0:4].real=}")
+                # print(f"{evals[:4]=}")
+                # print(f"{Hk_xc[:4,0:4].real=}")
+                # print(f"{Htot[:4,0:4].real=}")
+                # print(f"{Sk[:4,0:4].real=}")
+                # print(f"{rho[:4,0:4].real=}")
+                # print(f"{rho2[:4,0:4].real=}")
             # eband1 = np.sum(evals * fermi(evals, self.model.efermi, width=0.05))
             # eband2 = np.trace(Htot @ rho2).real
             # eband3 = np.trace(Htot @ rho).real
@@ -181,14 +182,14 @@ class RotateHam:
     def get_band_energy_vs_angles(
         self,
         thetas,
-        phis,
+        psis,
     ):
         es = []
         # es2 = []
         # e,rho = self.model.get_band_energy(dm=True)
         # self.calc_ref()
-        thetas = np.linspace(*angle_range, npoints)
-        for i, theta, phi in thetas:
+        # thetas = np.linspace(*angle_range, npoints)
+        for i, theta, phi in enumerate(zip(thetas, psis)):
             axis = spherical_to_cartesian(theta, phi)
             self.model.rotate_HR_xc(axis)
             # self.get_band_energy2()
