@@ -59,7 +59,7 @@ class JDownfolder:
             for iR, R in enumerate(self.Rlist):
                 phase = np.exp(-2.0j * np.pi * np.dot(q, R))
                 JR_downfolded[iR] += np.real(Jq_downfolded[iq] * phase / self.nqpt)
-        return JR_downfolded
+        return JR_downfolded, self.Rlist
 
     def downfold_oneq(self, J):
         JMM = J[np.ix_(self.iMn, self.iMn)]
@@ -120,7 +120,6 @@ class PWFDownfolder:
         )
         self.JR_downfolded = ewf.HwannR
         self.Rlist = ewf.Rlist
-        print("downfolded JR shape", self.JR_downfolded.shape)
 
     def get_JR(self):
         return self.JR_downfolded, self.Rlist
