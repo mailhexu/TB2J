@@ -58,6 +58,13 @@ def main():
         default=False,
     )
 
+    parser.add_argument(
+        "--method",
+        help="The method to downfold the exchange parameter. Options are Lowdin and PWF (projected Wannier function). ",
+        type=str,
+        default="Lowdin",
+    )
+
     args = parser.parse_args()
 
     if len(args.metals) == []:
@@ -73,6 +80,7 @@ def main():
         outpath=args.outpath,
         qmesh=args.qmesh,
         iso_only=args.iso_only,
+        method=args.method,
     )
 
 
