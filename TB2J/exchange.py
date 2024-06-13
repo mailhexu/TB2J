@@ -1,6 +1,9 @@
 from collections import defaultdict, OrderedDict
 import os
 import numpy as np
+import pickle
+from dataclasses import dataclass
+import yaml
 from TB2J.green import TBGreen
 from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_mat
 from TB2J.utils import symbol_number, kmesh_to_R
@@ -10,25 +13,46 @@ from TB2J.external import p_map
 from TB2J.contour import Contour
 from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform, split_symbol_number
 from TB2J.orbmap import map_orbs_matrix
-import pickle
+from typing import List, Tuple
 
 
+@dataclass
 class ExchangeParams:
+    """
+    A class to store the parameters for exchange calculation.
+    """
+
+    efermi: float
+    basis: list = None
+    magnetic_elements: list = None
+    include_orbs = {}
+    _kmesh = [4, 4, 4]
+    emin: float = -15
+    emax: float = 0.05
+    nz: int = 100
+    exclude_orbs = []
+    ne: int = None
+    Rcut: float = None
+    _use_cache: bool = False
+    np: int = 1
+    description: str = ""
+    write_density_matrix: bool = False
+    orb_decomposition: bool = False
+    output_path: str = "TB2J_results"
+
     def __init__(
         self,
-        efermi,
+        efermi=-10.0,
         basis=None,
-        magnetic_elements=[],
-        include_orbs={},
+        magnetic_elements=None,
+        include_orbs=None,
         kmesh=[4, 4, 4],
-        emin=-15,  # integration lower bound, relative to fermi energy
-        # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
+        emin=-15,
         emax=0.05,
         nz=100,
-        # the delta in the (i delta) in green's function to prevent divergence
-        exclude_orbs=[],  #
-        ne=None,  # number of electrons in Wannier function.
-        Rcut=None,  # Rcut.
+        exclude_orbs=[],
+        ne=None,
+        Rcut=None,
         use_cache=False,
         np=1,
         description="",
@@ -37,23 +61,43 @@ class ExchangeParams:
         output_path="TB2J_results",
     ):
         self.efermi = efermi
-        self.emin = emin
-        self.emax = emax
-        self.nz = nz
-        self.Rcut = Rcut
         self.basis = basis
         self.magnetic_elements = magnetic_elements
         self.include_orbs = include_orbs
-
+        self._kmesh = kmesh
+        self.emin = emin
+        self.emax = emax
+        self.nz = nz
         self.exclude_orbs = exclude_orbs
         self.ne = ne
+        self.Rcut = Rcut
         self._use_cache = use_cache
         self.np = np
-        self._kmesh = kmesh
-        self.orb_decomposition = orb_decomposition
-        self.write_density_matrix = write_density_matrix
         self.description = description
+        self.write_density_matrix = write_density_matrix
+        self.orb_decomposition = orb_decomposition
         self.output_path = output_path
+
+    def set_params(self, **kwargs):
+        for key, val in kwargs.items():
+            setattr(self, key, val)
+
+    def save_to_yaml(self, fname):
+        with open(fname, "w") as myfile:
+            yaml.dump(self.__dict__, myfile)
+
+
+@dataclass
+class QuantityPerEnergy:
+    """
+    A class to store the quantities for a given energy.
+    To be integrated over energy.
+    """
+
+    AijR = {}
+    AijR_orb = {}
+    rho = {}
+    MAE: np.ndarray = None
 
 
 class Exchange(ExchangeParams):
@@ -61,46 +105,10 @@ class Exchange(ExchangeParams):
         self,
         tbmodels,
         atoms,
-        efermi,
-        basis=None,
-        magnetic_elements=[],
-        include_orbs={},
-        kmesh=[4, 4, 4],
-        emin=-15,  # integration lower bound, relative to fermi energy
-        # integration upper bound. Should be 0 (fermi energy). But DFT codes define Fermi energy in various ways.
-        emax=0.05,
-        nz=100,
-        # the delta in the (i delta) in green's function to prevent divergence
-        exclude_orbs=[],  #
-        ne=None,  # number of electrons in Wannier function.
-        Rcut=None,  # Rcut.
-        use_cache=False,
-        np=1,
-        description="",
-        write_density_matrix=False,
-        output_path="TB2J_results",
-        orb_decomposition=False,
+        **params: ExchangeParams,
     ):
         self.atoms = atoms
-        super().__init__(
-            efermi=efermi,
-            basis=basis,
-            magnetic_elements=magnetic_elements,
-            include_orbs=include_orbs,
-            kmesh=kmesh,
-            emin=emin,
-            emax=emax,
-            nz=nz,
-            exclude_orbs=exclude_orbs,
-            ne=ne,
-            Rcut=Rcut,
-            use_cache=use_cache,
-            np=np,
-            description=description,
-            write_density_matrix=write_density_matrix,
-            orb_decomposition=orb_decomposition,
-            output_path=output_path,
-        )
+        super().__init__(**params)
         self._prepare_kmesh(self._kmesh)
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
@@ -334,7 +342,6 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
-        # TODO: check if tbmodels are really a tbmodel with SOC.
         self.G = TBGreen(
             self.tbmodel,
             self.kmesh,
@@ -615,7 +622,7 @@ class ExchangeNCL(Exchange):
     def calculate_DMI_NJT(self):
         """
         calculate exchange and DMI with the
-        D(i,j) =
+        This did not work and should be removed.
         """
         Ddict_NJT = {}
         Jdict_NJT = {}
@@ -679,10 +686,36 @@ class ExchangeNCL(Exchange):
                         self.contour.path, AijRs_orb[(R, iatom, jatom)]
                     )
 
-    def get_AijR(self, e):
-        GR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=False)
+    def get_quantities_per_e(self, e):
+        Gk_all = self.G.get_Gk_al()
+        mae = self.get_mae(Gk_all)
+        # TODO: get the MAE from Gk_all
+        GR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=False, Gk_all=Gk_all)
+        # TODO: define the quantities for one energy.
         AijR, AijR_orb = self.get_all_A(GR)
-        return AijR, AijR_orb
+
+        return QuantitiesPerE(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
+
+    def get_mae_kspace(self, Gk_all, angles):
+        """
+        get the MAE from Gk_all
+        TODO: This is only a place holder.
+        """
+        Hso_k = self.model.get_Hso_k(k)
+        mae = np.zeros(len(angles), dtype=complex)
+        # rotate the Hso_k to angles
+        for ik, k in enumerate(self.G.kpoints):
+            Gk = Gk_all[ik]
+            for i_angle, angle in enumerate(angles):
+                # TODO: implementa rotate_H
+                Hso_k_rot = rotate_H(Hso_k, angles[ik])
+                mae[i_angle] = Gk @ Hso_k @ Gk @ Hso_k
+        return mae
+
+    def get_mae_real(self, GR):
+        """
+        get the MAE from GR
+        """
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
