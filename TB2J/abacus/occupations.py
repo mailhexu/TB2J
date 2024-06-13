@@ -3,18 +3,17 @@ This file is stolen from the hotbit programm, with some modification.
 """
 
 import numpy as np
-from scipy.optimize import brentq, brent
+from scipy.optimize import brentq
 import sys
 
-MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
 from ase.dft.dos import DOS
-from scipy import interpolate, optimize, integrate
+from scipy import integrate
 
 # import numba
-import math
 
 # from numba import float64, int32
 
+MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
 
 # @numba.vectorize(nopython=True)
 # def myfermi(e, mu, width, nspin):
@@ -108,8 +107,9 @@ class Occupations(object):
             #    self.root_function,
             #    brack=(guess - elo, guess, guess + dmu),
             #    tol=xtol)
-        except:
+        except Exception as E:
             # probably a bad guess
+            print("Error in finding Fermi level: ", E)
             dmu = self.width
             if self.nel < 1e-3:
                 mu = min(e_sorted) - dmu * 20
@@ -167,12 +167,12 @@ class GaussOccupations(Occupations):
     def get_dos(self, npts=500):
         eflat = self.e.flatten()
         ind = np.argsort(eflat)
-        e_sorted = eflat[ind]
+        ##e_sorted = eflat[ind]
         if self.nspin == 1:
             m = 2
         elif self.nspin == 2:
             m = 1
-        n_sorted = (self.wk * np.ones_like(e) * m).flatten()[ind]
+        # n_sorted = (self.wk * np.ones_like(self.e) * m).flatten()[ind]
         dos = np.zeros(npts)
         for w, e_n in zip(self.w_k, self.e_skn[0]):
             for e in e_n:
@@ -239,13 +239,13 @@ class myDOS(DOS):
 
         self.energies = np.linspace(emin, emax, npts)
 
-        if width == 0.0:
-            bzkpts = calc.get_bz_k_points()
-            size, offset = get_monkhorst_pack_size_and_offset(bzkpts)
-            bz2ibz = calc.get_bz_to_ibz_map()
-            shape = (self.nspins,) + tuple(size) + (-1,)
-            self.e_skn = self.e_skn[:, bz2ibz].reshape(shape)
-            self.cell = calc.atoms.cell
+        # if width == 0.0: # To use tetrahedron method
+        #    bzkpts = calc.get_bz_k_points()
+        #    size, offset = get_monkhorst_pack_size_and_offset(bzkpts)
+        #    bz2ibz = calc.get_bz_to_ibz_map()
+        #    shape = (self.nspins,) + tuple(size) + (-1,)
+        #    self.e_skn = self.e_skn[:, bz2ibz].reshape(shape)
+        #    self.cell = calc.atoms.cell
 
     def get_idos(self):
         e, d = self.get_dos()
