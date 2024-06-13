@@ -270,7 +270,14 @@ class TBGreen:
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
-    def get_GR(self, Rpts, energy, get_rho=False):
+    def get_Gk_all(self, energy):
+        """Green's function G(k) for one energy for all kpoints"""
+        Gk_all = np.zeros((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
+        for ik, _ in enumerate(self.kpts):
+            Gk_all[ik] = self.get_Gk(ik, energy)
+        return Gk_all
+
+    def get_GR(self, Rpts, energy, get_rho=False, Gk_all=None):
         """calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
@@ -282,7 +289,10 @@ class TBGreen:
         GR = defaultdict(lambda: 0.0j)
         rhoR = defaultdict(lambda: 0.0j)
         for ik, kpt in enumerate(self.kpts):
-            Gk = self.get_Gk(ik, energy)
+            if Gk_all is None:
+                Gk = self.get_Gk(ik, energy)
+            else:
+                Gk = Gk_all[ik]
             if get_rho:
                 if self.is_orthogonal:
                     rhok = Gk
