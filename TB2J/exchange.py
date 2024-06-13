@@ -39,6 +39,7 @@ class ExchangeParams:
     write_density_matrix: bool = False
     orb_decomposition: bool = False
     output_path: str = "TB2J_results"
+    mae_angles = None
 
     def __init__(
         self,
@@ -85,19 +86,6 @@ class ExchangeParams:
     def save_to_yaml(self, fname):
         with open(fname, "w") as myfile:
             yaml.dump(self.__dict__, myfile)
-
-
-@dataclass
-class QuantityPerEnergy:
-    """
-    A class to store the quantities for a given energy.
-    To be integrated over energy.
-    """
-
-    AijR = {}
-    AijR_orb = {}
-    rho = {}
-    MAE: np.ndarray = None
 
 
 class Exchange(ExchangeParams):
@@ -693,32 +681,32 @@ class ExchangeNCL(Exchange):
                     )
 
     def get_quantities_per_e(self, e):
-        Gk_all = self.G.get_Gk_al()
-        mae = self.get_mae(Gk_all)
+        Gk_all = self.G.get_Gk_all(e)
+        mae = self.get_mae_kspace(Gk_all)
         # TODO: get the MAE from Gk_all
         GR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=False, Gk_all=Gk_all)
         # TODO: define the quantities for one energy.
         AijR, AijR_orb = self.get_all_A(GR)
+        return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
 
-        return QuantitiesPerE(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
-
-    def get_mae_kspace(self, Gk_all, angles):
+    def get_mae_kspace(self, Gk_all):
         """
         get the MAE from Gk_all
         TODO: This is only a place holder.
         """
+        return None
         Hso_k = self.model.get_Hso_k(k)
-        mae = np.zeros(len(angles), dtype=complex)
+        mae_e = np.zeros(len(self.mae_angles), dtype=complex)
         # rotate the Hso_k to angles
         for ik, k in enumerate(self.G.kpoints):
             Gk = Gk_all[ik]
-            for i_angle, angle in enumerate(angles):
+            for i_angle, angle in enumerate(self.mae_angles):
                 # TODO: implementa rotate_H
-                Hso_k_rot = rotate_H(Hso_k, angles[ik])
-                mae[i_angle] = Gk @ Hso_k @ Gk @ Hso_k
-        return mae
+                Hso_k_rot = rotate_H(Hso_k, angle)
+                mae_e[i_angle] = Gk @ Hso_k @ Gk @ Hso_k
+        return mae_e
 
-    def get_mae_real(self, GR):
+    def get_mae_rspace(self, GR):
         """
         get the MAE from GR
         """
@@ -732,6 +720,7 @@ class ExchangeNCL(Exchange):
         """
         Do some sanity check before proceding.
         """
+        pass
 
     def calculate_all(self):
         """
@@ -740,40 +729,38 @@ class ExchangeNCL(Exchange):
         print("Green's function Calculation started.")
 
         AijRs = {}
-
         AijRs_orb = {}
 
         self.validate()
 
         npole = len(self.contour.path)
         if self.np > 1:
-            results = p_map(self.get_AijR, self.contour.path, num_cpus=self.np)
+            results = p_map(
+                self.get_quantities_per_e, self.contour.path, num_cpus=self.np
+            )
         else:
-            results = map(self.get_AijR, tqdm(self.contour.path, total=npole))
+            results = map(
+                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+            )
 
         for i, result in enumerate(results):
             for iR, R in enumerate(self.R_ijatom_dict):
                 for iatom, jatom in self.R_ijatom_dict[R]:
                     if (R, iatom, jatom) in AijRs:
-                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
+                        AijRs[(R, iatom, jatom)].append(result["AijR"][R, iatom, jatom])
                         if self.orb_decomposition:
                             AijRs_orb[(R, iatom, jatom)].append(
-                                result[1][R, iatom, jatom]
+                                result["AijR_orb"][R, iatom, jatom]
                             )
 
                     else:
                         AijRs[(R, iatom, jatom)] = []
-                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
+                        AijRs[(R, iatom, jatom)].append(result["AijR"][R, iatom, jatom])
                         if self.orb_decomposition:
                             AijRs_orb[(R, iatom, jatom)] = []
                             AijRs_orb[(R, iatom, jatom)].append(
-                                result[1][R, iatom, jatom]
+                                result["AijR_orb"][R, iatom, jatom]
                             )
-        if self.np > 1:
-            # executor.close()
-            # executor.join()
-            # executor.clear()
-            pass
 
         # self.save_AijRs(AijRs)
         self.integrate(AijRs, AijRs_orb)

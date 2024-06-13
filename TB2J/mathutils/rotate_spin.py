@@ -14,6 +14,27 @@ def rotate_Matrix_from_z_to_axis(M, axis, normalize=True):
     return M_new
 
 
+def spherical_to_cartesian(theta, phi, normalize=True):
+    """
+    Convert spherical coordinates to cartesian
+    """
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+    vec = np.array([x, y, z])
+    if normalize:
+        vec = vec / np.linalg.norm(vec)
+    return vec
+
+
+def rotate_Matrix_from_z_to_spherical(M, theta, phi, normalize=True):
+    """
+    Given a spinor matrix M, rotate it from z-axis to spherical coordinates
+    """
+    axis = spherical_to_cartesian(theta, phi, normalize)
+    return rotate_Matrix_from_z_to_axis(M, axis, normalize)
+
+
 def test_rotate_Matrix_from_z_to_axis():
     M = np.array([[1.1, 0], [0, 0.9]])
     print(pauli_block_all(M))

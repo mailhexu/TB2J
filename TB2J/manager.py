@@ -6,7 +6,9 @@ from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.exchange_qspace import ExchangeCLQspace
 from TB2J.utils import read_basis, auto_assign_basis_name
 from ase.io import read
-from TB2J.sisl_wrapper import SislWrapper
+
+# from TB2J.sisl_wrapper import SislWrapper
+from HamiltonIO.siesta import SislWrapper
 from TB2J.gpaw_wrapper import GPAWWrapper
 from TB2J.wannier import parse_atoms
 
