@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 from pathlib import Path
 from TB2J.mathutils.rotate_spin import spherical_to_cartesian
-from HamiltonIO.occupations import Occupations
+from HamiltonIO.model.occupations import Occupations
 from TB2J.abacus.abacus_wrapper import AbacusSplitSOCParser
 from HamiltonIO.siesta import SislWrapper
 import tqdm
@@ -75,7 +75,10 @@ class MAE:
         # e,rho = self.model.get_band_energy(dm=True)
         # self.calc_ref()
         # thetas = np.linspace(*angle_range, npoints)
-        for i, (theta, phi) in tqdm.tqdm(enumerate(zip(thetas, phis))):
+        nangles = len(thetas)
+        for i in tqdm.trange(nangles):
+            theta = thetas[i]
+            phi = phis[i]
             self.model.set_Hsoc_rotation_angle([theta, phi])
             e = self.get_band_energy()
             es.append(e)
@@ -96,7 +99,6 @@ def abacus_get_MAE(
         outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
     )
     model = parser.parse()
-    model.nel = 16
     ham = MAE(model, kmesh, gamma=gamma)
     es = ham.get_band_energy_vs_angles(thetas, psis)
     if outfile:
@@ -109,7 +111,7 @@ def abacus_get_MAE(
 
 def siesta_get_MAE(fdf_fname, kmesh, thetas, phis, gamma=True, outfile="MAE.txt"):
     """ """
-    parser = SiestaParser(fdf_fname)
+    parser = SiestaParser(fdf_fname=fdf_fname, read_H_soc=True)
     model = parser.parse()
     ham = MAE(model, kmesh, gamma=gamma)
     es = ham.get_band_energy_vs_angles(thetas, phis)

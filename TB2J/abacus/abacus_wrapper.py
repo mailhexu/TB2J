@@ -156,6 +156,9 @@ class AbacusParser:
         # read the information
         self.read_atoms()
         self.efermi = self.read_efermi()
+        self.nel = self.read_nel()
+        print(f"efermi: {self.efermi}")
+        print(f"nel: {self.nel}")
         self.read_basis()
 
     def read_spin(self):
@@ -254,10 +257,10 @@ class AbacusParser:
         nel = None
         with open(fname, "r") as myfile:
             for line in myfile:
-                if "NELECT" in line:
-                    nel = float(line.split()[2])
+                if "number of electrons" in line:
+                    nel = float(line.split()[-1])
         if nel is None:
-            raise ValueError(f"NELECT not found in the {str(fname)}  file.")
+            raise ValueError(f"number of electron not found in the {str(fname)}  file.")
         return nel
 
     def get_basis(self):
@@ -306,6 +309,7 @@ class AbacusSplitSOCParser:
             nspin=2,
             HR_soc=HR_soc,
             HR_nosoc=HR_nosoc,
+            nel=self.parser_nosoc.nel,
         )
         model.efermi = self.parser_soc.efermi
         model.basis = self.parser_nosoc.basis

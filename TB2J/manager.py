@@ -8,7 +8,13 @@ from TB2J.utils import read_basis, auto_assign_basis_name
 from ase.io import read
 
 # from TB2J.sisl_wrapper import SislWrapper
-from HamiltonIO.siesta import SislWrapper
+try:
+    from HamiltonIO.siesta import SislWrapper
+except ImportError:
+    print(
+        "Cannot import SislWrapper from HamiltonIO.siesta. Please install HamiltonIO first."
+    )
+    from TB2J.sisl_wrapper import SislWrapper
 from TB2J.gpaw_wrapper import GPAWWrapper
 from TB2J.wannier import parse_atoms
 
@@ -285,8 +291,8 @@ def gen_exchange_siesta(
     geom = H.geometry
     if H.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
-        tbmodel_up = SislWrapper(H, spin=0, geom=geom)
-        tbmodel_dn = SislWrapper(H, spin=1, geom=geom)
+        tbmodel_up = SislWrapper(fdf_fname=None, sisl_hamiltonian=H, spin=0, geom=geom)
+        tbmodel_dn = SislWrapper(fdf_fname=None, sisl_hamiltonian=H, spin=1, geom=geom)
         basis = dict(zip(tbmodel_up.orbs, list(range(tbmodel_up.norb))))
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Siesta data.
@@ -353,7 +359,7 @@ def gen_exchange_siesta(
 
     elif H.spin.is_spinorbit or H.spin.is_noncolinear:
         print("Reading Siesta hamiltonian: non-colinear spin.")
-        tbmodel = SislWrapper(H, spin=None, geom=geom)
+        tbmodel = SislWrapper(fdf_fname=None, sisl_hamiltonian=H, spin=None, geom=geom)
         basis = dict(zip(tbmodel.orbs, list(range(tbmodel.nbasis))))
         print("Starting to calculate exchange.")
         description = f""" Input from non-collinear Siesta data.
