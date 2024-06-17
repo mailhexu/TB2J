@@ -11,8 +11,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from TB2J.mathutils.rotate_spin import spherical_to_cartesian
 from HamiltonIO.model.occupations import Occupations
-from TB2J.abacus.abacus_wrapper import AbacusSplitSOCParser
-from HamiltonIO.siesta import SislWrapper
+
+# from TB2J.abacus.abacus_wrapper import AbacusSplitSOCParser
+from HamiltonIO.abacus.abacus_wrapper import AbacusSplitSOCParser
+from HamiltonIO.siesta import SislParser, SiestaHamiltonian
 import tqdm
 
 
@@ -105,21 +107,21 @@ def abacus_get_MAE(
         with open(outfile, "w") as f:
             f.write("#theta, psi, energy\n")
             for theta, psi, e in zip(thetas, psis, es):
-                f.write(f"{theta}, {psi}, {e}\n")
+                f.write(f"{theta:5.3f}, {psi:5.3f}, {e:10.9f}\n")
     return es
 
 
 def siesta_get_MAE(fdf_fname, kmesh, thetas, phis, gamma=True, outfile="MAE.txt"):
     """ """
-    parser = SiestaParser(fdf_fname=fdf_fname, read_H_soc=True)
-    model = parser.parse()
+    model = SislParser(fdf_fname=fdf_fname, read_H_soc=True).get_model()
     ham = MAE(model, kmesh, gamma=gamma)
     es = ham.get_band_energy_vs_angles(thetas, phis)
     if outfile:
         with open(outfile, "w") as f:
             f.write("#theta, psi, energy\n")
             for theta, psi, e in zip(thetas, phis, es):
-                f.write(f"{theta}, {psi}, {e}\n")
+                # f.write(f"{theta}, {psi}, {e}\n")
+                f.write(f"{theta:5.3f}, {psi:5.3f}, {e:10.9f}\n")
     return es
 
 
