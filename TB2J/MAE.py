@@ -94,14 +94,24 @@ def get_model_energy(model, kmesh, gamma=True):
 
 
 def abacus_get_MAE(
-    path_nosoc, path_soc, kmesh, thetas, psis, gamma=True, outfile="MAE.txt", nel=None
+    path_nosoc,
+    path_soc,
+    kmesh,
+    thetas,
+    psis,
+    gamma=True,
+    outfile="MAE.txt",
+    nel=None,
+    width=0.1,
 ):
     """Get MAE from Abacus with magnetic force theorem. Two calculations are needed. First we do an calculation with SOC but the soc_lambda is set to 0. Save the density. The next calculatin we start with the density from the first calculation and set the SOC prefactor to 1. With the information from the two calcualtions, we can get the band energy with magnetic moments in the direction, specified in two list, thetas, and phis."""
     parser = AbacusSplitSOCParser(
         outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
     )
     model = parser.parse()
-    ham = MAE(model, kmesh, gamma=gamma)
+    if nel is not None:
+        model.nel = nel
+    ham = MAE(model, kmesh, gamma=gamma, width=width)
     es = ham.get_band_energy_vs_angles(thetas, psis)
     if outfile:
         with open(outfile, "w") as f:
@@ -111,10 +121,14 @@ def abacus_get_MAE(
     return es
 
 
-def siesta_get_MAE(fdf_fname, kmesh, thetas, phis, gamma=True, outfile="MAE.txt"):
+def siesta_get_MAE(
+    fdf_fname, kmesh, thetas, phis, gamma=True, outfile="MAE.txt", nel=None, width=0.1
+):
     """ """
     model = SislParser(fdf_fname=fdf_fname, read_H_soc=True).get_model()
-    ham = MAE(model, kmesh, gamma=gamma)
+    if nel is not None:
+        model.nel = nel
+    ham = MAE(model, kmesh, gamma=gamma, width=width)
     es = ham.get_band_energy_vs_angles(thetas, phis)
     if outfile:
         with open(outfile, "w") as f:

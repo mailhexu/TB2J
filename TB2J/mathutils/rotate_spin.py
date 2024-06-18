@@ -24,6 +24,7 @@ def spherical_to_cartesian(theta, phi, normalize=True):
     vec = np.array([x, y, z])
     if normalize:
         vec = vec / np.linalg.norm(vec)
+    print(vec)
     return vec
 
 
