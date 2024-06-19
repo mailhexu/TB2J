@@ -1,6 +1,6 @@
 import numpy as np
 from collections import defaultdict
-from ase.dft.kpoints import monkhorst_pack
+from TB2J.kpoints import monkhorst_pack
 from shutil import rmtree
 import os
 import tempfile
@@ -46,8 +46,10 @@ class TBGreen:
     def __init__(
         self,
         tbmodel,
-        kmesh,  # [ikpt, 3]
-        efermi,  # efermi
+        kmesh=None,  # [ikpt, 3]
+        efermi=None,  # efermi
+        gamma=False,
+        kpts=None,
         k_sym=False,
         use_cache=False,
         cache_path=None,
@@ -67,8 +69,10 @@ class TBGreen:
         self.cache_path = cache_path
         if use_cache:
             self._prepare_cache()
-        if kmesh is not None:
-            self.kpts = monkhorst_pack(size=kmesh)
+        if kpts is not None:
+            self.kpts = kpts
+        elif kmesh is not None:
+            self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
         else:
             self.kpts = tbmodel.get_kpts()
         self.nkpts = len(self.kpts)
@@ -252,16 +256,20 @@ class TBGreen:
     def get_density(self):
         return np.real(np.diag(self.get_density_matrix()))
 
-    def get_Gk(self, ik, energy):
+    def get_Gk(self, ik, energy, evals=None, evecs=None):
         """Green's function G(k) for one energy
         G(\epsilon)= (\epsilon I- H)^{-1}
         :param ik: indices for kpoint
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
+        if evals is None:
+            evals = self.get_evalue(ik)
+        if evecs is None:
+            evecs = self.get_evecs(ik)
         Gk = eigen_to_G(
-            evals=self.get_evalue(ik),
-            evecs=self.get_evecs(ik),
+            evals=evals,
+            evecs=evecs,
             efermi=self.efermi,
             energy=energy,
         )

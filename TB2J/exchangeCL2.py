@@ -20,16 +20,16 @@ class ExchangeCL2(ExchangeCL):
         self.tbmodel_up, self.tbmodel_dn = tbmodels
         self.backend_name = self.tbmodel_up.name
         self.Gup = TBGreen(
-            self.tbmodel_up,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel_up,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.np,
         )
         self.Gdn = TBGreen(
-            self.tbmodel_dn,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel_dn,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.np,
         )

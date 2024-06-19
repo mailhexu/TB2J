@@ -1,9 +1,4 @@
 import numpy as np
-from TB2J.abacus.abacus_wrapper import AbacusWrapper, AbacusParser
-from TB2J.mathutils.rotate_spin import rotate_Matrix_from_z_to_axis
-from TB2J.kpoints import monkhorst_pack
-from TB2J.mathutils.fermi import fermi
-from TB2J.mathutils.kR_convert import R_to_k
 from scipy.linalg import eigh
 from copy import deepcopy
 from scipy.spatial.transform import Rotation
@@ -16,6 +11,18 @@ from HamiltonIO.model.occupations import Occupations
 from HamiltonIO.abacus.abacus_wrapper import AbacusSplitSOCParser
 from HamiltonIO.siesta import SislParser, SiestaHamiltonian
 import tqdm
+from TB2J.abacus.abacus_wrapper import AbacusWrapper, AbacusParser
+from TB2J.mathutils.rotate_spin import (
+    rotate_Matrix_from_z_to_axis,
+    rotate_Matrix_from_z_to_spherical,
+)
+
+# from HamiltonIO.model.rotate_spin import rotate_Matrix_from_z_to_axis, rotate_Matrix_from_z_to_sperical
+from TB2J.kpoints import monkhorst_pack
+from TB2J.mathutils.fermi import fermi
+from TB2J.mathutils.kR_convert import R_to_k
+from TB2J.green import TBGreen
+from TB2J.contour import Contour
 
 
 def get_occupation(evals, kweights, nel, width=0.1):
@@ -88,6 +95,71 @@ class MAE:
         return es
 
 
+class MAEGreen(MAE):
+    def __init__(self, model, kmesh, gamma=True, nel=None, width=0.1, **kwargs):
+        super().__init__(model, kmesh, gamma=gamma, nel=nel, width=width)
+        model.set_so_strength(0.0)
+        evals, evecs = model.solve_all(self.kpts)
+        occ = Occupations(
+            nel=self.model.nel, width=self.width, wk=self.kweights, nspin=2
+        )
+        # occ.occupy(evals)
+        efermi = occ.efermi(evals)
+        self.G = TBGreen(model, kmesh, efermi=efermi, gamma=gamma, **kwargs)
+        self.emin = -15
+        self.emax = 0
+        self.nz = 50
+        self._prepare_elist()
+
+    def _prepare_elist(self, method="legendre"):
+        """
+        prepare list of energy for integration.
+        The path has three segments:
+         emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
+        """
+        self.contour = Contour(self.emin, self.emax)
+        # if method.lower() == "rectangle":
+        #    self.contour.build_path_rectangle(
+        #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
+        #    )
+        if method.lower() == "semicircle":
+            self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
+        elif method.lower() == "legendre":
+            self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
+        else:
+            raise ValueError(f"The path cannot be of type {method}.")
+
+    def get_efermi(self):
+        evals, evecs = self.model.solve_all(self.kpts)
+        occ = Occupations(
+            nel=self.model.nel, width=self.model.width, wk=self.kweights, nspin=2
+        )
+        occ.get_efermi(evals, self.kweights)
+
+    def get_perturbed(self, e, thetas, phis):
+        print(f"kpoint: {self.kpts.shape}")
+        print(f"kpoint-G: {self.G.kpts.shape}")
+        G0K = self.G.get_Gk_all(e)
+        Hsoc_k = self.model.get_Hk_soc(self.kpts)
+        print(f"{G0K.shape=}")
+        print(f"{Hsoc_k.shape=}")
+        dE_ang = []
+        for theta, phi in zip(thetas, phis):
+            dE = 0.0
+            for i, dHk in enumerate(Hsoc_k):
+                dHi = rotate_Matrix_from_z_to_spherical(dHk, theta, phi)
+                dE += np.imag(np.trace(G0K[i] @ dHi @ G0K[i] @ dHi))
+            dE_ang.append(dE)
+        return np.array(dE_ang)
+
+    def get_band_energy_vs_angles(self, thetas, phis):
+        es = np.zeros(len(thetas))
+        for ie, e in enumerate(tqdm.tqdm(self.contour.path)):
+            dE_angle = self.get_perturbed(e, thetas, phis)
+            es += dE_angle * self.contour.weights[i]
+        return es
+
+
 def get_model_energy(model, kmesh, gamma=True):
     ham = MAE(model, kmesh, gamma=gamma)
     return ham.get_band_energy()
@@ -128,7 +200,8 @@ def siesta_get_MAE(
     model = SislParser(fdf_fname=fdf_fname, read_H_soc=True).get_model()
     if nel is not None:
         model.nel = nel
-    ham = MAE(model, kmesh, gamma=gamma, width=width)
+    ham = MAEGreen(model, kmesh, gamma=gamma, width=width)
+    # es = ham.get_band_energy_vs_angles(thetas, phis)
     es = ham.get_band_energy_vs_angles(thetas, phis)
     if outfile:
         with open(outfile, "w") as f:

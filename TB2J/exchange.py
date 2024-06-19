@@ -331,9 +331,9 @@ class ExchangeNCL(Exchange):
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
         self.G = TBGreen(
-            self.tbmodel,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.np,
         )
