@@ -1,11 +1,19 @@
 import numpy as np
 from scipy.special import roots_legendre
+from TB2J.utils import simpson_nonuniform_weight
 
 
 class Contour:
     def __init__(self, emin, emax=0.0):
         self.emin = emin
         self.emax = emax
+        self._weights = None
+
+    @property
+    def weights(self):
+        if self._weights is None:
+            self._weights = simpson_nonuniform_weight(self.path)
+        return self._weights
 
     def build_path_semicircle(self, npoints, endpoint=True):
         R = (self.emax - self.emin) / 2.0

@@ -137,18 +137,15 @@ class MAEGreen(MAE):
         occ.get_efermi(evals, self.kweights)
 
     def get_perturbed(self, e, thetas, phis):
-        print(f"kpoint: {self.kpts.shape}")
-        print(f"kpoint-G: {self.G.kpts.shape}")
         G0K = self.G.get_Gk_all(e)
         Hsoc_k = self.model.get_Hk_soc(self.kpts)
-        print(f"{G0K.shape=}")
-        print(f"{Hsoc_k.shape=}")
         dE_ang = []
         for theta, phi in zip(thetas, phis):
             dE = 0.0
             for i, dHk in enumerate(Hsoc_k):
                 dHi = rotate_Matrix_from_z_to_spherical(dHk, theta, phi)
-                dE += np.imag(np.trace(G0K[i] @ dHi @ G0K[i] @ dHi))
+                GdH = G0K[i] @ dHi
+                dE += np.trace(GdH @ GdH) * self.kweights[i]
             dE_ang.append(dE)
         return np.array(dE_ang)
 
@@ -156,8 +153,8 @@ class MAEGreen(MAE):
         es = np.zeros(len(thetas))
         for ie, e in enumerate(tqdm.tqdm(self.contour.path)):
             dE_angle = self.get_perturbed(e, thetas, phis)
-            es += dE_angle * self.contour.weights[i]
-        return es
+            es += np.imag(dE_angle * self.contour.weights[ie])
+        return -es / np.pi
 
 
 def get_model_energy(model, kmesh, gamma=True):
@@ -170,7 +167,7 @@ def abacus_get_MAE(
     path_soc,
     kmesh,
     thetas,
-    psis,
+    phis,
     gamma=True,
     outfile="MAE.txt",
     nel=None,
@@ -183,13 +180,13 @@ def abacus_get_MAE(
     model = parser.parse()
     if nel is not None:
         model.nel = nel
-    ham = MAE(model, kmesh, gamma=gamma, width=width)
-    es = ham.get_band_energy_vs_angles(thetas, psis)
+    ham = MAEGreen(model, kmesh, gamma=gamma, width=width)
+    es = ham.get_band_energy_vs_angles(thetas, phis)
     if outfile:
         with open(outfile, "w") as f:
-            f.write("#theta, psi, energy\n")
-            for theta, psi, e in zip(thetas, psis, es):
-                f.write(f"{theta:5.3f}, {psi:5.3f}, {e:10.9f}\n")
+            f.write("#theta, phi, energy\n")
+            for theta, phi, e in zip(thetas, phis, es):
+                f.write(f"{theta:5.3f}, {phi:5.3f}, {e:10.9f}\n")
     return es
 
 
