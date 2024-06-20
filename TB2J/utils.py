@@ -87,6 +87,7 @@ def auto_assign_wannier_to_atom(positions, atoms, max_distance=0.1, half=False):
     """
     pos = np.array(positions)
     atompos = atoms.get_scaled_positions(wrap=False)
+    cell = atoms.get_cell()
     ind_atoms = []
     newpos = []
     refpos = []
@@ -95,8 +96,9 @@ def auto_assign_wannier_to_atom(positions, atoms, max_distance=0.1, half=False):
         dp = p[None, :] - atompos
         # residual of d
         r = dp - np.round(dp)
+        r_cart = r @ cell
         # find the min of residual
-        normd = np.linalg.norm(r, axis=1)
+        normd = np.linalg.norm(r_cart, axis=1)
         iatom = np.argmin(normd)
         # ref+residual
         rmin = r[iatom]
