@@ -48,7 +48,8 @@ class SpinIO_merge(SpinIO):
 
     def _set_projection_vectors(self):
 
-        spinat = self.spinat
+        norm = np.linalg.norm(self.spinat, axis=-1).reshape(-1, 1)
+        spinat = self.spinat / norm
         idx = [self.ind_atoms[i] for i in self.index_spin if i >= 0]
         projv = {}
         for i, j in combinations_with_replacement(range(self.nspin), 2):
