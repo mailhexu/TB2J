@@ -34,6 +34,7 @@ extensions = [
     "sphinx_rtd_theme",
     "sphinx.ext.mathjax",
     "sphinx.ext.autodoc",
+    "sphinxemoji.sphinxemoji",
 ]
 
 # Add any paths that contain templates here, relative to this directory.

@@ -345,7 +345,7 @@ class ExchangeNCL(Exchange):
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         # self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        self.rho = self.G.get_density_matrix().real
+        self.rho = self.G.get_density_matrix()
         self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()

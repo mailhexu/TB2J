@@ -17,9 +17,23 @@ def ind_to_indn(ind, n=3):
     return indn
 
 
+class JR_model:
+    def __init__(self, JR, Rlist):
+        self.JR = JR
+        self.Rlist = Rlist
+        self.nR = len(Rlist)
+
+    def get_Jq(self, q):
+        Jq = np.zeros(self.JR[0].shape, dtype=complex)
+        for iR, R in enumerate(self.Rlist):
+            phase = np.exp(2.0j * np.pi * np.dot(q, R))
+            Jq += self.JR[iR] * phase
+        return Jq
+
+
 class JDownfolder:
     def __init__(self, JR, Rlist, iM, iL, qmesh, iso_only=False):
-        self.JR = JR
+        self.model = JR_model(JR, Rlist)
         self.Rlist = Rlist
         self.nR = len(Rlist)
         self.nM = len(iM)
@@ -34,25 +48,18 @@ class JDownfolder:
         self.nLn = self.nL * 3
         self.iso_only = iso_only
 
-    def get_Jq(self, q):
-        Jq = np.zeros(self.JR[0].shape, dtype=complex)
-        for iR, R in enumerate(self.Rlist):
-            phase = np.exp(2.0j * np.pi * np.dot(q, R))
-            Jq += self.JR[iR] * phase
-        return Jq
-
     def get_JR(self):
         JR_downfolded = np.zeros((self.nR, self.nMn, self.nMn), dtype=float)
         Jq_downfolded = np.zeros((self.nqpt, self.nMn, self.nMn), dtype=complex)
         self.iMn = ind_to_indn(self.iM, n=3)
         self.iLn = ind_to_indn(self.iL, n=3)
         for iq, q in enumerate(self.qpts):
-            Jq = self.get_Jq(q)
+            Jq = self.model.get_Jq(q)
             Jq_downfolded[iq] = self.downfold_oneq(Jq)
             for iR, R in enumerate(self.Rlist):
                 phase = np.exp(-2.0j * np.pi * np.dot(q, R))
                 JR_downfolded[iR] += np.real(Jq_downfolded[iq] * phase / self.nqpt)
-        return JR_downfolded
+        return JR_downfolded, self.Rlist
 
     def downfold_oneq(self, J):
         JMM = J[np.ix_(self.iMn, self.iMn)]
@@ -63,17 +70,80 @@ class JDownfolder:
         return Jn
 
 
+class PWFDownfolder:
+    def __init__(self, JR, Rlist, iM, iL, qmesh, atoms=None, iso_only=False, **kwargs):
+        from lawaf.interfaces.magnon.magnon_downfolder import (
+            MagnonWrapper,
+            MagnonDownfolder,
+        )
+
+        model = MagnonWrapper(JR, Rlist, atoms)
+        wann = MagnonDownfolder(model)
+        # Downfold the band structure.
+        index_basis = []
+        for i in iM:
+            index_basis += list(range(i * 3, i * 3 + 3))
+        params = dict(
+            method="projected",
+            # method="maxprojected",
+            kmesh=qmesh,
+            nwann=len(index_basis),
+            selected_basis=index_basis,
+            # anchors={(0, 0, 0): (-1, -2, -3, -4)},
+            # anchors={(0, 0, 0): ()},
+            # use_proj=True,
+            enhance_Amn=2.0,
+        )
+        params.update(kwargs)
+        wann.set_parameters(**params)
+        print("begin downfold")
+        ewf = wann.downfold()
+        ewf.save_hr_pickle("downfolded_JR.pickle")
+
+        # Plot the band structure.
+        wann.plot_band_fitting(
+            # kvectors=np.array([[0, 0, 0], [0.5, 0, 0],
+            #                   [0.5, 0.5, 0], [0, 0, 0],
+            #                   [.5, .5, .5]]),
+            # knames=['$\Gamma$', 'X', 'M', '$\Gamma$', 'R'],
+            cell=model.atoms.cell,
+            supercell_matrix=None,
+            npoints=100,
+            efermi=None,
+            erange=None,
+            fullband_color="blue",
+            downfolded_band_color="green",
+            marker="o",
+            ax=None,
+            savefig="downfold_band.png",
+            show=True,
+        )
+        self.JR_downfolded = ewf.HwannR
+        self.Rlist = ewf.Rlist
+
+    def get_JR(self):
+        return self.JR_downfolded, self.Rlist
+
+
 class JDownfolder_pickle:
     def __init__(
-        self, inpath, metals, ligands, outpath, qmesh=[7, 7, 7], iso_only=False
+        self,
+        inpath,
+        metals,
+        ligands,
+        outpath,
+        qmesh=[7, 7, 7],
+        iso_only=False,
+        method="pwf",
+        **kwargs
     ):
         self.exc = SpinIO.load_pickle(path=inpath, fname="TB2J.pickle")
 
         self.iso_only = (self.exc.dmi_ddict is None) or iso_only
-
         self.metals = metals
         self.ligands = ligands
         self.outpath = outpath
+        self.method = method
 
         # read atomic structure
         self.atoms = self.exc.atoms
@@ -83,7 +153,8 @@ class JDownfolder_pickle:
         self.Rcut = None
         self._build_atom_index()
         self._prepare_distance()
-        self._downfold()
+        Jd, Rlist = self._downfold(**kwargs)
+        self._Jd_to_exchange(Jd, Rlist)
 
     def _build_atom_index(self):
         self.magnetic_elements = self.metals
@@ -101,18 +172,33 @@ class JDownfolder_pickle:
         self.nL = len(self.iL)
         self.nsite = self.nM + self.nL
 
-    def _downfold(self):
+    def _downfold(self, **kwargs):
         JR2 = self.exc.get_full_Jtensor_for_Rlist(asr=True)
-        d = JDownfolder(
-            JR2,
-            self.exc.Rlist,
-            iM=self.iM,
-            iL=self.iL,
-            qmesh=self.qmesh,
-            iso_only=self.iso_only,
-        )
-        Jd = d.get_JR()
+        if self.method == "lowdin":
+            d = JDownfolder(
+                JR2,
+                self.exc.Rlist,
+                iM=self.iM,
+                iL=self.iL,
+                qmesh=self.qmesh,
+                iso_only=self.iso_only,
+            )
+            Jd, Rlist = d.get_JR()
+        else:
+            d = PWFDownfolder(
+                JR2,
+                self.exc.Rlist,
+                iM=self.iM,
+                iL=self.iL,
+                qmesh=self.qmesh,
+                atoms=self.atoms,
+                iso_only=self.iso_only,
+                **kwargs
+            )
+            Jd, Rlist = d.get_JR()
+        return Jd, Rlist
 
+    def _Jd_to_exchange(self, Jd, Rlist):
         self._prepare_distance()
         self._prepare_index_spin()
         self.Jdict = {}
@@ -123,7 +209,7 @@ class JDownfolder_pickle:
             self.DMIdict = {}
             self.Janidict = {}
 
-        for iR, R in enumerate(d.Rlist):
+        for iR, R in enumerate(Rlist):
             for i, ispin in enumerate(self.index_spin):
                 for j, jspin in enumerate(self.index_spin):
                     if ispin >= 0 and jspin >= 0:

@@ -7,6 +7,8 @@ import tempfile
 from pathos.multiprocessing import ProcessPool
 import sys
 import pickle
+import warnings
+from TB2J.mathutils.fermi import fermi
 
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
 
@@ -24,19 +26,6 @@ def eigen_to_G(evals, evecs, efermi, energy):
         np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
         @ evecs.conj().T
     )
-
-
-def fermi(e, mu, width=0.01):
-    """
-    the fermi function.
-     .. math::
-        f=\\frac{1}{\exp((e-\mu)/width)+1}
-
-    :param e,mu,width: e,\mu,width
-    """
-
-    x = (e - mu) / width
-    return np.where(x < MAX_EXP_ARGUMENT, 1 / (1.0 + np.exp(x)), 0.0)
 
 
 def find_energy_ingap(evals, rbound, gap=4.0):

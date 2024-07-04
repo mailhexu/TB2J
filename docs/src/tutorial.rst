@@ -8,6 +8,7 @@ Tutorial
    siesta.rst
    openmx.rst
    abacus.rst
+   mae.md
    parameters.rst
    rotate_and_merge.rst
    downfold.md

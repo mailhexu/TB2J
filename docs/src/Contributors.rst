@@ -1,7 +1,7 @@
 Contributors
 ============
 
-The main contributors to the TB2J package are:
+The TB2J package is initially developped:
 
 * Xu He (mailhexu@gmail.com)
 
@@ -10,6 +10,29 @@ The main contributors to the TB2J package are:
 * Matthieu Verstraete
 
 * Eric Bousquet
+
+from the Phythema and Nanomat groups at the University of Liège. 
+Part of the code is developped by Xu He during he was at ICN2 (Institut Catala de Nanociencia i Nanotecnologia) in Barcelona, Spain.
+
+
+After the first public release, the following people has made significant contribution to the code:
+
+* Andres Tellez Mora  (West Virginia University)
+
+* Aldo Romero (West Virginia University)
+
+* Andrey Rubakov (ICMol, University of Valencia)
+
+* Gan Jin (University of Science and Technology of China)
+
+* Zhenxiong Shen (University of Science and Technology of China)
+
+
+We thank all the other people who have contributed to the code, including the ones who have reported bugs or typos, 
+ suggested improvements, and asked questions. 
+
+
+
 
 We welcome contributions. You can help us with:
 - extending the input format to other codes, e.g. first principles or tight binding code.

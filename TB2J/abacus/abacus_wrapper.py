@@ -16,16 +16,24 @@ from TB2J.abacus.stru_api import read_abacus, read_abacus_out
 
 class AbacusWrapper(AbstractTB):
     def __init__(self, HR, SR, Rlist, nbasis, nspin=1):
-        self.R2kfactor = -2j * np.pi
+        self.R2kfactor = 2j * np.pi
         self.is_orthogonal = False
         self._name = "ABACUS"
-        self.HR = HR
+        self._HR = HR
         self.SR = SR
         self.Rlist = Rlist
         self.nbasis = nbasis
         self.nspin = nspin
         self.norb = nbasis * nspin
         self._build_Rdict()
+
+    @property
+    def HR(self):
+        return self._HR
+
+    @HR.setter
+    def set_HR(self, HR):
+        self._HR = HR
 
     def _build_Rdict(self):
         if hasattr(self, "Rdict"):
@@ -62,6 +70,8 @@ class AbacusWrapper(AbstractTB):
                 S = self.SR[iR] * phase
                 # Sk += S + S.conjugate().T
                 Sk += S
+                # Hk = (Hk + Hk.conj().T)/2
+                # Sk = (Sk + Sk.conj().T)/2
         elif convention == 1:
             # TODO: implement the first convention (the r convention)
             raise NotImplementedError("convention 1 is not implemented yet.")
@@ -73,6 +83,14 @@ class AbacusWrapper(AbstractTB):
     def solve(self, k, convention=2):
         Hk, Sk = self.gen_ham(k, convention=convention)
         return eigh(Hk, Sk)
+
+    def solve_all(self, kpts, convention=2):
+        nk = len(kpts)
+        evals = np.zeros((nk, self.nbasis), dtype=float)
+        evecs = np.zeros((nk, self.nbasis, self.nbasis), dtype=complex)
+        for ik, k in enumerate(kpts):
+            evals[ik], evecs[ik] = self.solve(k, convention=convention)
+        return evals, evecs
 
     def HSE_k(self, kpt, convention=2):
         H, S = self.gen_ham(tuple(kpt), convention=convention)
