@@ -20,16 +20,16 @@ class ExchangeCL2(ExchangeCL):
         self.tbmodel_up, self.tbmodel_dn = tbmodels
         self.backend_name = self.tbmodel_up.name
         self.Gup = TBGreen(
-            self.tbmodel_up,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel_up,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.np,
         )
         self.Gdn = TBGreen(
-            self.tbmodel_dn,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel_dn,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.np,
         )
@@ -234,11 +234,11 @@ class ExchangeCL2(ExchangeCL):
                     self.contour.path, self.JJ_list[(R, iatom, jatom)]
                 )
 
-    def get_AijR(self, e):
+    def get_quantities_per_e(self, e):
         GR_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=False)
         GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=False)
         Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
-        return Jorb_list, JJ_list
+        return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
 
     def calculate_all(self):
         """
@@ -248,13 +248,18 @@ class ExchangeCL2(ExchangeCL):
 
         npole = len(self.contour.path)
         if self.np == 1:
-            results = map(self.get_AijR, tqdm(self.contour.path, total=npole))
+            results = map(
+                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+            )
         else:
             # pool = ProcessPool(nodes=self.np)
             # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_map(self.get_AijR, self.contour.path, num_cpus=self.np)
+            results = p_map(
+                self.get_quantities_per_e, self.contour.path, num_cpus=self.np
+            )
         for i, result in enumerate(results):
-            Jorb_list, JJ_list = result
+            Jorb_list = result["Jorb_list"]
+            JJ_list = result["JJ_list"]
             for iR, R in enumerate(self.R_ijatom_dict):
                 for iatom, jatom in self.R_ijatom_dict[R]:
                     key = (R, iatom, jatom)

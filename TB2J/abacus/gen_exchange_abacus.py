@@ -6,7 +6,9 @@ The main function to compute exchange interaction from abacus data
 
 import os
 from pathlib import Path
-from TB2J.abacus.abacus_wrapper import AbacusParser
+
+# from TB2J.abacus.abacus_wrapper import AbacusParser
+from HamiltonIO.abacus import AbacusParser
 from TB2J.exchange import ExchangeNCL, ExchangeCL
 from TB2J.exchangeCL2 import ExchangeCL2
 

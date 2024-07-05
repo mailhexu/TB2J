@@ -143,11 +143,47 @@ def pauli_block_all(M):
     return MI, Mx, My, Mz
 
 
-def gather_pauli_blocks(MI, Mx, My, Mz):
+def gather_pauli_blocks(MI, Mx, My, Mz, coeffs=[1.0, 1.0, 1.0, 1.0]):
     """
     Gather the I, x, y, z component of a matrix.
     """
-    return np.kron(MI, s0) + np.kron(Mx, s1) + np.kron(My, s2) + np.kron(Mz, s3)
+    cI, cx, cy, cz = coeffs
+    return (
+        cI * np.kron(MI, s0)
+        + cx * np.kron(Mx, s1)
+        + cy * np.kron(My, s2)
+        + cz * np.kron(Mz, s3)
+    )
+
+
+def pauli_part(M, coeffs=[1.0, 1.0, 1.0, 1.0]):
+    """
+    Get the I, x, y, z part of a matrix.
+    """
+    MI, Mx, My, Mz = pauli_block_all(M)
+    return gather_pauli_blocks(MI, Mx, My, Mz, coeffs=coeffs)
+
+
+def chargepart(M):
+    """
+    Get the charge part of a matrix.
+    """
+    MI = (M[::2, ::2] + M[1::2, 1::2]) / 2.0
+    Mcopy = np.zeros_like(M)
+    Mcopy[::2, ::2] = MI
+    Mcopy[1::2, 1::2] = MI
+    return Mcopy
+
+
+def spinpart(M):
+    """
+    Get the spin part of a matrix.
+    """
+    MI = (M[::2, ::2] + M[1::2, 1::2]) / 2.0
+    Mcopy = M.copy()
+    Mcopy[::2, ::2] -= MI
+    Mcopy[1::2, 1::2] -= MI
+    return Mcopy
 
 
 def test_gather_pauli_blocks():
