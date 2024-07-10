@@ -32,5 +32,11 @@ options:
                         precision for symmetry detection. The default value is 1e-5 Angstrom
 ```
 
-The script can read the data from TB2J\_results and write the symmetrized exchange parameters to a new directory.
+An example:
+
+```bash
+TB2J_symmetrize.py -i TB2J_results -o TB2J_symmetrized -s 1e-4
+```
+
+The script can read the data from TB2J\_results and write the symmetrized exchange parameters to a new directory TB2J\_symmetrized. The precistion for detecting the symmetry is 1e-4 angstrom. 
 
