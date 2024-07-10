@@ -79,7 +79,7 @@ def combine_J_tensor(Jiso=0.0, D=np.zeros(3), Jani=np.zeros((3, 3), dtype=float)
     :param Jani: 3x3 matrix anisotropic exchange
     :returns:  A 3x3 matrix, the exchange paraemter in tensor form.
     """
-    Jtensor = np.zeros((3, 3), dtype=float)
+    Jtensor = np.zeros((3, 3), dtype=complex)
     if Jiso is not None:
         Jtensor += np.eye(3, dtype=float) * Jiso
     if Jani is not None:

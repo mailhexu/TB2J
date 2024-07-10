@@ -95,7 +95,7 @@ Here is an example of the usage of the function.
 ```python
 
 import numpy as np
-from TB2J.abacus.MAE import abacus_get_MAE
+from TB2J.MAE import abacus_get_MAE
 
 def run():
     # theta, psi: along the xz plane, rotating from z to x. 
@@ -107,7 +107,8 @@ def run():
         kmesh=[6,6,1],
         gamma=True,
         thetas=thetas, 
-        psis=psis
+        psis=psis,
+        nel = 16,
         )
                                                                                         )
 
