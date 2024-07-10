@@ -106,7 +106,7 @@ class MAEGreen(MAE):
         # occ.occupy(evals)
         efermi = occ.efermi(evals)
         self.G = TBGreen(model, kmesh, efermi=efermi, gamma=gamma, **kwargs)
-        self.emin = -15
+        self.emin = -18
         self.emax = 0
         self.nz = 50
         self._prepare_elist()
@@ -145,7 +145,7 @@ class MAEGreen(MAE):
             for i, dHk in enumerate(Hsoc_k):
                 dHi = rotate_Matrix_from_z_to_spherical(dHk, theta, phi)
                 GdH = G0K[i] @ dHi
-                dE += np.trace(GdH @ GdH) * self.kweights[i]
+                dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
             dE_ang.append(dE)
         return np.array(dE_ang)
 

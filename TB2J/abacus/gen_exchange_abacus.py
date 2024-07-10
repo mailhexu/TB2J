@@ -66,7 +66,7 @@ data directory: {outpath}
         )
         exchange.run(path=output_path)
         print("\n")
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
     else:
         tbmodel = parser.get_models()
         print("Starting to calculate exchange.")

@@ -27,7 +27,7 @@ setup(
         "scripts/TB2J_eigen.py",
     ],
     install_requires=[
-        "numpy>1.16.5",
+        "numpy<2.0",
         "scipy",
         "matplotlib",
         "ase>=3.19",

@@ -107,6 +107,13 @@ def run_siesta2J():
         default="TB2J_results",
     )
 
+    parser.add_argument(
+        "--split_soc",
+        help="whether the SOC part of the Hamiltonian can be read from the output of siesta. Default: False",
+        action="store_true",
+        default=False,
+    )
+
     args = parser.parse_args()
 
     if args.elements is None:
@@ -134,9 +141,10 @@ def run_siesta2J():
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,
-        np=args.np,
+        nproc=args.np,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
+        read_H_soc=args.split_soc,
     )
 
 

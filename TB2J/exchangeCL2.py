@@ -24,14 +24,14 @@ class ExchangeCL2(ExchangeCL):
             kmesh=self.kmesh,
             efermi=self.efermi,
             use_cache=self._use_cache,
-            nproc=self.np,
+            nproc=self.nproc,
         )
         self.Gdn = TBGreen(
             tbmodel=self.tbmodel_dn,
             kmesh=self.kmesh,
             efermi=self.efermi,
             use_cache=self._use_cache,
-            nproc=self.np,
+            nproc=self.nproc,
         )
         if self.write_density_matrix:
             self.Gup.write_rho_R(
@@ -247,15 +247,15 @@ class ExchangeCL2(ExchangeCL):
         print("Green's function Calculation started.")
 
         npole = len(self.contour.path)
-        if self.np == 1:
+        if self.nproc == 1:
             results = map(
                 self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
             )
         else:
-            # pool = ProcessPool(nodes=self.np)
+            # pool = ProcessPool(nodes=self.nproc)
             # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
             results = p_map(
-                self.get_quantities_per_e, self.contour.path, num_cpus=self.np
+                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
             )
         for i, result in enumerate(results):
             Jorb_list = result["Jorb_list"]
@@ -265,8 +265,6 @@ class ExchangeCL2(ExchangeCL):
                     key = (R, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
-        if self.np > 1:
-            pass
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()

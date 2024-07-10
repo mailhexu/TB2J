@@ -6,6 +6,8 @@ from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.exchange_qspace import ExchangeCLQspace
 from TB2J.utils import read_basis, auto_assign_basis_name
 from ase.io import read
+import copy
+
 
 # from TB2J.sisl_wrapper import SislWrapper
 
@@ -42,7 +44,7 @@ def gen_exchange(
     Rcut=None,
     ne=None,
     use_cache=False,
-    np=1,
+    nproc=1,
     output_path="TB2J_results",
     wannier_type="wannier90",
     qspace=False,
@@ -123,7 +125,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                 exclude_orbs=exclude_orbs,
                 Rcut=Rcut,
                 ne=ne,
-                np=np,
+                nproc=nproc,
                 use_cache=use_cache,
                 output_path=output_path,
                 write_density_matrix=write_density_matrix,
@@ -143,7 +145,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                 exclude_orbs=exclude_orbs,
                 Rcut=Rcut,
                 ne=ne,
-                np=np,
+                nproc=nproc,
                 use_cache=use_cache,
                 output_path=output_path,
                 write_density_matrix=write_density_matrix,
@@ -151,7 +153,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
             )
 
         exchange.run(path=output_path)
-        print("All calculation finsihed. The results are in TB2J_results directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
 
     elif colinear and wannier_type.lower() == "banddownfolder":
         print("Reading Wannier90 hamiltonian: spin up.")
@@ -187,14 +189,14 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
             output_path=output_path,
             write_density_matrix=write_density_matrix,
             description=description,
         )
         exchange.run(path=output_path)
-        print("All calculation finsihed. The results are in TB2J_results directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
     else:
         print("Reading Wannier90 hamiltonian: non-colinear spin.")
         groupby = groupby.lower().strip()
@@ -235,7 +237,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
             description=description,
             output_path=output_path,
@@ -244,11 +246,12 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
         )
         print("\n")
         exchange.run(path=output_path)
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
 
 
 def gen_exchange_siesta(
     fdf_fname,
+    read_H_soc=False,
     magnetic_elements=[],
     include_orbs=None,
     kmesh=[5, 5, 5],
@@ -258,7 +261,7 @@ def gen_exchange_siesta(
     exclude_orbs=[],
     Rcut=None,
     ne=None,
-    np=1,
+    nproc=1,
     use_cache=False,
     output_path="TB2J_results",
     orb_decomposition=False,
@@ -292,7 +295,7 @@ def gen_exchange_siesta(
     # geom = fdf.read_geometry()
     # H = fdf.read_hamiltonian()
     # geom = H.geometry
-    parser = SislParser(fdf_fname=fdf_fname, ispin=None, read_H_soc=False)
+    parser = SislParser(fdf_fname=fdf_fname, ispin=None, read_H_soc=read_H_soc)
     if parser.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
         # tbmodel_up = SislWrapper(fdf_fname=None, sisl_hamiltonian=H, spin=0, geom=geom)
@@ -318,14 +321,14 @@ def gen_exchange_siesta(
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
             output_path=output_path,
             description=description,
         )
         exchange.run(path=output_path)
         print("\n")
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
 
     elif parser.spin.is_colinear and False:
         print(
@@ -352,7 +355,7 @@ def gen_exchange_siesta(
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
             ne=ne,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
             description=description,
             output_path=output_path,
@@ -360,7 +363,7 @@ def gen_exchange_siesta(
         )
         exchange.run(path=output_path)
         print("\n")
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
 
     elif parser.spin.is_spinorbit or H.spin.is_noncolinear:
         print("Reading Siesta hamiltonian: non-colinear spin.")
@@ -374,29 +377,65 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
  e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z component of DMI.
  If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
 \n"""
-        exchange = ExchangeNCL(
-            tbmodels=model,
-            atoms=model.atoms,
-            basis=basis,
-            efermi=0.0,
-            magnetic_elements=magnetic_elements,
-            include_orbs=include_orbs,
-            kmesh=kmesh,
-            emin=emin,
-            emax=emax,
-            nz=nz,
-            exclude_orbs=exclude_orbs,
-            Rcut=Rcut,
-            ne=ne,
-            np=np,
-            use_cache=use_cache,
-            description=description,
-            output_path=output_path,
-            orb_decomposition=orb_decomposition,
-        )
-        exchange.run(path=output_path)
-        print("\n")
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        if not model.split_soc:
+            exchange = ExchangeNCL(
+                tbmodels=model,
+                atoms=model.atoms,
+                basis=basis,
+                efermi=0.0,
+                magnetic_elements=magnetic_elements,
+                include_orbs=include_orbs,
+                kmesh=kmesh,
+                emin=emin,
+                emax=emax,
+                nz=nz,
+                exclude_orbs=exclude_orbs,
+                Rcut=Rcut,
+                ne=ne,
+                nproc=nproc,
+                use_cache=use_cache,
+                description=description,
+                output_path=output_path,
+                orb_decomposition=orb_decomposition,
+            )
+            exchange.run(path=output_path)
+            print("\n")
+            print(
+                f"All calculation finished. The results are in {output_path} directory."
+            )
+        else:
+            angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
+            for key, val in angle.items():
+                # model = parser.get_model()
+                theta, phi = val
+                model.set_Hsoc_rotation_angle([theta, phi])
+                basis = dict(zip(model.orbs, list(range(model.nbasis))))
+                output_path_full = f"{output_path}_{key}"
+                exchange = ExchangeNCL(
+                    tbmodels=model,
+                    atoms=model.atoms,
+                    basis=basis,
+                    efermi=0.0,
+                    magnetic_elements=magnetic_elements,
+                    include_orbs=include_orbs,
+                    kmesh=kmesh,
+                    emin=emin,
+                    emax=emax,
+                    nz=nz,
+                    exclude_orbs=exclude_orbs,
+                    Rcut=Rcut,
+                    ne=ne,
+                    nproc=nproc,
+                    use_cache=use_cache,
+                    description=description,
+                    output_path=output_path_full,
+                    orb_decomposition=orb_decomposition,
+                )
+                exchange.run(path=output_path_full)
+                print("\n")
+                print(
+                    f"All calculation finished. The results are in {output_path_full} directory."
+                )
 
 
 def gen_exchange_gpaw(
@@ -443,4 +482,4 @@ def gen_exchange_gpaw(
         )
         exchange.run(path=output_path)
         print("\n")
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")

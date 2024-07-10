@@ -34,7 +34,7 @@ class ExchangeParams:
     ne: int = None
     Rcut: float = None
     _use_cache: bool = False
-    np: int = 1
+    nproc: int = 1
     description: str = ""
     write_density_matrix: bool = False
     orb_decomposition: bool = False
@@ -55,7 +55,7 @@ class ExchangeParams:
         ne=None,
         Rcut=None,
         use_cache=False,
-        np=1,
+        nproc=1,
         description="",
         write_density_matrix=False,
         orb_decomposition=False,
@@ -73,7 +73,7 @@ class ExchangeParams:
         self.ne = ne
         self.Rcut = Rcut
         self._use_cache = use_cache
-        self.np = np
+        self.nproc = nproc
         self.description = description
         self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
@@ -335,7 +335,7 @@ class ExchangeNCL(Exchange):
             kmesh=self.kmesh,
             efermi=self.efermi,
             use_cache=self._use_cache,
-            nproc=self.np,
+            nproc=self.nproc,
         )
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
@@ -344,7 +344,11 @@ class ExchangeNCL(Exchange):
         self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
-        self.HR0 = self.G.H0
+        # self.HR0 = self.tbmodel.get_H0()
+        try:
+            self.HR0 = self.tbmodel.get_H0()
+        except:
+            self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
         if self.write_density_matrix:
@@ -734,9 +738,9 @@ class ExchangeNCL(Exchange):
         self.validate()
 
         npole = len(self.contour.path)
-        if self.np > 1:
+        if self.nproc > 1:
             results = p_map(
-                self.get_quantities_per_e, self.contour.path, num_cpus=self.np
+                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
             )
         else:
             results = map(

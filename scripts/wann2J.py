@@ -179,7 +179,7 @@ def run_wann2J():
         emax=args.emax,
         nz=args.nz,
         use_cache=args.use_cache,
-        np=args.np,
+        nproc=args.np,
         description=args.description,
         output_path=args.output_path,
         exclude_orbs=args.exclude_orbs,
