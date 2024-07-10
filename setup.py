@@ -40,6 +40,7 @@ setup(
         "pathos",
         "packaging>=20.0",
         "pre-commit",
+        "sympair>0.1.0",
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
