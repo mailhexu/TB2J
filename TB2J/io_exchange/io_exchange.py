@@ -238,6 +238,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def get_charge_iatom(self, iatom):
         return self.charges[iatom]
 
+    def ijR_index_spin_to_atom(self, i, j, R):
+        return (self.iatom(i), self.iatom(j), R)
+
+    def ijR_index_atom_to_spin(self, iatom, jatom, R):
+        return (self.index_spin[iatom], self.index_spin[jatom], R)
+
+    def ijR_list(self):
+        return [(i, j, R) for R, i, j in self.exchange_Jdict]
+
+    def ijR_list_index_atom(self):
+        return [self.ijR_index_spin_to_atom(i, j, R) for R, i, j in self.exchange_Jdict]
+
     def get_J(self, i, j, R, default=None):
         i = self.i_spin(i)
         j = self.i_spin(j)
