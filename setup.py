@@ -26,6 +26,11 @@ setup(
         "scripts/TB2J_downfold.py",
         "scripts/TB2J_eigen.py",
     ],
+    entry_points={
+        "console_scripts": [
+            "TB2J_symmetrize.py=TB2J.symmetrize_J:symmetrize_J_cli",
+        ]
+    },
     install_requires=[
         "numpy>1.16.5",
         "scipy",
