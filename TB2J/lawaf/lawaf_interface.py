@@ -9,29 +9,6 @@ from ase.io import read
 from TB2J.sisl_wrapper import SislWrapper
 from TB2J.gpaw_wrapper import GPAWWrapper
 from TB2J.wannier import parse_atoms
-from dataclasses import dataclass
-
-
-@dataclass
-class TB2JParams:
-    colinear: bool = True
-    efermi: float = 0
-    magnetic_elements: list = []
-    kmesh: list = [4, 4, 4]
-    emin: float = -12.0
-    emax: float = 0.0
-    nz: int = 100
-    exclude_orbs: list = []
-    Rcut: float = None
-    ne: int = None
-    use_cache: bool = False
-    np: int = 1
-    output_path: str = "TB2J_results"
-    wannier_type: str = "wannier90"
-    qspace: bool = False
-    orb_decomposition: bool = False
-    write_density_matrix: bool = False
-    description: str = ""
 
 
 def gen_exchange(
@@ -117,7 +94,7 @@ def gen_exchange(
 
         print("Starting to calculate exchange.")
         description = f""" Input from collinear Wannier90 data.
- Tight binding data from {path}.
+ Tight binding data from {path}. 
  Prefix of wannier function files:{prefix_up} and {prefix_dn}.
 Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
 \n"""
@@ -181,7 +158,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
             write_basis_file=os.path.join(output_path, "assigned_basis.txt"),
         )
         description = f""" Input from collinear BandDownfolder data.
- Tight binding data from {path}.
+ Tight binding data from {path}. 
  Prefix of wannier function files:{prefix_up} and {prefix_dn}.
 Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
 \n"""
@@ -225,7 +202,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
                 write_basis_file=os.path.join(output_path, "assigned_basis.txt"),
             )
         description = f""" Input from non-collinear Wannier90 data.
- Tight binding data from {path}.
+ Tight binding data from {path}. 
  Prefix of wannier function files:{prefix_SOC}.
 Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.
  The DMI component parallel to the spin orientation, the Jani which has the component of that orientation should be disregarded
