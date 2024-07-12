@@ -9,16 +9,18 @@ write not only xml output.
 """
 
 import os
-from collections.abc import Iterable
-import numpy as np
-from TB2J.kpoints import monkhorst_pack
 import pickle
-from TB2J import __version__
-from TB2J.Jtensor import combine_J_tensor
+from collections.abc import Iterable
 from datetime import datetime
+
 import matplotlib.pyplot as plt
-from TB2J.spinham.spin_api import SpinModel
+import numpy as np
+
+from TB2J import __version__
 from TB2J.io_exchange.io_txt import write_Jq_info
+from TB2J.Jtensor import combine_J_tensor
+from TB2J.kpoints import monkhorst_pack
+from TB2J.spinham.spin_api import SpinModel
 from TB2J.utils import symbol_number
 
 
@@ -237,6 +239,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
     def get_charge_iatom(self, iatom):
         return self.charges[iatom]
+
+    def ijR_index_spin_to_atom(self, i, j, R):
+        return (self.iatom(i), self.iatom(j), R)
+
+    def ijR_index_atom_to_spin(self, iatom, jatom, R):
+        return (self.index_spin[iatom], self.index_spin[jatom], R)
+
+    def ijR_list(self):
+        return [(i, j, R) for R, i, j in self.exchange_Jdict]
+
+    def ijR_list_index_atom(self):
+        return [self.ijR_index_spin_to_atom(i, j, R) for R, i, j in self.exchange_Jdict]
 
     def get_J(self, i, j, R, default=None):
         i = self.i_spin(i)
@@ -563,8 +577,8 @@ def gen_distance_dict(ind_mag_atoms, atoms, Rlist):
 
 
 def test_spin_io():
-    from ase import Atoms
     import numpy as np
+    from ase import Atoms
 
     atoms = Atoms(
         "SrMnO3",
@@ -580,7 +594,6 @@ def test_spin_io():
     spinat = [[0, 0, x] for x in [0, 3, 0, 0, 0]]
     charges = [2, 4, 5, 5, 5]
     index_spin = [-1, 0, -1, -1, -1]
-    colinear = True
     Rlist = [[0, 0, 0], [0, 0, 1]]
     ind_mag_atoms = [1]
     distance_dict = gen_distance_dict(ind_mag_atoms, atoms, Rlist)

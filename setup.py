@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 __version__ = "0.9.5_pre"
 
@@ -26,6 +26,11 @@ setup(
         "scripts/TB2J_downfold.py",
         "scripts/TB2J_eigen.py",
     ],
+    entry_points={
+        "console_scripts": [
+            "TB2J_symmetrize.py=TB2J.symmetrize_J:symmetrize_J_cli",
+        ]
+    },
     install_requires=[
         "numpy<2.0",
         "scipy",
@@ -35,6 +40,8 @@ setup(
         "pathos",
         "packaging>=20.0",
         "HamiltonIO>=0.1.5",
+        "pre-commit",
+        "sympair>0.1.0",
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
