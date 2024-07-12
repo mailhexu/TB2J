@@ -1,91 +1,23 @@
-from collections import defaultdict, OrderedDict
 import os
-import numpy as np
 import pickle
-from dataclasses import dataclass
-import yaml
-from TB2J.green import TBGreen
-from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_mat
-from TB2J.utils import symbol_number, kmesh_to_R
-from TB2J.io_exchange import SpinIO
+from collections import OrderedDict, defaultdict
+
+import numpy as np
 from tqdm import tqdm
-from TB2J.external import p_map
+
 from TB2J.contour import Contour
-from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform, split_symbol_number
+from TB2J.exchange_params import ExchangeParams
+from TB2J.external import p_map
+from TB2J.green import TBGreen
+from TB2J.io_exchange import SpinIO
 from TB2J.orbmap import map_orbs_matrix
-from typing import List, Tuple
-
-
-@dataclass
-class ExchangeParams:
-    """
-    A class to store the parameters for exchange calculation.
-    """
-
-    efermi: float
-    basis: list = None
-    magnetic_elements: list = None
-    include_orbs = {}
-    _kmesh = [4, 4, 4]
-    emin: float = -15
-    emax: float = 0.05
-    nz: int = 100
-    exclude_orbs = []
-    ne: int = None
-    Rcut: float = None
-    _use_cache: bool = False
-    nproc: int = 1
-    description: str = ""
-    write_density_matrix: bool = False
-    orb_decomposition: bool = False
-    output_path: str = "TB2J_results"
-    mae_angles = None
-
-    def __init__(
-        self,
-        efermi=-10.0,
-        basis=None,
-        magnetic_elements=None,
-        include_orbs=None,
-        kmesh=[4, 4, 4],
-        emin=-15,
-        emax=0.05,
-        nz=100,
-        exclude_orbs=[],
-        ne=None,
-        Rcut=None,
-        use_cache=False,
-        nproc=1,
-        description="",
-        write_density_matrix=False,
-        orb_decomposition=False,
-        output_path="TB2J_results",
-    ):
-        self.efermi = efermi
-        self.basis = basis
-        self.magnetic_elements = magnetic_elements
-        self.include_orbs = include_orbs
-        self._kmesh = kmesh
-        self.emin = emin
-        self.emax = emax
-        self.nz = nz
-        self.exclude_orbs = exclude_orbs
-        self.ne = ne
-        self.Rcut = Rcut
-        self._use_cache = use_cache
-        self.nproc = nproc
-        self.description = description
-        self.write_density_matrix = write_density_matrix
-        self.orb_decomposition = orb_decomposition
-        self.output_path = output_path
-
-    def set_params(self, **kwargs):
-        for key, val in kwargs.items():
-            setattr(self, key, val)
-
-    def save_to_yaml(self, fname):
-        with open(fname, "w") as myfile:
-            yaml.dump(self.__dict__, myfile)
+from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_mat
+from TB2J.utils import (
+    kmesh_to_R,
+    simpson_nonuniform,
+    symbol_number,
+    trapezoidal_nonuniform,
+)
 
 
 class Exchange(ExchangeParams):
@@ -219,9 +151,9 @@ class Exchange(ExchangeParams):
                     raise ValueError(
                         f"""The number of spin-orbitals for atom {iatom} is not even,
 {nsorb} spin-orbitals are found near this atom.
-which means the spin up/down does not have same number of orbitals. 
+which means the spin up/down does not have same number of orbitals.
 This is often because the Wannier functions are wrongly defined,
-or badly localized. Please check the Wannier centers in the Wannier90 output file. 
+or badly localized. Please check the Wannier centers in the Wannier90 output file.
 """
                     )
         self._spin_dict = {}
@@ -345,9 +277,9 @@ class ExchangeNCL(Exchange):
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         # self.HR0 = self.tbmodel.get_H0()
-        try:
+        if hasattr(self.tbmodel, "get_H0"):
             self.HR0 = self.tbmodel.get_H0()
-        except:
+        else:
             self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
@@ -481,7 +413,7 @@ class ExchangeNCL(Exchange):
         if self.orb_decomposition:
             for key, val in self.A_ijR_orb.items():
                 R, iatom, jatom = key
-                Rm = tuple(-x for x in R)
+                # Rm = tuple(-x for x in R)
                 # valm = self.A_ijR_orb[(Rm, jatom, iatom)]
                 ni = self.norb_reduced[iatom]
                 nj = self.norb_reduced[jatom]
@@ -693,27 +625,28 @@ class ExchangeNCL(Exchange):
         AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
 
-    def get_mae_kspace(self, Gk_all):
-        """
-        get the MAE from Gk_all
-        TODO: This is only a place holder.
-        """
-        return None
-        Hso_k = self.model.get_Hso_k(k)
-        mae_e = np.zeros(len(self.mae_angles), dtype=complex)
-        # rotate the Hso_k to angles
-        for ik, k in enumerate(self.G.kpoints):
-            Gk = Gk_all[ik]
-            for i_angle, angle in enumerate(self.mae_angles):
-                # TODO: implementa rotate_H
-                Hso_k_rot = rotate_H(Hso_k, angle)
-                mae_e[i_angle] = Gk @ Hso_k @ Gk @ Hso_k
-        return mae_e
+    # def get_mae_kspace(self, Gk_all):
+    #    """
+    #    get the MAE from Gk_all
+    #    TODO: This is only a place holder.
+    #    """
+    #    return None
+    #    mae_e = np.zeros(len(self.mae_angles), dtype=complex)
+    #    # rotate the Hso_k to angles
+    #    for ik, k in enumerate(self.G.kpoints):
+    #        Hso_k = self.model.get_Hso_k(k)
+    #        Gk = Gk_all[ik]
+    #        for i_angle, angle in enumerate(self.mae_angles):
+    #            # TODO: implementa rotate_H
+    #            Hso_k_rot = rotate_H(Hso_k, angle)
+    #            mae_e[i_angle] = Gk @ Hso_k @ Gk @ Hso_k
+    #    return mae_e
 
     def get_mae_rspace(self, GR):
         """
         get the MAE from GR
         """
+        raise NotImplementedError("Not yet implemented.")
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)

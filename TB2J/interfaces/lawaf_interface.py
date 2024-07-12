@@ -21,11 +21,11 @@ class LaWaFManager(Manager):
     ):
         # models and basis
         if colinear:
-            tbmodels, basis = self.prepare_model_colinear(path, prefix_up, prefix_dn)
-            atoms = tbmodels[0].atoms
+            tbmodels, basis, atoms = self.prepare_model_colinear(
+                path, prefix_up, prefix_dn
+            )
         else:
-            tbmodels, basis = self.prepare_model_ncl(path, prefix_SOC)
-            atoms = tbmodels.atoms
+            tbmodels, basis, atoms = self.prepare_model_ncl(path, prefix_SOC)
 
         description = self.description(path, prefix_up, prefix_dn, prefix_SOC, colinear)
         kwargs["description"] = description
@@ -39,13 +39,15 @@ class LaWaFManager(Manager):
         tbmodel_dn = Ham.load_pickle(os.path.join(path, f"{prefix_dn}.pickle"))
         tbmodels = (tbmodel_up, tbmodel_dn)
         basis = tbmodel_up.wann_names
-        return tbmodels, basis
+        atoms = tbmodel_up.atoms
+        return tbmodels, basis, atoms
 
     def prepare_model_ncl(self, path, prefix_SOC):
         print("Reading LaWaF hamiltonian: non-colinear spin.")
         tbmodel = Ham.load_pickle(os.path.join(path, f"{prefix_SOC}.pickle"))
         basis = tbmodel.wann_names
-        return tbmodel, basis
+        atoms = tbmodel.atoms
+        return tbmodel, basis, atoms
 
     def description(self, path, prefix_up, prefix_dn, prefix_SOC, colinear=True):
         if colinear:
