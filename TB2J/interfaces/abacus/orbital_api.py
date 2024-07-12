@@ -3,11 +3,11 @@
 """
 Parser for the abacus orbital file
 """
-from pathlib import Path
-import numpy as np
+
 from dataclasses import dataclass
-from collections import namedtuple
-from TB2J.utils import symbol_number, symbol_number_list
+from pathlib import Path
+
+from TB2J.utils import symbol_number_list
 
 
 @dataclass

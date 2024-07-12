@@ -3,15 +3,17 @@
 """
 @File    :   test_read_stru.py
 @Time    :   2024/02/02 09:52:23
-@Author  :   Shen Zhen-Xiong 
+@Author  :   Shen Zhen-Xiong
 @Email   :   shenzx@iai.ustc.edu.cn
 """
+
 import os
-from stru_api import read_abacus, write_abacus, read_input
+
+from stru_api import read_abacus, read_input, write_abacus
 
 
 def main():
-    stru_fe = read_abacus(os.path.join(os.getcwd(), "input/Fe.STRU"))
+    # stru_fe = read_abacus(os.path.join(os.getcwd(), "input/Fe.STRU"))
     stru_sr2mn2o6 = read_abacus(
         os.path.join(os.getcwd(), "input/Sr2Mn2O6.STRU"), verbose=True
     )

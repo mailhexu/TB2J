@@ -3,17 +3,20 @@
 """
 The abacus wrapper
 """
-from pathlib import Path
+
 import os
+from pathlib import Path
+
 import numpy as np
 from scipy.linalg import eigh
-from copy import deepcopy
+
 from TB2J.mathutils.rotate_spin import rotate_Matrix_from_z_to_spherical
-from TB2J.utils import symbol_number_list
 from TB2J.myTB import AbstractTB
-from TB2J.abacus.abacus_api import read_HR_SR
-from TB2J.abacus.orbital_api import parse_abacus_orbital
-from TB2J.abacus.stru_api import read_abacus, read_abacus_out
+from TB2J.utils import symbol_number_list
+
+from .abacus_api import read_HR_SR
+from .orbital_api import parse_abacus_orbital
+from .stru_api import read_abacus
 
 
 class AbacusWrapper(AbstractTB):
@@ -328,16 +331,17 @@ def test_abacus_wrapper_collinear():
     # print(H.diagonal().real)
     # print(model_up.get_HR0().diagonal().real)
     print(parser.efermi)
+    print(atoms)
 
 
 def test_abacus_wrapper_ncl():
     outpath = "/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/2_soc/OUT.Fe"
-
     parser = AbacusParser(outpath=outpath, spin=None, binary=False)
     atoms = parser.read_atoms()
     model = parser.get_models()
     H, S, E, V = model.HSE_k([0, 0, 0])
     print(parser.efermi)
+    print(atoms)
 
 
 if __name__ == "__main__":

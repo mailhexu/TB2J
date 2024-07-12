@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import sys
-from TB2J.manager import gen_exchange
+
+from TB2J.interfaces import gen_exchange
 from TB2J.versioninfo import print_license
 
 

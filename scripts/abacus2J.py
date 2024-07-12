@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-from TB2J.abacus.gen_exchange_abacus import gen_exchange_abacus
-from TB2J.versioninfo import print_license
-import sys
 import argparse
+import sys
+
+from TB2J.interfaces import gen_exchange_abacus
+from TB2J.versioninfo import print_license
 
 
 def run_abacus2J():
