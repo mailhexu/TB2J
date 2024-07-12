@@ -2,10 +2,11 @@ import os
 
 from ase.io import read
 
-from TB2J.intefaces.manager import Manager
 from TB2J.myTB import MyTB
 from TB2J.utils import auto_assign_basis_name
 from TB2J.wannier import parse_atoms
+
+from .manager import Manager
 
 
 class WannierManager(Manager):
