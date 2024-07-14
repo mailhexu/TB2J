@@ -60,7 +60,7 @@ Warning: Please check if the noise level of Wannier function Hamiltonian to make
 \n"""
 
         else:
-            description = f""" Input from non-collinear Wannier90 data.
+            description = f""" Input from non-collinear LaWaF data.
 Tight binding data from {path}.
 Prefix of wannier function files:{prefix_SOC}.
 Warning: Please check if the noise level of Wannier function Hamiltonian to make sure it is much smaller than the exchange values.

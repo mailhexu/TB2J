@@ -115,6 +115,13 @@ def run_siesta2J():
         default=False,
     )
 
+    parser.add_argument(
+        "--orth",
+        help="whether to use orthogonalization before the diagonization of the electron Hamiltonian. Default: False",
+        action="store_true",
+        default=False,
+    )
+
     args = parser.parse_args()
 
     if args.elements is None:
@@ -146,6 +153,7 @@ def run_siesta2J():
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
         read_H_soc=args.split_soc,
+        orth=args.orth,
     )
 
 

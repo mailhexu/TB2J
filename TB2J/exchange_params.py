@@ -30,6 +30,7 @@ class ExchangeParams:
     orb_decomposition: bool = False
     output_path: str = "TB2J_results"
     mae_angles = None
+    orth = False
 
     def __init__(
         self,
@@ -50,6 +51,8 @@ class ExchangeParams:
         orb_decomposition=False,
         output_path="TB2J_results",
         exclude_orbs=[],
+        mae_angles=None,
+        orth=False,
     ):
         self.efermi = efermi
         self.basis = basis
@@ -68,6 +71,8 @@ class ExchangeParams:
         self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
         self.output_path = output_path
+        self.mae_angles = mae_angles
+        self.orth = orth
 
     def set_params(self, **kwargs):
         for key, val in kwargs.items():
@@ -177,6 +182,13 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         action="store_true",
         default=False,
     )
+
+    parser.add_argument(
+        "--orth",
+        help="whether to use lowdin orthogonalization before diagonalization (for testing only)",
+        action="store_true",
+        default=False,
+    )
     return parser
 
 
@@ -197,4 +209,5 @@ def parser_argument_to_dict(args) -> dict:
         "write_density_matrix": args.write_dm,
         "orb_decomposition": args.orb_decomposition,
         "output_path": args.output_path,
+        "orth": args.orth,
     }
