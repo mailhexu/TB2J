@@ -1,13 +1,14 @@
-import numpy as np
-from collections import defaultdict
-from TB2J.kpoints import monkhorst_pack
-from shutil import rmtree
 import os
-import tempfile
-from pathos.multiprocessing import ProcessPool
-import sys
 import pickle
-import warnings
+import sys
+import tempfile
+from collections import defaultdict
+from shutil import rmtree
+
+import numpy as np
+from pathos.multiprocessing import ProcessPool
+
+from TB2J.kpoints import monkhorst_pack
 from TB2J.mathutils.fermi import fermi
 
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
@@ -220,9 +221,11 @@ class TBGreen:
         rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         if self.is_orthogonal:
             for ik, _ in enumerate(self.kpts):
+                evecs_k = self.get_evecs(ik)
+                # chekc if any of the evecs element is nan
                 rho += (
-                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
-                    @ self.get_evecs(ik).T.conj()
+                    (evecs_k * fermi(self.evals[ik], self.efermi))
+                    @ evecs_k.T.conj()
                     * self.kweights[ik]
                 )
         else:
@@ -233,7 +236,7 @@ class TBGreen:
                     @ self.get_Sk(ik)
                     * self.kweights[ik]
                 )
-
+        # check if rho has nan values
         return rho
 
     def get_rho_R(self, Rlist):

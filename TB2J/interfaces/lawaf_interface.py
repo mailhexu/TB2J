@@ -1,6 +1,11 @@
+import argparse
 import os
+import sys
 
 from HamiltonIO.lawaf import LawafHamiltonian as Ham
+
+from TB2J.exchange_params import add_exchange_args_to_parser, parser_argument_to_dict
+from TB2J.versioninfo import print_license
 
 from .manager import Manager
 
@@ -13,9 +18,6 @@ class LaWaFManager(Manager):
         prefix_dn,
         prefix_SOC,
         colinear=True,
-        groupby="spin",
-        basis_fname=None,
-        qspace=False,
         wannier_type="LaWaF",
         **kwargs,
     ):
@@ -67,3 +69,61 @@ e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z compo
 If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.\n"""
 
         return description
+
+
+def lawaf2J_cli():
+    print_license()
+    parser = argparse.ArgumentParser(
+        description="lawaf2J: Using magnetic force theorem to calculate exchange parameter J from wannier functions in LaWaF"
+    )
+    parser.add_argument(
+        "--path", help="path to the wannier files", default="./", type=str
+    )
+
+    parser.add_argument(
+        "--spinor",
+        help="if the calculation is spinor, default is False",
+        default=False,
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--prefix_spinor",
+        help="prefix to the spinor wannier files",
+        default="lawaf_spinor.pickle",
+        type=str,
+    )
+    parser.add_argument(
+        "--prefix_up",
+        help="prefix to the spin up wannier files",
+        default="lawaf_up",
+        type=str,
+    )
+    parser.add_argument(
+        "--prefix_down",
+        help="prefix to the spin down wannier files",
+        default="lawaf_dn",
+        type=str,
+    )
+    add_exchange_args_to_parser(parser)
+
+    args = parser.parse_args()
+
+    if args.efermi is None:
+        print("Please input fermi energy using --efermi ")
+        sys.exit()
+    if args.elements is None:
+        print("Please input the magnetic elements, e.g. --elements Fe Ni")
+        sys.exit()
+
+    kwargs = parser_argument_to_dict(args)
+
+    manager = LaWaFManager(
+        path=args.path,
+        prefix_up=args.prefix_up,
+        prefix_dn=args.prefix_down,
+        prefix_SOC=args.prefix_spinor,
+        colinear=not args.spinor,
+        **kwargs,
+    )
+    return manager

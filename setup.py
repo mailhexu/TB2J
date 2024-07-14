@@ -29,6 +29,7 @@ setup(
     entry_points={
         "console_scripts": [
             "TB2J_symmetrize.py=TB2J.symmetrize_J:symmetrize_J_cli",
+            "lawaf2J.py=TB2J.interfaces.lawaf_interface:lawaf2J_cli",
         ]
     },
     install_requires=[

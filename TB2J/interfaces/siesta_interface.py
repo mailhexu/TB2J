@@ -12,6 +12,8 @@ except ImportError:
         "Cannot import SislWrapper from HamiltonIO.siesta. Please install HamiltonIO first."
     )
 
+np.seterr(all="raise", under="ignore")
+
 
 def gen_exchange_siesta(
     fdf_fname,
@@ -29,6 +31,7 @@ def gen_exchange_siesta(
     use_cache=False,
     output_path="TB2J_results",
     orb_decomposition=False,
+    orth=True,
     description="",
 ):
     try:
@@ -59,7 +62,9 @@ def gen_exchange_siesta(
     # geom = fdf.read_geometry()
     # H = fdf.read_hamiltonian()
     # geom = H.geometry
-    parser = SislParser(fdf_fname=fdf_fname, ispin=None, read_H_soc=read_H_soc)
+    parser = SislParser(
+        fdf_fname=fdf_fname, ispin=None, read_H_soc=read_H_soc, orth=orth
+    )
     if parser.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
         # tbmodel_up = SislWrapper(fdf_fname=None, sisl_hamiltonian=H, spin=0, geom=geom)

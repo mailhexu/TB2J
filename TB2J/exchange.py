@@ -625,12 +625,13 @@ class ExchangeNCL(Exchange):
         AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
 
-    # def get_mae_kspace(self, Gk_all):
-    #    """
-    #    get the MAE from Gk_all
-    #    TODO: This is only a place holder.
-    #    """
-    #    return None
+    def get_mae_kspace(self, Gk_all):
+        """
+        get the MAE from Gk_all
+        TODO: This is only a place holder.
+        """
+        return None
+
     #    mae_e = np.zeros(len(self.mae_angles), dtype=complex)
     #    # rotate the Hso_k to angles
     #    for ik, k in enumerate(self.G.kpoints):
