@@ -1,28 +1,26 @@
-import numpy as np
-from scipy.linalg import eigh
-from copy import deepcopy
-from scipy.spatial.transform import Rotation
-import matplotlib.pyplot as plt
 from pathlib import Path
-from TB2J.mathutils.rotate_spin import spherical_to_cartesian
-from HamiltonIO.model.occupations import Occupations
+
+import matplotlib.pyplot as plt
+import numpy as np
+import tqdm
 
 # from TB2J.abacus.abacus_wrapper import AbacusSplitSOCParser
 from HamiltonIO.abacus.abacus_wrapper import AbacusSplitSOCParser
-from HamiltonIO.siesta import SislParser, SiestaHamiltonian
-import tqdm
-from TB2J.abacus.abacus_wrapper import AbacusWrapper, AbacusParser
-from TB2J.mathutils.rotate_spin import (
-    rotate_Matrix_from_z_to_axis,
-    rotate_Matrix_from_z_to_spherical,
-)
+from HamiltonIO.model.occupations import Occupations
+from HamiltonIO.siesta import SislParser
+from scipy.linalg import eigh
+
+from TB2J.contour import Contour
+from TB2J.green import TBGreen
 
 # from HamiltonIO.model.rotate_spin import rotate_Matrix_from_z_to_axis, rotate_Matrix_from_z_to_sperical
 from TB2J.kpoints import monkhorst_pack
-from TB2J.mathutils.fermi import fermi
 from TB2J.mathutils.kR_convert import R_to_k
-from TB2J.green import TBGreen
-from TB2J.contour import Contour
+
+# from TB2J.abacus.abacus_wrapper import AbacusWrapper, AbacusParser
+from TB2J.mathutils.rotate_spin import (
+    rotate_spinor_matrix,
+)
 
 
 def get_occupation(evals, kweights, nel, width=0.1):
@@ -143,7 +141,7 @@ class MAEGreen(MAE):
         for theta, phi in zip(thetas, phis):
             dE = 0.0
             for i, dHk in enumerate(Hsoc_k):
-                dHi = rotate_Matrix_from_z_to_spherical(dHk, theta, phi)
+                dHi = rotate_spinor_matrix(dHk, theta, phi)
                 GdH = G0K[i] @ dHi
                 dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
             dE_ang.append(dE)

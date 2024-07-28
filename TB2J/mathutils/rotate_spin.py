@@ -1,6 +1,7 @@
 import numpy as np
-from TB2J.pauli import pauli_block_all, s0, s1, s2, s3, gather_pauli_blocks
-from scipy.sparse import kron, eye_array
+from scipy.sparse import eye_array, kron
+
+from TB2J.pauli import gather_pauli_blocks, pauli_block_all
 
 
 def rotate_Matrix_from_z_to_axis(M, axis, normalize=True):
@@ -50,7 +51,25 @@ def rotate_spinor_single_block(M, theta, phi):
     return Uinv @ M @ U
 
 
-def rotate_spinor_matrix(M, theta, phi):
+def rotate_spinor_matrix(M, theta, phi, method="einsum"):
+    """
+    Rotate the spinor matrix M by theta and phi,
+    """
+    if method == "plain":
+        return rotate_spinor_matrix_plain(M, theta, phi)
+    elif method == "einsum":
+        return rotate_spinor_matrix_einsum(M, theta, phi)
+    elif method == "reshape":
+        return rotate_spinor_matrix_reshape(M, theta, phi)
+    elif method == "kron":
+        return rotate_spinor_matrix_kron(M, theta, phi)
+    elif method == "spkron":
+        return rotate_spinor_matrix_spkron(M, theta, phi)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+
+def rotate_spinor_matrix_plain(M, theta, phi):
     """
     M is a matrix with shape (2N, 2N), where N is the number of sites, and each site has a 2x2 matrix
     rotate each 2x2 block by theta and phi
@@ -59,7 +78,7 @@ def rotate_spinor_matrix(M, theta, phi):
     U = rotation_matrix(theta, phi)
     UT = U.conj().T
     tmp = np.zeros((2, 2), dtype=np.complex128)
-    for i in numba.prange(M.shape[0] // 2):
+    for i in range(M.shape[0] // 2):
         for j in range(M.shape[0] // 2):
             for k in range(2):
                 for l in range(2):
@@ -100,6 +119,10 @@ def rotate_spinor_matrix_einsum_R(M, theta, phi):
     )
     Mnew = Mnew.reshape(nR, 2 * N, 2 * N)
     return Mnew
+
+
+def rotate_spinor_Matrix_R(M, theta, phi):
+    return rotate_spinor_matrix_einsum_R(M, theta, phi)
 
 
 def rotate_spinor_matrix_reshape(M, theta, phi):
