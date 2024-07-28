@@ -149,7 +149,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                     tbmodels=model,
                     atoms=model.atoms,
                     basis=basis,
-                    efermi=0.0,
+                    efermi=None,  # set to None, compute from efermi.
                     magnetic_elements=magnetic_elements,
                     include_orbs=include_orbs,
                     kmesh=kmesh,

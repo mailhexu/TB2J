@@ -6,6 +6,7 @@ from collections import defaultdict
 from shutil import rmtree
 
 import numpy as np
+from HamiltonIO.model.occupations import Occupations
 from pathos.multiprocessing import ProcessPool
 
 from TB2J.kpoints import monkhorst_pack
@@ -149,6 +150,14 @@ class TBGreen:
 
         if not saveH:
             self.H = None
+
+        # get efermi
+        if self.efermi is None:
+            print("Calculating Fermi energy from eigenvalues")
+            print(f"Number of electrons: {self.tbmodel.nel} ")
+            occ = Occupations(nel=self.model.nel, width=0.01, wk=self.kweights, nspin=2)
+            self.efermi = occ.efermi(self.evals)
+            print(f"Fermi energy found: {self.efermi}")
 
         self.evals, self.evecs = self._reduce_eigens(
             self.evals, self.evecs, emin=self.efermi - 10.0, emax=self.efermi + 10.1
