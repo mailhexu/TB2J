@@ -24,9 +24,16 @@ def eigen_to_G(evals, evecs, efermi, energy):
     :returns: Green's function G,
     :rtype:  Matrix with same shape of the Hamiltonian (and eigenvector)
     """
-    return (
-        np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
-        @ evecs.conj().T
+    # return (
+    #    np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
+    #    @ evecs.conj().T
+    # )
+    return np.einsum(
+        "ib, b, jb-> ij",
+        evecs,
+        1.0 / (-evals + (energy + efermi)),
+        evecs.conj(),
+        optimize=True,
     )
 
 
