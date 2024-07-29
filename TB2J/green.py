@@ -1,3 +1,4 @@
+import copy
 import os
 import pickle
 import sys
@@ -7,10 +8,12 @@ from shutil import rmtree
 
 import numpy as np
 from HamiltonIO.model.occupations import Occupations
+from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
 
 from TB2J.kpoints import monkhorst_pack
-from TB2J.mathutils.fermi import fermi
+
+# from TB2J.mathutils.fermi import fermi
 
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
 
@@ -85,7 +88,7 @@ class TBGreen:
         else:
             self.kpts = tbmodel.get_kpts()
         self.nkpts = len(self.kpts)
-        self.kweights = [1.0 / self.nkpts] * self.nkpts
+        self.kweights = np.array([1.0 / self.nkpts] * self.nkpts)
         self.norb = tbmodel.norb
         self.nbasis = tbmodel.nbasis
         self.k_sym = k_sym
@@ -158,17 +161,22 @@ class TBGreen:
         if not saveH:
             self.H = None
 
+        for ik, kpt in enumerate(self.kpts):
+            print(self.evals[ik, 97:102])
+
         # get efermi
         if self.efermi is None:
             print("Calculating Fermi energy from eigenvalues")
             print(f"Number of electrons: {self.tbmodel.nel} ")
-            occ = Occupations(nel=self.model.nel, width=0.01, wk=self.kweights, nspin=2)
-            self.efermi = occ.efermi(self.evals)
+            occ = Occupations(
+                nel=self.tbmodel.nel, width=0.05, wk=self.kweights, nspin=2
+            )
+            self.efermi = occ.efermi(copy.deepcopy(self.evals))
             print(f"Fermi energy found: {self.efermi}")
 
-        self.evals, self.evecs = self._reduce_eigens(
-            self.evals, self.evecs, emin=self.efermi - 10.0, emax=self.efermi + 10.1
-        )
+        # self.evals, self.evecs = self._reduce_eigens(
+        #    self.evals, self.evecs, emin=self.efermi - 15.0, emax=self.efermi + 10.1
+        # )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
@@ -240,14 +248,14 @@ class TBGreen:
                 evecs_k = self.get_evecs(ik)
                 # chekc if any of the evecs element is nan
                 rho += (
-                    (evecs_k * fermi(self.evals[ik], self.efermi))
+                    (evecs_k * fermi(self.evals[ik], self.efermi, nspin=2))
                     @ evecs_k.T.conj()
                     * self.kweights[ik]
                 )
         else:
             for ik, _ in enumerate(self.kpts):
                 rho += (
-                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
+                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi, nspin=2))
                     @ self.get_evecs(ik).T.conj()
                     @ self.get_Sk(ik)
                     * self.kweights[ik]
@@ -261,7 +269,10 @@ class TBGreen:
         for ik, kpt in enumerate(self.kpts):
             evec = self.get_evecs(ik)
             rhok = np.einsum(
-                "ib,b, bj-> ij", evec, fermi(self.evals[ik], self.efermi), evec.conj().T
+                "ib,b, bj-> ij",
+                evec,
+                fermi(self.evals[ik], self.efermi, nspin=2),
+                evec.conj().T,
             )
             for iR, R in enumerate(Rlist):
                 rho_R[iR] += rhok * np.exp(self.k2Rfactor * kpt @ R) * self.kweights[ik]

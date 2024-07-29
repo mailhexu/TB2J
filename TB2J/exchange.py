@@ -269,6 +269,8 @@ class ExchangeNCL(Exchange):
             use_cache=self._use_cache,
             nproc=self.nproc,
         )
+        if self.efermi is None:
+            self.efermi = self.G.efermi
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
         # self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
