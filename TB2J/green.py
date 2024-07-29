@@ -161,9 +161,6 @@ class TBGreen:
         if not saveH:
             self.H = None
 
-        for ik, kpt in enumerate(self.kpts):
-            print(self.evals[ik, 97:102])
-
         # get efermi
         if self.efermi is None:
             print("Calculating Fermi energy from eigenvalues")
