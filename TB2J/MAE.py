@@ -35,12 +35,25 @@ def get_density_matrix(evals=None, evecs=None, kweights=None, nel=None, width=0.
 
 
 class MAE:
-    def __init__(self, model, kmesh, gamma=True, width=0.1, nel=None):
+    def __init__(
+        self,
+        model,
+        kmesh=None,
+        gamma=True,
+        kpts=None,
+        kweights=None,
+        width=0.1,
+        nel=None,
+    ):
         self.model = model
         if nel is not None:
             self.model.nel = nel
-        self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
-        self.kweights = np.ones(len(self.kpts), dtype=float) / len(self.kpts)
+        if kpts is None:
+            self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
+            self.kweights = np.ones(len(self.kpts), dtype=float) / len(self.kpts)
+        else:
+            self.kpts = kpts
+            self.kweights = kweights
         self.width = width
 
     def get_band_energy(self):
@@ -94,8 +107,27 @@ class MAE:
 
 
 class MAEGreen(MAE):
-    def __init__(self, model, kmesh, gamma=True, nel=None, width=0.1, **kwargs):
-        super().__init__(model, kmesh, gamma=gamma, nel=nel, width=width)
+    def __init__(
+        self,
+        model,
+        kmesh=None,
+        gamma=True,
+        kpts=None,
+        kweights=None,
+        nel=None,
+        width=0.1,
+        **kwargs,
+    ):
+        self.model = model
+        if nel is not None:
+            self.model.nel = nel
+        if kpts is None:
+            self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
+            self.kweights = np.ones(len(self.kpts), dtype=float) / len(self.kpts)
+        else:
+            self.kpts = kpts
+            self.kweights = kweights
+        self.width = width
         model.set_so_strength(0.0)
         evals, evecs = model.solve_all(self.kpts)
         occ = Occupations(
@@ -143,7 +175,8 @@ class MAEGreen(MAE):
             for i, dHk in enumerate(Hsoc_k):
                 dHi = rotate_spinor_matrix(dHk, theta, phi)
                 GdH = G0K[i] @ dHi
-                dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
+                # dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
+                dE += np.trace(GdH @ GdH) * self.kweights[i]
             dE_ang.append(dE)
         return np.array(dE_ang)
 

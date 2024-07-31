@@ -4,6 +4,7 @@ import numpy as np
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.MAEGreen import MAEGreen
 
 try:
     from HamiltonIO.siesta import SislParser
@@ -12,28 +13,70 @@ except ImportError:
         "Cannot import SislWrapper from HamiltonIO.siesta. Please install HamiltonIO first."
     )
 
-np.seterr(all="raise", under="ignore")
+
+def siesta_anisotropy(**kwargs):
+    pass
 
 
-def gen_exchange_siesta(
-    fdf_fname,
-    read_H_soc=False,
-    magnetic_elements=[],
-    include_orbs=None,
-    kmesh=[5, 5, 5],
-    emin=-12.0,
-    emax=0.0,
-    nz=100,
-    exclude_orbs=[],
-    Rcut=None,
-    ne=None,
-    nproc=1,
-    use_cache=False,
-    output_path="TB2J_results",
-    orb_decomposition=False,
-    orth=False,
-    description="",
-):
+def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
+    """
+    parameters:
+        fdf_fname: str
+            The fdf file for the calculation.
+        read_H_soc: bool
+            Whether to read the SOC Hamiltonian. Default is False.
+
+    parameters in **kwargs:
+        magnetic_elements: list of str
+            The magnetic elements to calculate the exchange. e.g. ["Fe", "Co", "Ni"]
+        include_orbs: dict
+            The included orbitals for each magnetic element. e.g. {"Fe": ["d"]}. Default is None.
+        kmesh: list of int
+            The k-point mesh for the calculation. e.g. [5, 5, 5]. Default is [5, 5, 5].
+        emin: float
+            The minimum energy for the calculation. Default is -12.0.
+        emax: float
+            The maximum energy for the calculation. Default is 0.0.
+        nz: int
+            The number of points for the energy mesh. Default is 100.
+        exclude_orbs: list of str
+            The excluded orbitals for the calculation. Default is [].
+        Rcut: float
+            The cutoff radius for the exchange calculation in angstrom. Default is None.
+        ne: int
+            The number of electrons for the calculation. Default is None.
+        nproc: int
+            The number of processors for the calculation. Default is 1.
+        use_cache: bool
+            Whether to use the cache for the calculation. Default is False.
+        output_path: str
+            The output path for the calculation. Default is "TB2J_results".
+        orb_decomposition: bool
+            Whether to calculate the orbital decomposition. Default is False.
+        orth: bool
+            Whether to orthogonalize the orbitals. Default is False.
+        description: str
+            The description for the calculation. Default is "".
+    """
+
+    exargs = dict(
+        magnetic_elements=[],
+        include_orbs=None,
+        kmesh=[5, 5, 5],
+        emin=-12.0,
+        emax=0.0,
+        nz=100,
+        exclude_orbs=[],
+        Rcut=None,
+        ne=None,
+        nproc=1,
+        use_cache=False,
+        output_path="TB2J_results",
+        orb_decomposition=False,
+        orth=False,
+        description="",
+    )
+    exargs.update(kwargs)
     try:
         import sisl
     except ImportError:
@@ -46,7 +89,8 @@ def gen_exchange_siesta(
             f"sisl version is {sisl.__version__}, but should be larger than 0.10.0."
         )
 
-    include_orbs = {}
+    magnetic_elements = exargs.pop("magnetic_elements")
+    include_orbs = exargs.pop("include_orbs")
     if isinstance(magnetic_elements, str):
         magnetic_elements = [magnetic_elements]
     for element in magnetic_elements:
@@ -57,13 +101,10 @@ def gen_exchange_siesta(
         else:
             include_orbs[element] = None
     magnetic_elements = list(include_orbs.keys())
+    output_path = exargs.pop("output_path")
 
-    # fdf = sisl.get_sile(fdf_fname)
-    # geom = fdf.read_geometry()
-    # H = fdf.read_hamiltonian()
-    # geom = H.geometry
     parser = SislParser(
-        fdf_fname=fdf_fname, ispin=None, read_H_soc=read_H_soc, orth=orth
+        fdf_fname=fdf_fname, ispin=None, read_H_soc=read_H_soc, orth=exargs["orth"]
     )
     if parser.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
@@ -83,17 +124,7 @@ def gen_exchange_siesta(
             efermi=0.0,
             magnetic_elements=magnetic_elements,
             include_orbs=include_orbs,
-            kmesh=kmesh,
-            emin=emin,
-            emax=emax,
-            nz=nz,
-            exclude_orbs=exclude_orbs,
-            Rcut=Rcut,
-            ne=ne,
-            nproc=nproc,
-            use_cache=use_cache,
-            output_path=output_path,
-            description=description,
+            **exargs,
         )
         exchange.run(path=output_path)
         print("\n")
@@ -111,28 +142,17 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
  e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z component of DMI.
  If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
 \n"""
+        exargs["description"] = description
         if not model.split_soc:
             exchange = ExchangeNCL(
                 tbmodels=model,
                 atoms=model.atoms,
                 basis=basis,
                 efermi=0.0,
-                # FIXME:
-                # efermi=None,
                 magnetic_elements=magnetic_elements,
                 include_orbs=include_orbs,
-                kmesh=kmesh,
-                emin=emin,
-                emax=emax,
-                nz=nz,
-                exclude_orbs=exclude_orbs,
-                Rcut=Rcut,
-                ne=ne,
-                nproc=nproc,
-                use_cache=use_cache,
-                description=description,
                 output_path=output_path,
-                orb_decomposition=orb_decomposition,
+                **exargs,
             )
             exchange.run(path=output_path)
             print("\n")
@@ -140,6 +160,21 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 f"All calculation finished. The results are in {output_path} directory."
             )
         else:
+            print("Starting to calculate MAE.")
+            MAE = MAEGreen(
+                tbmodels=model,
+                atoms=model.atoms,
+                basis=basis,
+                efermi=0.0,
+                magnetic_elements=magnetic_elements,
+                include_orbs=include_orbs,
+                **exargs,
+            )
+            MAE.run(path=output_path)
+            print(
+                f"MAE calculation finished. The results are in {output_path} directory."
+            )
+
             angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
             for key, val in angle.items():
                 # model = parser.get_model()
@@ -154,18 +189,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                     efermi=None,  # set to None, compute from efermi.
                     magnetic_elements=magnetic_elements,
                     include_orbs=include_orbs,
-                    kmesh=kmesh,
-                    emin=emin,
-                    emax=emax,
-                    nz=nz,
-                    exclude_orbs=exclude_orbs,
-                    Rcut=Rcut,
-                    ne=ne,
-                    nproc=nproc,
-                    use_cache=use_cache,
-                    description=description,
-                    output_path=output_path_full,
-                    orb_decomposition=orb_decomposition,
+                    **exargs,
                 )
                 exchange.run(path=output_path_full)
                 print("\n")

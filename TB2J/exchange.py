@@ -11,7 +11,7 @@ from TB2J.external import p_map
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
 from TB2J.orbmap import map_orbs_matrix
-from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_mat
+from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
 from TB2J.utils import (
     kmesh_to_R,
     simpson_nonuniform,
@@ -39,10 +39,7 @@ class Exchange(ExchangeParams):
         self._prepare_distance()
 
         # whether to calculate J and DMI with NJt method.
-        self.calc_NJt = True
         # self._prepare_NijR()
-        self.Ddict_NJT = None
-        self.Jdict_NJT = None
         self._is_collinear = True
         self.has_elistc = False
         self._clean_tbmodels()
@@ -551,53 +548,6 @@ class ExchangeNCL(Exchange):
         self.rho_dict = rho
         return self.rho_dict
 
-    def calculate_DMI_NJT(self):
-        """
-        calculate exchange and DMI with the
-        This did not work and should be removed.
-        """
-        Ddict_NJT = {}
-        Jdict_NJT = {}
-        for R in self.short_Rlist:
-            N = self.N[tuple(-np.array(R))]  # density matrix
-            t = self.tbmodel.get_hamR(R)  # hopping parameter
-            for iatom in self.ind_mag_atoms:
-                orbi = self.iorb(iatom)
-                ni = len(orbi)
-                for jatom in self.ind_mag_atoms:
-                    orbj = self.iorb(jatom)
-                    nj = len(orbj)
-                    Nji = N[np.ix_(orbj, orbi)]
-                    tij = t[np.ix_(orbi, orbj)]
-                    D = np.zeros(3, dtype=float)
-                    J = np.zeros(3, dtype=float)
-                    for dim in range(3):
-                        # S_i = pauli_mat(ni, dim +
-                        #                1)  #*self.rho[np.ix_(orbi, orbi)]
-                        # S_j = pauli_mat(nj, dim +
-                        #                1)  #*self.rho[np.ix_(orbj, orbj)]
-                        # TODO: Note that rho is complex, not the imaginary part
-                        S_i = pauli_mat(ni, dim + 1) * self.rho[np.ix_(orbi, orbi)]
-                        S_j = pauli_mat(nj, dim + 1) * self.rho[np.ix_(orbj, orbj)]
-
-                        # [S, t]+  = Si tij + tij Sj, where
-                        # Si and Sj are the spin operator
-                        # Here we do not have L operator, so J-> S
-                        Jt = np.matmul(S_i, tij) + np.matmul(tij, S_j)
-
-                        Jtminus = np.matmul(S_i, tij) - np.matmul(tij, S_j)
-                        # D = -1/2 Tr Nji [J, tij]
-                        # Trace over spin and orb
-                        D[dim] = -0.5 * np.imag(np.trace(np.matmul(Nji, Jt)))
-                        J[dim] = -0.5 * np.imag(np.trace(np.matmul(Nji, Jtminus)))
-                    ispin = self.ispin(iatom)
-                    jspin = self.ispin(jatom)
-                    Ddict_NJT[(R, ispin, jspin)] = D
-                    Jdict_NJT[(R, ispin, jspin)] = J
-        self.Jdict_NJT = Jdict_NJT
-        self.Ddict_NJT = Ddict_NJT
-        return Ddict_NJT
-
     def integrate(self, AijRs, AijRs_orb=None, method="simpson"):
         """
         AijRs: a list of AijR,
@@ -626,30 +576,6 @@ class ExchangeNCL(Exchange):
         # TODO: define the quantities for one energy.
         AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
-
-    def get_mae_kspace(self, Gk_all):
-        """
-        get the MAE from Gk_all
-        TODO: This is only a place holder.
-        """
-        return None
-
-    #    mae_e = np.zeros(len(self.mae_angles), dtype=complex)
-    #    # rotate the Hso_k to angles
-    #    for ik, k in enumerate(self.G.kpoints):
-    #        Hso_k = self.model.get_Hso_k(k)
-    #        Gk = Gk_all[ik]
-    #        for i_angle, angle in enumerate(self.mae_angles):
-    #            # TODO: implementa rotate_H
-    #            Hso_k_rot = rotate_H(Hso_k, angle)
-    #            mae_e[i_angle] = Gk @ Hso_k @ Gk @ Hso_k
-    #    return mae_e
-
-    def get_mae_rspace(self, GR):
-        """
-        get the MAE from GR
-        """
-        raise NotImplementedError("Not yet implemented.")
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
@@ -739,8 +665,6 @@ class ExchangeNCL(Exchange):
             Jani_dict=self.Jani,
             DMI_orb=self.DMI_orb,
             Jani_orb=self.Jani_orb,
-            NJT_Jdict=self.Jdict_NJT,
-            NJT_ddict=self.Ddict_NJT,
             biquadratic_Jdict=self.B,
             debug_dict=self.debug_dict,
             description=self.description,
@@ -779,8 +703,6 @@ class ExchangeCL(ExchangeNCL):
             distance_dict=self.distance_dict,
             exchange_Jdict=self.exchange_Jdict,
             dmi_ddict=None,
-            NJT_Jdict=None,
-            NJT_ddict=None,
             biquadratic_Jdict=self.B,
             description=self.description,
         )
