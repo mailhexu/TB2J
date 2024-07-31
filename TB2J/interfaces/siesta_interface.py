@@ -174,7 +174,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
             # phis = [0, 0, 0, 0]
             # MAE.set_angles(thetas=thetas, phis=phis)
-            MAE.run(output_path=output_path)
+            MAE.run(output_path=f"{output_path}_anisotropy")
             print(
                 f"MAE calculation finished. The results are in {output_path} directory."
             )

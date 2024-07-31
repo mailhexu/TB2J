@@ -81,4 +81,4 @@ class MAEGreen(ExchangeNCL):
 
     def run(self, output_path="TB2J_anisotropy"):
         self.get_band_energy_vs_angles(self.thetas, self.phis)
-        self.output()
+        self.output(output_path=output_path)
