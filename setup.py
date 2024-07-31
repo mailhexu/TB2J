@@ -40,7 +40,7 @@ setup(
         "tqdm",
         "pathos",
         "packaging>=20.0",
-        "HamiltonIO>=0.1.5",
+        "HamiltonIO>=0.1.7",
         "pre-commit",
         "sympair>0.1.0",
     ],
