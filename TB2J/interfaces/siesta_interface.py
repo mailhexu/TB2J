@@ -161,16 +161,20 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             )
         else:
             print("Starting to calculate MAE.")
+            model.set_so_strength(0.0)
             MAE = MAEGreen(
                 tbmodels=model,
                 atoms=model.atoms,
                 basis=basis,
-                efermi=0.0,
+                efermi=None,
                 magnetic_elements=magnetic_elements,
                 include_orbs=include_orbs,
                 **exargs,
             )
-            MAE.run(path=output_path)
+            # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
+            # phis = [0, 0, 0, 0]
+            # MAE.set_angles(thetas=thetas, phis=phis)
+            MAE.run(output_path=output_path)
             print(
                 f"MAE calculation finished. The results are in {output_path} directory."
             )

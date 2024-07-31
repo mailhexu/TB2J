@@ -166,7 +166,7 @@ class TBGreen:
             print("Calculating Fermi energy from eigenvalues")
             print(f"Number of electrons: {self.tbmodel.nel} ")
             occ = Occupations(
-                nel=self.tbmodel.nel, width=0.05, wk=self.kweights, nspin=2
+                nel=self.tbmodel.nel, width=0.1, wk=self.kweights, nspin=2
             )
             self.efermi = occ.efermi(copy.deepcopy(self.evals))
             print(f"Fermi energy found: {self.efermi}")

@@ -57,8 +57,9 @@ class Exchange(ExchangeParams):
         pass
 
     def _clean_tbmodels(self):
-        del self.tbmodel
-        del self.G.tbmodel
+        # del self.tbmodel
+        # del self.G.tbmodel
+        pass
 
     def _prepare_kmesh(self, kmesh):
         for k in kmesh:
@@ -259,9 +260,11 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
+        print(self.kmesh)
         self.G = TBGreen(
             tbmodel=self.tbmodel,
             kmesh=self.kmesh,
+            gamma=True,
             efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.nproc,
@@ -570,7 +573,8 @@ class ExchangeNCL(Exchange):
 
     def get_quantities_per_e(self, e):
         Gk_all = self.G.get_Gk_all(e)
-        mae = self.get_mae_kspace(Gk_all)
+        # mae = self.get_mae_kspace(Gk_all)
+        mae = None
         # TODO: get the MAE from Gk_all
         GR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=False, Gk_all=Gk_all)
         # TODO: define the quantities for one energy.
