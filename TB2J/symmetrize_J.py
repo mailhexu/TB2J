@@ -2,6 +2,7 @@ from sympair import SymmetryPairFinder, SymmetryPairGroupDict
 import numpy as np
 from pathlib import Path
 from TB2J.versioninfo import print_license
+from TB2J.io_exchange import SpinIO
 import copy
 
 
