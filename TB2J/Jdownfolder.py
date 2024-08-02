@@ -134,7 +134,7 @@ class JDownfolder_pickle:
         outpath,
         qmesh=[7, 7, 7],
         iso_only=False,
-        method="pwf",
+        method="lowdin",
         **kwargs
     ):
         self.exc = SpinIO.load_pickle(path=inpath, fname="TB2J.pickle")
