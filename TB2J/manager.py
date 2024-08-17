@@ -16,12 +16,12 @@ from dataclasses import dataclass
 class TB2JParams:
     colinear: bool = True
     efermi: float = 0
-    magnetic_elements: list = []
-    kmesh: list = [4, 4, 4]
+    magnetic_elements = []
+    kmesh = [4, 4, 4]
     emin: float = -12.0
     emax: float = 0.0
     nz: int = 100
-    exclude_orbs: list = []
+    exclude_orbs = []
     Rcut: float = None
     ne: int = None
     use_cache: bool = False
