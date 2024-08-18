@@ -166,7 +166,10 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         self.mmats = {}
         self.orbital_names = {}
         self.norb_reduced = {}
-        if self.backend_name.upper() == "SIESTA":
+        print(f"self.backend_name: {self.backend_name}")
+        if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
+            print(f"magntic_elements: {self.magnetic_elements}")
+            print(f"include_orbs: {self.include_orbs}")
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
                 if (self.include_orbs is not None) and syms[iatom] in self.include_orbs:
@@ -176,11 +179,13 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
                         include_only=self.include_orbs[syms[iatom]],
                     )
                 else:
+                    print(f"orbs: {orbs}")
                     mmat, reduced_orbs = map_orbs_matrix(
                         orbs, spinor=not (self._is_collinear), include_only=None
                     )
 
                 self.mmats[iatom] = mmat
+                print(f"{self.mmats[iatom]}")
                 self.orbital_names[iatom] = reduced_orbs
                 # Note that for siesta, spin up and spin down has same orb name.
                 # Therefor there is no nedd to /2
@@ -231,7 +236,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         """
         sum up the contribution of all the orbitals with same (n,l,m)
         """
-        if self.backend_name.upper() == "SIESTA":
+        if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
             mmat_i = self.mmats[iatom]
             mmat_j = self.mmats[jatom]
             Jorbij = mmat_i.T @ Jorbij @ mmat_j

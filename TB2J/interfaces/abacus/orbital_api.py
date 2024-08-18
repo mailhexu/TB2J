@@ -16,13 +16,14 @@ class AbacusOrbital:
     Orbital class
     """
 
-    iatom: int
-    sym: str
-    spin: int
-    element: str
-    l: int
-    m: int
-    z: int
+    iatom: int = 0
+    sym: str = ""
+    spin: int = 0
+    element: str = ""
+    n: int = 0
+    l: int = 0
+    m: int = 0
+    z: int = 0
 
 
 def parse_abacus_orbital(fname):
@@ -38,10 +39,11 @@ def parse_abacus_orbital(fname):
             iatom, element, l, m, z, sym = seg
             iatom = int(iatom)
             ispin = 0
+            n = 0
             l = int(l)
             m = int(m)
             z = int(z)
-            orbs.append(AbacusOrbital(iatom, sym, ispin, element, l, m, z))
+            orbs.append(AbacusOrbital(iatom, sym, ispin, element, n, l, m, z))
             line = myfile.readline()
     return orbs
 

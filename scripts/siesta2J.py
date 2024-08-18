@@ -128,20 +128,22 @@ def run_siesta2J():
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
 
-    include_orbs = {}
-    for element in args.elements:
-        if "_" in element:
-            elem = element.split("_")[0]
-            orb = element.split("_")[1:]
-            include_orbs[elem] = orb
-        else:
-            include_orbs[element] = None
+    # include_orbs = {}
+    # for element in args.elements:
+    #    if "_" in element:
+    #        elem = element.split("_")[0]
+    #        orb = element.split("_")[1:]
+    #        include_orbs[elem] = orb
+    #    else:
+    #        include_orbs[element] = None
 
     gen_exchange_siesta(
         fdf_fname=args.fdf_fname,
         kmesh=args.kmesh,
-        magnetic_elements=list(include_orbs.keys()),
-        include_orbs=include_orbs,
+        # magnetic_elements=list(include_orbs.keys()),
+        # include_orbs=include_orbs,
+        magnetic_elements=args.elements,
+        include_orbs={},
         Rcut=args.rcut,
         emin=args.emin,
         emax=args.emax,

@@ -27,7 +27,7 @@ def gen_exchange_abacus(
     exclude_orbs=[],
     Rcut=None,
     use_cache=False,
-    np=1,
+    nproc=1,
     output_path="TB2J_results",
     orb_decomposition=False,
     description=None,
@@ -60,9 +60,10 @@ data directory: {outpath}
             nz=nz,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
             output_path=output_path,
+            orb_decomposition=orb_decomposition,
             description=description,
         )
         exchange.run(path=output_path)
@@ -86,8 +87,9 @@ data directory: {outpath}
             nz=nz,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
+            orb_decomposition=orb_decomposition,
             description=description,
         )
         exchange.run()

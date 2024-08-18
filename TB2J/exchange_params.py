@@ -56,8 +56,11 @@ class ExchangeParams:
     ):
         self.efermi = efermi
         self.basis = basis
-        self.magnetic_elements = magnetic_elements
-        self.include_orbs = include_orbs
+        # self.magnetic_elements = magnetic_elements
+        # self.include_orbs = include_orbs
+        self.magnetic_elements, self.include_orbs = self.set_magnetic_elements(
+            magnetic_elements, include_orbs
+        )
         self._kmesh = kmesh
         self.emin = emin
         self.emax = emax
@@ -81,6 +84,28 @@ class ExchangeParams:
     def save_to_yaml(self, fname):
         with open(fname, "w") as myfile:
             yaml.dump(self.__dict__, myfile)
+
+    def set_magnetic_elements(self, magnetic_elements, include_orbs):
+        # magnetic_elements = exargs.pop("magnetic_elements")
+        # include_orbs = exargs.pop("include_orbs")
+        if include_orbs is None:
+            include_orbs = {}
+        if isinstance(magnetic_elements, str):
+            magnetic_elements = [magnetic_elements]
+        print(f"magnetic_elements: {magnetic_elements}")
+        print(f"include_orbs: {include_orbs}")
+        for element in magnetic_elements:
+            if "_" in element:
+                elem = element.split("_")[0]
+                orb = element.split("_")[1:]
+                include_orbs[elem] = orb
+            else:
+                include_orbs[element] = None
+
+        print(f"magnetic_elements: {magnetic_elements}")
+        print(f"include_orbs: {include_orbs}")
+        magnetic_elements = list(include_orbs.keys())
+        return magnetic_elements, include_orbs
 
 
 def add_exchange_args_to_parser(parser: argparse.ArgumentParser):

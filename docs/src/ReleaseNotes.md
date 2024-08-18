@@ -1,5 +1,11 @@
 ## Release Notes
 ------------------------------------------------------------------------
+#### v0.10.0 September 1, 2024
+- Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
+- Improved orbital-decomposition to the ABACUS interface. 
+- Allow computing anisotropic J and DMI without three or more calculations within ABACUS and SIESTA interfaces. 
+
+
 #### v0.9.0 March 22, 2024
 Improved merge method for anisotropic exchange and DMI. (thanks to Andres Tellez Mora!)
 

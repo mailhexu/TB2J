@@ -81,6 +81,7 @@ def run_abacus2J():
     )
 
     parser.add_argument(
+        "--nproc",
         "--np",
         help="number of cpu cores to use in parallel, default: 1",
         default=1,
@@ -121,28 +122,21 @@ def run_abacus2J():
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
 
-    include_orbs = {}
-    for element in args.elements:
-        if "_" in element:
-            elem = element.split("_")[0]
-            orb = element.split("_")[1:]
-            include_orbs[elem] = orb
-        else:
-            include_orbs[element] = None
+    # include_orbs = {}
 
     gen_exchange_abacus(
         path=args.path,
         suffix=args.suffix,
         kmesh=args.kmesh,
-        magnetic_elements=list(include_orbs.keys()),
-        include_orbs=include_orbs,
+        magnetic_elements=args.elements,
+        include_orbs={},
         Rcut=args.rcut,
         emin=args.emin,
         nz=args.nz,
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,
-        nproc=args.np,
+        nproc=args.nproc,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
     )

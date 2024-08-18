@@ -192,6 +192,7 @@ class AbacusParser:
     def read_basis(self):
         fname = str(Path(self.outpath) / "Orbital")
         self.basis = parse_abacus_orbital(fname)
+        print(self.basis)
         return self.basis
 
     def read_HSR_collinear(self, binary=None):

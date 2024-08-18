@@ -89,18 +89,6 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
             f"sisl version is {sisl.__version__}, but should be larger than 0.10.0."
         )
 
-    magnetic_elements = exargs.pop("magnetic_elements")
-    include_orbs = exargs.pop("include_orbs")
-    if isinstance(magnetic_elements, str):
-        magnetic_elements = [magnetic_elements]
-    for element in magnetic_elements:
-        if "_" in element:
-            elem = element.split("_")[0]
-            orb = element.split("_")[1:]
-            include_orbs[elem] = orb
-        else:
-            include_orbs[element] = None
-    magnetic_elements = list(include_orbs.keys())
     output_path = exargs.pop("output_path")
 
     parser = SislParser(
@@ -122,8 +110,8 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
             atoms=tbmodel_up.atoms,
             basis=basis,
             efermi=0.0,
-            magnetic_elements=magnetic_elements,
-            include_orbs=include_orbs,
+            # magnetic_elements=exargs['magnetic_elements'],
+            # include_orbs=ex
             **exargs,
         )
         exchange.run(path=output_path)
@@ -149,8 +137,8 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 atoms=model.atoms,
                 basis=basis,
                 efermi=0.0,
-                magnetic_elements=magnetic_elements,
-                include_orbs=include_orbs,
+                # magnetic_elements=magnetic_elements,
+                # include_orbs=include_orbs,
                 output_path=output_path,
                 **exargs,
             )
@@ -167,8 +155,8 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 atoms=model.atoms,
                 basis=basis,
                 efermi=None,
-                magnetic_elements=magnetic_elements,
-                include_orbs=include_orbs,
+                # magnetic_elements=magnetic_elements,
+                # include_orbs=include_orbs,
                 **exargs,
             )
             # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
@@ -191,8 +179,8 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                     atoms=model.atoms,
                     basis=basis,
                     efermi=None,  # set to None, compute from efermi.
-                    magnetic_elements=magnetic_elements,
-                    include_orbs=include_orbs,
+                    # magnetic_elements=magnetic_elements,
+                    # include_orbs=include_orbs,
                     **exargs,
                 )
                 exchange.run(path=output_path_full)
