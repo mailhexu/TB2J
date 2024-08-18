@@ -91,6 +91,8 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
 
     magnetic_elements = exargs.pop("magnetic_elements")
     include_orbs = exargs.pop("include_orbs")
+    if include_orbs is None:
+        include_orbs = {}
     if isinstance(magnetic_elements, str):
         magnetic_elements = [magnetic_elements]
     for element in magnetic_elements:
