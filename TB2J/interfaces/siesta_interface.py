@@ -171,6 +171,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             for key, val in angle.items():
                 # model = parser.get_model()
                 theta, phi = val
+                model.set_so_strength(1.0)
                 model.set_Hsoc_rotation_angle([theta, phi])
                 basis = dict(zip(model.orbs, list(range(model.nbasis))))
                 output_path_full = f"{output_path}_{key}"

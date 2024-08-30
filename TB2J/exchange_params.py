@@ -40,7 +40,7 @@ class ExchangeParams:
         include_orbs=None,
         kmesh=[4, 4, 4],
         emin=-15,
-        emax=0.05,
+        emax=0.00,
         nz=100,
         ne=None,
         Rcut=None,

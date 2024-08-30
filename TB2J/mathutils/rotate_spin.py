@@ -92,15 +92,17 @@ def rotate_spinor_matrix_einsum(M, theta, phi):
     """
     Rotate the spinor matrix M by theta and phi,
     """
-    N = M.shape[0] // 2
-    Mnew = np.reshape(M, (N, 2, N, 2))  # .swapaxes(1, 2)
+    shape = M.shape
+    n1 = np.product(shape[:-1]) // 2
+    n2 = M.shape[-1] // 2
+    Mnew = np.reshape(M, (n1, 2, n2, 2))  # .swapaxes(1, 2)
     # print("Mnew:", Mnew)
     U = rotation_matrix(theta, phi)
     UT = U.conj().T
     Mnew = np.einsum(
         "ij, rjsk, kl -> risl", UT, Mnew, U, optimize=True, dtype=np.complex128
     )
-    Mnew = Mnew.reshape(2 * N, 2 * N)
+    Mnew = Mnew.reshape(shape)
     return Mnew
 
 
@@ -111,7 +113,6 @@ def rotate_spinor_matrix_einsum_R(M, theta, phi):
     nR = M.shape[0]
     N = M.shape[1] // 2
     Mnew = np.reshape(M, (nR, N, 2, N, 2))  # .swapaxes(1, 2)
-    # print("Mnew:", Mnew)
     U = rotation_matrix(theta, phi)
     UT = U.conj().T
     Mnew = np.einsum(

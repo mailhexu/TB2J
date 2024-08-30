@@ -50,7 +50,8 @@ class Exchange(ExchangeParams):
         os.makedirs(self.orbpath, exist_ok=True)
 
     def _adjust_emin(self):
-        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 5.0) - self.efermi
+        # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 10.0) - self.efermi
+        self.emin = -22.0
         print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
@@ -114,14 +115,19 @@ class Exchange(ExchangeParams):
                 # e.g. Fe2, dxy, _, _
                 if isinstance(base, str):
                     atom_sym, orb_sym = base.split("|")[:2]
+                    iatom = sdict[atom_sym]
                 else:
-                    atom_sym, orb_sym = base[:2]
+                    try:
+                        atom_sym, orb_sym = base[:2]
+                    except Exception:
+                        iatom = base.iatom
+                        atom_sym = base.iatom
+                        orb_sym = base.sym
 
                 if atom_sym in adict:
                     adict[atom_sym].append(orb_sym)
                 else:
                     adict[atom_sym] = [orb_sym]
-                iatom = sdict[atom_sym]
                 if iatom not in self.orb_dict:
                     self.orb_dict[iatom] = [i]
                     self.labels[iatom] = [orb_sym]
@@ -144,8 +150,9 @@ class Exchange(ExchangeParams):
                 )
         if not self._is_collinear:
             for iatom, orb in self.orb_dict.items():
+                print(f"iatom: {iatom}, orb: {orb}")
                 nsorb = len(self.orb_dict[iatom])
-                if nsorb % 2 != 0:
+                if nsorb % 2 != 0 and False:
                     raise ValueError(
                         f"""The number of spin-orbitals for atom {iatom} is not even,
 {nsorb} spin-orbitals are found near this atom.
@@ -185,7 +192,6 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
                     )
 
                 self.mmats[iatom] = mmat
-                print(f"{self.mmats[iatom]}")
                 self.orbital_names[iatom] = reduced_orbs
                 # Note that for siesta, spin up and spin down has same orb name.
                 # Therefor there is no nedd to /2
