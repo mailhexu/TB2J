@@ -1,12 +1,15 @@
-from sympair import SymmetryPairFinder, SymmetryPairGroupDict
-import numpy as np
-from pathlib import Path
-from TB2J.versioninfo import print_license
 import copy
+from pathlib import Path
+
+import numpy as np
+from sympair import SymmetryPairFinder
+
+from TB2J.io_exchange import SpinIO
+from TB2J.versioninfo import print_license
 
 
 class TB2JSymmetrizer:
-    def __init__(self, exc, symprec=1e-8, verbose=True):
+    def __init__(self, exc, symprec=1e-8, verbose=True, Jonly=False):
         # list of pairs with the index of atoms
         ijRs = exc.ijR_list_index_atom()
         finder = SymmetryPairFinder(atoms=exc.atoms, pairs=ijRs, symprec=symprec)
@@ -28,10 +31,11 @@ class TB2JSymmetrizer:
             print(f"Finding crystal symmetry with symprec of {symprec} Angstrom.")
             print("Symmetry found:")
             print(finder.spacegroup)
-            print(f"-" * 30)
+            print("-" * 30)
         self.pgdict = finder.get_symmetry_pair_group_dict()
         self.exc = exc
         self.new_exc = copy.deepcopy(exc)
+        self.Jonly = Jonly
 
     def print_license(self):
         print_license()
@@ -41,8 +45,8 @@ class TB2JSymmetrizer:
         Symmetrize the exchange parameters J.
         """
         symJdict = {}
-        Jdict = self.exc.exchange_Jdict
-        ngroup = self.pgdict
+        # Jdict = self.exc.exchange_Jdict
+        # ngroup = self.pgdict
         for pairgroup in self.pgdict.groups:
             ijRs = pairgroup.get_all_ijR()
             ijRs_spin = [self.exc.ijR_index_atom_to_spin(*ijR) for ijR in ijRs]
@@ -51,6 +55,14 @@ class TB2JSymmetrizer:
             for i, j, R in ijRs_spin:
                 symJdict[(R, i, j)] = Javg
         self.new_exc.exchange_Jdict = symJdict
+        if self.Jonly:
+            self.new_exc.has_dmi = False
+            self.new_exc.dmi_ddict = None
+            self.new_exc.has_bilinear = False
+            self.new_exc.Jani_dict = None
+            self.has_uniaxial_anisotropy = False
+            self.k1 = None
+            self.k1dir = None
 
     def output(self, path="TB2J_symmetrized"):
         if path is None:
@@ -72,6 +84,7 @@ def symmetrize_J(
     fname="TB2J.pickle",
     symprec=1e-5,
     output_path="TB2J_symmetrized",
+    Jonly=False,
 ):
     """
     symmetrize the exchange parameters
@@ -80,7 +93,7 @@ def symmetrize_J(
     """
     if exc is None:
         exc = SpinIO.load_pickle(path=path, fname=fname)
-    symmetrizer = TB2JSymmetrizer(exc, symprec=symprec)
+    symmetrizer = TB2JSymmetrizer(exc, symprec=symprec, Jonly=Jonly)
     symmetrizer.run(path=output_path)
 
 
@@ -109,11 +122,23 @@ def symmetrize_J_cli():
         default=1e-5,
         help="precision for symmetry detection. default is 1e-5 Angstrom",
     )
+
+    parser.add_argument(
+        "-Jonly",
+        action="store_true",
+        help="Symmetrize only the exchange parameters. Do not output DMI and anisotropic exchange.",
+    )
+
     args = parser.parse_args()
     if args.inpath is None:
         parser.print_help()
         raise ValueError("Please provide the input path to the exchange.")
-    symmetrize_J(path=args.inpath, output_path=args.outpath, symprec=args.symprec)
+    symmetrize_J(
+        path=args.inpath,
+        output_path=args.outpath,
+        symprec=args.symprec,
+        Jonly=args.Jonly,
+    )
 
 
 if __name__ == "__main__":
