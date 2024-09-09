@@ -74,6 +74,7 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
         output_path="TB2J_results",
         orb_decomposition=False,
         orth=False,
+        ibz=False,
         description="",
     )
     exargs.update(kwargs)
