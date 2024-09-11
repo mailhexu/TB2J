@@ -7,6 +7,7 @@ from HamiltonIO.model.occupations import GaussOccupations
 from typing_extensions import DefaultDict
 
 from TB2J.exchange import ExchangeNCL
+from TB2J.external import p_map
 
 # from HamiltonIO.model.rotate_spin import rotate_Matrix_from_z_to_axis, rotate_Matrix_from_z_to_sperical
 # from TB2J.abacus.abacus_wrapper import AbacusWrapper, AbacusParser
@@ -78,6 +79,17 @@ class MAEGreen(ExchangeNCL):
 
     def get_perturbed(self, e, thetas, phis):
         self.tbmodel.set_so_strength(0.0)
+        maxsoc = self.tbmodel.get_max_Hsoc_abs()
+        maxH0 = self.tbmodel.get_max_H0_spin_abs()
+        if maxsoc > maxH0 * 0.01:
+            print(f"""Warning: The SOC of the Hamiltonian has a maximum of {maxsoc} eV,
+                  comparing to the maximum of {maxH0} eV of the spin part of the Hamiltonian.
+                  The SOC is too strong, the perturbation theory may not be valid.""")
+
+        print(f"""Warning: The SOC of the Hamiltonian has a maximum of {maxsoc} eV,
+                  comparing to the maximum of {maxH0} eV of the spin part of the Hamiltonian.
+                  The SOC is too strong, the perturbation theory may not be valid.""")
+
         G0K = self.G.get_Gk_all(e)
         Hsoc_k = self.tbmodel.get_Hk_soc(self.G.kpts)
         na = len(thetas)
@@ -143,15 +155,33 @@ class MAEGreen(ExchangeNCL):
         if with_eigen:
             self.es2 = self.get_band_energy_vs_angles_from_eigen(thetas, phis)
 
-        for ie, e in enumerate(tqdm.tqdm(self.contour.path)):
-            dE_angle, dE_angle_atom, dE_angle_atom_orb = self.get_perturbed(
-                e, thetas, phis
-            )
-            self.es += dE_angle * self.contour.weights[ie]
-            self.es_atom += dE_angle_atom * self.contour.weights[ie]
+        # for ie, e in enumerate(tqdm.tqdm(self.contour.path)):
+        #    dE_angle, dE_angle_atom, dE_angle_atom_orb = self.get_perturbed(
+        #        e, thetas, phis
+        #    )
+        #    self.es += dE_angle * self.contour.weights[ie]
+        #    self.es_atom += dE_angle_atom * self.contour.weights[ie]
+        #    for key, value in dE_angle_atom_orb.items():
+        #        self.es_atom_orb[key] += (
+        #            dE_angle_atom_orb[key] * self.contour.weights[ie]
+        #        )
+
+        # rewrite the for loop above to use p_map
+        def func(e):
+            return self.get_perturbed(e, thetas, phis)
+
+        if self.nproc > 1:
+            results = p_map(func, self.contour.path, num_cpus=self.nproc)
+        else:
+            npole = len(self.contour.path)
+            results = map(func, tqdm.tqdm(self.contour.path, total=npole))
+        for i, result in enumerate(results):
+            dE_angle, dE_angle_atom, dE_angle_atom_orb = result
+            self.es += dE_angle * self.contour.weights[i]
+            self.es_atom += dE_angle_atom * self.contour.weights[i]
             for key, value in dE_angle_atom_orb.items():
                 self.es_atom_orb[key] += (
-                    dE_angle_atom_orb[key] * self.contour.weights[ie]
+                    dE_angle_atom_orb[key] * self.contour.weights[i]
                 )
 
         self.es = -np.imag(self.es) / (2 * np.pi)

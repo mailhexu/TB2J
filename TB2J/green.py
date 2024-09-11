@@ -121,7 +121,10 @@ class TBGreen:
         elif kmesh is not None:
             if ibz:
                 self.kpts, self.kweights = ir_kpts(
-                    atoms=tbmodel.atoms, mp_grid=kmesh, ir=True, is_time_reversal=False
+                    atoms=tbmodel.atoms,
+                    mp_grid=kmesh,
+                    ir=True,
+                    is_time_reversal=False,
                 )
                 self.nkpts = len(self.kpts)
                 print(f"Using IBZ of kmesh of {kmesh}")

@@ -46,7 +46,8 @@ class Exchange(ExchangeParams):
 
     def _adjust_emin(self):
         self.emin = self.G.find_energy_ingap(rbound=self.efermi - 10.0) - self.efermi
-        # self.emin = -22.0
+        # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
+        # self.emin = -42.0
         print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):

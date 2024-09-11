@@ -70,7 +70,21 @@ def ir_kpts(
     # Irreducible k-points
     # print("Number of ir-kpoints: %d" % len(np.unique(mapping)))
     # print(grid[np.unique(mapping)] / np.array(mesh, dtype=float))
-    return ird_kpts, weight
+
+    new_ir_kpts = []
+    new_weight = []
+    for ik, k in enumerate(ird_kpts):
+        # add k and -k to ird_kpts if -k is not in ird_kpts
+        if not any([np.allclose(-1.0 * k, kpt) for kpt in new_ir_kpts]):
+            new_ir_kpts.append(k)
+            new_ir_kpts.append(-1.0 * k)
+            new_weight.append(weight[ik] / 2)
+            new_weight.append(weight[ik] / 2)
+        else:
+            new_ir_kpts.append(k)
+            new_weight.append(weight[ik])
+    # return ird_kpts, weight
+    return np.array(new_ir_kpts), np.array(new_weight)
 
 
 def test_ir_kpts():

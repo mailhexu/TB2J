@@ -28,14 +28,14 @@ def map_orbs_matrix(orblist, spinor=False, include_only=None):
 
     norb = len(orblist)
 
-    print("orblist: ", orblist)
+    # print("orblist: ", orblist)
     ss = [split_orb_name(orb) for orb in orblist]
     orbdict = dict(zip(ss, range(norb)))
 
     reduced_orbdict = defaultdict(lambda: [])
 
-    print(f"Orbital dictionary: {orbdict}")
-    print("include_only: ", include_only)
+    # print(f"Orbital dictionary: {orbdict}")
+    # print("include_only: ", include_only)
 
     if include_only is None:
         for key, val in orbdict.items():
@@ -46,7 +46,7 @@ def map_orbs_matrix(orblist, spinor=False, include_only=None):
                 # [:2] for 3d, 4d, 5d, etc. and [:1] for s, p, d, etc
                 reduced_orbdict[key[0]].append(val)
 
-    print(f"reduced_orbdict: {reduced_orbdict}")
+    # print(f"reduced_orbdict: {reduced_orbdict}")
     reduced_orbs = tuple(reduced_orbdict.keys())
     ngroup = len(reduced_orbdict)
     mmat = np.zeros((norb, ngroup), dtype=int)
