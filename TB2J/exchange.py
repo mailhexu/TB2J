@@ -21,12 +21,7 @@ from TB2J.utils import (
 
 
 class Exchange(ExchangeParams):
-    def __init__(
-        self,
-        tbmodels,
-        atoms,
-        **params: ExchangeParams,
-    ):
+    def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
         super().__init__(**params)
         self._prepare_kmesh(self._kmesh)
@@ -50,8 +45,9 @@ class Exchange(ExchangeParams):
         os.makedirs(self.orbpath, exist_ok=True)
 
     def _adjust_emin(self):
-        # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 10.0) - self.efermi
-        self.emin = -22.0
+        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 10.0) - self.efermi
+        # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
+        # self.emin = -42.0
         print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
@@ -62,7 +58,7 @@ class Exchange(ExchangeParams):
         # del self.G.tbmodel
         pass
 
-    def _prepare_kmesh(self, kmesh):
+    def _prepare_kmesh(self, kmesh, ibz=False):
         for k in kmesh:
             self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
@@ -150,7 +146,7 @@ class Exchange(ExchangeParams):
                 )
         if not self._is_collinear:
             for iatom, orb in self.orb_dict.items():
-                print(f"iatom: {iatom}, orb: {orb}")
+                # print(f"iatom: {iatom}, orb: {orb}")
                 nsorb = len(self.orb_dict[iatom])
                 if nsorb % 2 != 0 and False:
                     raise ValueError(
@@ -175,8 +171,8 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         self.norb_reduced = {}
         print(f"self.backend_name: {self.backend_name}")
         if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
-            print(f"magntic_elements: {self.magnetic_elements}")
-            print(f"include_orbs: {self.include_orbs}")
+            # print(f"magntic_elements: {self.magnetic_elements}")
+            # print(f"include_orbs: {self.include_orbs}")
             syms = self.atoms.get_chemical_symbols()
             for iatom, orbs in self.labels.items():
                 if (self.include_orbs is not None) and syms[iatom] in self.include_orbs:
@@ -186,7 +182,7 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
                         include_only=self.include_orbs[syms[iatom]],
                     )
                 else:
-                    print(f"orbs: {orbs}")
+                    # print(f"orbs: {orbs}")
                     mmat, reduced_orbs = map_orbs_matrix(
                         orbs, spinor=not (self._is_collinear), include_only=None
                     )
@@ -271,10 +267,10 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
-        print(self.kmesh)
         self.G = TBGreen(
             tbmodel=self.tbmodel,
             kmesh=self.kmesh,
+            ibz=self.ibz,
             gamma=True,
             efermi=self.efermi,
             use_cache=self._use_cache,

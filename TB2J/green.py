@@ -7,11 +7,11 @@ from collections import defaultdict
 from shutil import rmtree
 
 import numpy as np
-from HamiltonIO.model.occupations import Occupations
+from HamiltonIO.model.occupations import GaussOccupations
 from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
 
-from TB2J.kpoints import monkhorst_pack
+from TB2J.kpoints import ir_kpts, monkhorst_pack
 
 # from TB2J.mathutils.fermi import fermi
 
@@ -40,7 +40,7 @@ def eigen_to_G(evals, evecs, efermi, energy):
     )
 
 
-def find_energy_ingap(evals, rbound, gap=4.0):
+def find_energy_ingap(evals, rbound, gap=2.0):
     """
     find a energy inside a gap below rbound (right bound),
     return the energy gap top - 0.5.
@@ -59,9 +59,11 @@ class TBGreen:
         self,
         tbmodel,
         kmesh=None,  # [ikpt, 3]
+        ibz=False,  # if True, will interpolate the Green's function at Ir-kpoints
         efermi=None,  # efermi
         gamma=False,
         kpts=None,
+        kweights=None,
         k_sym=False,
         use_cache=False,
         cache_path=None,
@@ -81,19 +83,63 @@ class TBGreen:
         self.cache_path = cache_path
         if use_cache:
             self._prepare_cache()
-        if kpts is not None:
-            self.kpts = kpts
-        elif kmesh is not None:
-            self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
-        else:
-            self.kpts = tbmodel.get_kpts()
-        self.nkpts = len(self.kpts)
-        self.kweights = np.array([1.0 / self.nkpts] * self.nkpts)
+        self.prepare_kpts(
+            kmesh=kmesh,
+            ibz=ibz,
+            gamma=gamma,
+            kpts=kpts,
+            kweights=kweights,
+            tbmodel=tbmodel,
+        )
+
         self.norb = tbmodel.norb
         self.nbasis = tbmodel.nbasis
         self.k_sym = k_sym
         self.nproc = nproc
         self._prepare_eigen()
+
+    def prepare_kpts(
+        self, kmesh=None, gamma=True, ibz=False, kpts=None, kweights=None, tbmodel=None
+    ):
+        """
+        Prepare the k-points for the calculation.
+
+        Parameters:
+        - kmesh (tuple): The k-mesh used to generate k-points.
+        - gamma (bool): Whether to include the gamma point in the k-points.
+        - ibz (bool): Whether to use the irreducible Brillouin zone.
+        - kpts (list): List of user-defined k-points.
+        - kweights (list): List of weights for each k-point.
+
+        Returns:
+        None
+        """
+        if kpts is not None:
+            self.kpts = kpts
+            self.nkpts = len(self.kpts)
+            self.kweights = kweights
+        elif kmesh is not None:
+            if ibz:
+                self.kpts, self.kweights = ir_kpts(
+                    atoms=tbmodel.atoms,
+                    mp_grid=kmesh,
+                    ir=True,
+                    is_time_reversal=False,
+                )
+                self.nkpts = len(self.kpts)
+                print(f"Using IBZ of kmesh of {kmesh}")
+                print(f"Number of kpts: {self.nkpts}")
+                for kpt, weight in zip(self.kpts, self.kweights):
+                    # format the kpt and weight, use 5 digits
+                    print(f"{kpt[0]:8.5f} {kpt[1]:8.5f} {kpt[2]:8.5f} {weight:8.5f}")
+            else:
+                self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
+                self.nkpts = len(self.kpts)
+                self.kweights = np.array([1.0 / self.nkpts] * self.nkpts)
+        else:
+            self.kpts = tbmodel.get_kpts()
+            self.nkpts = len(self.kpts)
+            self.kweights = np.array([1.0 / self.nkpts] * self.nkpts)
 
     def _reduce_eigens(self, evals, evecs, emin, emax):
         ts = np.logical_and(evals >= emin, evals < emax)
@@ -106,7 +152,7 @@ class TBGreen:
         istart, iend = ts[0], ts[-1] + 1
         return evals[:, istart:iend], evecs[:, :, istart:iend]
 
-    def find_energy_ingap(self, rbound, gap=4.0):
+    def find_energy_ingap(self, rbound, gap=2.0):
         return find_energy_ingap(self.evals, rbound, gap)
 
     def _prepare_cache(self):
@@ -165,7 +211,14 @@ class TBGreen:
         if self.efermi is None:
             print("Calculating Fermi energy from eigenvalues")
             print(f"Number of electrons: {self.tbmodel.nel} ")
-            occ = Occupations(
+
+            # occ = Occupations(
+            #    nel=self.tbmodel.nel, width=0.1, wk=self.kweights, nspin=2
+            # )
+            # self.efermi = occ.efermi(copy.deepcopy(self.evals))
+            # print(f"Fermi energy found: {self.efermi}")
+
+            occ = GaussOccupations(
                 nel=self.tbmodel.nel, width=0.1, wk=self.kweights, nspin=2
             )
             self.efermi = occ.efermi(copy.deepcopy(self.evals))
@@ -360,7 +413,6 @@ class TBGreen:
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
                 GR[R] += Gkw * (phase * self.kweights[ik])
-
                 dHRdx = dHdx.get_hamR(R)
                 dGRdx[R] += Gkw @ dHRdx @ Gk
                 # dGRdx[R] += Gk.dot(dHRdx).dot(Gkp)

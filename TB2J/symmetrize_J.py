@@ -36,6 +36,7 @@ class TB2JSymmetrizer:
         self.pgdict = finder.get_symmetry_pair_group_dict()
         self.exc = exc
         self.new_exc = copy.deepcopy(exc)
+        self.Jonly = Jonly
 
     def print_license(self):
         print_license()
@@ -57,9 +58,12 @@ class TB2JSymmetrizer:
         self.new_exc.exchange_Jdict = symJdict
         if self.Jonly:
             self.new_exc.has_dmi = False
-            self.new_exc.dmi_dict = {}
-            self.new_exc.has_uniaxial_anistropy = False
-            self.new_exc.k1_dict = {}
+            self.new_exc.dmi_ddict = None
+            self.new_exc.has_bilinear = False
+            self.new_exc.Jani_dict = None
+            self.has_uniaxial_anisotropy = False
+            self.k1 = None
+            self.k1dir = None
 
     def output(self, path="TB2J_symmetrized"):
         if path is None:
@@ -90,7 +94,7 @@ def symmetrize_J(
     """
     if exc is None:
         exc = SpinIO.load_pickle(path=path, fname=fname)
-    symmetrizer = TB2JSymmetrizer(exc, symprec=symprec)
+    symmetrizer = TB2JSymmetrizer(exc, symprec=symprec, Jonly=Jonly)
     symmetrizer.run(path=output_path)
 
 
@@ -131,7 +135,12 @@ def symmetrize_J_cli():
     if args.inpath is None:
         parser.print_help()
         raise ValueError("Please provide the input path to the exchange.")
-    symmetrize_J(path=args.inpath, output_path=args.outpath, symprec=args.symprec)
+    symmetrize_J(
+        path=args.inpath,
+        output_path=args.outpath,
+        symprec=args.symprec,
+        Jonly=args.Jonly,
+    )
 
 
 if __name__ == "__main__":

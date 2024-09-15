@@ -74,6 +74,7 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
         output_path="TB2J_results",
         orb_decomposition=False,
         orth=False,
+        ibz=False,
         description="",
     )
     exargs.update(kwargs)
@@ -162,7 +163,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
             # phis = [0, 0, 0, 0]
             # MAE.set_angles(thetas=thetas, phis=phis)
-            MAE.run(output_path=f"{output_path}_anisotropy")
+            MAE.run(output_path=f"{output_path}_anisotropy", with_eigen=True)
             print(
                 f"MAE calculation finished. The results are in {output_path} directory."
             )

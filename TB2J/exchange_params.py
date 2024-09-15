@@ -31,6 +31,7 @@ class ExchangeParams:
     output_path: str = "TB2J_results"
     mae_angles = None
     orth = False
+    ibz = False
 
     def __init__(
         self,
@@ -53,6 +54,7 @@ class ExchangeParams:
         exclude_orbs=[],
         mae_angles=None,
         orth=False,
+        ibz=False,
     ):
         self.efermi = efermi
         self.basis = basis
@@ -76,6 +78,7 @@ class ExchangeParams:
         self.output_path = output_path
         self.mae_angles = mae_angles
         self.orth = orth
+        self.ibz = ibz
 
     def set_params(self, **kwargs):
         for key, val in kwargs.items():
@@ -92,8 +95,6 @@ class ExchangeParams:
             include_orbs = {}
         if isinstance(magnetic_elements, str):
             magnetic_elements = [magnetic_elements]
-        print(f"magnetic_elements: {magnetic_elements}")
-        print(f"include_orbs: {include_orbs}")
         for element in magnetic_elements:
             if "_" in element:
                 elem = element.split("_")[0]
@@ -102,8 +103,6 @@ class ExchangeParams:
             else:
                 include_orbs[element] = None
 
-        print(f"magnetic_elements: {magnetic_elements}")
-        print(f"include_orbs: {include_orbs}")
         magnetic_elements = list(include_orbs.keys())
         return magnetic_elements, include_orbs
 
@@ -214,6 +213,14 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         action="store_true",
         default=False,
     )
+
+    parser.add_argument(
+        "--ibz",
+        help=" use irreducible k-points in the Brillouin zone. (Note: only for computing total MAE).",
+        action="store_true",
+        default=False,
+    )
+
     return parser
 
 

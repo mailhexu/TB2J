@@ -137,9 +137,9 @@ class MAEGreen(MAE):
         efermi = occ.efermi(evals)
         print(f"{efermi=}")
         self.G = TBGreen(model, kmesh, efermi=efermi, gamma=gamma, **kwargs)
-        self.emin = -12
+        self.emin = -52
         self.emax = 0
-        self.nz = 50
+        self.nz = 100
         self._prepare_elist()
 
     def _prepare_elist(self, method="legendre"):
@@ -186,7 +186,7 @@ class MAEGreen(MAE):
         for ie, e in enumerate(tqdm.tqdm(self.contour.path)):
             dE_angle = self.get_perturbed(e, thetas, phis)
             es += np.imag(dE_angle * self.contour.weights[ie])
-        return -es / np.pi
+        return -es / np.pi / 2
 
 
 def get_model_energy(model, kmesh, gamma=True):
