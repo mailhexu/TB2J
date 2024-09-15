@@ -17,19 +17,19 @@ class CFR:
     Integration with the continued fraction representation.
     """
 
-    def __init__(self, cutoff=0, T=300):
-        self.cutoff = cutoff
+    def __init__(self, nz=0, T=300):
+        self.nz = nz
         self.T = T
         self.beta = 1 / (kb * self.T)
         self.Rinf = 1e10
-        if cutoff <= 0:
-            raise ValueError("cutoff should be larger than 0.")
+        if nz <= 0:
+            raise ValueError("nz should be larger than 0.")
         else:
             self.prepare_poles()
 
     def prepare_poles(self):
-        ##b_mat = [1 / (2.0 * np.sqrt((2 * (j + 1) - 1) * (2 * (j + 1) + 1)) / (kb * self.#T)) for j in range(0, self.cutoff - 1)]
-        jmat = np.arange(0, self.cutoff - 1)
+        ##b_mat = [1 / (2.0 * np.sqrt((2 * (j + 1) - 1) * (2 * (j + 1) + 1)) / (kb * self.#T)) for j in range(0, self.nz- 1)]
+        jmat = np.arange(0, self.nz - 1)
         b_mat = 1 / (2.0 * np.sqrt((2 * (jmat + 1) - 1) * (2 * (jmat + 1) + 1)))
         b_mat = np.diag(b_mat, -1) + np.diag(b_mat, 1)
 
@@ -50,10 +50,13 @@ class CFR:
         # self.weights = np.concatenate((self.weights, [00.0]))
         # zeros moment is 1j * R * test_gf(1j * R), but the real part of it will be taken. In contrast to the other part, where the imaginary part is taken.
 
-    def integrate_values(self, gf_vals):
-        return np.imag(gf_vals @ self.weights)
+    def integrate(self, gf_vals, imag=False):
+        if imag:
+            return np.imag(gf_vals @ self.weights)
+        else:
+            return gf_vals @ self.weights
 
-    def integrate(self, gf, ef=0):
+    def integrate_func(self, gf, ef=0):
         """
         Integration with the continued fraction representation.
 
@@ -67,12 +70,12 @@ class CFR:
 
 
 def test_cfr():
-    cfr = CFR(cutoff=100)
+    cfr = CFR(nz=100)
 
     def test_gf(z, ef=0.1):
-        return 1 / (z - 3)
+        return 1 / (z - 3 + ef)
 
-    print(cfr.integrate(test_gf, ef=0))
+    print(cfr.integrate_func(test_gf, ef=5))
 
 
 if __name__ == "__main__":

@@ -10,13 +10,12 @@ from TB2J.exchange_params import ExchangeParams
 from TB2J.external import p_map
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
+from TB2J.mycfr import CFR
 from TB2J.orbmap import map_orbs_matrix
 from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
 from TB2J.utils import (
     kmesh_to_R,
-    simpson_nonuniform,
     symbol_number,
-    trapezoidal_nonuniform,
 )
 
 
@@ -68,15 +67,18 @@ class Exchange(ExchangeParams):
         The path has three segments:
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
-        self.contour = Contour(self.emin, self.emax)
         # if method.lower() == "rectangle":
         #    self.contour.build_path_rectangle(
         #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
         #    )
         if method.lower() == "semicircle":
+            self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
         elif method.lower() == "legendre":
+            self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
+        elif method.lower() == "CFR":
+            self.contour = CFR(nz=self.nz, T=300)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
 
@@ -563,20 +565,24 @@ class ExchangeNCL(Exchange):
         AijRs: a list of AijR,
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
-        if method == "trapezoidal":
-            integrate = trapezoidal_nonuniform
-        elif method == "simpson":
-            integrate = simpson_nonuniform
+        # if method == "trapezoidal":
+        #    integrate = trapezoidal_nonuniform
+        # elif method == "simpson":
+        #    integrate = simpson_nonuniform
+        #
 
         # self.rho = integrate(self.contour.path, rhoRs)
         for iR, R in enumerate(self.R_ijatom_dict):
             for iatom, jatom in self.R_ijatom_dict[R]:
                 f = AijRs[(R, iatom, jatom)]
-                self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
+                # self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
+                self.A_ijR[(R, iatom, jatom)] = self.contour.integrate(f)
+
                 if self.orb_decomposition:
-                    self.A_ijR_orb[(R, iatom, jatom)] = integrate(
-                        self.contour.path, AijRs_orb[(R, iatom, jatom)]
-                    )
+                    # self.A_ijR_orb[(R, iatom, jatom)] = integrate(
+                    #    self.contour.path, AijRs_orb[(R, iatom, jatom)]
+                    # )
+                    self.contour.integrate(AijRs_orb[(R, iatom, jatom)])
 
     def get_quantities_per_e(self, e):
         Gk_all = self.G.get_Gk_all(e)

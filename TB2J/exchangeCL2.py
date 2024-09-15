@@ -1,15 +1,18 @@
 """
 Exchange from Green's function
 """
+
 import os
 from collections import defaultdict
+
 import numpy as np
+from tqdm import tqdm
+
+from TB2J.external import p_map
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
-from tqdm import tqdm
-from TB2J.external import p_map
+
 from .exchange import ExchangeCL
-from .utils import simpson_nonuniform, trapezoidal_nonuniform
 
 
 class ExchangeCL2(ExchangeCL):
@@ -221,17 +224,23 @@ class ExchangeCL2(ExchangeCL):
         #    shutil.rmtree(path)
 
     def integrate(self, method="simpson"):
-        if method == "trapezoidal":
-            integrate = trapezoidal_nonuniform
-        elif method == "simpson":
-            integrate = simpson_nonuniform
+        # if method == "trapezoidal":
+        #    integrate = trapezoidal_nonuniform
+        # elif method == "simpson":
+        #    integrate = simpson_nonuniform
         for R, ijpairs in self.R_ijatom_dict.items():
             for iatom, jatom in ijpairs:
-                self.Jorb[(R, iatom, jatom)] = integrate(
-                    self.contour.path, self.Jorb_list[(R, iatom, jatom)]
+                # self.Jorb[(R, iatom, jatom)] = integrate(
+                #    self.contour.path, self.Jorb_list[(R, iatom, jatom)]
+                # )
+                # self.JJ[(R, iatom, jatom)] = integrate(
+                #    self.contour.path, self.JJ_list[(R, iatom, jatom)]
+                # )
+                self.Jorb[(R, iatom, jatom)] = self.contour.integrate(
+                    self.Jorb_list[(R, iatom, jatom)]
                 )
-                self.JJ[(R, iatom, jatom)] = integrate(
-                    self.contour.path, self.JJ_list[(R, iatom, jatom)]
+                self.JJ[(R, iatom, jatom)] = self.contour.integrate(
+                    self.JJ_list[(R, iatom, jatom)]
                 )
 
     def get_quantities_per_e(self, e):
