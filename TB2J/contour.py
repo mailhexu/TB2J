@@ -26,7 +26,10 @@ class Contour:
         """
         integrate f along the path
         """
-        return values @ self.weights
+        ret = 0
+        for i in range(len(values)):
+            ret += values[i] * self.weights[i]
+        return ret
 
     def build_path_semicircle(self, npoints, endpoint=True):
         R = (self.emax - self.emin) / 2.0
