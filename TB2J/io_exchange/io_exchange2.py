@@ -1,10 +1,8 @@
 import numpy as np
 
-from ..mathutils import generate_grid, get_rotation_arrays, round_to_precision
+from ..mathutils import generate_grid, get_rotation_arrays, round_to_precision, uz
 from .structure import BaseMagneticStructure, get_attribute_array
 from .plot import BandsPlot
-
-uz = np.array([[0.0, 0.0, 1.0]])
 
 def branched_keys(tb2j_keys, npairs):
 

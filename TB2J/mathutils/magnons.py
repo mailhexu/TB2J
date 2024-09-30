@@ -1,5 +1,7 @@
 import numpy as np
 
+uz = np.array([[0.0, 0.0, 1.0]])
+
 def generate_grid(kmesh, sort=True):
 
     half_grid = [int(n/2) for n in kmesh]

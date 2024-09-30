@@ -41,9 +41,12 @@ def get_attribute_array(array, attribute, dtype=float):
 def validate_symbols(value):
 
     try:
-        values_list = list(value)
-    except (ValueError, TypeError):
-        raise TypeError("'elements' must be an iterable of 'str' or 'int' entries.")
+        values_list = value.split()
+    except AttributeError:
+        try:
+            values_list = list(value)
+        except (ValueError, TypeError):
+            raise TypeError("'elements' must be an iterable of 'str' or 'int' entries.")
 
     if all(isinstance(s, str) for s in values_list):
         symbols = values_list
@@ -89,10 +92,11 @@ class BaseMagneticStructure:
                 elements = ()
             if positions is None:
                 positions = np.zeros((len(elements), 3))
-            if magmoms is None:
-                magmoms = np.zeros(positions.shape)
             if pbc is None:
                 pbc = (True, True, True)
+        if magmoms is None:
+            magmoms_shape = positions.shape[0] if collinear else positions.shape
+            magmoms = np.zeros(magmoms_shape)
 
         self.cell = cell
         self.elements = elements
