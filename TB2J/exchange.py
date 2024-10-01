@@ -27,8 +27,8 @@ class Exchange(ExchangeParams):
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        self._prepare_elist(method="CFR")
-        # self._prepare_elist(method="legendre")
+        # self._prepare_elist(method="CFR")
+        self._prepare_elist(method="legendre")
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
@@ -109,7 +109,6 @@ class Exchange(ExchangeParams):
 
         sdict = symbol_number(self.atoms)
 
-        print(f"self.basis: {self.basis}")
         for i, base in enumerate(self.basis):
             if i not in self.exclude_orbs:
                 # e.g. Fe2, dxy, _, _
@@ -174,7 +173,6 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         self.mmats = {}
         self.orbital_names = {}
         self.norb_reduced = {}
-        print(f"self.backend_name: {self.backend_name}")
         if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
             # print(f"magntic_elements: {self.magnetic_elements}")
             # print(f"include_orbs: {self.include_orbs}")

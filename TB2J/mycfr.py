@@ -104,7 +104,10 @@ def test_cfr():
     def test_gf(z, ef=0.1):
         return 1 / (z - 3 + ef)
 
-    print(cfr.integrate_func(test_gf, ef=5))
+    r = cfr.integrate_func(test_gf, ef=2)
+    r = -np.imag(r) / np.pi * 2
+    print(r)
+    return r
 
 
 if __name__ == "__main__":
