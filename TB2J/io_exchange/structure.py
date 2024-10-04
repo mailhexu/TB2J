@@ -212,14 +212,21 @@ class BaseMagneticStructure:
 
         self._n = n
 
-class MagneticStructure(BaseMagneticStructure):
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def to_ase(self):
+
+        from ase.atoms import Atoms
+        atoms = Atoms(
+            cell=self.cell,
+            positions=self.cartesian_positions,
+            numbers=[valid_symbols.index(symbol) for symbol in self.elements],
+            pbc=self.pbc
+        )
+
+        return atoms
 
     @classmethod
-    def from_poscar(cls, filename, magmoms=None, collinear=True, pbc=(True, True, True)):
-        
+    def from_structure_file(cls, filename, magmoms=None, collinear=True, pbc=(True, True, True)):
+
         from ase.io import read
         atoms = read(filename)
         atoms.pbc = pbc
