@@ -7,7 +7,7 @@ from .plot import BandsPlot
 def branched_keys(tb2j_keys, npairs):
 
     msites = int( (2*npairs)**0.5 )
-    branch_size = int( len(tb2j_keys)/msites**2 )
+    branch_size = len(tb2j_keys) // msites**2
     new_keys = sorted(tb2j_keys, key=lambda x : -x[1] + x[2])[(npairs-msites)*branch_size:]
     new_keys.sort(key=lambda x : x[1:])
     bkeys = [new_keys[i:i+branch_size] for i in range(0, len(new_keys), branch_size)]
@@ -260,12 +260,12 @@ class ExchangeIO(BaseMagneticStructure):
 
         J0 = self.Jq(np.zeros((1, 3)), anisotropic=anisotropic)
         J0 = -Hermitize( J0 )[:, :, 0]
-        Jq = -Hermitize( self.Jq(-kpoints, anisotropic=anisotropic) )
+        Jq = -Hermitize( self.Jq(kpoints, anisotropic=anisotropic) )
 
         C = np.diag( np.einsum('ix,ijxy,jy->i', V, 2*J0, V) )
         B = np.einsum('ix,ijkxy,jy->kij', U, Jq, U)
         A1 = np.einsum('ix,ijkxy,jy->kij', U, Jq, U.conj())
-        A2 = np.einsum('ix,ijkxy,jy->kij', U.conj(), Jq.conj(), U)
+        A2 = np.einsum('ix,ijkxy,jy->kij', U.conj(), Jq, U)
 
         return np.block([
             [A1 - C, B],
@@ -275,7 +275,7 @@ class ExchangeIO(BaseMagneticStructure):
     def _magnon_energies(self, kpoints, anisotropic=True, u=uz):
 
         H = self.Hq(kpoints, anisotropic=anisotropic, u=u)
-        n = int( H.shape[-1] / 2 )
+        n = H.shape[-1] // 2
         I = np.eye(n)
 
         min_eig = 0.0
