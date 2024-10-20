@@ -78,10 +78,11 @@ class ExchangeDownfolder(ExchangeIO):
         U, _ = zip(*[get_rotation_arrays(magmoms, u=u[None, :]) for u in self.reference_axes])
         U = np.stack(U).swapaxes(0, 1)
 
-        uc = combine_arrays(U[i], U[j].conj())
+        u1 = combine_arrays(U[i], U[j].conj())
         ur = combine_arrays(U[i], U[j])
         ui = combine_arrays(U[i].conj(), U[j].conj())
-        u = np.concatenate([uc, ur, ui], axis=1)
+        u2 = combine_arrays(U[i].conj(), U[j])
+        u = np.concatenate([u1, ur, ui, u2], axis=1)
         
         self.u_matrix = u
 
@@ -95,12 +96,11 @@ class ExchangeDownfolder(ExchangeIO):
         i, j = self.i, self.j
         n = i.max() + 1
 
-        ABk = Hk[:, :, [i, i, i], [j, j+n, j+n]]
-        ABk[:, :, 2, :] = ABk[:, ::-1, 2, :].conj()
-        ABk = np.moveaxis(ABk, [2, 3], [1, 0]).reshape(len(i), 18, -1)
+        ABk = Hk[:, :, [i, i, i+n, i+n], [j, j+n, j, j+n]]
+        ABk = np.moveaxis(ABk, [2, 3], [1, 0]).reshape(len(i), 24, -1)
 
-        exp_summand = np.exp( -2j*np.pi*self.vectors @ self.kpoints.T )
-        AB = np.einsum('nik,ndk->nid', ABk, exp_summand) / len(self.kpoints)
+        exp_summand = np.exp( 2j*np.pi*self.vectors @ self.kpoints.T )
+        AB = np.einsum('nik,ndk->nid', ABk[..., ::-1], exp_summand) / len(self.kpoints)
 
         self.AB_coefficients = AB
 
