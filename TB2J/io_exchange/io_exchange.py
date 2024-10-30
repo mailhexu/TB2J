@@ -13,6 +13,11 @@ import pickle
 from collections.abc import Iterable
 from datetime import datetime
 
+import matplotlib
+
+matplotlib.use("Agg")
+import gc
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -544,6 +549,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         plt.clf()
         plt.close()
+        gc.collect()  # This is to fix the tk error if multiprocess is used.
         return fig, axes
 
     def write_tom_format(self, path):
