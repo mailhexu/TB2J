@@ -215,7 +215,7 @@ class ExchangeIO(BaseMagneticStructure):
         shape = self._exchange_values.shape[:2] + (3, 3)
         tensor = np.zeros(shape, dtype=float)
 
-        if anisotropic:
+        if anisotropic and not self.collinear:
             tensor += self._exchange_values[:, :, 9:].reshape(shape)
             pos_indices = ([1, 2, 0], [2, 0, 1])
             neg_indices = ([2, 0, 1], [1, 2, 0])
@@ -368,7 +368,11 @@ class ExchangeIO(BaseMagneticStructure):
             correct_content(content)
 
         magmoms = content['magmoms'] if content['colinear'] else content['spinat']
-        magnetic_elements = {content['atoms'].numbers[i] for i in content['index_spin'] if i > -1}
+        magnetic_elements = {
+            content['atoms'].numbers[i] 
+            for i, j in enumerate(content['index_spin']) 
+            if j > -1
+        }
 
         exchange = cls(
             atoms=content['atoms'], 
