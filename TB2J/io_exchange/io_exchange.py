@@ -325,7 +325,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         i = self.i_spin(i)
         j = self.i_spin(j)
         if iso_only:
-            Jtensor = np.eye(3) * self.get_J(i, j, R)
+            J = self.get_Jiso(i, j, R)
+            if J is not None:
+                Jtensor = np.eye(3) * self.get_J(i, j, R)
+            else:
+                Jtensor = np.eye(3) * 0
         else:
             Jtensor = combine_J_tensor(
                 Jiso=self.get_J(i, j, R),
@@ -334,7 +338,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             )
         return Jtensor
 
-    def get_full_Jtensor_for_one_R(self, R):
+    def get_full_Jtensor_for_one_R(self, R, iso_only=False):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
@@ -345,15 +349,17 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         Jmat = np.zeros((n3, n3), dtype=float)
         for i in range(self.nspin):
             for j in range(self.nspin):
-                Jmat[i * 3 : i * 3 + 3, j * 3 : j * 3 + 3] = self.get_J_tensor(i, j, R)
+                Jmat[i * 3 : i * 3 + 3, j * 3 : j * 3 + 3] = self.get_J_tensor(
+                    i, j, R, iso_only=iso_only
+                )
         return Jmat
 
-    def get_full_Jtensor_for_Rlist(self, asr=False, iso_only=False):
+    def get_full_Jtensor_for_Rlist(self, asr=False, iso_only=True):
         n3 = self.nspin * 3
         nR = len(self.Rlist)
         Jmat = np.zeros((nR, n3, n3), dtype=float)
         for iR, R in enumerate(self.Rlist):
-            Jmat[iR] = self.get_full_Jtensor_for_one_R(R)
+            Jmat[iR] = self.get_full_Jtensor_for_one_R(R, iso_only=iso_only)
         if asr:
             iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
             assert np.linalg.norm(self.Rlist[iR0]) == 0
