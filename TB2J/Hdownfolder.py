@@ -187,7 +187,7 @@ class ExchangeDownfolder(ExchangeIO):
             nsites = len(magnetic_sites)
             metal_indices = [i for i, element in enumerate(magnetic_sites) if element in metals]
             selected_basis = metal_indices + [x+nsites for x in metal_indices]
-            params |= {'nwann': len(selected_basis), 'selected_basis': selected_basis}
+            params |= {'nwann': len(selected_basis), 'selected_basis': selected_basis, 'kmesh': self.kmesh}
 
         self.atoms = self.to_ase()
         self.metal_indices = metal_indices
