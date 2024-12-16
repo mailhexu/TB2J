@@ -12,7 +12,6 @@ def combine_arrays(u, v):
 
     return np.concatenate([u*v, np.roll(u, -1, axis=-1)*v, np.roll(v, -1, axis=-1)*u], axis=-1)
 
-
 class ExchangeDownfolder(ExchangeIO):
 
     def __init__(self, **kwargs):
@@ -156,18 +155,16 @@ class ExchangeDownfolder(ExchangeIO):
         self._exchange_values[:, :, 6:9] = DMI[:, :, *idmi]
         self._exchange_values[:, :, 9:] = Jani.reshape(Jani.shape[:2] + (9,))
 
-    def _compute_downfolded_H(self, u, **params):
+    @staticmethod
+    def downfold_matrix(matrix, basis):
 
-        Hq = self.Hq(kpoints=self.kpoints, anisotropic=True, u=u)
-        Hr = k_to_R(kpts=self.kpoints, Rlist=self.Rlist, Mk=Hq, kweights=None)
-        model = MagnonWrapper(HR=Hr, Rlist=self.Rlist, atoms=self.atoms)
+        eigvals, eigvecs = np.linalg.eigh(matrix)
+        A = np.einsum('...ki,...kj->...ij', eigvecs.conj(), basis)
+        W, _, Vh = np.linalg.svd(A, full_matrices=False)
+        U = np.einsum('...ij,...kj->...ij', W, Vh)
+        downfolded_matrix = np.einsum('...ki,...kj->...ij', U.conj(), eigvals[..., None]*U)
 
-        wann = MagnonDownfolder(model)
-        wann.set_parameters(**params)
-        ewf = wann.downfold()
-        H = np.stack([ewf.get_wann_Hk(k) for k in self.kpoints])
-
-        return H
+        return downfolded_matrix
 
     def downfold(self, metals, **params):
 
@@ -186,22 +183,13 @@ class ExchangeDownfolder(ExchangeIO):
             magnetic_sites = [symbol for symbol in self.elements if symbol in self.magnetic_elements]
             nsites = len(magnetic_sites)
             metal_indices = [i for i, element in enumerate(magnetic_sites) if element in metals]
-            selected_basis = metal_indices + [x+nsites for x in metal_indices]
-            params |= {'nwann': len(selected_basis), 'selected_basis': selected_basis, 'kmesh': self.kmesh}
 
-        self.atoms = self.to_ase()
-        self.metal_indices = metal_indices
-        self.Rlist = build_Rgrid(self.kmesh)
-
-        Hk = np.stack([
-            self._compute_downfolded_H(u[None, :], **params) for u in self.reference_axes
-        ])
+        Hq = np.stack([self.Hq(self.kpoints, u=u[None, :]) for u in self.reference_axes])
+        downfolded_Hq = self.downfold_matrix(Hq, basis)
 
         self.set_downfolded_magnetic_sites(metals)
-        J = self.compute_exchange_tensor(Hk)
+        J = self.compute_exchange_tensor(downfolded_Hq)
         self.set_exchange_tensor(J.real)
-
-        del self.atoms, self.metal_indices, self.Rlist
 
         return J
 
