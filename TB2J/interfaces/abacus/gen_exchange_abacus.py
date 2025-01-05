@@ -6,8 +6,11 @@ The main function to compute exchange interaction from abacus data
 
 import os
 from pathlib import Path
-from TB2J.abacus.abacus_wrapper import AbacusParser
-from TB2J.exchange import ExchangeNCL, ExchangeCL
+
+# from TB2J.abacus.abacus_wrapper import AbacusParser
+from HamiltonIO.abacus import AbacusParser
+
+from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
 
 
@@ -24,7 +27,7 @@ def gen_exchange_abacus(
     exclude_orbs=[],
     Rcut=None,
     use_cache=False,
-    np=1,
+    nproc=1,
     output_path="TB2J_results",
     orb_decomposition=False,
     description=None,
@@ -57,14 +60,15 @@ data directory: {outpath}
             nz=nz,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
             output_path=output_path,
+            orb_decomposition=orb_decomposition,
             description=description,
         )
         exchange.run(path=output_path)
         print("\n")
-        print(f"All calculation finsihed. The results are in {output_path} directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
     else:
         tbmodel = parser.get_models()
         print("Starting to calculate exchange.")
@@ -83,8 +87,9 @@ data directory: {outpath}
             nz=nz,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
-            np=np,
+            nproc=nproc,
             use_cache=use_cache,
+            orb_decomposition=orb_decomposition,
             description=description,
         )
         exchange.run()

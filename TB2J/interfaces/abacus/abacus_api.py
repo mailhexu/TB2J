@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-import numpy as np
-from scipy import sparse
-from scipy.sparse import csr_matrix
 import re
 import struct
+
+import numpy as np
+from scipy.sparse import csr_matrix
 
 
 class XR_matrix:

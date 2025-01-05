@@ -1,5 +1,6 @@
-import TB2J
 from datetime import datetime
+
+import TB2J
 
 
 def print_license():

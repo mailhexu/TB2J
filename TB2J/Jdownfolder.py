@@ -1,7 +1,9 @@
 import os
 from collections import defaultdict
+
 import numpy as np
 from ase.dft.kpoints import monkhorst_pack
+
 from TB2J.io_exchange import SpinIO
 from TB2J.Jtensor import decompose_J_tensor
 
@@ -73,8 +75,8 @@ class JDownfolder:
 class PWFDownfolder:
     def __init__(self, JR, Rlist, iM, iL, qmesh, atoms=None, iso_only=False, **kwargs):
         from lawaf.interfaces.magnon.magnon_downfolder import (
-            MagnonWrapper,
             MagnonDownfolder,
+            MagnonWrapper,
         )
 
         model = MagnonWrapper(JR, Rlist, atoms)
@@ -92,13 +94,13 @@ class PWFDownfolder:
             # anchors={(0, 0, 0): (-1, -2, -3, -4)},
             # anchors={(0, 0, 0): ()},
             # use_proj=True,
-            enhance_Amn=2.0,
+            enhance_Amn=0.0,
         )
         params.update(kwargs)
         wann.set_parameters(**params)
         print("begin downfold")
         ewf = wann.downfold()
-        ewf.save_hr_pickle("downfolded_JR.pickle")
+        # ewf.save_hr_pickle("downfolded_JR.pickle")
 
         # Plot the band structure.
         wann.plot_band_fitting(
@@ -135,7 +137,7 @@ class JDownfolder_pickle:
         qmesh=[7, 7, 7],
         iso_only=False,
         method="pwf",
-        **kwargs
+        **kwargs,
     ):
         self.exc = SpinIO.load_pickle(path=inpath, fname="TB2J.pickle")
 
@@ -193,7 +195,7 @@ class JDownfolder_pickle:
                 qmesh=self.qmesh,
                 atoms=self.atoms,
                 iso_only=self.iso_only,
-                **kwargs
+                **kwargs,
             )
             Jd, Rlist = d.get_JR()
         return Jd, Rlist
@@ -274,10 +276,10 @@ class JDownfolder_pickle:
 def test():
     # pass
     # inpath = "/home/hexu/projects/NiCl2/vasp_inputs/TB2J_results"
-    # inpath = "/home/hexu/projects/TB2J_example/CrI3/TB2J_results"
-    inpath = "/home/hexu/projects/TB2J_projects/NiCl2/TB2J_NiCl/TB2J_results"
-    fname = os.path.join(inpath, "TB2J.pickle")
-    p = JDownfolder_pickle(
+    inpath = "/home/hexu/projects/TB2J_example/CrI3/TB2J_results"
+    # inpath = "/home/hexu/projects/TB2J_projects/NiCl2/TB2J_NiCl/TB2J_results"
+    _fname = os.path.join(inpath, "TB2J.pickle")
+    _p = JDownfolder_pickle(
         inpath=inpath, metals=["Ni"], ligands=["Cl"], outpath="TB2J_results_downfolded"
     )
 

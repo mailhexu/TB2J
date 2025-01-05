@@ -1,5 +1,4 @@
 from abacus_api import read_HR_SR
-import numpy as np
 
 
 def main():

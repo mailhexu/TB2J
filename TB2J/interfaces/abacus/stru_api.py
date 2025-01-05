@@ -8,17 +8,17 @@ Modified on Wed Aug 01 11:44:51 2022
 @author: Ji Yu-yang
 """
 
-import re
-import warnings
-import numpy as np
 import os
+import re
 import shutil
+import warnings
 from pathlib import Path
 
+import numpy as np
 from ase import Atoms
-from ase.units import Bohr, Hartree, GPa, mol, _me, Rydberg
-from ase.utils import lazymethod, lazyproperty, reader, writer
 from ase.calculators.singlepoint import SinglePointDFTCalculator, arrays_to_kpoints
+from ase.units import Bohr, GPa, Hartree, Rydberg, _me, mol
+from ase.utils import lazymethod, lazyproperty, reader, writer
 
 _re_float = r"[-+]?\d+\.*\d*(?:[Ee][-+]\d+)?"
 AU_to_MASS = mol * _me * 1e3
@@ -697,7 +697,7 @@ def read_abacus(fd, latname=None, verbose=False):
     )
     symbols = specie_lines[:, 0]
     ntype = len(symbols)
-    mass = specie_lines[:, 1].astype(float)
+    # mass = specie_lines[:, 1].astype(float)
     try:
         atom_potential = dict(zip(symbols, specie_lines[:, 2].tolist()))
     except IndexError:
@@ -789,7 +789,7 @@ def read_abacus(fd, latname=None, verbose=False):
 
         # symbols, magnetism
         sym = [symbol] * number
-        masses = [mass] * number
+        # masses = [mass] * number
         atom_mags = [float(sub_block.group(1))] * number
         for j in range(number):
             atom_symbol.append(sym[j])
@@ -1121,7 +1121,7 @@ class AbacusOutHeaderChunk(AbacusOutChunk):
         def str_to_kpoints(val_in):
             lines = (
                 re.search(
-                    rf"KPOINTS\s*DIRECT_X\s*DIRECT_Y\s*DIRECT_Z\s*WEIGHT([\s\S]+?)DONE",
+                    r"KPOINTS\s*DIRECT_X\s*DIRECT_Y\s*DIRECT_Z\s*WEIGHT([\s\S]+?)DONE",
                     val_in,
                 )
                 .group(1)
@@ -1349,7 +1349,7 @@ class AbacusOutCalcChunk(AbacusOutChunk):
     def _parse_ionic_block(self):
         """Parse the ionic block from the output file"""
         step_pattern = re.compile(
-            rf"(?:[NON]*SELF-|STEP OF|RELAX CELL)([\s\S]+?)charge density convergence is achieved"
+            r"(?:[NON]*SELF-|STEP OF|RELAX CELL)([\s\S]+?)charge density convergence is achieved"
         )
 
         return step_pattern.findall(self.contents)
@@ -1384,7 +1384,7 @@ class AbacusOutCalcChunk(AbacusOutChunk):
             == "Lattice relaxation is converged!"
         )
         res = np.zeros((self.ion_steps), dtype=bool)
-        if lat_arr[-1] == True:
+        if lat_arr[-1]:
             res[-1] = 1
 
         return res.astype(bool)
@@ -1805,7 +1805,7 @@ class AbacusOutCalcChunk(AbacusOutChunk):
     @lazyproperty
     def n_iter(self):
         """The number of SCF iterations needed to converge the SCF cycle for the chunk"""
-        step_pattern = re.compile(rf"ELEC\s*=\s*[+]?(\d+)")
+        step_pattern = re.compile(r"ELEC\s*=\s*[+]?(\d+)")
 
         try:
             return int(step_pattern.findall(self._ionic_block)[-1])

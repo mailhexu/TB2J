@@ -1,5 +1,5 @@
-from scipy.linalg import eigh
 import numpy as np
+from scipy.linalg import eigh
 
 
 def gen_random_hermitean_matrix(n):

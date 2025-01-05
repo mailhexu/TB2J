@@ -1,16 +1,32 @@
-import numpy as np
-from collections import defaultdict
-from ase.dft.kpoints import monkhorst_pack
-from shutil import rmtree
+import copy
 import os
-import tempfile
-from pathos.multiprocessing import ProcessPool
-import sys
 import pickle
-import warnings
-from TB2J.mathutils.fermi import fermi
+import sys
+import tempfile
+from collections import defaultdict
+from shutil import rmtree
+
+import numpy as np
+from HamiltonIO.model.occupations import GaussOccupations
+from HamiltonIO.model.occupations import myfermi as fermi
+from pathos.multiprocessing import ProcessPool
+
+from TB2J.kpoints import ir_kpts, monkhorst_pack
+
+# from TB2J.mathutils.fermi import fermi
 
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
+
+
+def eigen_to_G2(H, S, efermi, energy):
+    """calculate green's function from eigenvalue/eigenvector for energy(e-ef): G(e-ef).
+    :param H: Hamiltonian matrix in eigenbasis
+    :param S: Overlap matrix in eigenbasis
+    :param efermi: fermi energy
+    :param energy: energy level e - efermi
+    """
+    # G = ((E+Ef) S - H)^-1
+    return np.linalg.inv((energy + efermi) * S - H)
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
@@ -22,13 +38,20 @@ def eigen_to_G(evals, evecs, efermi, energy):
     :returns: Green's function G,
     :rtype:  Matrix with same shape of the Hamiltonian (and eigenvector)
     """
-    return (
-        np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
-        @ evecs.conj().T
+    # return (
+    #    np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
+    #    @ evecs.conj().T
+    # )
+    return np.einsum(
+        "ib, b, jb-> ij",
+        evecs,
+        1.0 / (-evals + (energy + efermi)),
+        evecs.conj(),
+        optimize=True,
     )
 
 
-def find_energy_ingap(evals, rbound, gap=4.0):
+def find_energy_ingap(evals, rbound, gap=2.0):
     """
     find a energy inside a gap below rbound (right bound),
     return the energy gap top - 0.5.
@@ -46,8 +69,12 @@ class TBGreen:
     def __init__(
         self,
         tbmodel,
-        kmesh,  # [ikpt, 3]
-        efermi,  # efermi
+        kmesh=None,  # [ikpt, 3]
+        ibz=False,  # if True, will interpolate the Green's function at Ir-kpoints
+        efermi=None,  # efermi
+        gamma=False,
+        kpts=None,
+        kweights=None,
         k_sym=False,
         use_cache=False,
         cache_path=None,
@@ -67,17 +94,63 @@ class TBGreen:
         self.cache_path = cache_path
         if use_cache:
             self._prepare_cache()
-        if kmesh is not None:
-            self.kpts = monkhorst_pack(size=kmesh)
-        else:
-            self.kpts = tbmodel.get_kpts()
-        self.nkpts = len(self.kpts)
-        self.kweights = [1.0 / self.nkpts] * self.nkpts
+        self.prepare_kpts(
+            kmesh=kmesh,
+            ibz=ibz,
+            gamma=gamma,
+            kpts=kpts,
+            kweights=kweights,
+            tbmodel=tbmodel,
+        )
+
         self.norb = tbmodel.norb
         self.nbasis = tbmodel.nbasis
         self.k_sym = k_sym
         self.nproc = nproc
         self._prepare_eigen()
+
+    def prepare_kpts(
+        self, kmesh=None, gamma=True, ibz=False, kpts=None, kweights=None, tbmodel=None
+    ):
+        """
+        Prepare the k-points for the calculation.
+
+        Parameters:
+        - kmesh (tuple): The k-mesh used to generate k-points.
+        - gamma (bool): Whether to include the gamma point in the k-points.
+        - ibz (bool): Whether to use the irreducible Brillouin zone.
+        - kpts (list): List of user-defined k-points.
+        - kweights (list): List of weights for each k-point.
+
+        Returns:
+        None
+        """
+        if kpts is not None:
+            self.kpts = kpts
+            self.nkpts = len(self.kpts)
+            self.kweights = kweights
+        elif kmesh is not None:
+            if ibz:
+                self.kpts, self.kweights = ir_kpts(
+                    atoms=tbmodel.atoms,
+                    mp_grid=kmesh,
+                    ir=True,
+                    is_time_reversal=False,
+                )
+                self.nkpts = len(self.kpts)
+                print(f"Using IBZ of kmesh of {kmesh}")
+                print(f"Number of kpts: {self.nkpts}")
+                for kpt, weight in zip(self.kpts, self.kweights):
+                    # format the kpt and weight, use 5 digits
+                    print(f"{kpt[0]:8.5f} {kpt[1]:8.5f} {kpt[2]:8.5f} {weight:8.5f}")
+            else:
+                self.kpts = monkhorst_pack(kmesh, gamma_center=gamma)
+                self.nkpts = len(self.kpts)
+                self.kweights = np.array([1.0 / self.nkpts] * self.nkpts)
+        else:
+            self.kpts = tbmodel.get_kpts()
+            self.nkpts = len(self.kpts)
+            self.kweights = np.array([1.0 / self.nkpts] * self.nkpts)
 
     def _reduce_eigens(self, evals, evecs, emin, emax):
         ts = np.logical_and(evals >= emin, evals < emax)
@@ -90,7 +163,7 @@ class TBGreen:
         istart, iend = ts[0], ts[-1] + 1
         return evals[:, istart:iend], evecs[:, :, istart:iend]
 
-    def find_energy_ingap(self, rbound, gap=4.0):
+    def find_energy_ingap(self, rbound, gap=2.0):
         return find_energy_ingap(self.evals, rbound, gap)
 
     def _prepare_cache(self):
@@ -145,9 +218,26 @@ class TBGreen:
         if not saveH:
             self.H = None
 
-        self.evals, self.evecs = self._reduce_eigens(
-            self.evals, self.evecs, emin=self.efermi - 10.0, emax=self.efermi + 10.1
-        )
+        # get efermi
+        if self.efermi is None:
+            print("Calculating Fermi energy from eigenvalues")
+            print(f"Number of electrons: {self.tbmodel.nel} ")
+
+            # occ = Occupations(
+            #    nel=self.tbmodel.nel, width=0.1, wk=self.kweights, nspin=2
+            # )
+            # self.efermi = occ.efermi(copy.deepcopy(self.evals))
+            # print(f"Fermi energy found: {self.efermi}")
+
+            occ = GaussOccupations(
+                nel=self.tbmodel.nel, width=0.1, wk=self.kweights, nspin=2
+            )
+            self.efermi = occ.efermi(copy.deepcopy(self.evals))
+            print(f"Fermi energy found: {self.efermi}")
+
+        # self.evals, self.evecs = self._reduce_eigens(
+        #    self.evals, self.evecs, emin=self.efermi - 15.0, emax=self.efermi + 10.1
+        # )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
@@ -216,20 +306,22 @@ class TBGreen:
         rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         if self.is_orthogonal:
             for ik, _ in enumerate(self.kpts):
+                evecs_k = self.get_evecs(ik)
+                # chekc if any of the evecs element is nan
                 rho += (
-                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
-                    @ self.get_evecs(ik).T.conj()
+                    (evecs_k * fermi(self.evals[ik], self.efermi, nspin=2))
+                    @ evecs_k.T.conj()
                     * self.kweights[ik]
                 )
         else:
             for ik, _ in enumerate(self.kpts):
                 rho += (
-                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
+                    (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi, nspin=2))
                     @ self.get_evecs(ik).T.conj()
                     @ self.get_Sk(ik)
                     * self.kweights[ik]
                 )
-
+        # check if rho has nan values
         return rho
 
     def get_rho_R(self, Rlist):
@@ -238,7 +330,10 @@ class TBGreen:
         for ik, kpt in enumerate(self.kpts):
             evec = self.get_evecs(ik)
             rhok = np.einsum(
-                "ib,b, bj-> ij", evec, fermi(self.evals[ik], self.efermi), evec.conj().T
+                "ib,b, bj-> ij",
+                evec,
+                fermi(self.evals[ik], self.efermi, nspin=2),
+                evec.conj().T,
             )
             for iR, R in enumerate(Rlist):
                 rho_R[iR] += rhok * np.exp(self.k2Rfactor * kpt @ R) * self.kweights[ik]
@@ -252,16 +347,20 @@ class TBGreen:
     def get_density(self):
         return np.real(np.diag(self.get_density_matrix()))
 
-    def get_Gk(self, ik, energy):
+    def get_Gk(self, ik, energy, evals=None, evecs=None):
         """Green's function G(k) for one energy
         G(\epsilon)= (\epsilon I- H)^{-1}
         :param ik: indices for kpoint
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
+        if evals is None:
+            evals = self.get_evalue(ik)
+        if evecs is None:
+            evecs = self.get_evecs(ik)
         Gk = eigen_to_G(
-            evals=self.get_evalue(ik),
-            evecs=self.get_evecs(ik),
+            evals=evals,
+            evecs=evecs,
             efermi=self.efermi,
             energy=energy,
         )
@@ -270,7 +369,14 @@ class TBGreen:
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
-    def get_GR(self, Rpts, energy, get_rho=False):
+    def get_Gk_all(self, energy):
+        """Green's function G(k) for one energy for all kpoints"""
+        Gk_all = np.zeros((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
+        for ik, _ in enumerate(self.kpts):
+            Gk_all[ik] = self.get_Gk(ik, energy)
+        return Gk_all
+
+    def get_GR(self, Rpts, energy, get_rho=False, Gk_all=None):
         """calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
@@ -282,7 +388,10 @@ class TBGreen:
         GR = defaultdict(lambda: 0.0j)
         rhoR = defaultdict(lambda: 0.0j)
         for ik, kpt in enumerate(self.kpts):
-            Gk = self.get_Gk(ik, energy)
+            if Gk_all is None:
+                Gk = self.get_Gk(ik, energy)
+            else:
+                Gk = Gk_all[ik]
             if get_rho:
                 if self.is_orthogonal:
                     rhok = Gk
@@ -315,7 +424,6 @@ class TBGreen:
             for iR, R in enumerate(Rpts):
                 phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
                 GR[R] += Gkw * (phase * self.kweights[ik])
-
                 dHRdx = dHdx.get_hamR(R)
                 dGRdx[R] += Gkw @ dHRdx @ Gk
                 # dGRdx[R] += Gk.dot(dHRdx).dot(Gkp)

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-from TB2J.manager import gen_exchange_siesta
-from TB2J.versioninfo import print_license
-import sys
 import argparse
+import sys
+
+from TB2J.interfaces import gen_exchange_siesta
+from TB2J.versioninfo import print_license
 
 
 def run_siesta2J():
@@ -107,26 +108,42 @@ def run_siesta2J():
         default="TB2J_results",
     )
 
+    parser.add_argument(
+        "--split_soc",
+        help="whether the SOC part of the Hamiltonian can be read from the output of siesta. Default: False",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--orth",
+        help="whether to use orthogonalization before the diagonization of the electron Hamiltonian. Default: False",
+        action="store_true",
+        default=False,
+    )
+
     args = parser.parse_args()
 
     if args.elements is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
 
-    include_orbs = {}
-    for element in args.elements:
-        if "_" in element:
-            elem = element.split("_")[0]
-            orb = element.split("_")[1:]
-            include_orbs[elem] = orb
-        else:
-            include_orbs[element] = None
+    # include_orbs = {}
+    # for element in args.elements:
+    #    if "_" in element:
+    #        elem = element.split("_")[0]
+    #        orb = element.split("_")[1:]
+    #        include_orbs[elem] = orb
+    #    else:
+    #        include_orbs[element] = None
 
     gen_exchange_siesta(
         fdf_fname=args.fdf_fname,
         kmesh=args.kmesh,
-        magnetic_elements=list(include_orbs.keys()),
-        include_orbs=include_orbs,
+        # magnetic_elements=list(include_orbs.keys()),
+        # include_orbs=include_orbs,
+        magnetic_elements=args.elements,
+        include_orbs={},
         Rcut=args.rcut,
         emin=args.emin,
         emax=args.emax,
@@ -134,9 +151,11 @@ def run_siesta2J():
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,
-        np=args.np,
+        nproc=args.np,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
+        read_H_soc=args.split_soc,
+        orth=args.orth,
     )
 
 

@@ -13,5 +13,6 @@ Tutorial
    rotate_and_merge.rst
    downfold.md
    orbital_contribution.md
+   symmetry.md
    output.rst
 

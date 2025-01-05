@@ -1,15 +1,18 @@
 """
 Exchange from Green's function
 """
+
 import os
 from collections import defaultdict
+
 import numpy as np
+from tqdm import tqdm
+
+from TB2J.external import p_map
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
-from tqdm import tqdm
-from TB2J.external import p_map
+
 from .exchange import ExchangeCL
-from .utils import simpson_nonuniform, trapezoidal_nonuniform
 
 
 class ExchangeCL2(ExchangeCL):
@@ -20,18 +23,18 @@ class ExchangeCL2(ExchangeCL):
         self.tbmodel_up, self.tbmodel_dn = tbmodels
         self.backend_name = self.tbmodel_up.name
         self.Gup = TBGreen(
-            self.tbmodel_up,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel_up,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
-            nproc=self.np,
+            nproc=self.nproc,
         )
         self.Gdn = TBGreen(
-            self.tbmodel_dn,
-            self.kmesh,
-            self.efermi,
+            tbmodel=self.tbmodel_dn,
+            kmesh=self.kmesh,
+            efermi=self.efermi,
             use_cache=self._use_cache,
-            nproc=self.np,
+            nproc=self.nproc,
         )
         if self.write_density_matrix:
             self.Gup.write_rho_R(
@@ -221,24 +224,30 @@ class ExchangeCL2(ExchangeCL):
         #    shutil.rmtree(path)
 
     def integrate(self, method="simpson"):
-        if method == "trapezoidal":
-            integrate = trapezoidal_nonuniform
-        elif method == "simpson":
-            integrate = simpson_nonuniform
+        # if method == "trapezoidal":
+        #    integrate = trapezoidal_nonuniform
+        # elif method == "simpson":
+        #    integrate = simpson_nonuniform
         for R, ijpairs in self.R_ijatom_dict.items():
             for iatom, jatom in ijpairs:
-                self.Jorb[(R, iatom, jatom)] = integrate(
-                    self.contour.path, self.Jorb_list[(R, iatom, jatom)]
+                # self.Jorb[(R, iatom, jatom)] = integrate(
+                #    self.contour.path, self.Jorb_list[(R, iatom, jatom)]
+                # )
+                # self.JJ[(R, iatom, jatom)] = integrate(
+                #    self.contour.path, self.JJ_list[(R, iatom, jatom)]
+                # )
+                self.Jorb[(R, iatom, jatom)] = self.contour.integrate_values(
+                    self.Jorb_list[(R, iatom, jatom)]
                 )
-                self.JJ[(R, iatom, jatom)] = integrate(
-                    self.contour.path, self.JJ_list[(R, iatom, jatom)]
+                self.JJ[(R, iatom, jatom)] = self.contour.integrate_values(
+                    self.JJ_list[(R, iatom, jatom)]
                 )
 
-    def get_AijR(self, e):
+    def get_quantities_per_e(self, e):
         GR_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=False)
         GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=False)
         Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
-        return Jorb_list, JJ_list
+        return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
 
     def calculate_all(self):
         """
@@ -247,21 +256,24 @@ class ExchangeCL2(ExchangeCL):
         print("Green's function Calculation started.")
 
         npole = len(self.contour.path)
-        if self.np == 1:
-            results = map(self.get_AijR, tqdm(self.contour.path, total=npole))
+        if self.nproc == 1:
+            results = map(
+                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+            )
         else:
-            # pool = ProcessPool(nodes=self.np)
+            # pool = ProcessPool(nodes=self.nproc)
             # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_map(self.get_AijR, self.contour.path, num_cpus=self.np)
+            results = p_map(
+                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
+            )
         for i, result in enumerate(results):
-            Jorb_list, JJ_list = result
+            Jorb_list = result["Jorb_list"]
+            JJ_list = result["JJ_list"]
             for iR, R in enumerate(self.R_ijatom_dict):
                 for iatom, jatom in self.R_ijatom_dict[R]:
                     key = (R, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
-        if self.np > 1:
-            pass
         self.integrate()
         self.get_rho_atom()
         self.A_to_Jtensor()

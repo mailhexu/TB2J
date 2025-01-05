@@ -3,21 +3,29 @@
 """
 The abacus wrapper
 """
-from pathlib import Path
+
 import os
+from pathlib import Path
+
 import numpy as np
 from scipy.linalg import eigh
-from TB2J.utils import symbol_number_list
+
+from TB2J.mathutils.rotate_spin import rotate_Matrix_from_z_to_spherical
 from TB2J.myTB import AbstractTB
-from TB2J.abacus.abacus_api import read_HR_SR
-from TB2J.abacus.orbital_api import parse_abacus_orbital
-from TB2J.abacus.stru_api import read_abacus, read_abacus_out
+from TB2J.utils import symbol_number_list
+
+from .abacus_api import read_HR_SR
+from .orbital_api import parse_abacus_orbital
+from .stru_api import read_abacus
 
 
 class AbacusWrapper(AbstractTB):
-    def __init__(self, HR, SR, Rlist, nbasis, nspin=1):
+    def __init__(
+        self, HR, SR, Rlist, nbasis, nspin=1, HR_soc=None, HR_nosoc=None, nel=None
+    ):
         self.R2kfactor = 2j * np.pi
         self.is_orthogonal = False
+        self.split_soc = False
         self._name = "ABACUS"
         self._HR = HR
         self.SR = SR
@@ -25,11 +33,38 @@ class AbacusWrapper(AbstractTB):
         self.nbasis = nbasis
         self.nspin = nspin
         self.norb = nbasis * nspin
+        self.nel = nel
         self._build_Rdict()
+        if HR_soc is not None:
+            self.set_HR_soc(HR_soc=HR_soc, HR_nosoc=HR_nosoc, HR_full=HR)
+        self.soc_rotation_angle = 0.0
+
+    def set_HR_soc(self, HR_soc=None, HR_nosoc=None, HR_full=None):
+        self.split_soc = True
+        self.HR_soc = HR_soc
+        if HR_nosoc is not None:
+            self.HR_nosoc = HR_nosoc
+        if HR_full is not None:
+            self.HR_nosoc = HR_full - HR_soc
+
+    def set_Hsoc_rotation_angle(self, angle):
+        """
+        Set the rotation angle for SOC part of Hamiltonian
+        """
+        self.soc_rotation_angle = angle
 
     @property
     def HR(self):
-        return self._HR
+        if self.split_soc:
+            _HR = np.zeros_like(self.HR_soc)
+            for iR, _ in enumerate(self.Rlist):
+                theta, phi = self.soc_rotation_angle
+                _HR[iR] = self.HR_nosoc[iR] + rotate_Matrix_from_z_to_spherical(
+                    self.HR_soc[iR], theta, phi
+                )
+            return _HR
+        else:
+            return self._HR
 
     @HR.setter
     def set_HR(self, HR):
@@ -124,6 +159,9 @@ class AbacusParser:
         # read the information
         self.read_atoms()
         self.efermi = self.read_efermi()
+        self.nel = self.read_nel()
+        print(f"efermi: {self.efermi}")
+        print(f"nel: {self.nel}")
         self.read_basis()
 
     def read_spin(self):
@@ -154,6 +192,7 @@ class AbacusParser:
     def read_basis(self):
         fname = str(Path(self.outpath) / "Orbital")
         self.basis = parse_abacus_orbital(fname)
+        print(self.basis)
         return self.basis
 
     def read_HSR_collinear(self, binary=None):
@@ -214,6 +253,20 @@ class AbacusParser:
             raise ValueError(f"EFERMI not found in the {str(fname)}  file.")
         return efermi
 
+    def read_nel(self):
+        """
+        Reading the number of electrons from the scf log file.
+        """
+        fname = str(Path(self.outpath) / "running_scf.log")
+        nel = None
+        with open(fname, "r") as myfile:
+            for line in myfile:
+                if "number of electrons" in line:
+                    nel = float(line.split()[-1])
+        if nel is None:
+            raise ValueError(f"number of electron not found in the {str(fname)}  file.")
+        return nel
+
     def get_basis(self):
         slist = symbol_number_list(self.atoms)
         if self.spin == "collinear":
@@ -231,6 +284,43 @@ class AbacusParser:
             return basis
 
 
+class AbacusSplitSOCParser:
+    """
+    Abacus parser with Hamiltonian split to SOC and non-SOC parts
+    """
+
+    def __init__(self, outpath_nosoc=None, outpath_soc=None, binary=False):
+        self.outpath_nosoc = outpath_nosoc
+        self.outpath_soc = outpath_soc
+        self.binary = binary
+        self.parser_nosoc = AbacusParser(outpath=outpath_nosoc, binary=binary)
+        self.parser_soc = AbacusParser(outpath=outpath_soc, binary=binary)
+        spin1 = self.parser_nosoc.read_spin()
+        spin2 = self.parser_soc.read_spin()
+        if spin1 != "noncollinear" or spin2 != "noncollinear":
+            raise ValueError("Spin should be noncollinear")
+
+    def parse(self):
+        nbasis, Rlist, HR_nosoc, SR = self.parser_nosoc.Read_HSR_noncollinear()
+        nbasis2, Rlist2, HR2, SR2 = self.parser_soc.Read_HSR_noncollinear()
+        # print(HR[0])
+        HR_soc = HR2 - HR_nosoc
+        model = AbacusWrapper(
+            HR=None,
+            SR=SR,
+            Rlist=Rlist,
+            nbasis=nbasis,
+            nspin=2,
+            HR_soc=HR_soc,
+            HR_nosoc=HR_nosoc,
+            nel=self.parser_nosoc.nel,
+        )
+        model.efermi = self.parser_soc.efermi
+        model.basis = self.parser_nosoc.basis
+        model.atoms = self.parser_nosoc.atoms
+        return model
+
+
 def test_abacus_wrapper_collinear():
     outpath = "/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/1_no_soc/OUT.Fe"
     parser = AbacusParser(outpath=outpath, spin=None, binary=False)
@@ -239,20 +329,20 @@ def test_abacus_wrapper_collinear():
     # parser.read_HSR_collinear()
     model_up, model_dn = parser.get_models()
     H, S, E, V = model_up.HSE_k([0, 0, 0])
-    # print(H.shape)
     # print(H.diagonal().real)
     # print(model_up.get_HR0().diagonal().real)
     print(parser.efermi)
+    print(atoms)
 
 
 def test_abacus_wrapper_ncl():
     outpath = "/Users/hexu/projects/TB2J_abacus/abacus-tb2j-master/abacus_example/case_Fe/2_soc/OUT.Fe"
-
     parser = AbacusParser(outpath=outpath, spin=None, binary=False)
     atoms = parser.read_atoms()
     model = parser.get_models()
     H, S, E, V = model.HSE_k([0, 0, 0])
     print(parser.efermi)
+    print(atoms)
 
 
 if __name__ == "__main__":
