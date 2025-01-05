@@ -40,6 +40,10 @@ class CFR:
             np.real(self.poles) > 0, 4.0j / self.beta * residules, 0.0
         )
 
+        # print the poles and the weights
+        for i in range(len(self.poles)):
+            print("Pole: ", self.poles[i], "Weight: ", self.weights[i])
+
         # add a point to the poles: 1e10j
         self.path = 1j / self.poles * kb * self.T
         self.path = np.concatenate((self.path, [self.Rinf * 1j]))
@@ -50,9 +54,9 @@ class CFR:
         # self.weights = np.concatenate((self.weights, [00.0]))
         # zeros moment is 1j * R * test_gf(1j * R), but the real part of it will be taken. In contrast to the other part, where the imaginary part is taken.
 
-    def integrate(self, gf_vals, imag=False):
+    def integrate_values(self, gf_vals, imag=False):
         if imag:
-            return np.imag(gf_vals @ self.weights)
+            return np.imag(gf_vals @ self.weights) * np.pi / 2
         else:
             return gf_vals @ self.weights
 

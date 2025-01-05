@@ -1,7 +1,23 @@
 ## Release Notes
 ------------------------------------------------------------------------
-#### v0.10.0 September 1, 2024
+
+#### Current development version (v1.0.0-alpha) 
+These are the new features and changes  not yet included in the official release.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
+This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
+
+- The full implementation of the magnon band structure from the linear spin wave theory. (Thanks to Andres Tellez Mora and Aldo Romero!) 
+
+- An improved method of the downfolding method which implements the ligand correction to the exchange based on the Wannier function method. This requires the updated version of LaWaF (https://github.com/mailhexu/lawaf) and the updated version of the TB2J\_downfold.py script.
+
+- There is a major refractoring of the interface to the DFT codes. The parsing of the electron Hamiltonian from the DFT codes are now in a separate python package called HamiltonIO (github.com/mailhexu/HamiltonIO). This package is used by TB2J but is made general to be used with other packages too.
+
+
+#### v0.11.0 October 10, 2024
+- Allowing to symmetrize the exchange according to the crystal symmetry with the TB2J\_symmetrize.py script. Note that the spin order is not considered in this symmetrization process. 
+
+#### v0.10.0 September 1, 2024
 - Improved orbital-decomposition to the ABACUS interface. 
 - Allow computing anisotropic J and DMI without three or more calculations within ABACUS and SIESTA interfaces. 
 
