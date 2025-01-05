@@ -27,6 +27,7 @@ class Exchange(ExchangeParams):
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
+        # self._prepare_elist(method="CFR")
         self._prepare_elist(method="legendre")
         self._prepare_basis()
         self._prepare_orb_dict()
@@ -44,7 +45,7 @@ class Exchange(ExchangeParams):
         os.makedirs(self.orbpath, exist_ok=True)
 
     def _adjust_emin(self):
-        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 10.0) - self.efermi
+        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
         # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
         # self.emin = -42.0
         print(f"A gap is found at {self.emin}, set emin to it.")
@@ -61,7 +62,7 @@ class Exchange(ExchangeParams):
         for k in kmesh:
             self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
-    def _prepare_elist(self, method="legendre"):
+    def _prepare_elist(self, method="CFR"):
         """
         prepare list of energy for integration.
         The path has three segments:
@@ -77,8 +78,8 @@ class Exchange(ExchangeParams):
         elif method.lower() == "legendre":
             self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
-        elif method.lower() == "CFR":
-            self.contour = CFR(nz=self.nz, T=300)
+        elif method.lower() == "cfr":
+            self.contour = CFR(nz=self.nz, T=600)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
 
@@ -117,6 +118,7 @@ class Exchange(ExchangeParams):
                 else:
                     try:
                         atom_sym, orb_sym = base[:2]
+                        iatom = sdict[atom_sym]
                     except Exception:
                         iatom = base.iatom
                         atom_sym = base.iatom
@@ -171,7 +173,6 @@ or badly localized. Please check the Wannier centers in the Wannier90 output fil
         self.mmats = {}
         self.orbital_names = {}
         self.norb_reduced = {}
-        print(f"self.backend_name: {self.backend_name}")
         if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
             # print(f"magntic_elements: {self.magnetic_elements}")
             # print(f"include_orbs: {self.include_orbs}")
@@ -576,13 +577,13 @@ class ExchangeNCL(Exchange):
             for iatom, jatom in self.R_ijatom_dict[R]:
                 f = AijRs[(R, iatom, jatom)]
                 # self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
-                self.A_ijR[(R, iatom, jatom)] = self.contour.integrate(f)
+                self.A_ijR[(R, iatom, jatom)] = self.contour.integrate_values(f)
 
                 if self.orb_decomposition:
                     # self.A_ijR_orb[(R, iatom, jatom)] = integrate(
                     #    self.contour.path, AijRs_orb[(R, iatom, jatom)]
                     # )
-                    self.contour.integrate(AijRs_orb[(R, iatom, jatom)])
+                    self.contour.integrate_values(AijRs_orb[(R, iatom, jatom)])
 
     def get_quantities_per_e(self, e):
         Gk_all = self.G.get_Gk_all(e)

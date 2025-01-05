@@ -18,6 +18,17 @@ from TB2J.kpoints import ir_kpts, monkhorst_pack
 MAX_EXP_ARGUMENT = np.log(sys.float_info.max)
 
 
+def eigen_to_G2(H, S, efermi, energy):
+    """calculate green's function from eigenvalue/eigenvector for energy(e-ef): G(e-ef).
+    :param H: Hamiltonian matrix in eigenbasis
+    :param S: Overlap matrix in eigenbasis
+    :param efermi: fermi energy
+    :param energy: energy level e - efermi
+    """
+    # G = ((E+Ef) S - H)^-1
+    return np.linalg.inv((energy + efermi) * S - H)
+
+
 def eigen_to_G(evals, evecs, efermi, energy):
     """calculate green's function from eigenvalue/eigenvector for energy(e-ef): G(e-ef).
     :param evals:  eigen values

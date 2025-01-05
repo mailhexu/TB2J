@@ -1,11 +1,12 @@
 import random
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.interpolate import LinearNDInterpolator
-from scipy.optimize import curve_fit
-from numpy.linalg import matrix_rank
 from dataclasses import dataclass
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy.linalg import matrix_rank
+from scipy.interpolate import LinearNDInterpolator
+from scipy.optimize import curve_fit
 
 
 @dataclass
@@ -18,8 +19,9 @@ class Anisotropy:
     @classmethod
     def from_T6(cls, T6):
         T = T6_to_T(T6)
-        T -= np.trace(T) / 3 * np.eye(3)
-        direction, amplitude = aniostropy_tensor_to_vector(T)
+        isotropic_part = np.trace(T) / 3
+        T -= isotropic_part * np.eye(3)
+        direction, amplitude = anisotropy_tensor_to_vector(T)
         return cls(
             direction=direction, amplitude=amplitude, isotropic_part=isotropic_part, T=T
         )
@@ -33,9 +35,9 @@ class Anisotropy:
 
     @classmethod
     def from_tensor(cls, T):
-        isotropic_part = np.trace(T) / 3
+        isotropic_part = np.trace(T) / 3 * np.eye(3)
         T -= np.trace(T) / 3 * np.eye(3)
-        direction, amplitude = aniostropy_tensor_to_vector(T)
+        direction, amplitude = anisotropy_tensor_to_vector(T)
         return cls(
             T=T, direction=direction, amplitude=amplitude, isotropic_part=isotropic_part
         )
@@ -44,13 +46,14 @@ class Anisotropy:
         if self.isotropic_part is None:
             self.isotropic_part = 0
         if self.T is None:
-            self.T = anisotropy_vector_to_tensor(
-                self.direction, self.amplitude
-            ) + self.isotropic_part * np.eye(3)
+            self.T = (
+                anisotropy_vector_to_tensor(self.direction, self.amplitude)
+                + self.isotropic_part
+            )
         elif self.direction is None or self.amplitude is None:
-            self.isotropic_part = np.trace(self.T) / 3
-            # print(f'aniostropic tensor = {self.anisotropic_part}')
-            self.direction, self.amplitude = aniostropy_tensor_to_vector(
+            self.isotropic_part = np.trace(self.T) / 3 * np.eye(3)
+            # print(f'anisotropic tensor = {self.anisotropic_part}')
+            self.direction, self.amplitude = anisotropy_tensor_to_vector(
                 self.anisotropic_part
             )
             self.isotropic_part = np.trace(self.T) / 3
@@ -113,7 +116,6 @@ class Anisotropy:
         E = -self.amplitude * (S @ self.direction) ** 2
         if include_isotropic:
             E = E + self.isotropic_part
-        print(f"E shape = {E.shape}")
         return E
 
     def energy_tensor_form(self, S=None, angle=None, include_isotropic=False):
@@ -126,7 +128,7 @@ class Anisotropy:
             return -S.T @ self.anisotropic_part @ S
 
     @classmethod
-    def fit_from_data(cls, thetas, phis, values, test=False):
+    def fit_from_data(cls, thetas, phis, values, test=False, units="rad"):
         """
         Fit the anisotropic tensor to the data
         parameters:
@@ -137,14 +139,16 @@ class Anisotropy:
            the anisotropic object fitted from the data
         """
         angles = np.vstack([thetas, phis])
+        if units.lower().startswith("deg"):
+            angles = np.deg2rad(angles)
         params, cov = curve_fit(anisotropy_energy, angles, values)
         fitted_values = anisotropy_energy(angles, *params)
 
         delta = fitted_values - values
 
         # print(f'Max value = {np.max(values)}, Min value = {np.min(values)}')
-        if np.abs(delta).max() > 1e-5:
-            print(f"Warning: The fitting is not consistent with the data.")
+        if np.abs(delta).max() > 1e-4:
+            print("Warning: The fitting is not consistent with the data.")
             print(f"Max-min = {np.max(values) - np.min(values)}")
             print(f"delta = {np.max(np.abs(delta))}")
         T = T6_to_T(params)
@@ -157,7 +161,7 @@ class Anisotropy:
                     angle=[thetas[i], phis[i]], include_isotropic=True
                 )
                 values2.append(E)
-            delta2 = np.array(values2) - values
+            # delta2 = np.array(values2) - values
             # print(delta2)
 
             ax = plot_3D_scatter(angles, values - np.min(values), color="r")
@@ -183,7 +187,7 @@ class Anisotropy:
         delta = fitted_values - values
         print(f"Max value = {np.max(values)}, Min value = {np.min(values)}")
         print(f"Max-min = {np.max(values) - np.min(values)}")
-        # print(f'delta = {delta}')
+        print(f"delta = {delta}")
         theta_a, phi_a, amplitude, isotropic_part = params
         direction = sphere_to_cartesian([theta_a, phi_a])
         return cls.from_direction_amplitude(
@@ -201,6 +205,25 @@ class Anisotropy:
         """
         data = np.loadtxt(fname)
         theta, phi, value = data[:, 0], data[:, 1], data[:, 2]
+        if method == "tensor":
+            return cls.fit_from_data(theta, phi, value)
+        elif method == "vector":
+            return cls.fit_from_data_vector_form(theta, phi, value)
+        else:
+            raise ValueError(f"Unknown method {method}")
+
+    @classmethod
+    def fit_from_xyz_data_file(cls, fname, method="tensor"):
+        """
+        Fit the anisotropic tensor to the data with x y z val form
+        parameters:
+           fname: the file name of the data
+        Return:
+              anisotropy: the anisotropic object
+        """
+        data = np.loadtxt(fname)
+        xyz, value = data[:, 0:3], data[:, 3]
+        theta, phi = np.array([cartesian_to_sphere(t) for t in xyz]).T
         if method == "tensor":
             return cls.fit_from_data(theta, phi, value)
         elif method == "vector":
@@ -297,6 +320,55 @@ class Anisotropy:
         if show:
             plt.show()
 
+    def plot_contourf(self, ax=None, figname=None, show=False):
+        if ax is None:
+            fig, ax = plt.subplots()
+        X, Y = np.meshgrid(np.arange(0, 180, 1), np.arange(-180, 180, 1))
+        Z = np.zeros(X.shape)
+        ntheta, nphi = X.shape
+        for i in range(ntheta):
+            for j in range(nphi):
+                E = self.energy_tensor_form(angle=[X[i, j], Y[i, j]])
+                Z[i, j] = E
+        # find the X, Y for min and max of Z
+        X_max, Y_max = np.unravel_index(np.argmax(Z), Z.shape)
+        X_min, Y_min = np.unravel_index(np.argmin(Z), Z.shape)
+        X_max, Y_max = X[X_max, Y_max], Y[X_max, Y_max]
+        X_min, Y_min = X[X_min, Y_min], Y[X_min, Y_min]
+        c = ax.contourf(X, Y, Z, cmap="viridis", levels=200)
+        # print(X_max, Y_max, X_min, Y_min)
+        # ax.scatter(X_max, Y_max, color="r", marker="o")
+        # ax.scatter(X_min, Y_min, color="b", marker="o")
+        ax.set_xlabel("$\theta$ (degree)")
+        ax.set_ylabel("$\phi$ degree")
+        # ax.scatter(X_max, Y_max, color="r", marker="o")
+        # ax.scatter(X_min, Y_min, color="r", marker="o")
+
+        # colorbar
+        _cbar = plt.colorbar(c, ax=ax)
+
+        if figname is not None:
+            plt.savefig(figname)
+            plt.close()
+        if show:
+            print(f"Max = {X_max}, {Y_max}, Min = {X_min}, {Y_min}")
+            plt.show()
+        return ax
+
+    def tensor_strings(self, include_isotropic=False, multiplier=1):
+        """
+        convert the energy tensor to strings for easy printing
+        parameters:
+        include_isotropic: if include the isotropic part
+        multiplier: the multiplier for the tensor. Use for scaling the tensor by units.
+        """
+        if include_isotropic:
+            T = self.T
+        else:
+            T = self.T
+        strings = np.array2string(T * multiplier, precision=5, separator=" ")
+        return strings
+
 
 def plot_3D_scatter(angles, values, ax=None, **kwargs):
     if ax is None:
@@ -389,7 +461,7 @@ def sphere_to_cartesian(angles, r=1):
     return np.array([x, y, z])
 
 
-def cartesian_to_sphere(xyz):
+def cartesian_to_sphere(xyz, unit="deg"):
     """
     Transform the cartesian coordinates to the spherical coordinates
     parameters:
@@ -401,8 +473,13 @@ def cartesian_to_sphere(xyz):
     r = np.linalg.norm(xyz)
     theta = np.arccos(z / r)
     phi = np.arctan2(y, x)
-    theta = theta * 180 / np.pi
-    phi = phi * 180 / np.pi
+    if unit.lower().startswith("deg"):
+        theta = theta * 180 / np.pi
+        phi = phi * 180 / np.pi
+    elif unit.lower.startswith("rad"):
+        pass
+    else:
+        raise ValueError("unit must be 'deg' or 'rad'")
     return np.array([theta, phi])
 
 
@@ -470,7 +547,7 @@ def fit_anisotropy(thetas, phis, values):
     params, cov = curve_fit(anisotropy_energy, angles, values)
     # check if the fitting is consistent with the data
     T = T6_to_T(params)
-    direction, amp = anisostropy_tensor_to_vector(T)
+    direction, amp = anisotropy_tensor_to_vector(T)
     return direction, amp
 
 
@@ -518,7 +595,7 @@ def anisotropy_vector_to_tensor(direction, amplitude):
     return T
 
 
-def aniostropy_tensor_to_vector(T):
+def anisotropy_tensor_to_vector(T):
     """
     Transform the anisotropic tensor to the anisotropic vector
     parameters:
@@ -553,7 +630,7 @@ def test_anisotorpy_vector_to_tensor():
     assert np.abs(diff) < 1e-10
 
     # test if the inverse transformation get the direction and amplitude back
-    dir2, amp2 = aniostropy_tensor_to_vector(T)
+    dir2, amp2 = anisotropy_tensor_to_vector(T)
 
     # set the first element of the direction to be positive
     if direction[0] * dir2[0] < 0:
@@ -569,7 +646,7 @@ def test_anisotropy_tensor_to_vector():
     T = np.random.rand(3, 3)
     T = T + T.T
     T = T - np.trace(T) / 3
-    direction, amplitude = aniostropy_tensor_to_vector(T)
+    direction, amplitude = anisotropy_tensor_to_vector(T)
     T2 = anisotropy_vector_to_tensor(direction, amplitude)
     print(f"T = {T}")
     print(f"T2 = {T2}")
@@ -596,9 +673,6 @@ def test_fit_anisotropy():
         print(
             f"theta = {theta[i]}, phi = {phi[i]}, value = {value[i]}, fitted value = {fitted_values[i]}, delta = {delta[i]}"
         )
-
-    easy_axis = easy_axis_from_tensor(T6)
-    print(f"easy_axis = {easy_axis}")
 
 
 def view_anisotropy_strain():

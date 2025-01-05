@@ -236,10 +236,10 @@ class ExchangeCL2(ExchangeCL):
                 # self.JJ[(R, iatom, jatom)] = integrate(
                 #    self.contour.path, self.JJ_list[(R, iatom, jatom)]
                 # )
-                self.Jorb[(R, iatom, jatom)] = self.contour.integrate(
+                self.Jorb[(R, iatom, jatom)] = self.contour.integrate_values(
                     self.Jorb_list[(R, iatom, jatom)]
                 )
-                self.JJ[(R, iatom, jatom)] = self.contour.integrate(
+                self.JJ[(R, iatom, jatom)] = self.contour.integrate_values(
                     self.JJ_list[(R, iatom, jatom)]
                 )
 

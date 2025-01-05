@@ -115,6 +115,14 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         type=str,
         nargs="*",
     )
+
+    parser.add_argument(
+        "--spinor",
+        help="whether the Wannier functions are spinor. Default: False",
+        action="store_true",
+        default=False,
+    )
+
     parser.add_argument(
         "--rcut",
         help="cutoff of spin pair distance. The default is to calculate all commensurate R point to the k mesh.",
