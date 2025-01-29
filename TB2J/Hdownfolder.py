@@ -1,12 +1,9 @@
 import numpy as np
 
 from .io_exchange import ExchangeIO
+from .kpoints import monkhorst_pack
 from .mathutils import get_rotation_arrays
 from .io_exchange.structure import get_attribute_array
-
-from lawaf.utils.kpoints import monkhorst_pack, build_Rgrid
-from lawaf.mathutils.kR_convert import k_to_R, R_to_k
-from lawaf.interfaces.magnon.magnon_downfolder import MagnonDownfolder, MagnonWrapper
 
 def combine_arrays(u, v):
 
@@ -161,7 +158,7 @@ class ExchangeDownfolder(ExchangeIO):
         eigvals, eigvecs = np.linalg.eigh(matrix)
         A = np.einsum('...ki,...kj->...ij', eigvecs.conj(), basis)
         W, _, Vh = np.linalg.svd(A, full_matrices=False)
-        U = np.einsum('...ij,...kj->...ij', W, Vh)
+        U = np.einsum('...ik,...kj->...ij', W, Vh)
         downfolded_matrix = np.einsum('...ki,...kj->...ij', U.conj(), eigvals[..., None]*U)
 
         return downfolded_matrix
