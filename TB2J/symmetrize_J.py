@@ -33,7 +33,7 @@ class TB2JSymmetrizer:
             print("Symmetry found:")
             print(finder.spacegroup)
             print("-" * 30)
-        self.pgdict = finder.get_symmetry_pair_group_dict()
+        self.pldict = finder.get_symmetry_pair_list_dict()
         self.exc = exc
         self.new_exc = copy.deepcopy(exc)
         self.Jonly = Jonly
@@ -46,21 +46,25 @@ class TB2JSymmetrizer:
         Symmetrize the exchange parameters J.
         """
         symJdict = {}
+        reduced_symJdict = {}
         # Jdict = self.exc.exchange_Jdict
-        # ngroup = self.pgdict
-        for pairgroup in self.pgdict.groups:
-            ijRs = pairgroup.get_all_ijR()
+        for ishell, pairlist in enumerate(self.pldict.groups):
+            ijRs = pairlist.get_all_ijR()
             ijRs_spin = [self.exc.ijR_index_atom_to_spin(*ijR) for ijR in ijRs]
             Js = [self.exc.get_J(*ijR_spin) for ijR_spin in ijRs_spin]
             Javg = np.average(Js)
             for i, j, R in ijRs_spin:
                 symJdict[(R, i, j)] = Javg
+            ijRs_ref = ijRs_spin[0]
+            i, j, R = ijRs_ref
+            reduced_symJdict[(R, i, j)] = Javg
         self.new_exc.exchange_Jdict = symJdict
         if self.Jonly:
             self.new_exc.has_dmi = False
             self.new_exc.dmi_ddict = None
             self.new_exc.has_bilinear = False
             self.new_exc.Jani_dict = None
+            self.new_exc.reduced_exchange_Jdict = reduced_symJdict
             self.has_uniaxial_anisotropy = False
             self.k1 = None
             self.k1dir = None

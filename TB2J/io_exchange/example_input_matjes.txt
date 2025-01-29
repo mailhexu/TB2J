@@ -1,0 +1,67 @@
+# Lattice and supercell
+
+Periodic_log .T. .T. .F.       periodic boundary conditions along vector 1, 2 and 3
+
+Nsize 10 10 1                  size of the supercell
+
+alat 1.0 1.0 1.0               lattice parameter
+
+lattice                         lattice vector should be orthogonal or expressed in cartesian
+
+1.0 0.0 0.0     # a_11 a_12 a_1      first lattice vector in line (does not need to be normalize)
+
+0.0 1.0 0.0      # a_21 a_22 a_23    second lattice vector in line (does not need to be normalize)
+
+0.0 0.0 1.0                          third lattice vector in line
+
+The unit cell
+# Atoms
+
+atomtypes  2       Number of types atom
+
+Fe 0.5 0.0 0.0 F 0 # atom type: (name, mag. moment, mass, charge, displacement, number TB-orb.)
+
+Ir 0.0 0.0 0.0 F 0
+
+
+
+atoms 2          positions of the atom in the unit cell
+
+Fe 0.0 0.0 0.0
+
+Ir 0.5 0.5 0.79
+
+
+The Hamiltonian
+
+# Magnetic interactions
+
+magnetic_J
+
+1 1 1  1.0d-3     # between atoms type 1 and 1, shell 1 (so first nearest neighbor), amplitude in eV  
+
+c_H_J 0.5        apply 1/2 in front of the sum of the exchange energy - default is -1
+
+
+
+magnetic_anisotropy 
+
+1 0.0 0.0 1.0 -0.05d-3     anisotropy of atoms type 1, direction 0 0 1 and amplitude in eV
+
+c_H_ani 1.0
+
+
+
+magnetic_D
+
+1 1 2 1 -0.5d-3.         #between atoms type 1 and 1, mediated by atom type 2, shell 1, amplitude in eV
+
+c_H_D   -1.0             # coefficients to put in from of the sum - default is -1
+
+
+
+magnetic_r2_tensor #Exchange tensor elements, middle 9 entries: xx, xy, xz, yx, etc. (in units of eV) and direction in which it should be applied
+
+1 1 1 -5.2d-3 0.0 0.0 0.0 -3.8d-3 -0.9d-3 0.0 -0.9d-3 -4.7d-3 1.0 0.0 0.0 #First NN (J1intra: 0 GPa)
+
+c_H_Exchten 0.50         apply 1/2 in front of the sum of the exchange tensor energy - default is -1

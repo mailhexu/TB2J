@@ -573,6 +573,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         write_uppasd(self, path=path)
 
+    def write_matjes(self, path):
+        from TB2J.io_exchange.io_matjes import write_matjes
+
+        write_matjes(self, path=path)
+
 
 def gen_distance_dict(ind_mag_atoms, atoms, Rlist):
     distance_dict = {}
