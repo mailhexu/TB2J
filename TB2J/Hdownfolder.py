@@ -163,6 +163,27 @@ class ExchangeDownfolder(ExchangeIO):
 
         return downfolded_matrix
 
+    @staticmethod
+    def lowdin_partition(matrix, indices):
+
+        N = matrix.shape[-1] // 2
+        null_indices = np.array([i for i in range(N) if i not in indices])
+        diag_indices = np.diag_indices(null_indices.size)
+
+        idx = np.concatenate([indices, indices+N])[None, :]
+        jdx = np.concatenate([null_indices, null_indices+N])[None, :]
+
+        Hii = matrix[..., idx.T, idx]
+        Hij = matrix[..., idx.T, jdx]
+        Hji = matrix[..., jdx.T, idx]
+        Hjj = matrix[..., jdx.T, jdx]
+
+        eigvals = np.linalg.eigvalsh(matrix)
+        #Hjj[..., *diag_indices] -= eigvals.min(axis=-1)[:, None]
+        correction = np.einsum('...ij,...jk,...kl->...il', Hij, np.linalg.inv(Hjj), Hji)
+        
+        return Hii - correction
+
     def downfold(self, metals, **params):
 
         try:
@@ -179,10 +200,13 @@ class ExchangeDownfolder(ExchangeIO):
         else:
             magnetic_sites = [symbol for symbol in self.elements if symbol in self.magnetic_elements]
             nsites = len(magnetic_sites)
-            metal_indices = [i for i, element in enumerate(magnetic_sites) if element in metals]
+            metal_indices = np.array([
+                i for i, element in enumerate(magnetic_sites) 
+                if element in metals
+            ])
 
         Hq = np.stack([self.Hq(self.kpoints, u=u[None, :]) for u in self.reference_axes])
-        downfolded_Hq = self.downfold_matrix(Hq, basis)
+        downfolded_Hq = self.lowdin_partition(Hq, metal_indices)
 
         self.set_downfolded_magnetic_sites(metals)
         J = self.compute_exchange_tensor(downfolded_Hq)
