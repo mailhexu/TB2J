@@ -168,7 +168,7 @@ class ExchangeDownfolder(ExchangeIO):
 
         N = matrix.shape[-1] // 2
         null_indices = np.array([i for i in range(N) if i not in indices])
-        diag_indices = np.diag_indices(null_indices.size)
+        diag_indices = np.diag_indices(2*null_indices.size)
 
         idx = np.concatenate([indices, indices+N])[None, :]
         jdx = np.concatenate([null_indices, null_indices+N])[None, :]
@@ -179,7 +179,7 @@ class ExchangeDownfolder(ExchangeIO):
         Hjj = matrix[..., jdx.T, jdx]
 
         eigvals = np.linalg.eigvalsh(matrix)
-        #Hjj[..., *diag_indices] -= eigvals.min(axis=-1)[:, None]
+        Hjj[..., *diag_indices] -= eigvals.min()
         correction = np.einsum('...ij,...jk,...kl->...il', Hij, np.linalg.inv(Hjj), Hji)
         
         return Hii - correction
