@@ -405,6 +405,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_multibinit(path=os.path.join(path, "Multibinit"))
         self.write_tom_format(path=os.path.join(path, "TomASD"))
         self.write_vampire(path=os.path.join(path, "Vampire"))
+        self.write_matjes(path=os.path.join(path, "Matjes"))
 
         self.plot_all(savefile=os.path.join(path, "JvsR.pdf"))
         # self.write_Jq(kmesh=[9, 9, 9], path=path)

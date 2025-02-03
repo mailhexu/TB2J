@@ -48,7 +48,7 @@ class TB2JSymmetrizer:
         symJdict = {}
         reduced_symJdict = {}
         # Jdict = self.exc.exchange_Jdict
-        for ishell, pairlist in enumerate(self.pldict.groups):
+        for ishell, pairlist in enumerate(self.pldict.pairlists):
             ijRs = pairlist.get_all_ijR()
             ijRs_spin = [self.exc.ijR_index_atom_to_spin(*ijR) for ijR in ijRs]
             Js = [self.exc.get_J(*ijR_spin) for ijR_spin in ijRs_spin]
