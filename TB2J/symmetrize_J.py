@@ -9,7 +9,7 @@ from TB2J.versioninfo import print_license
 
 
 class TB2JSymmetrizer:
-    def __init__(self, exc, symprec=1e-8, verbose=True, Jonly=False):
+    def __init__(self, exc, symprec=1e-8, verbose=True, Jonly=True):
         # list of pairs with the index of atoms
         ijRs = exc.ijR_list_index_atom()
         finder = SymmetryPairFinder(atoms=exc.atoms, pairs=ijRs, symprec=symprec)
@@ -25,6 +25,12 @@ class TB2JSymmetrizer:
             )
             print("-" * 30)
             if exc.has_dmi:
+                # raise NotImplementedError(
+                #    "Symmetrization of DMI is not yet implemented."
+                #    )
+                # raise Warning(
+                #        "WARNING: Symmetrization of DMI is not yet implemented."
+                #        )
                 print(
                     "WARNING: Currently only the isotropic exchange is symmetrized. Symmetrization of DMI and anisotropic exchange are not yet implemented."
                 )
@@ -128,12 +134,12 @@ def symmetrize_J_cli():
         help="precision for symmetry detection. default is 1e-5 Angstrom",
     )
 
-    parser.add_argument(
-        "--Jonly",
-        action="store_true",
-        help="symmetrize only the exchange parameters and discard the DMI and anisotropic exchange",
-        default=False,
-    )
+    # parser.add_argument(
+    #    "--Jonly",
+    #    action="store_true",
+    #    help="symmetrize only the exchange parameters and discard the DMI and anisotropic exchange",
+    #    default=True,
+    # )
 
     args = parser.parse_args()
     if args.inpath is None:
@@ -143,7 +149,8 @@ def symmetrize_J_cli():
         path=args.inpath,
         output_path=args.outpath,
         symprec=args.symprec,
-        Jonly=args.Jonly,
+        # Jonly=args.Jonly,
+        Jonly=True,
     )
 
 

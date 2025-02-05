@@ -594,6 +594,21 @@ def gen_distance_dict(ind_mag_atoms, atoms, Rlist):
     return distance_dict
 
 
+def get_ind_shell(distance_dict, symprec=1e-5):
+    """
+    return a dictionary of shell index for each pair of atoms.
+    The index of shell is the ith shortest distances between all magnetic atom pairs.
+    """
+    shell_dict = {}
+    distances = np.array([x[1] for x in distance_dict.values()])
+    distances_int = np.round(distances / symprec).astype(int)
+    dint = sorted(np.unique(distances_int))
+    dintdict = dict(zip(dint, range(len(dint))))
+    for key, val in enumerate(distances_int):
+        shell_dict[key] = dintdict[val]
+    return shell_dict
+
+
 def test_spin_io():
     import numpy as np
     from ase import Atoms

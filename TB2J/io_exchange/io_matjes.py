@@ -5,6 +5,22 @@ import numpy as np
 from TB2J.utils import symbol_number
 
 
+def get_ind_shell(distance_dict, symprec=1e-5):
+    """
+    return a dictionary of shell index for each pair of atoms.
+    The index of shell is the ith shortest distances between all magnetic atom pairs.
+    """
+    shell_dict = {}
+    distances = np.array([x[1] for x in distance_dict.values()])
+    distances_int = np.round(distances / symprec).astype(int)
+    dint = sorted(np.unique(distances_int))
+    dintdict = dict(zip(dint, range(len(dint))))
+    for key, val in distance_dict.items():
+        di = np.round(val[1] / symprec).astype(int)
+        shell_dict[key] = dintdict[di]
+    return shell_dict
+
+
 def write_matjes(cls, path="TB2J_results/Matjes"):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -82,13 +98,19 @@ def _write_magnetic_interactions(cls, myfile):
     myfile.write("\nThe Hamiltonian\n")
     myfile.write("# Magnetic interactions\n")
     myfile.write("\nmagnetic_J\n")
-    for key, val in cls.exchange_Jdict.items():
+
+    shell_dict = get_ind_shell(cls.distance_dict)
+    print(shell_dict)
+
+    # for key, val in cls.exchange_Jdict.items():
+    for key, val in cls.reduced_exchange_Jdict.items():
         R, i, j = key
+        ishell = shell_dict[(R, i, j)]
         myfile.write(
-            f"{i+1} {j+1} {R[0]} {R[1]} {R[2]} {val}     # between atoms type {i+1} and {j+1}, shell {R}, amplitude in eV  \n"
+            f"{i+1} {j+1} {ishell+1} {val}     # between atoms type {i+1} and {j+1}, shell {R}, amplitude in eV  \n"
         )
     myfile.write(
-        "\nc_H_J 0.5        apply 1/2 in front of the sum of the exchange energy - default is -1\n"
+        "\nc_H_J -1        apply 1/2 in front of the sum of the exchange energy - default is -1\n"
     )
 
 
@@ -106,25 +128,27 @@ def _write_magnetic_anisotropy(cls, myfile):
 
 def _write_dmi(cls, myfile):
     myfile.write("\nmagnetic_D\n")
-    for key, val in cls.dmi_ddict.items():
-        R, i, j = key
+    if cls.has_dmi:
+        for key, val in cls.dmi_ddict.items():
+            R, i, j = key
+            myfile.write(
+                f"{i+1} {j+1} {R[0]} {R[1]} {R[2]} {val}         #between atoms type {i+1} and {j+1}, mediated by atom type {R}, shell {R}, amplitude in eV\n"
+            )
         myfile.write(
-            f"{i+1} {j+1} {R[0]} {R[1]} {R[2]} {val}         #between atoms type {i+1} and {j+1}, mediated by atom type {R}, shell {R}, amplitude in eV\n"
+            "\nc_H_D   -1.0             # coefficients to put in from of the sum - default is -1\n"
         )
-    myfile.write(
-        "\nc_H_D   -1.0             # coefficients to put in from of the sum - default is -1\n"
-    )
 
 
 def _write_exchange_tensor(cls, myfile):
     myfile.write(
         "\nmagnetic_r2_tensor #Exchange tensor elements, middle 9 entries: xx, xy, xz, yx, etc. (in units of eV) and direction in which it should be applied\n"
     )
-    for key, val in cls.Jani_dict.items():
-        R, i, j = key
+    if cls.Jani_dict is not None:
+        for key, val in cls.Jani_dict.items():
+            R, i, j = key
+            myfile.write(
+                f"{i+1} {j+1} {R[0]} {R[1]} {R[2]} {' '.join([str(x) for x in val.flatten()])} 1.0 0.0 0.0 #First NN (J1intra: 0 GPa)\n"
+            )
         myfile.write(
-            f"{i+1} {j+1} {R[0]} {R[1]} {R[2]} {' '.join([str(x) for x in val.flatten()])} 1.0 0.0 0.0 #First NN (J1intra: 0 GPa)\n"
+            "\nc_H_Exchten -1         apply 1/2 in front of the sum of the exchange tensor energy - default is -1\n"
         )
-    myfile.write(
-        "\nc_H_Exchten -1         apply 1/2 in front of the sum of the exchange tensor energy - default is -1\n"
-    )
