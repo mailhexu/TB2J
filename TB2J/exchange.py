@@ -566,23 +566,12 @@ class ExchangeNCL(Exchange):
         AijRs: a list of AijR,
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
-        # if method == "trapezoidal":
-        #    integrate = trapezoidal_nonuniform
-        # elif method == "simpson":
-        #    integrate = simpson_nonuniform
-        #
-
-        # self.rho = integrate(self.contour.path, rhoRs)
         for iR, R in enumerate(self.R_ijatom_dict):
             for iatom, jatom in self.R_ijatom_dict[R]:
                 f = AijRs[(R, iatom, jatom)]
-                # self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
                 self.A_ijR[(R, iatom, jatom)] = self.contour.integrate_values(f)
 
                 if self.orb_decomposition:
-                    # self.A_ijR_orb[(R, iatom, jatom)] = integrate(
-                    #    self.contour.path, AijRs_orb[(R, iatom, jatom)]
-                    # )
                     self.contour.integrate_values(AijRs_orb[(R, iatom, jatom)])
 
     def get_quantities_per_e(self, e):
