@@ -135,6 +135,9 @@ class BaseMagneticStructure:
         symbols = validate_symbols(value)
         self._symbols = symbols
 
+    @property
+    def numbers(self):
+        return [valid_symbols.index(symbol) for symbol in self._symbols]
 
     @property
     def positions(self):
