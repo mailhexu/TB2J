@@ -68,7 +68,12 @@ class ExchangeDownfolder(ExchangeIO):
 
         '''
         i, j = self.i, self.j
-        magmoms = self.magmoms[self._index_spin]
+        if self.collinear:
+            flat_magmoms = self.magmoms[self._index_spin]
+            magmoms = np.zeros((flat_magmoms.shape[0], 3))
+            magmoms[:, 2] = flat_magmoms
+        else:
+            magmoms = self.magmoms[self._index_spin]
         magmoms /= np.linalg.norm(magmoms, axis=-1)[:, None]
 
         U, _ = zip(*[get_rotation_arrays(magmoms, u=u[None, :]) for u in self.reference_axes])
@@ -149,8 +154,9 @@ class ExchangeDownfolder(ExchangeIO):
         Jani[:, :, *idig] -= Jiso[:, :, None]
 
         self._exchange_values[:, :, 3] = Jiso
-        self._exchange_values[:, :, 6:9] = DMI[:, :, *idmi]
-        self._exchange_values[:, :, 9:] = Jani.reshape(Jani.shape[:2] + (9,))
+        if not self.collinear:
+            self._exchange_values[:, :, 6:9] = DMI[:, :, *idmi]
+            self._exchange_values[:, :, 9:] = Jani.reshape(Jani.shape[:2] + (9,))
 
     @staticmethod
     def downfold_matrix(matrix, basis):
