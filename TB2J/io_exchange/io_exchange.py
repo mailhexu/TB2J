@@ -338,6 +338,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             )
         return Jtensor
 
+    def get_J_tensor_dict(self):
+        Jdict = {}
+        for i, j, R in self.ijR_list():
+            Jdict[(i, j, R)] = self.get_J_tensor(i, j, R)
+        return Jdict
+
     def get_full_Jtensor_for_one_R(self, R, iso_only=False):
         """
         Return the full exchange tensor of all i and j for cell R.
