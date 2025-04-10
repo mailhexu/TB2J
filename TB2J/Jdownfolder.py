@@ -92,7 +92,7 @@ class PWFDownfolder:
             # anchors={(0, 0, 0): (-1, -2, -3, -4)},
             # anchors={(0, 0, 0): ()},
             # use_proj=True,
-            enhance_Amn=2.0,
+            # enhance_Amn=2.0,
         )
         params.update(kwargs)
         wann.set_parameters(**params)
