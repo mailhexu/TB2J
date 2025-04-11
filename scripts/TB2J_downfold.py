@@ -60,9 +60,9 @@ def main():
 
     parser.add_argument(
         "--method",
-        help="The method to downfold the exchange parameter. Options are Lowdin and PWF (projected Wannier function). ",
+        help="The method to downfold the exchange parameter. Options are lowdin and PWF (projected Wannier function). ",
         type=str,
-        default="Lowdin",
+        default="lowdin",
     )
 
     args = parser.parse_args()

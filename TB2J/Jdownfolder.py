@@ -174,7 +174,7 @@ class JDownfolder_pickle:
 
     def _downfold(self, **kwargs):
         JR2 = self.exc.get_full_Jtensor_for_Rlist(asr=True)
-        if self.method == "lowdin":
+        if self.method.strip().lower() == "lowdin":
             d = JDownfolder(
                 JR2,
                 self.exc.Rlist,
