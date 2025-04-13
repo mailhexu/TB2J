@@ -7,4 +7,5 @@ tqdm>=4.42.0
 pathos
 packaging>=20.0
 sympair>=0.1.0
+sisl>=0.9.0
 pre-commit

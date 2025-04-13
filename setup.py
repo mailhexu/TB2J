@@ -43,6 +43,7 @@ setup(
         "HamiltonIO>=0.1.9",
         "pre-commit",
         "sympair>0.1.0",
+        "sisl>=0.9.0",
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
