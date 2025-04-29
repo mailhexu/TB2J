@@ -1,6 +1,6 @@
 import os
 import pickle
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 
 import numpy as np
 from tqdm import tqdm
@@ -96,78 +96,96 @@ class Exchange(ExchangeParams):
 
     def _prepare_orb_dict(self):
         """
-        generate self.ind_mag_atoms and self.orb_dict
+        Generate orbital and magnetic atom mappings needed for exchange calculations.
+
+        Creates:
+        - self.orb_dict: Maps atom indices to their orbital indices
+        - self.labels: Maps atom indices to their orbital labels
+        - self.ind_mag_atoms: List of indices of magnetic atoms
+        - self._spin_dict: Maps atom indices to spin indices
+        - self._atom_dict: Maps spin indices back to atom indices
         """
-        # adict: dictionary of {'Fe': ['dxy', 'dyz', ...], ...}
-        adict = OrderedDict()
-        # orb_dict: {ind_atom:[ind_orb,1,2], ...}
-        self.orb_dict = {}
-        # labels: {0:{dxy, ...}}
-        self.labels = {}
-        # magnetic atoms index
-        self.ind_mag_atoms = []
-
-        sdict = symbol_number(self.atoms)
-
-        for i, base in enumerate(self.basis):
-            if i not in self.exclude_orbs:
-                # e.g. Fe2, dxy, _, _
-                if isinstance(base, str):
-                    atom_sym, orb_sym = base.split("|")[:2]
-                    iatom = sdict[atom_sym]
-                else:
-                    try:
-                        atom_sym, orb_sym = base[:2]
-                        iatom = sdict[atom_sym]
-                    except Exception:
-                        iatom = base.iatom
-                        atom_sym = base.iatom
-                        orb_sym = base.sym
-
-                if atom_sym in adict:
-                    adict[atom_sym].append(orb_sym)
-                else:
-                    adict[atom_sym] = [orb_sym]
-                if iatom not in self.orb_dict:
-                    self.orb_dict[iatom] = [i]
-                    self.labels[iatom] = [orb_sym]
-                else:
-                    self.orb_dict[iatom] += [i]
-                    self.labels[iatom] += [orb_sym]
-
-        # index of magnetic atoms
-        symbols = self.atoms.get_chemical_symbols()
-        tags = self.atoms.get_tags()
-        for i, (sym, tag) in enumerate(zip(symbols, tags)):
-            if sym in self.magnetic_elements or f"{sym}{tag}" in self.magnetic_elements:
-                self.ind_mag_atoms.append(i)
-
-        # sanity check to see if some magnetic atom has no orbital.
-        for iatom in self.ind_mag_atoms:
-            if iatom not in self.orb_dict:
-                raise ValueError(
-                    f"""Cannot find any orbital for atom {iatom}, which is supposed to be magnetic. Please check the Wannier functions."""
-                )
-        if not self._is_collinear:
-            for iatom, orb in self.orb_dict.items():
-                # print(f"iatom: {iatom}, orb: {orb}")
-                nsorb = len(self.orb_dict[iatom])
-                if nsorb % 2 != 0 and False:
-                    raise ValueError(
-                        f"""The number of spin-orbitals for atom {iatom} is not even,
-{nsorb} spin-orbitals are found near this atom.
-which means the spin up/down does not have same number of orbitals.
-This is often because the Wannier functions are wrongly defined,
-or badly localized. Please check the Wannier centers in the Wannier90 output file.
-"""
-                    )
-        self._spin_dict = {}
-        self._atom_dict = {}
-        for ispin, iatom in enumerate(self.ind_mag_atoms):
-            self._spin_dict[iatom] = ispin
-            self._atom_dict[ispin] = iatom
-
+        self._create_orbital_mappings()
+        self._identify_magnetic_atoms()
+        self._validate_orbital_assignments()
+        self._create_spin_mappings()
         self._prepare_orb_mmat()
+
+    def _create_orbital_mappings(self):
+        """Create mappings between atoms and their orbitals."""
+        self.orb_dict = {}  # {atom_index: [orbital_indices]}
+        self.labels = {}  # {atom_index: [orbital_labels]}
+        atom_symbols = symbol_number(self.atoms)
+
+        for orb_idx, base in enumerate(self.basis):
+            if orb_idx in self.exclude_orbs:
+                continue
+
+            # Extract atom and orbital info
+            if isinstance(base, str):
+                atom_sym, orb_sym = base.split("|")[:2]
+                atom_idx = atom_symbols[atom_sym]
+            else:
+                try:
+                    atom_sym, orb_sym = base[:2]
+                    atom_idx = atom_symbols[atom_sym]
+                except Exception:
+                    atom_idx = base.iatom
+                    atom_sym = base.iatom
+                    orb_sym = base.sym
+
+            # Update orbital mappings
+            if atom_idx not in self.orb_dict:
+                self.orb_dict[atom_idx] = [orb_idx]
+                self.labels[atom_idx] = [orb_sym]
+            else:
+                self.orb_dict[atom_idx].append(orb_idx)
+                self.labels[atom_idx].append(orb_sym)
+
+    def _identify_magnetic_atoms(self):
+        """Identify which atoms are magnetic based on elements/tags."""
+        if self.index_magnetic_atoms is not None:
+            self.ind_mag_atoms = self.index_magnetic_atoms
+        else:
+            self.ind_mag_atoms = []
+            symbols = self.atoms.get_chemical_symbols()
+            tags = self.atoms.get_tags()
+
+            for atom_idx, (sym, tag) in enumerate(zip(symbols, tags)):
+                if (
+                    sym in self.magnetic_elements
+                    or f"{sym}{tag}" in self.magnetic_elements
+                ):
+                    self.ind_mag_atoms.append(atom_idx)
+        print(f"Magnetic atoms: {self.ind_mag_atoms}")
+
+    def _validate_orbital_assignments(self):
+        """Validate that magnetic atoms have proper orbital assignments."""
+        # Check all magnetic atoms have orbitals
+        for atom_idx in self.ind_mag_atoms:
+            if atom_idx not in self.orb_dict:
+                raise ValueError(
+                    f"Atom {atom_idx} is magnetic but has no orbitals assigned. "
+                    "Check Wannier function definitions."
+                )
+
+        # For non-collinear case, check spin-orbital pairing
+        if not self._is_collinear:
+            for atom_idx, orbitals in self.orb_dict.items():
+                if len(orbitals) % 2 != 0:
+                    raise ValueError(
+                        f"Atom {atom_idx} has {len(orbitals)} spin-orbitals "
+                        "(should be even). Check Wannier function localization."
+                    )
+
+    def _create_spin_mappings(self):
+        """Create mappings between atom indices and spin indices."""
+        self._spin_dict = {}  # {atom_index: spin_index}
+        self._atom_dict = {}  # {spin_index: atom_index}
+
+        for spin_idx, atom_idx in enumerate(self.ind_mag_atoms):
+            self._spin_dict[atom_idx] = spin_idx
+            self._atom_dict[spin_idx] = atom_idx
 
     def _prepare_orb_mmat(self):
         self.mmats = {}

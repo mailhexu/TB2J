@@ -11,7 +11,9 @@ This currently requires an non-official SIESTA branch which can seperate the spi
 
 - An improved method of the downfolding method which implements the ligand correction to the exchange based on the Wannier function method. This requires the updated version of LaWaF (https://github.com/mailhexu/lawaf) and the updated version of the TB2J\_downfold.py script.
 
-- There is a major refractoring of the interface to the DFT codes. The parsing of the electron Hamiltonian from the DFT codes are now in a separate python package called HamiltonIO (github.com/mailhexu/HamiltonIO). This package is used by TB2J but is made general to be used with other packages too.
+- Added a new parameter (--index_magnetic_atoms) to the wann2J.py, siesta2J.py, and abacus2J.py scripts, so that a more detailed selection of the magnetic atoms than the one in --element is possible. This is useful when we need to select a subset of a specific element in a system.
+
+- There is a major refactoring of the interface to the DFT codes. The parsing of the electron Hamiltonian from the DFT codes are now in a separate python package called HamiltonIO (github.com/mailhexu/HamiltonIO). This package is used by TB2J but is made general to be used with other packages too.
 
 
 #### v0.11.0 October 10, 2024

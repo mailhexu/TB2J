@@ -1,7 +1,7 @@
 Contributors
 ============
 
-The TB2J package is initially developped:
+The TB2J package is initially developed:
 
 * Xu He (mailhexu@gmail.com)
 

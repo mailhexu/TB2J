@@ -89,6 +89,7 @@ def run_wann2J():
         # qspace=args.qspace,
         write_density_matrix=args.write_dm,
         orb_decomposition=args.orb_decomposition,
+        index_magnetic_atoms=args.index_magnetic_atoms,
     )
 
 

@@ -15,6 +15,7 @@ class ExchangeParams:
     efermi: float
     basis = []
     magnetic_elements = []
+    index_magnetic_atoms = None
     include_orbs = {}
     _kmesh = [4, 4, 4]
     emin: float = -15
@@ -55,6 +56,7 @@ class ExchangeParams:
         mae_angles=None,
         orth=False,
         ibz=False,
+        index_magnetic_atoms=None,
     ):
         self.efermi = efermi
         self.basis = basis
@@ -79,6 +81,7 @@ class ExchangeParams:
         self.mae_angles = mae_angles
         self.orth = orth
         self.ibz = ibz
+        self.index_magnetic_atoms = index_magnetic_atoms
 
     def set_params(self, **kwargs):
         for key, val in kwargs.items():
@@ -229,6 +232,21 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         default=False,
     )
 
+    parser.add_argument(
+        "--mae_angles",
+        help="angles for computing MAE, default is 0 0 0",
+        type=float,
+        nargs="*",
+        default=[0.0, 0.0, 0.0],
+    )
+    parser.add_argument(
+        "--index_magnetic_atoms",
+        help="index of magnetic atoms in the unit cell, default is None. If specified, this will be used to determine the atoms to be considered as magnetic atoms, instead of determined from magnetic elements. Note that the index starts from 1 ",
+        type=int,
+        nargs="*",
+        default=None,
+    )
+
     return parser
 
 
@@ -250,4 +268,5 @@ def parser_argument_to_dict(args) -> dict:
         "orb_decomposition": args.orb_decomposition,
         "output_path": args.output_path,
         "orth": args.orth,
+        "index_magnetic_atoms": args.index_magnetic_atoms,
     }
