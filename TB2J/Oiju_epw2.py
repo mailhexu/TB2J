@@ -10,6 +10,7 @@ from TB2J.FDTB import dHdx
 from TB2J.epw import epw_to_dHdx, generate_TB_with_distortion
 from TB2J.epwparser import Epmat, EpmatOneMode
 from ase.io import write
+from  os.path import expanduser
 
 
 def gen_exchange_Oiju_epw(path,
@@ -77,7 +78,7 @@ if __name__ == '__main__':
         gen_exchange_Oiju_epw(
             # path="./U3_SrMnO3_111_slater0.00",
             # path="/home/hexu/projects/SrMnO3/origin_wannier/SrMnO3_FM/center_SrMnO3_slater0.00",
-            path="/home/hexu/projects/TB2J_examples/Wannier/SrMnO3_QE_Wannier90/W90",
+            path=expanduser("~/projects/TB2J_examples/Wannier/SrMnO3_QE_Wannier90/W90"),
             colinear=True,
             posfile='SrMnO3.scf.pwi',
             # prefix_up='wannier90.up',
@@ -85,7 +86,7 @@ if __name__ == '__main__':
             prefix_up="SrMnO3_up",
             prefix_dn="SrMnO3_down",
             prefix_SOC='wannier90',
-            epw_path='/home/hexu/projects/SrMnO3/epw',
+            epw_path=expanduser('~/projects/projects/SrMnO3/epw'),
             epw_prefix='SrMnO3',
             imode=imode,
             Ru=(0, 0, 0),
