@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import copy
-from ase.io import read, write
+
 import numpy as np
-from TB2J.tensor_rotate import Rxx, Rxy, Rxz, Ryx, Ryy, Ryz, Rzx, Rzy, Rzz
+from ase.io import read, write
+
+from TB2J.tensor_rotate import Rzx, Rzy, Rzz
 
 
 def rotate_atom_xyz(atoms, noncollinear=False):
@@ -15,14 +17,16 @@ def rotate_atom_xyz(atoms, noncollinear=False):
     will be generated.
     """
 
+    yield atoms
     rotation_axes = [(1, 0, 0), (0, 1, 0)]
     if noncollinear:
         rotation_axes += [(1, 1, 0), (1, 0, 1), (0, 1, 1)]
-    
+
     for axis in rotation_axes:
         rotated_atoms = copy.deepcopy(atoms)
         rotated_atoms.rotate(90, axis, rotate_cell=True)
         yield rotated_atoms
+    yield atoms
 
 
 def rotate_atom_spin_one_rotation(atoms, Rotation):
@@ -109,7 +113,7 @@ def rotate_xyz(fname, ftype="xyz", noncollinear=False):
     rotated = rotate_atom_xyz(atoms, noncollinear=noncollinear)
 
     for i, rotated_atoms in enumerate(rotated):
-        write(f"atoms_{i+1}.{ftype}", rotated_atoms)
-    write(f"atoms_0.{ftype}", atoms)
-
-    print(f"The output has been written to the atoms_i.{ftype} files. atoms_0.{ftype} contains the reference structure.")
+        write(f"atoms_{i}.{ftype}", rotated_atoms)
+    print(
+        f"The output has been written to the atoms_i.{ftype} files. atoms_0.{ftype} contains the reference structure."
+    )
