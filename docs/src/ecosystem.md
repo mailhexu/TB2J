@@ -28,11 +28,9 @@ TB2J can provide the input files containing the parameters for Heisenberg models
 
 * [AiiDA\_TB2J\_plugin](https://github.com/antelmor/aiida_tb2j_plugin/tree/groundstate2/aiida_tb2j): AiiDA\_TB2J\_plugin is a AiiDA plugin for high-throughput Siesta-TB2J calculations within the framework of [AiiDA](https://www.aiida.net/). 
 
-#### Codes for Linear Spin Wave method and magnon band structure
+#### Codes for Spin Wave methods
 
-* [RAD-tools](https://rad-tools.org/): RAD-tools is a python package for the spin Hamiltonian analysis (with built-in notation changes) and magnon band structure calculation. It is interfaced directly with the TB2J .txt output ("exchange.out") and can compute the magnon band structure via the [linear spin wave theory](https://rad-tools.org/en/stable/user-guide/library/magnon-dispersion.html) for **ferromagnetic**, **antiferromagnetic** and **spiral** magnetic structures. Documentation of the usage can be found on the package website: if you know python -  [use as library](https://rad-tools.org/en/stable/user-guide/module/magnons/index.html) or if you do not know python - [use console interface](https://rad-tools.org/en/stable/user-guide/scripts/rad-plot-tb2j-magnons.html).
-
-
+* [magnopy](https://magnopy.org/): magnopy is an open-source python package that analyses spin Hamiltonian (with built-in manipulation of notation) on periodic lattices at several levels of spin wave theory. It is interfaced directly with the TB2J's text output ("exchange.out") and can output magnon band structure, among other thing. It can be used as a python library of within the command line interface.
   
 
 #### Related software without already-built interface with TB2J
