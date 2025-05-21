@@ -8,15 +8,12 @@ write not only xml output.
 - tom's asd inputs.
 """
 
+# matplotlib.use("Agg")
+import gc
 import os
 import pickle
 from collections.abc import Iterable
 from datetime import datetime
-
-import matplotlib
-
-matplotlib.use("Agg")
-import gc
 
 import matplotlib.pyplot as plt
 import numpy as np
