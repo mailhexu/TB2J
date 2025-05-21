@@ -1,8 +1,39 @@
-# Reading EPW Output Files
+## Workflow for Spin-Phonon Coupling Calculation 
+The full workflow :
+- SCF calculation
+- NSCF calculation (for a required k-point mesh in Full Brillouin zone)
+- Phonon calculation at a grid of q-points
+- post-processing of phonon calculation files (with pp.py) to prepare for EPW. 
+- EPW calculation with output to the Wannier90 hamiltonian, the EPW matrix elements in the wannier basis, and the EPW matrix elements in the atomic basis
+- TB2J calculation with the Wannier90 hamiltonian and the EPW matrix elements in the wannier basis
+
+## DFT and EPW Calculations
+
+  spin-polarized EPW calculation requires Alvaro's version of EPW based on EPW 5.9 (within QE 7.4)
+
+### Tips for DFT and EPW Calculations
+
+#### k-point  and q-point meshes
+
+### Files to be generated
+    Wannier90 files:
+     - .win files (wannier90 input)
+     - .hr files (hamiltonian)
+     - .wout files (wannier90 output)
+     - .xyz files (wannier centers)
+    EPW files:
+     -  .epmatwp (EPW matrix elements in the wannier basis)
+     -  crystal.fmt (crystal structure information)
+     -  epwdata.fmt (basic dimensions and fermi energy)
+     -  WSVecDeg.dat (Wigner-Seitz vectors and degeneracies)
+
+
+
+## Reading EPW Output Files
 
 This document describes how to read and work with Electron-Phonon Wannier (EPW) output files using TB2J.
 
-## File Format Overview
+### File Format Overview
 
 EPW calculations generate several output files that need to be read together:
 
@@ -11,7 +42,7 @@ EPW calculations generate several output files that need to be read together:
 3. `WSVecDeg.dat`: Contains Wigner-Seitz vectors and degeneracies
 4. `.epmatwp`: Binary file containing the electron-phonon matrix elements
 
-## Converting EPW Output to NetCDF
+### Converting EPW Output to NetCDF
 
 For easier handling of the EPW matrix elements, TB2J provides a script to convert the binary `.epmatwp` file to NetCDF format. To use it:
 
@@ -29,7 +60,7 @@ Example:
 python3 convert_epw_to_netcdf.py --path ./epw_calc --prefix sic --ncfile epmat.nc
 ```
 
-## Reading EPW Data Using the Python API
+### Reading EPW Data Using the Python API
 
 TB2J provides the `Epmat` class for handling EPW data. Here's how to use it:
 
@@ -61,7 +92,7 @@ matrix = ep1mode.get_epmat_RgRk(Rg=(0,0,0), Rk=(0,1,0))
 matrix_avg = ep1mode.get_epmat_RgRk(Rg=(0,0,0), Rk=(0,1,0), avg=True)
 ```
 
-## Data Structure
+### Data Structure
 
 The EPW matrix elements are stored with the following dimensions:
 
@@ -76,11 +107,11 @@ The matrix elements in the NetCDF file are stored in two variables:
 
 Each has dimensions `(nRg, nmodes, nRk, nwann, nwann)`.
 
-## Units
+### Units
 
 The matrix elements are automatically converted from Rydberg/Bohr to atomic units when read from the NetCDF file.
 
-## Crystal Structure Information
+### Crystal Structure Information
 
 The crystal structure information can be read from the `crystal.fmt` file using:
 
