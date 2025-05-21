@@ -1,3 +1,12 @@
+"""
+Module for calculating spin-phonon coupling using EPW (Electron-Phonon Wannier) data.
+
+This module provides functionality to calculate spin-phonon coupling parameters
+by combining Wannier90 electronic structure data with EPW electron-phonon
+matrix elements. It uses perturbation theory to compute the coupling between
+spin and lattice degrees of freedom.
+"""
+
 import os
 import numpy as np
 import copy
@@ -13,7 +22,7 @@ from ase.io import write
 from  os.path import expanduser
 
 
-def gen_exchange_Oiju_epw(path,
+def gen_exchange_Oiju_epw(path: str,
                           colinear=True,
                           posfile='POSCAR',
                           prefix_up='wannier90.up',
@@ -21,7 +30,7 @@ def gen_exchange_Oiju_epw(path,
                           prefix_SOC='wannier90',
                           epw_path='./',
                           epw_prefix='SrMnO3',
-                          imode=0,
+                          idisp=0,
                           Ru=(0, 0, 0),
                           min_hopping_norm=1e-6,
                           Rcut=None,
@@ -33,9 +42,69 @@ def gen_exchange_Oiju_epw(path,
                           nz=50,
                           np=1,
                           exclude_orbs=[],
-                          description='',
-                          list_iatom=None,
-                          output_path='TB2J_results'):
+                          description: str = '',
+                          list_iatom: list = None,
+                          output_path: str = 'TB2J_results'):
+    """Calculate spin-phonon coupling parameters using EPW data.
+
+    This function combines Wannier90 electronic structure with EPW electron-phonon
+    matrix elements to compute the spin-phonon coupling. It can handle both
+    collinear and non-collinear magnetic systems.
+
+    Parameters
+    ----------
+    path : str
+        Path to the Wannier90 calculation directory
+    colinear : bool, default=True
+        Whether the system is collinear magnetic
+    posfile : str, default='POSCAR'
+        Name of the structure file
+    prefix_up : str, default='wannier90.up'
+        Prefix for spin-up Wannier90 files
+    prefix_dn : str, default='wannier90.dn'
+        Prefix for spin-down Wannier90 files
+    prefix_SOC : str, default='wannier90'
+        Prefix for SOC Wannier90 files
+    epw_path : str, default='./'
+        Path to the EPW calculation directory
+    epw_prefix : str, default='SrMnO3'
+        Prefix for EPW files
+    idisp : int, default=0
+        Index of the atomic displacement pattern to analyze
+    Ru : tuple, default=(0,0,0)
+        R vector for the unit cell
+    min_hopping_norm : float, default=1e-6
+        Minimum norm for hopping terms
+    Rcut : float, optional
+        Cutoff radius for interactions
+    efermi : float, default=3.0
+        Fermi energy in eV
+    magnetic_elements : list, default=[]
+        List of magnetic elements
+    kmesh : list, default=[5,5,5]
+        k-point mesh dimensions
+    emin : float, default=-12.0
+        Minimum energy for integration
+    emax : float, default=0.0
+        Maximum energy for integration
+    nz : int, default=50
+        Number of energy points
+    np : int, default=1
+        Number of processors for parallel calculation
+    exclude_orbs : list, default=[]
+        List of orbitals to exclude
+    description : str, default=''
+        Description of the calculation
+    list_iatom : list, optional
+        List of atoms to include in calculation
+    output_path : str, default='TB2J_results'
+        Path for output files
+
+    Returns
+    -------
+    None
+        Results are written to the specified output_path
+    """
     atoms = read(os.path.join(path, posfile))
     if colinear:
         tbmodel_up = MyTB.read_from_wannier_dir(path=path,
@@ -67,14 +136,14 @@ def gen_exchange_Oiju_epw(path,
                                  exclude_orbs=exclude_orbs,
                                  list_iatom=list_iatom,
                                  description=description)
-        exchange.set_epw(Ru, imode=imode, epmat=epw)
+        exchange.set_epw(Ru, imode=idisp, epmat=epw)
         exchange.run(output_path)
 
 
 if __name__ == '__main__':
     # for imode in range(15):
     # for imode in range(3, 15):
-    for imode in [3, 6, 7]:
+    for idisp in [3, 6, 7]:
         gen_exchange_Oiju_epw(
             # path="./U3_SrMnO3_111_slater0.00",
             # path="/home/hexu/projects/SrMnO3/origin_wannier/SrMnO3_FM/center_SrMnO3_slater0.00",
@@ -88,7 +157,7 @@ if __name__ == '__main__':
             prefix_SOC='wannier90',
             epw_path=expanduser('~/projects/projects/SrMnO3/epw'),
             epw_prefix='SrMnO3',
-            imode=imode,
+            idisp=idisp,
             Ru=(0, 0, 0),
             Rcut=8,
             efermi=10.67,
@@ -101,4 +170,4 @@ if __name__ == '__main__':
             exclude_orbs=[],
             description='',
             # list_iatom=[1],
-            output_path=f"VT_{imode}_withcutoff0.1")
+            output_path=f"VT_{idisp}_withcutoff0.1")
