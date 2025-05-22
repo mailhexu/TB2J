@@ -251,6 +251,11 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
 
 
 def parser_argument_to_dict(args) -> dict:
+    ind_mag_atoms = args.index_magnetic_atoms
+    if ind_mag_atoms is not None:
+        ind_mag_atoms = [int(i) - 1 for i in ind_mag_atoms]
+    else:
+        ind_mag_atoms = None
     return {
         "efermi": args.efermi,
         "magnetic_elements": args.elements,
@@ -268,5 +273,5 @@ def parser_argument_to_dict(args) -> dict:
         "orb_decomposition": args.orb_decomposition,
         "output_path": args.output_path,
         "orth": args.orth,
-        "index_magnetic_atoms": args.index_magnetic_atoms,
+        "index_magnetic_atoms": ind_mag_atoms,
     }

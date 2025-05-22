@@ -61,9 +61,13 @@ def run_wann2J():
     if args.efermi is None:
         print("Please input fermi energy using --efermi ")
         sys.exit()
-    if args.elements is None:
+    if args.elements is None and args.index_magnetic_atoms is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
+
+    index_magnetic_atoms = args.index_magnetic_atoms
+    if index_magnetic_atoms is not None:
+        index_magnetic_atoms = [i - 1 for i in index_magnetic_atoms]
 
     gen_exchange(
         path=args.path,
@@ -89,7 +93,7 @@ def run_wann2J():
         # qspace=args.qspace,
         write_density_matrix=args.write_dm,
         orb_decomposition=args.orb_decomposition,
-        index_magnetic_atoms=args.index_magnetic_atoms,
+        index_magnetic_atoms=index_magnetic_atoms,
     )
 
 

@@ -47,6 +47,10 @@ def run_siesta2J():
     #    else:
     #        include_orbs[element] = None
 
+    index_magnetic_atoms = args.index_magnetic_atoms
+    if index_magnetic_atoms is not None:
+        index_magnetic_atoms = [i - 1 for i in index_magnetic_atoms]
+
     gen_exchange_siesta(
         fdf_fname=args.fdf_fname,
         kmesh=args.kmesh,
@@ -66,7 +70,7 @@ def run_siesta2J():
         orb_decomposition=args.orb_decomposition,
         read_H_soc=args.split_soc,
         orth=args.orth,
-        index_magnetic_atoms=args.index_magnetic_atoms,
+        index_magnetic_atoms=index_magnetic_atoms,
     )
 
 

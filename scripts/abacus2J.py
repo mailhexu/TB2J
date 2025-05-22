@@ -28,7 +28,11 @@ def run_abacus2J():
 
     args = parser.parse_args()
 
-    if args.elements is None:
+    index_magnetic_atoms = args.index_magnetic_atoms
+    if index_magnetic_atoms is not None:
+        index_magnetic_atoms = [i - 1 for i in index_magnetic_atoms]
+
+    if args.elements is None and index_magnetic_atoms is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
 
@@ -49,7 +53,7 @@ def run_abacus2J():
         nproc=args.nproc,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
-        index_magnetic_atoms=args.index_magnetic_atoms,
+        index_magnetic_atoms=index_magnetic_atoms,
         cutoff=args.cutoff,
     )
 
