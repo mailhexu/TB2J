@@ -9,7 +9,9 @@ The full workflow :
 
 ## DFT and EPW Calculations
 
-  spin-polarized EPW calculation requires Alvaro's version of EPW based on EPW 5.9 (within QE 7.4)
+##   spin-polarized EPW calculation requires Alvaro's version o
+
+## f EPW based on EPW 5.9 (within QE 7.4)
 
 ### Tips for DFT and EPW Calculations
 
