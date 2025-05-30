@@ -9,6 +9,7 @@ class BandsPlot:
     def __init__(self, bands, kpath, **kwargs):
         self.bands = bands
         self.kpath = kpath
+        self.bands *= 1000
 
         plot_options = kwargs
         self.linewidth = plot_options.pop("linewidth", 1.5)

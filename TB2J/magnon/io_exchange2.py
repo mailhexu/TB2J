@@ -1,3 +1,13 @@
+"""
+This module provides functionality for handling magnetic exchange interactions and computing magnon band structures.
+
+It includes classes and functions for:
+- Reading and writing exchange interaction data
+- Computing exchange tensors and magnon energies
+- Plotting magnon band structures
+- Converting between different magnetic structure representations
+"""
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -5,8 +15,28 @@ from ..mathutils import generate_grid, get_rotation_arrays, round_to_precision, 
 from .plot import BandsPlot
 from .structure import BaseMagneticStructure, get_attribute_array
 
+__all__ = [
+    "ExchangeIO",
+    "plot_tb2j_magnon_bands",
+]
+
 
 def branched_keys(tb2j_keys, npairs):
+    """
+    Organize TB2J keys into branches based on magnetic site pairs.
+
+    Parameters
+    ----------
+    tb2j_keys : list
+        List of TB2J dictionary keys containing interaction information
+    npairs : int
+        Number of magnetic site pairs
+
+    Returns
+    -------
+    list
+        List of branched keys organized by magnetic site pairs
+    """
     msites = int((2 * npairs) ** 0.5)
     branch_size = len(tb2j_keys) // msites**2
     new_keys = sorted(tb2j_keys, key=lambda x: -x[1] + x[2])[
@@ -21,6 +51,16 @@ def branched_keys(tb2j_keys, npairs):
 
 
 def correct_content(content, quadratic=False):
+    """
+    Ensure content dictionary has all required entries with proper initialization.
+
+    Parameters
+    ----------
+    content : dict
+        Dictionary containing exchange interaction data
+    quadratic : bool, optional
+        Whether to include biquadratic interactions, by default False
+    """
     n = max(content["index_spin"]) + 1
     data_shape = {"exchange_Jdict": ()}
 
@@ -34,6 +74,40 @@ def correct_content(content, quadratic=False):
 
 
 def Hermitize(array):
+    """
+    Convert an array into its Hermitian form by constructing a Hermitian matrix.
+
+    A Hermitian matrix H has the property that H = H†, where H† is the conjugate transpose.
+    This means H[i,j] = conj(H[j,i]) for all indices i,j. The function takes an input array
+    representing the upper triangular part of the matrix and constructs the full Hermitian
+    matrix by:
+    1. Placing the input values in the upper triangular part
+    2. Computing the conjugate transpose of these values for the lower triangular part
+
+    This is commonly used in quantum mechanics and magnetic systems where Hamiltonians
+    must be Hermitian to ensure real eigenvalues.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Input array containing the upper triangular elements of the matrix.
+        Shape should be (n*(n+1)/2, ...) where n is the dimension of
+        the resulting square matrix.
+
+    Returns
+    -------
+    numpy.ndarray
+        Full Hermitian matrix with shape (n, n, ...), where n is computed
+        from the input array size. The result satisfies result[i,j] = conj(result[j,i])
+        for all indices i,j.
+
+    Example
+    -------
+    >>> arr = np.array([1+0j, 2+1j, 3+0j])  # Upper triangular elements for 2x2 matrix
+    >>> Hermitize(arr)
+    array([[1.+0.j, 2.+1.j],
+           [2.-1.j, 3.+0.j]])
+    """
     n = int((2 * array.shape[0]) ** 0.5)
     result = np.zeros((n, n) + array.shape[1:], dtype=complex)
     u_indices = np.triu_indices(n)
@@ -45,6 +119,38 @@ def Hermitize(array):
 
 
 class ExchangeIO(BaseMagneticStructure):
+    """
+    Class for handling magnetic exchange interactions and computing magnon properties.
+
+    This class provides functionality for:
+    - Managing magnetic structure information
+    - Computing exchange tensors
+    - Calculating magnon band structures
+    - Reading TB2J format files
+    - Visualizing magnon bands
+
+    Parameters
+    ----------
+    atoms : ase.Atoms, optional
+        ASE atoms object containing the structure
+    cell : array_like, optional
+        3x3 matrix defining the unit cell
+    elements : list, optional
+        List of chemical symbols for atoms
+    positions : array_like, optional
+        Atomic positions
+    magmoms : array_like, optional
+        Magnetic moments for each atom
+    pbc : tuple, optional
+        Periodic boundary conditions, default (True, True, True)
+    magnetic_elements : list, optional
+        List of magnetic elements in the structure
+    kmesh : list, optional
+        k-point mesh dimensions, default [1, 1, 1]
+    collinear : bool, optional
+        Whether the magnetic structure is collinear, default True
+    """
+
     def __init__(
         self,
         atoms=None,
@@ -75,6 +181,7 @@ class ExchangeIO(BaseMagneticStructure):
 
     @property
     def magnetic_elements(self):
+        """List of magnetic elements in the structure."""
         return self._magnetic_elements
 
     @magnetic_elements.setter
@@ -91,6 +198,7 @@ class ExchangeIO(BaseMagneticStructure):
 
     @property
     def interacting_pairs(self):
+        """List of pairs of interacting magnetic sites."""
         return self._pairs
 
     def _set_index_pairs(self):
@@ -109,6 +217,7 @@ class ExchangeIO(BaseMagneticStructure):
 
     @property
     def kmesh(self):
+        """K-point mesh dimensions for sampling the Brillouin zone."""
         return self._kmesh
 
     @kmesh.setter
@@ -126,9 +235,20 @@ class ExchangeIO(BaseMagneticStructure):
 
     @property
     def vectors(self):
+        """Array of interaction vectors between magnetic sites."""
         return self._exchange_values[:, :, :3]
 
     def set_vectors(self, values=None, cartesian=False):
+        """
+        Set the interaction vectors between magnetic sites.
+
+        Parameters
+        ----------
+        values : array_like, optional
+            Array of interaction vectors
+        cartesian : bool, optional
+            Whether the vectors are in Cartesian coordinates, default False
+        """
         try:
             pairs = self._pairs
         except AttributeError:
@@ -165,6 +285,21 @@ class ExchangeIO(BaseMagneticStructure):
         self._exchange_values = exchange_values
 
     def _get_neighbor_indices(self, neighbors, tol=1e-4):
+        """
+        Get indices of neighbor pairs based on distance.
+
+        Parameters
+        ----------
+        neighbors : list
+            List of neighbor shells to consider
+        tol : float, optional
+            Distance tolerance for neighbor shell assignment, default 1e-4
+
+        Returns
+        -------
+        tuple
+            Indices corresponding to the specified neighbor shells
+        """
         distance = np.linalg.norm(self.vectors @ self.cell, axis=-1)
         distance = round_to_precision(distance, tol)
         neighbors_distance = np.unique(np.sort(distance))
@@ -175,6 +310,20 @@ class ExchangeIO(BaseMagneticStructure):
         return indices
 
     def set_exchange_array(self, name, values, neighbors=None, tol=1e-4):
+        """
+        Set exchange interaction values for specified neighbors.
+
+        Parameters
+        ----------
+        name : str
+            Type of exchange interaction ('Jiso', 'Biquad', 'DMI', or 'Jani')
+        values : array_like
+            Exchange interaction values
+        neighbors : list, optional
+            List of neighbor shells to assign values to
+        tol : float, optional
+            Distance tolerance for neighbor shell assignment, default 1e-4
+        """
         if self.vectors.size == 0:
             raise AttributeError("The intraction vectors must be set first.")
 
@@ -229,6 +378,19 @@ class ExchangeIO(BaseMagneticStructure):
         return self._exchange_values[:, :, 9:].reshape(matrix_shape)
 
     def exchange_tensor(self, anisotropic=True):
+        """
+        Compute the exchange interaction tensor.
+
+        Parameters
+        ----------
+        anisotropic : bool, optional
+            Whether to include anisotropic interactions, default True
+
+        Returns
+        -------
+        numpy.ndarray
+            Exchange interaction tensor
+        """
         shape = self._exchange_values.shape[:2] + (3, 3)
         tensor = np.zeros(shape, dtype=float)
 
@@ -244,6 +406,21 @@ class ExchangeIO(BaseMagneticStructure):
         return tensor
 
     def Jq(self, kpoints, anisotropic=True):
+        """
+        Compute the exchange interactions in reciprocal space.
+
+        Parameters
+        ----------
+        kpoints : array_like
+            k-points at which to evaluate the exchange interactions
+        anisotropic : bool, optional
+            Whether to include anisotropic interactions, default True
+
+        Returns
+        -------
+        numpy.ndarray
+            Exchange interactions in reciprocal space
+        """
         vectors = self._exchange_values[:, :, :3].copy()
         tensor = self.exchange_tensor(anisotropic=anisotropic)
 
@@ -268,6 +445,23 @@ class ExchangeIO(BaseMagneticStructure):
         return Jq
 
     def Hq(self, kpoints, anisotropic=True, u=uz):
+        """
+        Compute the magnon Hamiltonian in reciprocal space.
+
+        Parameters
+        ----------
+        kpoints : array_like
+            k-points at which to evaluate the Hamiltonian
+        anisotropic : bool, optional
+            Whether to include anisotropic interactions, default True
+        u : array_like, optional
+            Reference direction for spin quantization axis
+
+        Returns
+        -------
+        numpy.ndarray
+            Magnon Hamiltonian matrix at each k-point
+        """
         if self.collinear:
             magmoms = np.zeros((self._index_spin.size, 3))
             magmoms[:, 2] = self.magmoms[self._index_spin]
@@ -354,6 +548,14 @@ class ExchangeIO(BaseMagneticStructure):
         return labels, bands
 
     def plot_magnon_bands(self, **kwargs):
+        """
+        Plot magnon band structure.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments passed to get_magnon_bands and plotting functions
+        """
         filename = kwargs.pop("filename", None)
         kpath, bands = self.get_magnon_bands(**kwargs)
         bands_plot = BandsPlot(bands, kpath)
@@ -417,3 +619,70 @@ class ExchangeIO(BaseMagneticStructure):
             exchange.set_exchange_array("Biquad", Biquad)
 
         return exchange
+
+
+def plot_tb2j_magnon_bands(
+    pickle_file: str = "TB2J.pickle",
+    path: str = None,
+    npoints: int = 300,
+    special_points: dict = None,
+    anisotropic: bool = False,
+    quadratic: bool = False,
+    pbc: tuple = (True, True, True),
+    filename: str = None,
+):
+    """
+    Load TB2J data and plot magnon band structure in one step.
+
+    This is a convenience function that combines loading TB2J data and plotting
+    magnon bands. It first loads the magnetic structure and exchange interactions
+    from a TB2J pickle file, then calculates and plots the magnon band structure.
+
+    Parameters
+    ----------
+    pickle_file : str, optional
+        Path to the TB2J pickle file, default "TB2J.pickle"
+    path : str, optional
+        High-symmetry k-point path for band structure plot
+        (e.g., "GXMG" for a square lattice)
+    npoints : int, optional
+        Number of k-points for band structure calculation, default 300
+    special_points : dict, optional
+        Dictionary of special k-points for custom paths
+    anisotropic : bool, optional
+        Whether to include anisotropic interactions, default False
+    quadratic : bool, optional
+        Whether to include biquadratic interactions, default False
+    pbc : tuple, optional
+        Periodic boundary conditions, default (True, True, True)
+    filename : str, optional
+        If provided, save the plot to this file
+
+    Returns
+    -------
+    exchange : ExchangeIO
+        The ExchangeIO instance containing the loaded data and plot
+
+    Example
+    -------
+    >>> # Basic usage with default parameters
+    >>> plot_tb2j_magnon_bands()
+
+    >>> # Custom path and saving to file
+    >>> plot_tb2j_magnon_bands(
+    ...     path="GXMG",
+    ...     anisotropic=True,
+    ...     filename="magnon_bands.png"
+    ... )
+    """
+    # Load the TB2J data
+    exchange = ExchangeIO.load_tb2j(
+        pickle_file=pickle_file, pbc=pbc, anisotropic=anisotropic, quadratic=quadratic
+    )
+
+    # Plot the magnon bands
+    exchange.plot_magnon_bands(
+        path=path, npoints=npoints, special_points=special_points, filename=filename
+    )
+
+    return exchange
