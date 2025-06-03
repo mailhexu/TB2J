@@ -4,6 +4,7 @@ import numpy as np
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.io_merge import merge
 from TB2J.MAEGreen import MAEGreen
 
 try:
@@ -156,7 +157,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 atoms=model.atoms,
                 basis=basis,
                 efermi=None,
-                angles="miller",
+                angles="axis",
                 # magnetic_elements=magnetic_elements,
                 # include_orbs=include_orbs,
                 **exargs,
@@ -165,9 +166,9 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             # phis = [0, 0, 0, 0]
             # MAE.set_angles(thetas=thetas, phis=phis)
             MAE.run(output_path=f"{output_path}_anisotropy", with_eigen=False)
-            print(
-                f"MAE calculation finished. The results are in {output_path} directory."
-            )
+            # print(
+            #    f"MAE calculation finished. The results are in {output_path} directory."
+            # )
 
             angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
             for key, val in angle.items():
@@ -191,3 +192,13 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 print(
                     f"All calculation finished. The results are in {output_path_full} directory."
                 )
+
+            merge(
+                "TB2J_results_x",
+                "TB2J_results_y",
+                "TB2J_results_z",
+                main_path=None,
+                save=True,
+                write_path="TB2J_results",
+            )
+            print("Final TB2J_results written to TB2J_results directory.")

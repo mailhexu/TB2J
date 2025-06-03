@@ -136,7 +136,7 @@ class JDownfolder_pickle:
         outpath,
         qmesh=[7, 7, 7],
         iso_only=False,
-        method="pwf",
+        method="lowdin",
         **kwargs,
     ):
         self.exc = SpinIO.load_pickle(path=inpath, fname="TB2J.pickle")
@@ -146,6 +146,7 @@ class JDownfolder_pickle:
         self.ligands = ligands
         self.outpath = outpath
         self.method = method
+        print("Using method:", self.method)
 
         # read atomic structure
         self.atoms = self.exc.atoms
@@ -176,7 +177,7 @@ class JDownfolder_pickle:
 
     def _downfold(self, **kwargs):
         JR2 = self.exc.get_full_Jtensor_for_Rlist(asr=True)
-        if self.method == "lowdin":
+        if self.method.lower() == "lowdin":
             d = JDownfolder(
                 JR2,
                 self.exc.Rlist,
