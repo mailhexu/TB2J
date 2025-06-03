@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from TB2J.magnon import plot_tb2j_magnon_bands
 
 
