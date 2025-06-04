@@ -50,7 +50,7 @@ def test_fibonacci_sphere():
     import matplotlib.pyplot as plt
 
     # Generate points on the sphere
-    samples = 20000
+    samples = 200
     theta, phi = fibonacci_sphere(samples)
     # theta, phi = fibonacci_semisphere(samples)
 

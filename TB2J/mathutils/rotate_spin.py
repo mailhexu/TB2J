@@ -132,7 +132,6 @@ def rotate_spinor_matrix_reshape(M, theta, phi):
     """
     N = M.shape[0] // 2
     Mnew = np.reshape(M, (N, 2, N, 2)).swapaxes(1, 2)
-    # print("Mnew:", Mnew)
     U = rotation_matrix(theta, phi)
     UT = U.conj().T
     Mnew = UT @ Mnew @ U
