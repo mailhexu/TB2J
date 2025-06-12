@@ -11,7 +11,7 @@ It includes classes and functions for:
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from ..mathutils import generate_grid, get_rotation_arrays, round_to_precision, uz
+from .magnon_math import generate_grid, get_rotation_arrays, round_to_precision, uz
 from .plot import BandsPlot
 from .structure import BaseMagneticStructure, get_attribute_array
 
@@ -112,8 +112,12 @@ def Hermitize(array):
     result = np.zeros((n, n) + array.shape[1:], dtype=complex)
     u_indices = np.triu_indices(n)
 
-    result[*u_indices] = array
-    result.swapaxes(0, 1)[*u_indices] = array.swapaxes(-1, -2).conj()
+    # for python>=3.11
+    # result[*u_indices] = array
+    # result.swapaxes(0, 1)[*u_indices] = array.swapaxes(-1, -2).conj()
+    # for python<3.11
+    result[u_indices[0], u_indices[1]] = array
+    result.swapaxes(0, 1)[u_indices[0], u_indices[1]] = array.swapaxes(-1, -2).conj()
 
     return result
 
@@ -395,11 +399,14 @@ class ExchangeIO(BaseMagneticStructure):
         tensor = np.zeros(shape, dtype=float)
 
         if anisotropic and not self.collinear:
+            # anisotropic exchange tensor
             tensor += self._exchange_values[:, :, 9:].reshape(shape)
+            # DMI
             pos_indices = ([1, 2, 0], [2, 0, 1])
             neg_indices = ([2, 0, 1], [1, 2, 0])
             tensor[:, :, *pos_indices] += self._exchange_values[:, :, 6:9]
             tensor[:, :, *neg_indices] -= self._exchange_values[:, :, 6:9]
+        # isotropic exchange
         diag_indices = ([0, 1, 2], [0, 1, 2])
         tensor[:, :, *diag_indices] += self._exchange_values[:, :, 3, None]
 

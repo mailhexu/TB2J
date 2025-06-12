@@ -19,6 +19,14 @@ def generate_grid(kmesh, sort=True):
     return grid
 
 
+# def JR_to_Jq(JR, Rlist, qpt, vecn):
+#    for iR, R in enumerate(Rlist):
+#        phase = 2 * np.pi * R @ qpt
+#        rv = phase * vecn
+#        Rot = Rotation.from_rotvec(rv.reshape(-1, 3)).as_matrix().reshape(R.shape[0], 3, 3)
+#
+
+
 def get_rotation_arrays(magmoms, u=uz):
     dim = magmoms.shape[0]
     v = magmoms
