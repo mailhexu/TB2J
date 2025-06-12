@@ -1,7 +1,6 @@
 import gc
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import tqdm
 from HamiltonIO.abacus.abacus_wrapper import AbacusSplitSOCParser
@@ -32,7 +31,9 @@ class MAEGreen(ExchangeNCL):
         """
         super().__init__(**kwargs)
         self.natoms = len(self.atoms)
-        if angles is None or angles == "axis":
+        if angles is None or angles == "xyz":
+            self.set_angles_xyz()
+        elif angles == "axis":
             self.set_angles_axis()
         elif angles == "scan":
             self.set_angles_scan()
@@ -50,6 +51,11 @@ class MAEGreen(ExchangeNCL):
         self.es = np.zeros(nangles, dtype=complex)
         self.es_atom = np.zeros((nangles, self.natoms), dtype=complex)
         self.es_atom_orb = DefaultDict(lambda: 0)
+
+    def set_angles_xyz(self):
+        """theta and phi are defined as the x, y, z, xy, yz, xz, xyz, x-yz, -xyz, -x-yz axis."""
+        self.thetas = [np.pi / 2, np.pi / 2, 0.0]
+        self.phis = [np.pi / 2, 0, 0.0]
 
     def set_angles_axis(self):
         """theta and phi are defined as the x, y, z, xy, yz, xz, xyz, x-yz, -xyz, -x-yz axis."""
@@ -75,7 +81,6 @@ class MAEGreen(ExchangeNCL):
         self.thetas = thetas
         self.phis = phis
         self.angle_pairs = list(zip(thetas, phis))
-        # remove duplicates of angles using sets.
         self.angle_pairs = list(set(self.angle_pairs))
         self.thetas, self.phis = zip(*self.angle_pairs)
 
@@ -248,11 +253,11 @@ class MAEGreen(ExchangeNCL):
         Path(output_path).mkdir(exist_ok=True)
         fname = f"{output_path}/MAE.dat"
         fname_orb = f"{output_path}/MAE_orb.dat"
-        fname_tensor = f"{output_path}/MAE_tensor.dat"
-        if figure3d is not None:
-            fname_fig3d = f"{output_path}/{figure3d}"
-        if figure_contourf is not None:
-            fname_figcontourf = f"{output_path}/{figure_contourf}"
+        # fname_tensor = f"{output_path}/MAE_tensor.dat"
+        # if figure3d is not None:
+        #    fname_fig3d = f"{output_path}/{figure3d}"
+        # if figure_contourf is not None:
+        #    fname_figcontourf = f"{output_path}/{figure_contourf}"
 
         # ouput with eigenvalues.
         if with_eigen:
@@ -277,18 +282,18 @@ class MAEGreen(ExchangeNCL):
                     f.write(f"{ea*1e3:.8f} ")
                 f.write("\n")
 
-        self.ani = self.fit_anisotropy_tensor()
-        with open(fname_tensor, "w") as f:
-            f.write("# Anisotropy tensor in meV\n")
-            f.write(f"{self.ani.tensor_strings(include_isotropic=False)}\n")
+        # self.ani = self.fit_anisotropy_tensor()
+        # with open(fname_tensor, "w") as f:
+        #    f.write("# Anisotropy tensor in meV\n")
+        #    f.write(f"{self.ani.tensor_strings(include_isotropic=False)}\n")
 
-        if figure3d is not None:
-            self.ani.plot_3d(figname=fname_fig3d, show=False)
+        # if figure3d is not None:
+        #    self.ani.plot_3d(figname=fname_fig3d, show=False)
 
-        if figure_contourf is not None:
-            self.ani.plot_contourf(figname=fname_figcontourf, show=False)
+        # if figure_contourf is not None:
+        #    self.ani.plot_contourf(figname=fname_figcontourf, show=False)
 
-        plt.close()
+        # plt.close()
         gc.collect()
 
         with open(fname_orb, "w") as f:
