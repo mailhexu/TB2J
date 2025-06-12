@@ -24,6 +24,8 @@ There are some optional dependencies, which you need to install if needed.
 -  sisl>0.10.0 (optional) for Siesta interface
 -  GPAW (optional) For gpaw interface (not yet fully operational).
 
+
+
 How to install
 --------------
 
@@ -45,7 +47,7 @@ It is suggested that it being installed within a virtual environment
 using e.g. pyenv or conda.
 
 By default, TB2J only forces the non-optional dependencies to be
-installed automatically. The sisl package which is used to read the
+installed automatically. The sisl package (with netcdf4) which is used to read the
 Hamiltonian from the Siesta or OpenMX output is needed, which can also
 be installed with pip. The GPAW-TB2J interface is through python
 directly, which of course requires the gpaw python package. The sisl and
@@ -53,7 +55,7 @@ gpaw python package can be installed via pip, too. For example:
 
 ::
 
-    pip3 install sisl
+    pip3 install sisl netcdf4
 
 
 How to install in a virtual environment
