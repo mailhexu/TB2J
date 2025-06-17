@@ -1,31 +1,52 @@
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from TB2J.io_exchange import SpinIO
-
-from ..mathutils import Hermitize, get_rotation_arrays, uz
+from ..io_exchange import SpinIO
+from ..mathutils import Hermitize, get_rotation_arrays
 from .plot import BandsPlot
 
 
+@dataclass
 class Magnon:
-    """ """
+    """
+    Magnon calculator implementation using dataclass
+    """
 
-    def __init__(self, exc: SpinIO, iso_only=False, asr=False):
-        self.exc = exc
-        self.nspin = exc.get_nspin()
-        self.ind_atoms = exc.ind_atoms
-        self.magmom = np.array([exc.spinat[exc.iatom(i)] for i in range(self.nspin)])
-        self.Rlist = exc.Rlist
-        self.JR = exc.get_full_Jtensor_for_Rlist(asr=asr, iso_only=iso_only)
-        self._Q = None
-        self._uz = np.array([[0.0, 0.0, 1.0]], dtype=float)
-        self._n = np.array([0, 0, 1], dtype=float)
+    nspin: int
+    # ind_atoms: list
+    magmom: np.ndarray
+    Rlist: np.ndarray
+    JR: np.ndarray
+    _Q: np.ndarray = np.array([0.0, 0.0, 0.0], dtype=float)
+    _uz: np.ndarray = np.array([[0.0, 0.0, 1.0]], dtype=float)
+    _n: np.ndarray = np.array([0, 0, 1], dtype=float)
+
+    def set_reference(self, Q, uz, n):
+        """
+        Set reference propagation vector and quantization axis
+
+        Parameters
+        ----------
+        Q : array_like
+            Propagation vector
+        uz : array_like
+            Quantization axis
+        n : array_like
+            Normal vector for rotation
+        """
+        self.set_propagation_vector(Q)
+        self._uz = np.array(uz, dtype=float)
+        self._n = np.array(n, dtype=float)
 
     def set_propagation_vector(self, Q):
+        """Set propagation vector"""
         self._Q = np.array(Q)
 
     @property
     def Q(self):
+        """Get propagation vector"""
         if self._Q is None:
             raise ValueError("Propagation vector Q is not set.")
         return self._Q
@@ -42,55 +63,65 @@ class Magnon:
         """
         Compute the exchange interactions in reciprocal space.
 
+        The exchange interactions J(q) are computed using the Fourier transform:
+        J(q) = ∑_R J(R) exp(iq·R)
+
+        Array shapes and indices:
+        - kpoints: (nkpt, 3) array of k-points
+        - Rlist: (nR, 3) array of real-space lattice vectors
+        - JR: (nR, nspin, nspin, 3, 3) array of exchange tensors in real space
+            where nspin is number of magnetic atoms
+        - Output Jq: (nkpt, nspin, nspin, 3, 3) array of exchange tensors in q-space
+
+        If propagation vector Q is set, each J(R) is rotated before the Fourier transform:
+        J'_mn(R) = R_m(ϕ)^T J(R) R_n(ϕ)
+        where ϕ = 2π R·Q and R(ϕ) is rotation matrix around axis n by angle ϕ
+
         Parameters
         ----------
-        kpoints : array_like
+        kpoints : array_like (nkpt, 3)
             k-points at which to evaluate the exchange interactions
+
+        Returns
+        -------
+        numpy.ndarray (nkpt, nspin, nspin, 3, 3)
+            Exchange interaction tensors J(q) at each k-point
+            First two indices are for magnetic atom pairs
+            Last two indices are for 3x3 tensor components
         """
         Rlist = np.array(self.Rlist)
         JR = self.JR
+        JRprime = JR.copy()
 
         for iR, R in enumerate(Rlist):
             if self._Q is not None:
-                phi = 2 * np.pi * R @ self._Q
-                rv = phi * self._n
+                # Rotate exchange tensors based on propagation vector
+                phi = 2 * np.pi * R @ self._Q  # angle ϕ = 2π R·Q
+                rv = phi * self._n  # rotation vector
                 Rmat = Rotation.from_rotvec(rv).as_matrix()
-                JR[iR] = np.einsum("rijxy, yz -> rixzy", JR[iR], Rmat)
+                # J'_mn(R) = R_m(ϕ)^T J(R) R_n(ϕ) using Einstein summation.
+                # Here m is always in the R=0, thus the rotation is only applied on the
+                # n , so only on the right.
+                JRprime[iR] = np.einsum(" rijxy, yb -> rijab", JR[iR], Rmat)
 
         nkpt = kpoints.shape[0]
         Jq = np.zeros((nkpt, self.nspin, self.nspin, 3, 3), dtype=complex)
 
         for iR, R in enumerate(Rlist):
             for iqpt, qpt in enumerate(kpoints):
+                # Fourier transform of exchange tensors
                 phase = 2 * np.pi * R @ qpt
-                Jq[iqpt] += np.exp(1j * phase) * JR[iR]
+                Jq[iqpt] += np.exp(1j * phase) * JRprime[iR]
 
-                # Hermitian
-                Jq[iqpt, :, :, :, :] += np.conj(Jq[iqpt, :, :, :, :].swapaxes(-1, -2))
-
-        # should we divide
-
-        # if self._Q is not None:
-        #    phi = 2 * np.pi * vectors.round(3).astype(int) @ self._Q
-        #    rv = np.einsum("ij,k->ijk", phi, self._n)
-        #    R = (
-        #        Rotation.from_rotvec(rv.reshape(-1, 3))
-        #        .as_matrix()
-        #        .reshape(vectors.shape[:2] + (3, 3))
-        #    )
-        #    np.einsum("nmij,nmjk->nmik", tensor, R, out=tensor)
-
-        # exp_summand = np.exp(2j * np.pi * vectors @ kpoints.T)
-        # Jexp = exp_summand[:, :, :, None, None] * tensor[:, :, None]
-        # Jq = np.sum(Jexp, axis=1)
-
-        # pairs = np.array(self._pairs)
-        # idx = np.where(pairs[:, 0] == pairs[:, 1])
-        # Jq[idx] /= 2
-
+        # Ensure Hermiticity: J(q) = J(-q)†
+        for iqpt in range(nkpt):
+            Jq[iqpt, :, :, :, :] += np.conj(
+                np.moveaxis(Jq[iqpt, :, :, :, :], [1, 3], [2, 4])
+            )
+            Jq[iqpt, :, :, :, :] /= 2.0
         return Jq
 
-    def Hq(self, kpoints, anisotropic=True, u=uz):
+    def Hq(self, kpoints, anisotropic=True):
         """
         Compute the magnon Hamiltonian in reciprocal space.
 
@@ -100,8 +131,6 @@ class Magnon:
             k-points at which to evaluate the Hamiltonian
         anisotropic : bool, optional
             Whether to include anisotropic interactions, default True
-        u : array_like, optional
-            Reference direction for spin quantization axis
 
         Returns
         -------
@@ -111,7 +140,7 @@ class Magnon:
         magmoms = self.magmom.copy()
         magmoms /= np.linalg.norm(magmoms, axis=-1)[:, None]
 
-        U, V = get_rotation_arrays(magmoms, u=u)
+        U, V = get_rotation_arrays(magmoms, u=self._uz)
 
         J0 = self.Jq(np.zeros((1, 3)), anisotropic=anisotropic)
         J0 = -Hermitize(J0)[:, :, 0]
@@ -124,8 +153,9 @@ class Magnon:
 
         return np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
 
-    def _magnon_energies(self, kpoints, anisotropic=True, u=uz):
-        H = self.Hq(kpoints, anisotropic=anisotropic, u=u)
+    def _magnon_energies(self, kpoints, anisotropic=True, u=None):
+        """Calculate magnon energies"""
+        H = self.Hq(kpoints, anisotropic=anisotropic)
         n = H.shape[-1] // 2
         I = np.eye(n)
 
@@ -160,10 +190,11 @@ class Magnon:
         cartesian: bool = False,
         labels: list = None,
         anisotropic: bool = True,
-        u: np.array = uz,
+        u: np.array = None,
     ):
+        """Get magnon band structure"""
         pbc = self._pbc if pbc is None else pbc
-
+        u = self._uz if u is None else u
         if kpoints.size == 0:
             from ase.cell import Cell
 
@@ -185,7 +216,7 @@ class Magnon:
         elif cartesian:
             kpoints = np.linalg.solve(self._cell.T, kpoints.T).T
 
-        bands = self._magnon_energies(kpoints, anisotropic=anisotropic, u=u)
+        bands = self._magnon_energies(kpoints, anisotropic=anisotropic)
 
         return labels, bands
 
@@ -202,3 +233,102 @@ class Magnon:
         kpath, bands = self.get_magnon_bands(**kwargs)
         bands_plot = BandsPlot(bands, kpath)
         bands_plot.plot(filename=filename)
+
+    @classmethod
+    def load_from_io(cls, exc: SpinIO, **kwargs):
+        """
+        Create Magnon instance from SpinIO
+
+        Parameters
+        ----------
+        exc : SpinIO
+            SpinIO instance with exchange parameters
+        **kwargs : dict
+            Additional arguments passed to get_full_Jtensor_for_Rlist
+
+        Returns
+        -------
+        Magnon
+            Initialized Magnon instance
+        """
+        return cls(
+            nspin=exc.nspin,
+            magmom=exc.magmoms,
+            Rlist=exc.Rlist,
+            JR=exc.get_full_Jtensor_for_Rlist(order="ij33", **kwargs),
+        )
+
+    @classmethod
+    def from_TB2J_results(cls, path=None, fname="TB2J.pickle", **kwargs):
+        """
+        Create Magnon instance from TB2J results.
+
+        Parameters
+        ----------
+        path : str, optional
+            Path to the TB2J results file
+        fname : str, optional
+            Filename of the TB2J results file, default "TB2J.pickle"
+        **kwargs : dict
+            Additional arguments passed to load_from_io
+
+        Returns
+        -------
+        Magnon
+            Initialized Magnon instance
+        """
+        exc = SpinIO.load_pickle(path=path, fname=fname)
+        return cls.load_from_io(exc, **kwargs)
+
+
+def test_magnon(path="TB2J_results"):
+    """Test the magnon calculator by loading from TB2J_results and computing at high-symmetry points."""
+    from pathlib import Path
+
+    import numpy as np
+
+    # Check if TB2J_results exists
+    results_path = Path(path)
+    if not results_path.exists():
+        raise FileNotFoundError(f"TB2J_results directory not found at {path}")
+
+    # Load magnon calculator from TB2J results
+    print(f"Loading exchange parameters from {path}...")
+    magnon = Magnon.from_TB2J_results(path=path, iso_only=True)
+
+    # Define high-symmetry points for a cube
+    kpoints = np.array(
+        [
+            [0.0, 0.0, 0.0],  # Γ (Gamma)
+            [0.5, 0.0, 0.0],  # X
+            [0.5, 0.5, 0.0],  # M
+            [0.5, 0.5, 0.5],  # R
+        ]
+    )
+    klabels = ["Gamma", "X", "M", "R"]
+
+    print("\nComputing exchange interactions at high-symmetry points...")
+    Jq = magnon.Jq(kpoints)
+
+    print(f"\nResults for {len(kpoints)} k-points:")
+    print("-" * 50)
+    print("Exchange interactions J(q):")
+    print(f"Shape of Jq tensor: {Jq.shape}")
+    print(
+        f"Dimensions: (n_kpoints={Jq.shape[0]}, n_spin={Jq.shape[1]}, n_spin={Jq.shape[2]}, xyz={Jq.shape[3]}, xyz={Jq.shape[4]})"
+    )
+
+    print("\nComputing magnon energies...")
+    energies = magnon._magnon_energies(kpoints)
+
+    print("\nMagnon energies at high-symmetry points (in meV):")
+    print("-" * 50)
+    for i, (k, label) in enumerate(zip(kpoints, klabels)):
+        print(f"\n{label}-point k={k}:")
+        print(f"Energies: {energies[i] * 1000:.3f} meV")  # Convert to meV
+
+    return magnon, Jq, energies
+
+
+if __name__ == "__main__":
+    test_magnon()
