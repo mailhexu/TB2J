@@ -141,6 +141,8 @@ class Exchange(ExchangeParams):
             else:
                 self.orb_dict[atom_idx].append(orb_idx)
                 self.labels[atom_idx].append(orb_sym)
+        print(f"basis: {self.basis}")
+        print(f"Orbital labels: {self.labels}")
         print(f"Orbital dictionary: {self.orb_dict}")
 
     def _identify_magnetic_atoms(self):

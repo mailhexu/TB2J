@@ -45,6 +45,7 @@ def parse_abacus_orbital(fname):
             z = int(z)
             orbs.append(AbacusOrbital(iatom, sym, ispin, element, n, l, m, z))
             line = myfile.readline()
+    print(orbs)
     return orbs
 
 
