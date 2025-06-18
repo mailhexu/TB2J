@@ -102,7 +102,7 @@ def symmetrize_J_cli():
     from argparse import ArgumentParser
 
     parser = ArgumentParser(
-        description="Symmetrize exchange parameters. Currently, it take the crystal symmetry into account and  not the magnetic moment into account."
+        description="Symmetrize exchange parameters. Currently, it take the crystal symmetry into account and  not the magnetic moment."
     )
     parser.add_argument(
         "-i",

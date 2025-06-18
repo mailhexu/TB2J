@@ -172,7 +172,6 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
 
             angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
             for key, val in angle.items():
-                # model = parser.get_model()
                 theta, phi = val
                 model.set_so_strength(1.0)
                 model.set_Hsoc_rotation_angle([theta, phi])
@@ -183,8 +182,6 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                     atoms=model.atoms,
                     basis=basis,
                     efermi=None,  # set to None, compute from efermi.
-                    # magnetic_elements=magnetic_elements,
-                    # include_orbs=include_orbs,
                     **exargs,
                 )
                 exchange.run(path=output_path_full)

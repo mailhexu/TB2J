@@ -11,7 +11,6 @@ def rotate_Matrix_from_z_to_axis(M, axis, normalize=True):
     """
     MI, Mx, My, Mz = pauli_block_all(M)
     axis = axis / np.linalg.norm(axis)
-    # M_new = s0* MI +  Mz * (axis[0] * s1 + axis[1] * s2 + axis[2] * s3) *2
     M_new = gather_pauli_blocks(MI, Mz * axis[0], Mz * axis[1], Mz * axis[2])
     return M_new
 
@@ -96,7 +95,6 @@ def rotate_spinor_matrix_einsum(M, theta, phi):
     n1 = np.product(shape[:-1]) // 2
     n2 = M.shape[-1] // 2
     Mnew = np.reshape(M, (n1, 2, n2, 2))  # .swapaxes(1, 2)
-    # print("Mnew:", Mnew)
     U = rotation_matrix(theta, phi)
     UT = U.conj().T
     Mnew = np.einsum(
