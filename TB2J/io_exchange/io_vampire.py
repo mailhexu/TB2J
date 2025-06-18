@@ -1,5 +1,6 @@
-import numpy as np
 import os
+
+import numpy as np
 from ase.units import J
 
 
@@ -51,10 +52,15 @@ def write_vampire_unitcell_file(cls, fname):
             R, ispin, jspin = key
             Jtensor = cls.get_J_tensor(ispin, jspin, R)
             counter += 1  # starts at 0
-            myfile.write(f"{counter} {ispin} {jspin} {R[0]} {R[1]} {R[2]} ")
+            myfile.write(
+                f"{counter:5d} {ispin:3d} {jspin:3d} {R[0]:3d} {R[1]:3d} {R[2]:3d} "
+            )
             for i in range(3):
                 for j in range(3):
-                    myfile.write(f"{Jtensor[i,j]*2.0/J} ")
+                    val = np.real(Jtensor[i, j] * 2.0 / J)
+                    if np.abs(val) < 1e-30:
+                        val = 0.0
+                    myfile.write(f"{val:<012.5e} ")
             myfile.write("\n")
 
 

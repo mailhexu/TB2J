@@ -160,8 +160,6 @@ class AbacusParser:
         self.read_atoms()
         self.efermi = self.read_efermi()
         self.nel = self.read_nel()
-        print(f"efermi: {self.efermi}")
-        print(f"nel: {self.nel}")
         self.read_basis()
 
     def read_spin(self):
@@ -192,7 +190,6 @@ class AbacusParser:
     def read_basis(self):
         fname = str(Path(self.outpath) / "Orbital")
         self.basis = parse_abacus_orbital(fname)
-        print(self.basis)
         return self.basis
 
     def read_HSR_collinear(self, binary=None):

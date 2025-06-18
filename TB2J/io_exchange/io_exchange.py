@@ -263,7 +263,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             j,
         )
         if self.exchange_Jdict is not None and key in self.exchange_Jdict:
-            return self.exchange_Jdict[key]
+            return np.real(self.exchange_Jdict[key])
         else:
             return default
 
@@ -276,7 +276,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             j,
         )
         if self.exchange_Jdict is not None and key in self.exchange_Jdict:
-            return self.exchange_Jdict[key]
+            return np.real(self.exchange_Jdict[key])
         else:
             return default
 
@@ -289,7 +289,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             j,
         )
         if self.dmi_ddict is not None and key in self.dmi_ddict:
-            return self.dmi_ddict[(tuple(R), i, j)]
+            return np.real(self.dmi_ddict[(tuple(R), i, j)])
         else:
             return default
 
@@ -308,7 +308,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             j,
         )
         if self.Jani_dict is not None and key in self.Jani_dict:
-            return self.Jani_dict[(tuple(R), i, j)]
+            return np.real(self.Jani_dict[(tuple(R), i, j)])
         else:
             return default
 
