@@ -55,4 +55,4 @@ class BandsPlot:
         if filename is None:
             plt.show()
         else:
-            fig.save(filename, dpi=300, bbox_inches="tight")
+            plt.savefig(filename, dpi=300, bbox_inches="tight")

@@ -382,7 +382,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         elif order == "ij33":
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
-            Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(R, iso_only=iso_only)
+            for iR, R in enumerate(self.Rlist):
+                Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(R, iso_only=iso_only)
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
                 assert np.linalg.norm(self.Rlist[iR0]) == 0

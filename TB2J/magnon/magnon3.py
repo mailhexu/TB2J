@@ -3,9 +3,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from ..io_exchange import SpinIO
-from ..mathutils import Hermitize, get_rotation_arrays
-from .plot import BandsPlot
+from TB2J.io_exchange import SpinIO
+from TB2J.magnon.magnon_math import get_rotation_arrays
+from TB2J.magnon.plot import BandsPlot
 
 
 @dataclass
@@ -19,6 +19,8 @@ class Magnon:
     magmom: np.ndarray
     Rlist: np.ndarray
     JR: np.ndarray
+    cell: np.ndarray = np.eye(3)
+    pbc: tuple = (True, True, True)
     _Q: np.ndarray = np.array([0.0, 0.0, 0.0], dtype=float)
     _uz: np.ndarray = np.array([[0.0, 0.0, 1.0]], dtype=float)
     _n: np.ndarray = np.array([0, 0, 1], dtype=float)
@@ -102,7 +104,7 @@ class Magnon:
                 # J'_mn(R) = R_m(ϕ)^T J(R) R_n(ϕ) using Einstein summation.
                 # Here m is always in the R=0, thus the rotation is only applied on the
                 # n , so only on the right.
-                JRprime[iR] = np.einsum(" rijxy, yb -> rijab", JR[iR], Rmat)
+                JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
 
         nkpt = kpoints.shape[0]
         Jq = np.zeros((nkpt, self.nspin, self.nspin, 3, 3), dtype=complex)
@@ -113,15 +115,13 @@ class Magnon:
                 phase = 2 * np.pi * R @ qpt
                 Jq[iqpt] += np.exp(1j * phase) * JRprime[iR]
 
-        # Ensure Hermiticity: J(q) = J(-q)†
-        for iqpt in range(nkpt):
-            Jq[iqpt, :, :, :, :] += np.conj(
-                np.moveaxis(Jq[iqpt, :, :, :, :], [1, 3], [2, 4])
-            )
-            Jq[iqpt, :, :, :, :] /= 2.0
+        Jq_copy = Jq.copy()
+        Jq.swapaxes(-1, -2)  # swap xyz
+        Jq.swapaxes(-3, -4)  # swap ij
+        Jq = (Jq.conj() + Jq_copy) / 2.0
         return Jq
 
-    def Hq(self, kpoints, anisotropic=True):
+    def Hq(self, kpoints):
         """
         Compute the magnon Hamiltonian in reciprocal space.
 
@@ -142,20 +142,25 @@ class Magnon:
 
         U, V = get_rotation_arrays(magmoms, u=self._uz)
 
-        J0 = self.Jq(np.zeros((1, 3)), anisotropic=anisotropic)
-        J0 = -Hermitize(J0)[:, :, 0]
-        Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
+        J0 = self.Jq(np.zeros((1, 3)))[0]
+        # J0 = -Hermitize(J0)[:, :, 0]
+        # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
+
+        Jq = -self.Jq(kpoints)
+        print(f"J0 shape: {J0.shape}")
 
         C = np.diag(np.einsum("ix,ijxy,jy->i", V, 2 * J0, V))
-        B = np.einsum("ix,ijkxy,jy->kij", U, Jq, U)
-        A1 = np.einsum("ix,ijkxy,jy->kij", U, Jq, U.conj())
-        A2 = np.einsum("ix,ijkxy,jy->kij", U.conj(), Jq, U)
+        B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
+        A1 = np.einsum("ix,kijxy,jy->kij", U, Jq, U.conj())
+        A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq, U)
 
-        return np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
+        H = np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
+        print(f"H shape: {H.shape}")
+        return H
 
-    def _magnon_energies(self, kpoints, anisotropic=True, u=None):
+    def _magnon_energies(self, kpoints, u=None):
         """Calculate magnon energies"""
-        H = self.Hq(kpoints, anisotropic=anisotropic)
+        H = self.Hq(kpoints)
         n = H.shape[-1] // 2
         I = np.eye(n)
 
@@ -176,8 +181,9 @@ class Magnon:
 
         g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
         KH = K.swapaxes(-1, -2).conj()
-
+        # Why only n:?
         return np.linalg.eigvalsh(KH @ g @ K)[:, n:] + min_eig
+        # return np.linalg.eigvalsh(KH @ g @ K)[:, :] + min_eig
 
     def get_magnon_bands(
         self,
@@ -193,12 +199,11 @@ class Magnon:
         u: np.array = None,
     ):
         """Get magnon band structure"""
-        pbc = self._pbc if pbc is None else pbc
+        pbc = self.pbc if pbc is None else pbc
+        pbc = [True, True, True]
         u = self._uz if u is None else u
         if kpoints.size == 0:
-            from ase.cell import Cell
-
-            bandpath = Cell(self._cell).bandpath(
+            bandpath = self.cell.bandpath(
                 path=path,
                 npoints=npoints,
                 special_points=special_points,
@@ -214,9 +219,10 @@ class Magnon:
                 for i in np.where((kpoints == spk[symbol]).all(axis=1))[0]
             ]
         elif cartesian:
-            kpoints = np.linalg.solve(self._cell.T, kpoints.T).T
+            kpoints = np.linalg.solve(self.cell.T, kpoints.T).T
 
-        bands = self._magnon_energies(kpoints, anisotropic=anisotropic)
+        bands = self._magnon_energies(kpoints)
+        print(f"bands shape: {bands.shape}")
 
         return labels, bands
 
@@ -251,11 +257,27 @@ class Magnon:
         Magnon
             Initialized Magnon instance
         """
+        # magmoms: magnetic moments of atoms with index in ind_mag_atoms
+        index_spin = exc.index_spin
+        print(index_spin)
+        nspin = exc.nspin
+        magmoms = np.zeros((nspin, 3))
+        ms = exc.magmoms[index_spin]
+        print(f"ms: {ms}")
+        if ms.ndim == 1:
+            magmoms[:, 2] = np.array(ms)
+        print(f"magmoms: {magmoms}")
+
+        cell = exc.atoms.get_cell()
+        pbc = exc.atoms.get_pbc()
+
         return cls(
             nspin=exc.nspin,
-            magmom=exc.magmoms,
+            magmom=magmoms,
             Rlist=exc.Rlist,
             JR=exc.get_full_Jtensor_for_Rlist(order="ij33", **kwargs),
+            cell=cell,
+            pbc=pbc,
         )
 
     @classmethod
@@ -325,10 +347,19 @@ def test_magnon(path="TB2J_results"):
     print("-" * 50)
     for i, (k, label) in enumerate(zip(kpoints, klabels)):
         print(f"\n{label}-point k={k}:")
-        print(f"Energies: {energies[i] * 1000:.3f} meV")  # Convert to meV
+        # print(f"Energies: {energies[i] * 1000:.3f} meV")  # Convert to meV
+        print(f"Energies: {energies[i] * 1000} meV")  # Convert to meV
+
+    print("\nPlotting magnon bands...")
+    magnon.plot_magnon_bands(
+        # kpoints=kpoints,
+        # labels=klabels,
+        path="GHPGPH,PN",
+        filename="magnon_bands.png",
+    )
 
     return magnon, Jq, energies
 
 
 if __name__ == "__main__":
-    test_magnon()
+    test_magnon(path="/home/hexu/projects/TB2J_examples/Siesta/bccFe/TB2J_results_sym")

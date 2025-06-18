@@ -30,7 +30,10 @@ def generate_grid(kmesh, sort=True):
 def get_rotation_arrays(magmoms, u=uz):
     dim = magmoms.shape[0]
     v = magmoms
+    print("u:", u)
+    print("v:", v)
     n = np.cross(u, v)
+    print("n:", n)
     n /= np.linalg.norm(n, axis=-1).reshape(dim, 1)
     z = np.repeat(u, dim, axis=0)
     A = np.stack([z, np.cross(n, z), n], axis=1)
