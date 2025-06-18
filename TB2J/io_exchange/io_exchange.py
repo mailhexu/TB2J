@@ -335,7 +335,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             )
         return Jtensor
 
-    def get_full_Jtensor_for_one_R(self, R, iso_only=False):
+    def get_full_Jtensor_for_one_R_i3j3(self, R, iso_only=False):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
@@ -351,18 +351,46 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 )
         return Jmat
 
-    def get_full_Jtensor_for_Rlist(self, asr=False, iso_only=True):
-        n3 = self.nspin * 3
+    def get_full_Jtensor_for_one_R_ij33(self, R, iso_only=False):
+        """
+        Return the full exchange tensor of all i and j for cell R.
+        param R (tuple of integers): cell index R
+        returns:
+            Jmat: (nspin,nspin,3,3) matrix.
+        """
+        n = self.nspin
+        Jmat = np.zeros((n, n, 3, 3), dtype=float)
+        for i in range(self.nspin):
+            for j in range(self.nspin):
+                Jmat[i, j, :, :] = self.get_J_tensor(i, j, R, iso_only=iso_only)
+        return Jmat
+
+    def get_full_Jtensor_for_Rlist(self, asr=False, iso_only=True, order="i3j3"):
+        n = self.nspin
+        n3 = n * 3
         nR = len(self.Rlist)
-        Jmat = np.zeros((nR, n3, n3), dtype=float)
-        for iR, R in enumerate(self.Rlist):
-            Jmat[iR] = self.get_full_Jtensor_for_one_R(R, iso_only=iso_only)
-        if asr:
-            iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
-            assert np.linalg.norm(self.Rlist[iR0]) == 0
-            for i in range(n3):
-                sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
-                Jmat[iR0][i, i] -= sum_JRi
+        if order == "i3j3":
+            Jmat = np.zeros((nR, n3, n3), dtype=float)
+            for iR, R in enumerate(self.Rlist):
+                Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(R, iso_only=iso_only)
+            if asr:
+                iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
+                assert np.linalg.norm(self.Rlist[iR0]) == 0
+                for i in range(n3):
+                    sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
+                    Jmat[iR0][i, i] -= sum_JRi
+
+        elif order == "ij33":
+            Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
+            Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(R, iso_only=iso_only)
+            if asr:
+                iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
+                assert np.linalg.norm(self.Rlist[iR0]) == 0
+                for i in range(n):
+                    sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
+                    Jmat[iR0][i, i] -= sum_JRi
+        else:
+            raise ValueError("order must be either 'i3j3' or 'ij33'.")
         return Jmat
 
     def write_pickle(self, path="TB2J_results", fname="TB2J.pickle"):

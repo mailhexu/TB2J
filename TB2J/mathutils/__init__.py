@@ -1,2 +1,3 @@
 from .lowdin import Lowdin
-from .magnons import *
+
+__all__ = ["Lowdin"]

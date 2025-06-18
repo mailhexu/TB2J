@@ -177,8 +177,7 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
-        "--np",
-        "--nproc",
+        "-np",
         help="number of cpu cores to use in parallel, default: 1",
         default=1,
         type=int,

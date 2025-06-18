@@ -50,7 +50,7 @@ def run_abacus2J():
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,
-        nproc=args.nproc,
+        nproc=args.np,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
         index_magnetic_atoms=index_magnetic_atoms,
