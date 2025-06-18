@@ -141,6 +141,7 @@ class Exchange(ExchangeParams):
             else:
                 self.orb_dict[atom_idx].append(orb_idx)
                 self.labels[atom_idx].append(orb_sym)
+        print(f"Orbital dictionary: {self.orb_dict}")
 
     def _identify_magnetic_atoms(self):
         """Identify which atoms are magnetic based on elements/tags."""
@@ -333,6 +334,7 @@ class ExchangeNCL(Exchange):
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
+        print(orbs)
         # return self.HR0[self.orb_slice[iatom], self.orb_slice[iatom]]
         return self.HR0[np.ix_(orbs, orbs)]
 

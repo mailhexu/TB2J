@@ -30,6 +30,7 @@ def gen_exchange_abacus(
     nproc=1,
     output_path="TB2J_results",
     orb_decomposition=False,
+    index_magnetic_atoms=None,
     description=None,
 ):
     outpath = Path(path) / f"OUT.{suffix}"
@@ -64,6 +65,7 @@ data directory: {outpath}
             use_cache=use_cache,
             output_path=output_path,
             orb_decomposition=orb_decomposition,
+            index_magnetic_atoms=index_magnetic_atoms,
             description=description,
         )
         exchange.run(path=output_path)
@@ -90,6 +92,7 @@ data directory: {outpath}
             nproc=nproc,
             use_cache=use_cache,
             orb_decomposition=orb_decomposition,
+            index_magnetic_atoms=index_magnetic_atoms,
             description=description,
         )
         exchange.run()
