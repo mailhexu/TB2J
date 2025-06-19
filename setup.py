@@ -26,6 +26,7 @@ setup(
         "scripts/TB2J_magnon_dos.py",
         "scripts/TB2J_downfold.py",
         "scripts/TB2J_eigen.py",
+        "scripts/TB2J_plot_magnon_bands.py",
     ],
     entry_points={
         "console_scripts": [
@@ -45,6 +46,8 @@ setup(
         "pre-commit",
         "sympair>0.1.0",
         "sisl>=0.9.0",
+        "tomli>=2.0.0",
+        "tomli-w>=1.0.0",
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",

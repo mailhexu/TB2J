@@ -1,11 +1,57 @@
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 import numpy as np
+import tomli
+import tomli_w
 from scipy.spatial.transform import Rotation
 
 from TB2J.io_exchange import SpinIO
 from TB2J.magnon.magnon_math import get_rotation_arrays
 from TB2J.magnon.plot import BandsPlot
+
+
+@dataclass
+class MagnonParameters:
+    """Parameters for magnon band structure calculations"""
+
+    path: str = "TB2J_results"
+    kpath: str = None
+    npoints: int = 300
+    filename: str = "magnon_bands.png"
+    Jiso: bool = True
+    Jani: bool = False
+    DMI: bool = False
+    Q: Optional[List[float]] = None
+    uz_file: Optional[str] = None
+    n: Optional[List[float]] = None
+
+    @classmethod
+    def from_toml(cls, filename: str) -> "MagnonParameters":
+        """Load parameters from a TOML file"""
+        with open(filename, "rb") as f:
+            data = tomli.load(f)
+        return cls(**data)
+
+    def to_toml(self, filename: str):
+        """Save parameters to a TOML file"""
+        # Convert to dict and remove None values
+        data = {k: v for k, v in asdict(self).items() if v is not None}
+        with open(filename, "wb") as f:
+            tomli_w.dump(data, f)
+
+    def __post_init__(self):
+        """Validate parameters after initialization"""
+        if self.Q is not None and len(self.Q) != 3:
+            raise ValueError("Q must be a list of 3 numbers")
+        if self.n is not None and len(self.n) != 3:
+            raise ValueError("n must be a list of 3 numbers")
+
+        # Convert path to absolute path if uz_file is relative to it
+        if self.uz_file and not Path(self.uz_file).is_absolute():
+            self.uz_file = str(Path(self.path) / self.uz_file)
 
 
 @dataclass
@@ -364,8 +410,314 @@ def test_magnon(path="TB2J_results"):
     return magnon, Jq, energies
 
 
+def save_bands_data(
+    kpoints: np.ndarray,
+    energies: np.ndarray,
+    kpath_labels: List[Tuple[int, str]],
+    filename: str,
+):
+    """Save magnon band structure data to a JSON file.
+
+    Parameters
+    ----------
+    kpoints : array_like
+        Array of k-points coordinates
+    energies : array_like
+        Array of band energies (in meV)
+    kpath_labels : list of (int, str)
+        List of tuples containing k-point indices and their labels
+    filename : str
+        Output filename (default extension: .json)
+    """
+    # Ensure the filename has .json extension
+    if not filename.endswith(".json"):
+        filename = filename + ".json"
+
+    # Prepare data for saving
+    data = {
+        "kpoints": kpoints.tolist(),
+        "energies": energies.tolist(),
+        "kpath_labels": [(int(i), str(l)) for i, l in kpath_labels],
+        "xlabel": "k-points",
+        "ylabel": "Energy (meV)",
+    }
+
+    # Save to file
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=2)
+
+    # Create plotting script
+    script_name = "plot_magnon_bands.py"
+    script_content = '''#!/usr/bin/env python3
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_magnon_bands(filename, output=None):
+    """Plot magnon band structure from saved data file."""
+    # Load data
+    with open(filename) as f:
+        data = json.load(f)
+    
+    # Extract data
+    kpoints = np.array(data['kpoints'])
+    energies = np.array(data['energies'])
+    kpath_labels = data['kpath_labels']
+    
+    # Create figure
+    fig, ax = plt.subplots(constrained_layout=True)
+    
+    # Plot bands
+    kdata = np.arange(len(kpoints))
+    for band in energies.T:
+        ax.plot(kdata, band, linewidth=1.5, color='blue')
+    
+    # Set limits
+    bmin, bmax = energies.min(), energies.max()
+    ymin = bmin - 0.05 * abs(bmin - bmax)
+    ymax = bmax + 0.05 * abs(bmax - bmin)
+    ax.set_ylim([ymin, ymax])
+    ax.set_xlim([0, kdata[-1]])
+    
+    # Add k-point labels and vertical lines
+    klabels = list(zip(*kpath_labels))
+    ax.set_xticks(klabels[0], klabels[1])
+    ax.vlines(x=klabels[0], ymin=ymin, ymax=ymax,
+              color='black', linewidth=0.3)
+    
+    # Labels
+    ax.set_xlabel(data['xlabel'])
+    ax.set_ylabel(data['ylabel'])
+    
+    # Save or show
+    if output:
+        plt.savefig(output, dpi=300, bbox_inches='tight')
+    else:
+        plt.show()
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Plot magnon band structure from saved data')
+    parser.add_argument('filename', help='Input JSON file with band structure data')
+    parser.add_argument('-o', '--output', help='Output figure filename')
+    args = parser.parse_args()
+    plot_magnon_bands(args.filename, args.output)
+'''
+
+    with open(script_name, "w") as f:
+        f.write(script_content)
+
+    import os
+
+    os.chmod(script_name, 0o755)  # Make executable
+
+
+def plot_magnon_bands_from_TB2J(
+    params: MagnonParameters,
+):
+    """
+    Load TB2J results and plot magnon band structure along a specified k-path.
+
+    Parameters
+    ----------
+    path : str, optional
+        Path to TB2J results directory, default is "TB2J_results"
+    kpath : str, optional
+        String specifying the k-path, e.g. "GXMR" for Gamma-X-M-R path
+        Default is "GXMR"
+    npoints : int, optional
+        Number of k-points along the path, default is 300
+    filename : str, optional
+        Output file name for the plot, default is "magnon_bands.png"
+    Jiso : bool, optional
+        Include isotropic exchange interactions, default is True
+    Jani : bool, optional
+        Include anisotropic exchange interactions, default is False
+    DMI : bool, optional
+        Include Dzyaloshinskii-Moriya interactions, default is False
+    Q : array-like, optional
+        Propagation vector [Qx, Qy, Qz], default is [0, 0, 0]
+    uz_file : str, optional
+        Path to file containing quantization axes for each spin (natom×3 array)
+        If not provided, default [0, 0, 1] will be used for all spins
+    n : array-like, optional
+        Normal vector for rotation [nx, ny, nz], default is [0, 0, 1]
+
+    Returns
+    -------
+    magnon : Magnon
+        The Magnon instance used for calculations
+    """
+    # Load magnon calculator from TB2J results
+    print(f"Loading exchange parameters from {params.path}...")
+    magnon = Magnon.from_TB2J_results(
+        path=params.path, Jiso=params.Jiso, Jani=params.Jani, DMI=params.DMI
+    )
+
+    # Set reference vectors if provided
+    if any(x is not None for x in [params.Q, params.uz_file, params.n]):
+        Q = [0, 0, 0] if params.Q is None else params.Q
+        n = [0, 0, 1] if params.n is None else params.n
+
+        # Handle quantization axes
+        if params.uz_file is not None:
+            uz = np.loadtxt(params.uz_file)
+            if uz.shape[1] != 3:
+                raise ValueError(
+                    f"Quantization axes file should contain a natom×3 array. Got shape {uz.shape}"
+                )
+            if uz.shape[0] != magnon.nspin:
+                raise ValueError(
+                    f"Number of spins in uz file ({uz.shape[0]}) does not match the system ({magnon.nspin})"
+                )
+        else:
+            # Default: [0, 0, 1] for all spins
+            uz = np.array([[0.0, 0.0, 1.0] for _ in range(magnon.nspin)])
+
+        magnon.set_reference(Q, uz, n)
+
+    # Get band structure data
+    print(f"\nCalculating bands along path {params.kpath}...")
+    kpath_labels, bands = magnon.get_magnon_bands(
+        path=params.kpath,
+        npoints=params.npoints,
+    )
+
+    # Convert energies to meV
+    bands_meV = bands * 1000
+
+    # Save band structure data
+    data_file = params.filename.rsplit(".", 1)[0] + ".json"
+    kdata = np.arange(bands.shape[0])
+    save_bands_data(kdata, bands_meV, kpath_labels, data_file)
+    print(f"Band structure data saved to {data_file}")
+    print("Created plot_magnon_bands.py script for plotting the data")
+
+    # Plot band structure
+    print(f"Plotting bands to {params.filename}...")
+    bands_plot = BandsPlot(bands, kpath_labels)
+    bands_plot.plot(filename=params.filename)
+
+    return magnon
+
+
+def main():
+    """Command line interface for plotting magnon bands from TB2J results."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Plot magnon band structure from TB2J results"
+    )
+
+    # Add a mutually exclusive group for config file vs. command line arguments
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--config",
+        type=str,
+        help="Path to TOML configuration file",
+    )
+    group.add_argument(
+        "--save-config",
+        type=str,
+        help="Save default configuration to specified TOML file",
+    )
+
+    # Command line arguments (used if no config file is provided)
+    parser.add_argument(
+        "--path",
+        default="TB2J_results",
+        help="Path to TB2J results directory (default: TB2J_results)",
+    )
+    parser.add_argument(
+        "--kpath",
+        default=None,
+        help="k-path specification (default: auto-detected from type of cell)",
+    )
+    parser.add_argument(
+        "--npoints",
+        type=int,
+        default=300,
+        help="Number of k-points along the path (default: 300)",
+    )
+    parser.add_argument(
+        "--output",
+        default="magnon_bands.png",
+        help="Output file name (default: magnon_bands.png)",
+    )
+    parser.add_argument(
+        "--Jiso",
+        action="store_true",
+        default=True,
+        help="Include isotropic exchange interactions (default: True)",
+    )
+    parser.add_argument(
+        "--no-Jiso",
+        action="store_false",
+        dest="Jiso",
+        help="Exclude isotropic exchange interactions",
+    )
+    parser.add_argument(
+        "--Jani",
+        action="store_true",
+        default=False,
+        help="Include anisotropic exchange interactions (default: False)",
+    )
+    parser.add_argument(
+        "--DMI",
+        action="store_true",
+        default=False,
+        help="Include Dzyaloshinskii-Moriya interactions (default: False)",
+    )
+    parser.add_argument(
+        "--Q",
+        nargs=3,
+        type=float,
+        metavar=("Qx", "Qy", "Qz"),
+        help="Propagation vector [Qx, Qy, Qz] (default: [0, 0, 0])",
+    )
+    parser.add_argument(
+        "--uz-file",
+        type=str,
+        help="Path to file containing quantization axes for each spin (natom×3 array)",
+    )
+    parser.add_argument(
+        "--n",
+        nargs=3,
+        type=float,
+        metavar=("nx", "ny", "nz"),
+        help="Normal vector for rotation [nx, ny, nz] (default: [0, 0, 1])",
+    )
+
+    args = parser.parse_args()
+
+    # Handle configuration file options
+    if args.save_config:
+        # Create default parameters and save to file
+        params = MagnonParameters()
+        params.to_toml(args.save_config)
+        print(f"Saved default configuration to {args.save_config}")
+        return
+
+    if args.config:
+        # Load parameters from config file
+        params = MagnonParameters.from_toml(args.config)
+    else:
+        # Create parameters from command line arguments
+        params = MagnonParameters(
+            path=args.path,
+            kpath=args.kpath,
+            npoints=args.npoints,
+            filename=args.output,
+            Jiso=args.Jiso,
+            Jani=args.Jani,
+            DMI=args.DMI,
+            Q=args.Q if args.Q is not None else None,
+            uz_file=args.uz_file,
+            n=args.n if args.n is not None else None,
+        )
+
+    plot_magnon_bands_from_TB2J(params)
+
+
 if __name__ == "__main__":
-    # test_magnon(path="/Users/hexu/projects/TB2J_examples/Siesta/bccFe/TB2J_results_sym")
-    test_magnon(path="/Users/hexu/projects/TB2J_examples/Siesta/bccFe/TB2J_results")
-    # /Users/hexu/projects/TB2J_examples/Wannier/bccFe_QE_Wannier90/TB2J_results
-    # test_magnon(path="/Users/hexu/projects/TB2J_examples/Wannier/bccFe_QE_Wannier90/TB2J_results")
+    main()
