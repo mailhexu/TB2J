@@ -19,11 +19,11 @@ class Magnon:
     magmom: np.ndarray
     Rlist: np.ndarray
     JR: np.ndarray
-    cell: np.ndarray = np.eye(3)
+    cell: np.ndarray
+    _Q: np.ndarray
+    _uz: np.ndarray
+    _n: np.ndarray
     pbc: tuple = (True, True, True)
-    _Q: np.ndarray = np.array([0.0, 0.0, 0.0], dtype=float)
-    _uz: np.ndarray = np.array([[0.0, 0.0, 1.0]], dtype=float)
-    _n: np.ndarray = np.array([0, 0, 1], dtype=float)
 
     def set_reference(self, Q, uz, n):
         """
@@ -142,7 +142,7 @@ class Magnon:
 
         U, V = get_rotation_arrays(magmoms, u=self._uz)
 
-        J0 = self.Jq(np.zeros((1, 3)))[0]
+        J0 = -self.Jq(np.zeros((1, 3)))[0]
         # J0 = -Hermitize(J0)[:, :, 0]
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 
@@ -275,8 +275,11 @@ class Magnon:
             nspin=exc.nspin,
             magmom=magmoms,
             Rlist=exc.Rlist,
-            JR=exc.get_full_Jtensor_for_Rlist(order="ij33", **kwargs),
+            JR=exc.get_full_Jtensor_for_Rlist(order="ij33", asr=False, **kwargs),
             cell=cell,
+            _Q=np.zeros(3),  # Default propagation vector
+            _uz=np.array([[0.0, 0.0, 1.0]]),  # Default quantization axis
+            _n=np.array([0.0, 0.0, 1.0]),  # Default rotation axis
             pbc=pbc,
         )
 
@@ -316,7 +319,7 @@ def test_magnon(path="TB2J_results"):
 
     # Load magnon calculator from TB2J results
     print(f"Loading exchange parameters from {path}...")
-    magnon = Magnon.from_TB2J_results(path=path, iso_only=True)
+    magnon = Magnon.from_TB2J_results(path=path, Jiso=True, Jani=False, DMI=False)
 
     # Define high-symmetry points for a cube
     kpoints = np.array(
@@ -362,4 +365,7 @@ def test_magnon(path="TB2J_results"):
 
 
 if __name__ == "__main__":
-    test_magnon(path="/home/hexu/projects/TB2J_examples/Siesta/bccFe/TB2J_results_sym")
+    # test_magnon(path="/Users/hexu/projects/TB2J_examples/Siesta/bccFe/TB2J_results_sym")
+    test_magnon(path="/Users/hexu/projects/TB2J_examples/Siesta/bccFe/TB2J_results")
+    # /Users/hexu/projects/TB2J_examples/Wannier/bccFe_QE_Wannier90/TB2J_results
+    # test_magnon(path="/Users/hexu/projects/TB2J_examples/Wannier/bccFe_QE_Wannier90/TB2J_results")
