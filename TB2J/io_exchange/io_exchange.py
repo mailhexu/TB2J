@@ -237,6 +237,23 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         i = self.i_spin(i)
         return self.charges[self.iatom(i)]
 
+    def get_magnetic_moments(self):
+        """Get magnetic moments for magnetic atoms only.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (n_magnetic_atoms, 3) containing the magnetic moments.
+            For collinear calculations, only the z component is meaningful.
+        """
+        mag_atoms = [i for i, idx in enumerate(self.index_spin) if idx >= 0]
+        if self.spinat.ndim == 1:  # Handle collinear case with only z-component
+            moments = np.zeros((len(mag_atoms), 3))
+            moments[:, 2] = self.spinat[mag_atoms]
+            return moments
+        else:  # Full 3D magnetic moments
+            return self.spinat[mag_atoms]
+
     def get_spin_iatom(self, iatom):
         return self.spinat[iatom]
 

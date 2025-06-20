@@ -1,7 +1,6 @@
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import tomli
@@ -9,8 +8,9 @@ import tomli_w
 from scipy.spatial.transform import Rotation
 
 from TB2J.io_exchange import SpinIO
+from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
-from TB2J.magnon.plot import BandsPlot
+from TB2J.mathutils.auto_kpath import auto_kpath
 
 
 @dataclass
@@ -244,33 +244,84 @@ class Magnon:
         anisotropic: bool = True,
         u: np.array = None,
     ):
-        """Get magnon band structure"""
+        """Get magnon band structure.
+
+        Parameters
+        ----------
+        kpoints : np.array, optional
+            Explicit k-points to calculate bands at. If empty, generates k-points from path.
+        path : str, optional
+            String specifying the k-path. If None, generates automatically using auto_kpath.
+        npoints : int, optional
+            Number of k-points along the path. Default is 300.
+        special_points : dict, optional
+            Dictionary of special points coordinates.
+        tol : float, optional
+            Tolerance for k-point comparisons. Default is 2e-4.
+        pbc : tuple, optional
+            Periodic boundary conditions. Default is None.
+        cartesian : bool, optional
+            Whether k-points are in cartesian coordinates. Default is False.
+        labels : list, optional
+            List of k-point labels. Default is None.
+        anisotropic : bool, optional
+            Whether to include anisotropic interactions. Default is True.
+        u : np.array, optional
+            Quantization axis. Default is None.
+
+        Returns
+        -------
+        tuple
+            - labels : list of (index, name) tuples for special k-points
+            - bands : array of band energies
+            - xlist : list of arrays with x-coordinates for plotting (if using auto_kpath)
+        """
         pbc = self.pbc if pbc is None else pbc
         pbc = [True, True, True]
         u = self._uz if u is None else u
         if kpoints.size == 0:
-            bandpath = self.cell.bandpath(
-                path=path,
-                npoints=npoints,
-                special_points=special_points,
-                eps=tol,
-                pbc=pbc,
-            )
-            kpoints = bandpath.kpts
-            spk = bandpath.special_points
-            spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
-            labels = [
-                (i, symbol)
-                for symbol in spk
-                for i in np.where((kpoints == spk[symbol]).all(axis=1))[0]
-            ]
+            if path is None:
+                # Use auto_kpath to generate path automatically
+                xlist, kptlist, Xs, knames, spk = auto_kpath(
+                    self.cell, None, npoints=npoints
+                )
+                kpoints = np.concatenate(kptlist)
+                # Create labels from special points
+                labels = []
+                current_pos = 0
+                for i, (x, k) in enumerate(zip(xlist, kptlist)):
+                    for name in knames:
+                        matches = np.where((k == spk[name]).all(axis=1))[0]
+                        if matches.size > 0:
+                            labels.append((matches[0] + current_pos, name))
+                    current_pos += len(k)
+            else:
+                bandpath = self.cell.bandpath(
+                    path=path,
+                    npoints=npoints,
+                    special_points=special_points,
+                    eps=tol,
+                    pbc=pbc,
+                )
+                kpoints = bandpath.kpts
+                spk = bandpath.special_points
+                spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+                labels = [
+                    (i, symbol)
+                    for symbol in spk
+                    for i in np.where((kpoints == spk[symbol]).all(axis=1))[0]
+                ]
         elif cartesian:
             kpoints = np.linalg.solve(self.cell.T, kpoints.T).T
 
         bands = self._magnon_energies(kpoints)
         print(f"bands shape: {bands.shape}")
 
-        return labels, bands
+        if path is None and kpoints.size == 0:  # Fixed condition
+            # When using auto_kpath, return xlist for segmented plotting
+            return labels, bands, xlist
+        else:
+            return labels, bands, None
 
     def plot_magnon_bands(self, **kwargs):
         """
@@ -279,12 +330,41 @@ class Magnon:
         Parameters
         ----------
         **kwargs
-            Additional keyword arguments passed to get_magnon_bands and plotting functions
+            Additional keyword arguments passed to get_magnon_bands and plotting functions.
+            Supported plotting options:
+            - filename : str, optional
+                Output filename for saving the plot
+            - ax : matplotlib.axes.Axes, optional
+                Axes for plotting. If None, creates new figure
+            - show : bool, optional
+                Whether to show the plot on screen
         """
         filename = kwargs.pop("filename", None)
-        kpath, bands = self.get_magnon_bands(**kwargs)
-        bands_plot = BandsPlot(bands, kpath)
-        bands_plot.plot(filename=filename)
+        kpath_labels, bands, xlist = self.get_magnon_bands(**kwargs)
+
+        # Get k-points and special points
+        if "path" in kwargs and kwargs["path"] is None:
+            _, kptlist, _, _, spk = auto_kpath(
+                self.cell, None, npoints=kwargs.get("npoints", 300)
+            )
+            kpoints = np.concatenate(kptlist)
+        else:
+            bandpath = self.cell.bandpath(
+                path=kwargs.get("path", "GXMG"), npoints=kwargs.get("npoints", 300)
+            )
+            kpoints = bandpath.kpts
+            spk = bandpath.special_points.copy()
+            spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+
+        bands_plot = MagnonBand(
+            energies=bands * 1000,  # Convert to meV
+            kpoints=kpoints,
+            kpath_labels=kpath_labels,
+            special_points=spk,
+            xcoords=xlist,
+        )
+
+        return bands_plot.plot(filename=filename, **kwargs)
 
     @classmethod
     def load_from_io(cls, exc: SpinIO, **kwargs):
@@ -303,16 +383,9 @@ class Magnon:
         Magnon
             Initialized Magnon instance
         """
-        # magmoms: magnetic moments of atoms with index in ind_mag_atoms
-        index_spin = exc.index_spin
-        print(index_spin)
-        nspin = exc.nspin
-        magmoms = np.zeros((nspin, 3))
-        ms = exc.magmoms[index_spin]
-        print(f"ms: {ms}")
-        if ms.ndim == 1:
-            magmoms[:, 2] = np.array(ms)
-        print(f"magmoms: {magmoms}")
+        # Get magnetic moments for magnetic atoms
+        magmoms = exc.get_magnetic_moments()
+        # nspin = len(magmoms)  # Number of magnetic atoms
 
         cell = exc.atoms.get_cell()
         pbc = exc.atoms.get_pbc()
@@ -410,13 +483,89 @@ def test_magnon(path="TB2J_results"):
     return magnon, Jq, energies
 
 
+def create_plot_script(filename: str):
+    """Create a Python script for plotting the saved band structure data.
+
+    Parameters
+    ----------
+    filename : str
+        Base filename (without extension) to use for the plot script
+    """
+    script_name = f"plot_{filename}.py"
+    script = '''#!/usr/bin/env python3
+"""Simple script to plot magnon band structure from saved data."""
+
+from TB2J.magnon.magnon_band import MagnonBand
+import matplotlib.pyplot as plt
+
+def plot_magnon_bands(input_file, output_file=None, ax=None, color='blue', show=True):
+    """Load and plot magnon band structure.
+    
+    Parameters
+    ----------
+    input_file : str
+        JSON file containing band structure data
+    output_file : str, optional
+        Output file for saving the plot
+    ax : matplotlib.axes.Axes, optional
+        Axes for plotting. If None, creates new figure
+    color : str, optional
+        Color of the band lines (default: blue)
+    show : bool, optional
+        Whether to show the plot on screen (default: True)
+    
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The plotting axes
+    """
+    # Load band structure data
+    bands = MagnonBand.load(input_file)
+    
+    # Create plot
+    ax = bands.plot(
+        ax=ax,
+        filename=output_file,
+        color=color,
+        show=show
+    )
+    return ax
+
+if __name__ == "__main__":
+    # Usage example
+    # Example usage
+    import matplotlib.pyplot as plt
+    
+    # Create a figure and axis (optional)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    
+    # Plot bands with custom color on given axis
+    plot_magnon_bands(
+        input_file="magnon_bands.json",
+        output_file="magnon_bands.png",
+        ax=ax,
+        color='red',
+        show=True
+    )
+'''
+
+    with open(script_name, "w") as f:
+        f.write(script)
+
+    import os
+
+    os.chmod(script_name, 0o755)  # Make executable
+
+
 def save_bands_data(
     kpoints: np.ndarray,
     energies: np.ndarray,
     kpath_labels: List[Tuple[int, str]],
+    special_points: dict,
+    xcoords: Optional[Union[np.ndarray, List[np.ndarray]]],
     filename: str,
 ):
-    """Save magnon band structure data to a JSON file.
+    """Save magnon band structure data to a JSON file using MagnonBand class.
 
     Parameters
     ----------
@@ -426,90 +575,34 @@ def save_bands_data(
         Array of band energies (in meV)
     kpath_labels : list of (int, str)
         List of tuples containing k-point indices and their labels
+    special_points : dict
+        Dictionary of special points and their coordinates
+    xcoords : array_like or list of arrays
+        x-coordinates for plotting (can be segmented)
     filename : str
-        Output filename (default extension: .json)
+        Output filename
     """
-    # Ensure the filename has .json extension
-    if not filename.endswith(".json"):
-        filename = filename + ".json"
+    from TB2J.magnon.magnon_band import MagnonBand  # Using same import as above
 
-    # Prepare data for saving
-    data = {
-        "kpoints": kpoints.tolist(),
-        "energies": energies.tolist(),
-        "kpath_labels": [(int(i), str(l)) for i, l in kpath_labels],
-        "xlabel": "k-points",
-        "ylabel": "Energy (meV)",
-    }
-
-    # Save to file
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=2)
+    bands = MagnonBand(
+        energies=energies,
+        kpoints=kpoints,
+        kpath_labels=kpath_labels,
+        special_points=special_points,
+        xcoords=xcoords,
+    )
+    bands.save(filename)
 
     # Create plotting script
-    script_name = "plot_magnon_bands.py"
-    script_content = '''#!/usr/bin/env python3
-import json
-import numpy as np
-import matplotlib.pyplot as plt
+    base_name = filename.rsplit(".", 1)[0]
+    create_plot_script(base_name)
 
-def plot_magnon_bands(filename, output=None):
-    """Plot magnon band structure from saved data file."""
-    # Load data
-    with open(filename) as f:
-        data = json.load(f)
-    
-    # Extract data
-    kpoints = np.array(data['kpoints'])
-    energies = np.array(data['energies'])
-    kpath_labels = data['kpath_labels']
-    
-    # Create figure
-    fig, ax = plt.subplots(constrained_layout=True)
-    
-    # Plot bands
-    kdata = np.arange(len(kpoints))
-    for band in energies.T:
-        ax.plot(kdata, band, linewidth=1.5, color='blue')
-    
-    # Set limits
-    bmin, bmax = energies.min(), energies.max()
-    ymin = bmin - 0.05 * abs(bmin - bmax)
-    ymax = bmax + 0.05 * abs(bmax - bmin)
-    ax.set_ylim([ymin, ymax])
-    ax.set_xlim([0, kdata[-1]])
-    
-    # Add k-point labels and vertical lines
-    klabels = list(zip(*kpath_labels))
-    ax.set_xticks(klabels[0], klabels[1])
-    ax.vlines(x=klabels[0], ymin=ymin, ymax=ymax,
-              color='black', linewidth=0.3)
-    
-    # Labels
-    ax.set_xlabel(data['xlabel'])
-    ax.set_ylabel(data['ylabel'])
-    
-    # Save or show
-    if output:
-        plt.savefig(output, dpi=300, bbox_inches='tight')
-    else:
-        plt.show()
+    print(f"Band structure data saved to {filename}")
+    print(f"Created plotting script: plot_{base_name}.py")
+    print("Usage: ")
+    print(f"See plot_{base_name}.py for example usage")
 
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description='Plot magnon band structure from saved data')
-    parser.add_argument('filename', help='Input JSON file with band structure data')
-    parser.add_argument('-o', '--output', help='Output figure filename')
-    args = parser.parse_args()
-    plot_magnon_bands(args.filename, args.output)
-'''
-
-    with open(script_name, "w") as f:
-        f.write(script_content)
-
-    import os
-
-    os.chmod(script_name, 0o755)  # Make executable
+    return bands
 
 
 def plot_magnon_bands_from_TB2J(
@@ -578,7 +671,7 @@ def plot_magnon_bands_from_TB2J(
 
     # Get band structure data
     print(f"\nCalculating bands along path {params.kpath}...")
-    kpath_labels, bands = magnon.get_magnon_bands(
+    kpath_labels, bands, xlist = magnon.get_magnon_bands(
         path=params.kpath,
         npoints=params.npoints,
     )
@@ -586,17 +679,32 @@ def plot_magnon_bands_from_TB2J(
     # Convert energies to meV
     bands_meV = bands * 1000
 
-    # Save band structure data
+    # Save band structure data and create plot
     data_file = params.filename.rsplit(".", 1)[0] + ".json"
-    kdata = np.arange(bands.shape[0])
-    save_bands_data(kdata, bands_meV, kpath_labels, data_file)
-    print(f"Band structure data saved to {data_file}")
-    print("Created plot_magnon_bands.py script for plotting the data")
+    print(f"\nSaving band structure data to {data_file}")
+
+    # Get k-points and special points
+    if params.kpath is None:
+        _, kptlist, _, _, spk = auto_kpath(magnon.cell, None, npoints=params.npoints)
+        kpoints = np.concatenate(kptlist)
+    else:
+        bandpath = magnon.cell.bandpath(path=params.kpath, npoints=params.npoints)
+        kpoints = bandpath.kpts
+        spk = bandpath.special_points
+        spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+
+    magnon_bands = save_bands_data(
+        kpoints=kpoints,
+        energies=bands_meV,
+        kpath_labels=kpath_labels,
+        special_points=spk,
+        xcoords=xlist,
+        filename=data_file,
+    )
 
     # Plot band structure
-    print(f"Plotting bands to {params.filename}...")
-    bands_plot = BandsPlot(bands, kpath_labels)
-    bands_plot.plot(filename=params.filename)
+    print(f"Plotting bands to {params.filename}")
+    magnon_bands.plot(filename=params.filename)
 
     return magnon
 
