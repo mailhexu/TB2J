@@ -2,12 +2,16 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tomli
 import tomli_w
+from ase.dft.dos import DOS
+from ase.units import J, eV
 from scipy.spatial.transform import Rotation
 
 from TB2J.io_exchange import SpinIO
+from TB2J.kpoints import monkhorst_pack
 from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
 from TB2J.mathutils.auto_kpath import auto_kpath
@@ -194,7 +198,6 @@ class Magnon:
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 
         Jq = -self.Jq(kpoints)
-        print(f"J0 shape: {J0.shape}")
 
         C = np.diag(np.einsum("ix,ijxy,jy->i", V, 2 * J0, V))
         B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
@@ -202,7 +205,6 @@ class Magnon:
         A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq, U)
 
         H = np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
-        print(f"H shape: {H.shape}")
         return H
 
     def _magnon_energies(self, kpoints, u=None):
@@ -840,3 +842,97 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+class MagnonASEWrapper:
+    def __init__(self, magnon: Magnon):
+        self.magnon = magnon
+        self.atoms = None
+        self.kpts = None
+        self.weights = None
+        self.dos_args = {}
+
+    def set(self, atoms=None, kmesh=[9, 9, 9], gamma=True, **kwargs):
+        self.atoms = atoms
+        self.dos_args = {
+            "kmesh": kmesh,
+            "gamma": gamma,
+        }
+        self.kpts = monkhorst_pack(
+            self.dos_args["kmesh"], gamma_center=self.dos_args["gamma"]
+        )
+        self.weights = np.ones(len(self.kpts)) / len(self.kpts)
+
+    def get_k_points_and_weights(self):
+        return self.kpts, self.weights
+
+    def get_k_point_weights(self):
+        return self.weights
+
+    def get_number_of_spins(self):
+        return 1
+
+    def get_eigenvalues(self, kpt, spin=0):
+        """
+        return the eigenvalues at a given k-point. The energy unit is eV
+        args:
+            kpt: k-point index.
+            spin: spin index.
+        """
+        kpoint = self.kpts[kpt]
+        # Magnon energies are already in eV, convert to meV for consistency with plot
+        evals = self.magnon._magnon_energies(np.array([kpoint]))[0]
+        evals = evals * J / eV  # Convert to eV
+        return evals
+
+    def get_fermi_level(self):
+        return 0.0
+
+    def get_bz_k_points(self):
+        return self.kpts
+
+    def get_dos(self, width=0.1, window=None, npts=401):
+        dos = DOS(self, width=width, window=window, npts=npts)
+        energies = dos.get_energies()
+        tdos = dos.get_dos()
+        return energies, tdos
+
+    def plot_dos(
+        self,
+        smearing_width=0.0001,
+        window=None,
+        npts=401,
+        output="magnon_dos.pdf",
+        ax=None,
+        show=True,
+        dos_filename="magnon_dos.txt",
+    ):
+        """
+        plot total DOS.
+        :param width: width of Gaussian smearing
+        :param window: energy window
+        :param npts: number of points
+        :param output: output filename
+        :param ax: matplotlib axis
+        :return: ax
+        """
+        if ax is None:
+            _fig, ax = plt.subplots()
+        energies, tdos = self.get_dos(width=smearing_width, window=window, npts=npts)
+        energies = energies * 1000  # Convert to meV
+        tdos = tdos / 1000  # Convert to states/meV
+        if dos_filename is not None:
+            np.savetxt(
+                dos_filename,
+                np.array([energies, tdos]).T,
+                header="Energy(meV) DOS(state/meV)",
+            )
+        ax.plot(energies, tdos)
+        ax.set_xlabel("Energy (meV)")
+        ax.set_ylabel("DOS (states/meV)")
+        ax.set_title("Total DOS")
+        if output is not None:
+            plt.savefig(output)
+        if show:
+            plt.show()
+        return ax

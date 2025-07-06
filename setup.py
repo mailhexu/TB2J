@@ -32,6 +32,7 @@ setup(
         "console_scripts": [
             "TB2J_symmetrize.py=TB2J.symmetrize_J:symmetrize_J_cli",
             "lawaf2J.py=TB2J.interfaces.lawaf_interface:lawaf2J_cli",
+            "TB2J_plot_magnon_dos.py=TB2J.magnon.plot_magnon_dos_cli:main",
         ]
     },
     install_requires=[
