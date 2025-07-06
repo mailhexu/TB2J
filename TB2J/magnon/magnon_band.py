@@ -40,7 +40,7 @@ class MagnonBand:
         if self.xcoords is None:
             self.xcoords = np.arange(len(self.kpoints))
 
-    def plot(self, ax=None, filename=None, show=False, **kwargs):
+    def plot(self, ax=None, filename=None, show=False, shift=0.0, **kwargs):
         """Plot the magnon band structure.
 
         Parameters
@@ -79,7 +79,7 @@ class MagnonBand:
                 for band in segment_bands:
                     ax.plot(
                         x,
-                        band[start_idx : start_idx + nbands],
+                        band[start_idx : start_idx + nbands] + shift,
                         linewidth=linewidth,
                         color=color,
                         linestyle=linestyle,
@@ -91,7 +91,7 @@ class MagnonBand:
             for band in self.energies.T:
                 ax.plot(
                     self.xcoords,
-                    band,
+                    band + shift,
                     linewidth=linewidth,
                     color=color,
                     linestyle=linestyle,

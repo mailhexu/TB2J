@@ -12,13 +12,22 @@ import os
 import re
 import shutil
 import warnings
+from copy import deepcopy
+from math import sqrt
 from pathlib import Path
 
 import numpy as np
 from ase import Atoms
+from ase.calculators.calculator import kpts2ndarray, kpts2sizeandoffsets
 from ase.calculators.singlepoint import SinglePointDFTCalculator, arrays_to_kpoints
+from ase.constraints import FixAtoms, FixCartesian
+from ase.dft.kpoints import bandpath
+from ase.stress import full_3x3_to_voigt_6_stress
 from ase.units import Bohr, GPa, Hartree, Rydberg, _me, mol
 from ase.utils import lazymethod, lazyproperty, reader, writer
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
+
 
 _re_float = r"[-+]?\d+\.*\d*(?:[Ee][-+]\d+)?"
 AU_to_MASS = mol * _me * 1e3
@@ -40,7 +49,6 @@ def write_input(fd, parameters=None):
     parameters: dict
         The dictionary of all paramters for the calculation.
     """
-    from copy import deepcopy
 
     params = deepcopy(parameters)
     params["dft_functional"] = (
@@ -103,8 +111,6 @@ def write_kpt(fd=None, parameters=None, atoms=None):
         return
     elif kpts is not None:
         if isinstance(kpts, dict) and "path" not in kpts:
-            from ase.calculators.calculator import kpts2sizeandoffsets
-
             kgrid, shift = kpts2sizeandoffsets(atoms=atoms, **kpts)
             koffset = []
             for i, x in enumerate(shift):
@@ -119,8 +125,6 @@ def write_kpt(fd=None, parameters=None, atoms=None):
         koffset = [koffset] * 3
 
     if isinstance(kgrid, dict) or hasattr(kgrid, "kpts"):
-        from ase.calculators.calculator import kpts2ndarray
-
         kmode = "Direct"
         kgrid = kpts2ndarray(kgrid, atoms=atoms)
     elif isinstance(kgrid, str) and (kgrid == "gamma"):
@@ -270,8 +274,6 @@ def judge_exist_stru(stru=None):
 
 
 def read_ase_stru(stru=None, coordinates_type="Cartesian"):
-    from ase.constraints import FixAtoms, FixCartesian
-
     fix_cart = np.ones((len(stru), 3), dtype=int).tolist()
     for constr in stru.constraints:
         for i in constr.index:
@@ -565,8 +567,6 @@ def read_kpt(fd, cell=None):
         else:
             knumbers = klines[:, 3].astype(int)
             if cell is not None:
-                from ase.dft.kpoints import bandpath
-
                 return bandpath(kpts, cell, npoints=knumbers.sum())
             else:
                 return {
@@ -680,8 +680,6 @@ def read_abacus(fd, latname=None, verbose=False):
 
     If `verbose` is True, pseudo-potential, basis and other information along with the Atoms object will be output as a dict.
     """
-
-    from ase.constraints import FixCartesian
 
     contents = fd.read()
     title_str = r"(?:LATTICE_CONSTANT|NUMERICAL_DESCRIPTOR|NUMERICAL_ORBITAL|ABFS_ORBITAL|LATTICE_VECTORS|LATTICE_PARAMETERS|ATOMIC_POSITIONS)"
@@ -885,8 +883,6 @@ def read_abacus(fd, latname=None, verbose=False):
 
 
 def get_lattice_from_latname(lines, latname=None):
-    from math import sqrt
-
     if lines:
         lines = lines.group(1).split(" ")
 
@@ -1486,7 +1482,6 @@ class AbacusOutCalcChunk(AbacusOutChunk):
     @lazymethod
     def get_stress(self):
         """Get the stress from the output file according to index"""
-        from ase.stress import full_3x3_to_voigt_6_stress
 
         try:
             stress = (

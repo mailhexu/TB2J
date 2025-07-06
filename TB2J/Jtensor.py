@@ -71,22 +71,21 @@ def decompose_J_tensor(Jtensor):
     return Jiso, D, Jani
 
 
-def combine_J_tensor(Jiso=0.0, D=np.zeros(3), Jani=np.zeros((3, 3), dtype=float)):
+def combine_J_tensor(Jiso=None, D=None, Jani=None, dtype=float):
     """Combine isotropic exchange, DMI, and anisotropic exchange into tensor form
-
     :param Jiso: scalar, isotropice exchange
     :param D: vector, DMI.
     :param Jani: 3x3 matrix anisotropic exchange
     :returns:  A 3x3 matrix, the exchange paraemter in tensor form.
     """
-    Jtensor = np.zeros((3, 3), dtype=complex)
+    Jtensor = np.zeros((3, 3), dtype=dtype)
     if Jiso is not None:
-        Jtensor += np.eye(3, dtype=float) * Jiso
+        Jtensor += np.eye(3, dtype=dtype) * Jiso
     if Jani is not None:
-        Jtensor += np.array(Jani, dtype=float)
+        Jtensor += np.array(Jani, dtype=dtype)
     if D is not None:
         Jtensor += np.array(
-            [[0, D[2], -D[1]], [-D[2], 0, D[0]], [D[1], -D[0], 0]], dtype=float
+            [[0, D[2], -D[1]], [-D[2], 0, D[0]], [D[1], -D[0], 0]], dtype=dtype
         )
     return Jtensor
 

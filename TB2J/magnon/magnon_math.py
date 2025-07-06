@@ -32,6 +32,7 @@ def get_rotation_arrays(magmoms, u=uz):
     v = magmoms
     n = np.cross(u, v)
     n /= np.linalg.norm(n, axis=-1).reshape(dim, 1)
+    # z = u #np.repeat(u, dim, axis=0)
     z = np.repeat(u, dim, axis=0)
     A = np.stack([z, np.cross(n, z), n], axis=1)
     B = np.stack([v, np.cross(n, v), n], axis=1)

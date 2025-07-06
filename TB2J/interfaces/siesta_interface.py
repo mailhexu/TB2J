@@ -157,7 +157,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 atoms=model.atoms,
                 basis=basis,
                 efermi=None,
-                angles="axis",
+                angles="xyz",
                 # magnetic_elements=magnetic_elements,
                 # include_orbs=include_orbs,
                 **exargs,
@@ -165,6 +165,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
             # phis = [0, 0, 0, 0]
             # MAE.set_angles(thetas=thetas, phis=phis)
+            # MAE.set_xyz_angles()
             MAE.run(output_path=f"{output_path}_anisotropy", with_eigen=False)
             # print(
             #    f"MAE calculation finished. The results are in {output_path} directory."

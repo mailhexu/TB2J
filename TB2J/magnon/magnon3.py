@@ -27,6 +27,7 @@ class MagnonParameters:
     Q: Optional[List[float]] = None
     uz_file: Optional[str] = None
     n: Optional[List[float]] = None
+    show: bool = False
 
     @classmethod
     def from_toml(cls, filename: str) -> "MagnonParameters":
@@ -161,10 +162,10 @@ class Magnon:
                 phase = 2 * np.pi * R @ qpt
                 Jq[iqpt] += np.exp(1j * phase) * JRprime[iR]
 
-        Jq_copy = Jq.copy()
-        Jq.swapaxes(-1, -2)  # swap xyz
-        Jq.swapaxes(-3, -4)  # swap ij
-        Jq = (Jq.conj() + Jq_copy) / 2.0
+        # Jq_copy = Jq.copy()
+        # Jq.swapaxes(-1, -2)  # swap xyz
+        # Jq.swapaxes(-3, -4)  # swap ij
+        # Jq = (Jq.conj() + Jq_copy) / 2.0
         return Jq
 
     def Hq(self, kpoints):
@@ -635,6 +636,8 @@ def plot_magnon_bands_from_TB2J(
         If not provided, default [0, 0, 1] will be used for all spins
     n : array-like, optional
         Normal vector for rotation [nx, ny, nz], default is [0, 0, 1]
+    show: bool, optional
+        whether to show figure.
 
     Returns
     -------
@@ -796,6 +799,13 @@ def main():
         help="Normal vector for rotation [nx, ny, nz] (default: [0, 0, 1])",
     )
 
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        default=False,
+        help="show figure on screen.",
+    )
+
     args = parser.parse_args()
 
     # Handle configuration file options
@@ -822,6 +832,7 @@ def main():
             Q=args.Q if args.Q is not None else None,
             uz_file=args.uz_file,
             n=args.n if args.n is not None else None,
+            show=args.show,
         )
 
     plot_magnon_bands_from_TB2J(params)

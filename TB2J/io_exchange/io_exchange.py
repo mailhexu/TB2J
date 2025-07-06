@@ -54,6 +54,7 @@ class SpinIO(object):
         gyro_ratio=None,
         write_experimental=True,
         description=None,
+        standardize_Jani=False,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -307,7 +308,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             j,
         )
         if self.dmi_ddict is not None and key in self.dmi_ddict:
-            return np.real(self.dmi_ddict[(tuple(R), i, j)])
+            return self.dmi_ddict[(tuple(R), i, j)]
         else:
             return default
 
@@ -326,7 +327,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             j,
         )
         if self.Jani_dict is not None and key in self.Jani_dict:
-            return np.real(self.Jani_dict[(tuple(R), i, j)])
+            return self.Jani_dict[(tuple(R), i, j)]
         else:
             return default
 
@@ -339,11 +340,19 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         """
         i = self.i_spin(i)
         j = self.i_spin(j)
-        Jtensor = combine_J_tensor(
-            Jiso=self.get_J(i, j, R) if Jiso else None,
-            D=self.get_DMI(i, j, R) if DMI else None,
-            Jani=self.get_Jani(i, j, R) if Jani else None,
-        )
+        J = D = Ja = None
+        if Jiso:
+            J = self.get_Jiso(i, j, R)
+        if DMI:
+            D = self.get_DMI(i, j, R)
+            if D is not None:
+                D *= 1
+        if Jani:
+            Ja = self.get_Jani(i, j, R)
+            if Ja is not None:
+                Ja *= 1
+        Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
+
         # if iso_only:
         #    J = self.get_Jiso(i, j, R)
         #    if J is not None:

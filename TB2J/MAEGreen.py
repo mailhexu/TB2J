@@ -43,6 +43,8 @@ class MAEGreen(ExchangeNCL):
             self.set_angles_random()
         elif angles == "miller":
             self.set_angles_miller()
+        elif angles == "ztox":
+            self.set_angels_ztox()
         else:
             self.thetas = angles[0]
             self.phis = angles[1]
@@ -91,6 +93,11 @@ class MAEGreen(ExchangeNCL):
             for j in range(0, 181, step):
                 self.thetas.append(i * np.pi / 180)
                 self.phis.append(j * np.pi / 180)
+
+    def set_angels_ztox(self, n=16):
+        """Set angles for a scan from z to x"""
+        self.thetas = np.linspace(0, np.pi, n)
+        self.phis = np.zeros(n)
 
     def set_angles_random(self, n=16):
         # n random pairs of theta, phi
