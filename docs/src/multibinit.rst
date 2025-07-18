@@ -85,5 +85,5 @@ There are 6 exchange interaction format in Vampire.
 
 * normalised-tensorial
 
-Since version 0.7.1, the TB2J-Vampire output take the "tensorial" format, in which the exchange values are 2 times that in the convention of TB2J. 
+Since version 0.7.1, the TB2J-Vampire output take the "tensorial" format, in which the exchange values are 2 times that in the convention of TB2J exchange.out file. This convention is automatically applied in the TB2J-Vampire interface.
 The anisotropic exchange and DMI are not written before version 0.7.2. They are included since then. 
