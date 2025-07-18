@@ -430,8 +430,20 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 for i in range(n):
                     sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
                     Jmat[iR0][i, i] -= sum_JRi
+        elif order == "i3j3_2D":
+            Jmat = np.zeros((nR, n3, n3), dtype=float)
+            for iR, R in enumerate(self.Rlist):
+                Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                ).reshape((n3, n3))
+            if asr:
+                iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
+                assert np.linalg.norm(self.Rlist[iR0]) == 0
+                for i in range(n3):
+                    sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
+                    Jmat[iR0][i, i] -= sum_JRi
         else:
-            raise ValueError("order must be either 'i3j3' or 'ij33'.")
+            raise ValueError("order must be either 'i3j3' or 'ij33', or 'i3j3_2D'.")
         return Jmat
 
     def write_pickle(self, path="TB2J_results", fname="TB2J.pickle"):
