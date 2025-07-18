@@ -64,8 +64,9 @@ def decompose_J_tensor(Jtensor):
     :returns:
 
     """
+    Jtensor = Jtensor.real
     Jiso = np.average(np.diag(Jtensor))
-    Dm = (Jtensor - Jtensor.T) / 2.0
+    Dm = (Jtensor - Jtensor.T).real / 2.0
     D = np.array((Dm[1, 2], Dm[2, 0], Dm[0, 1]), dtype=float)
     Jani = (Jtensor + Jtensor.T) / 2 - np.eye(3) * Jiso
     return Jiso, D, Jani

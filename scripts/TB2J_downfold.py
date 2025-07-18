@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import os
-import sys
+
 from TB2J.Jdownfolder import JDownfolder_pickle
+from TB2J.versioninfo import print_license
 
 
 def main():
@@ -73,6 +73,15 @@ def main():
     if len(args.ligands) == []:
         print("List of ligand elements cannot be empty")
 
+    print_license()
+    print("Input path:", args.inpath)
+    print("Output path:", args.outpath)
+    print("Magnetic cation elements:", args.metals)
+    print("Ligand elements:", args.ligands)
+    print("k-mesh:", args.qmesh)
+    print("Downfolding method:", args.method)
+    print("Downfolding only isotropic part:", args.iso_only)
+    print("Begining downfolding the exchange parameters:")
     JDownfolder_pickle(
         inpath=args.inpath,
         metals=args.metals,
@@ -82,6 +91,7 @@ def main():
         iso_only=args.iso_only,
         method=args.method,
     )
+    print("Downfolding finished. Results are saved in:", args.outpath)
 
 
 main()
