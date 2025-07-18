@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import os
-import sys
+
 from TB2J.io_merge import merge
+from TB2J.version_info import print_license
 
 
 def main():
@@ -32,14 +32,18 @@ def main():
         "--main_path",
         help="The path containning the reference structure.",
         type=str,
-        default=None
+        default=None,
     )
 
     args = parser.parse_args()
     # merge(*(args.directories), args.type.strip().lower(), path=args.output_path)
     # merge(*(args.directories), method=args.type.strip().lower(), path=args.output_path)
-    #merge2(args.directories, args.type.strip().lower(), path=args.output_path)
+    # merge2(args.directories, args.type.strip().lower(), path=args.output_path)
+    print_license()
+    print("Merging the TB2J results from the following directories: ", args.directories)
     merge(*args.directories, main_path=args.main_path, write_path=args.output_path)
+    print("Merging completed. The results are saved in:", args.output_path)
 
 
-main()
+if __name__ == "__main__":
+    main()
