@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "TB2J"
+version = "0.9.10.1"
+description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
+readme = "README.md"
+license = { text = "BSD-2-Clause" }
+authors = [{ name = "Xu He", email = "mailhexu@gmail.com" }]
+maintainers = [{ name = "Xu He", email = "mailhexu@gmail.com" }]
+keywords = ["magnetism", "DFT", "Heisenberg", "exchange", "physics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "License :: OSI Approved :: BSD License",
+]
+requires-python = ">=3.6"
+dependencies = [
+    "numpy<2.0",
+    "scipy",
+    "matplotlib",
+    "ase>=3.19",
+    "tqdm",
+    "pathos",
+    "packaging>=20.0",
+    "HamiltonIO>=0.2.4",
+    "pre-commit",
+    "sympair>0.1.0",
+    "tomli>=2.0.0",
+    "tomli-w>=1.0.0",
+]
+
+[project.optional-dependencies]
+siesta = ["sisl>=0.9.0", "netcdf4"]
+lawaf = ["lawaf==0.2.3"]
+all = ["sisl>=0.9.0", "netcdf4", "lawaf==0.2.3"]
+
+[project.urls]
+Homepage = "https://github.com/mailhexu/TB2J"
+Documentation = "https://tb2j.readthedocs.io/en/latest/"
+Repository = "https://github.com/mailhexu/TB2J"
+Issues = "https://github.com/mailhexu/TB2J/issues"
+
+[project.scripts]
+"wann2J.py" = "scripts.wann2J:run_wann2J"
+"siesta2J.py" = "scripts.siesta2J:run_siesta2J"
+"abacus2J.py" = "scripts.abacus2J:run_abacus2J"
+"TB2J_rotate.py" = "scripts.TB2J_rotate:main"
+"TB2J_rotateDM.py" = "scripts.TB2J_rotateDM:main"
+"TB2J_merge.py" = "scripts.TB2J_merge:main"
+"TB2J_magnon.py" = "scripts.TB2J_magnon:main"
+"TB2J_magnon2.py" = "scripts.TB2J_magnon2:main"
+"TB2J_magnon_dos.py" = "scripts.TB2J_magnon_dos:main"
+"TB2J_downfold.py" = "scripts.TB2J_downfold:main"
+"TB2J_eigen.py" = "scripts.TB2J_eigen:main"
+"TB2J_plot_magnon_bands.py" = "scripts.TB2J_plot_magnon_bands:main"
+"TB2J_symmetrize.py" = "TB2J.symmetrize_J:symmetrize_J_cli"
+"lawaf2J.py" = "TB2J.interfaces.lawaf_interface:lawaf2J_cli"
+"TB2J_plot_magnon_dos.py" = "TB2J.magnon.plot_magnon_dos_cli:main"
+
+[tool.setuptools]
+packages = ["TB2J"]
+
+[tool.setuptools.package-data]
+TB2J = ["**/*.py"]
+
+[tool.ruff]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+line-length = 88
+indent-width = 4
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E741"]
+fixable = ["ALL"]
+unfixable = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
+docstring-code-line-length = "dynamic"

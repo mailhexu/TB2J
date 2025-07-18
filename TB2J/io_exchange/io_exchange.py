@@ -541,7 +541,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Js.append(val * 1e3)
         ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
         ax.axhline(color="gray")
-        ax.set_xlabel("Distance ($\AA$)")
+        ax.set_xlabel(r"Distance ($\AA$)")
         ax.set_ylabel("J (meV)")
         if fname is not None:
             plt.savefig(fname)
@@ -569,7 +569,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         ax.axhline(color="gray")
         ax.legend(loc=1)
         ax.set_ylabel("D (meV)")
-        ax.set_xlabel("Distance ($\AA$)")
+        ax.set_xlabel(r"Distance ($\AA$)")
         if fname is not None:
             plt.savefig(fname)
         if show:
@@ -601,7 +601,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             )
         ax.axhline(color="gray")
         ax.legend(loc=1, ncol=2)
-        ax.set_xlabel("Distance ($\AA$)")
+        ax.set_xlabel(r"Distance ($\AA$)")
         ax.set_ylabel("Jani (meV)")
         if fname is not None:
             plt.savefig(fname)
