@@ -35,6 +35,7 @@ class JR_model:
 
 class JDownfolder:
     def __init__(self, JR, Rlist, iM, iL, qmesh, iso_only=False):
+        self.nxyz = 1 if iso_only else 3
         self.model = JR_model(JR, Rlist)
         self.Rlist = Rlist
         self.nR = len(Rlist)
@@ -53,15 +54,14 @@ class JDownfolder:
     def get_JR(self):
         JR_downfolded = np.zeros((self.nR, self.nMn, self.nMn), dtype=float)
         Jq_downfolded = np.zeros((self.nqpt, self.nMn, self.nMn), dtype=complex)
-        self.iMn = ind_to_indn(self.iM, n=3)
-        self.iLn = ind_to_indn(self.iL, n=3)
+        self.iMn = ind_to_indn(self.iM, n=self.nxyz)
+        self.iLn = ind_to_indn(self.iL, n=self.nxyz)
         for iq, q in enumerate(self.qpts):
             Jq = self.model.get_Jq(q)
             Jq_downfolded[iq] = self.downfold_oneq(Jq)
             for iR, R in enumerate(self.Rlist):
                 phase = np.exp(-2.0j * np.pi * np.dot(q, R))
                 JR_downfolded[iR] += np.real(Jq_downfolded[iq] * phase / self.nqpt)
-        return JR_downfolded, self.Rlist
 
     def downfold_oneq(self, J):
         JMM = J[np.ix_(self.iMn, self.iMn)]
@@ -79,12 +79,13 @@ class PWFDownfolder:
             MagnonWrapper,
         )
 
-        model = MagnonWrapper(JR, Rlist, atoms)
+        model = MagnonWrapper(JR, Rlist, atoms, align_evecs=not iso_only)
         wann = MagnonDownfolder(model)
         # Downfold the band structure.
         index_basis = []
+        self.nxyz = 1 if iso_only else 3
         for i in iM:
-            index_basis += list(range(i * 3, i * 3 + 3))
+            index_basis += list(range(i * self.nxyz, i * self.nxyz + self.nxyz))
         params = dict(
             method="projected",
             # method="maxprojected",
@@ -93,8 +94,10 @@ class PWFDownfolder:
             selected_basis=index_basis,
             # anchors={(0, 0, 0): (-1, -2, -3, -4)},
             # anchors={(0, 0, 0): ()},
-            # use_proj=True,
-            enhance_Amn=1.4,
+            # weight_func="Gauss",
+            # weight_func_params=(-0.143, 0.04),
+            use_proj=True,
+            enhance_Amn=0.0,
         )
         params.update(kwargs)
         wann.set_parameters(**params)
@@ -176,7 +179,19 @@ class JDownfolder_pickle:
         self.nsite = self.nM + self.nL
 
     def _downfold(self, **kwargs):
-        JR2 = self.exc.get_full_Jtensor_for_Rlist(order="i3j3_2D", asr=True)
+        if self.iso_only:
+            JR2 = self.exc.get_full_Jtensor_for_Rlist(
+                order="ij", asr=True, DMI=False, Jani=False
+            )
+            # magmoms = self.exc.magmoms
+            # magmoms of magnetic atoms (metal + ligand)
+            # mmagmoms = magmoms[self.iM + self.iL]
+            # sqrt_magmoms = np.sqrt(np.abs(mmagmoms))
+            # magmoms_mat = np.outer(sqrt_magmoms, sqrt_magmoms)
+            # JR2 = JR2 / magmoms_mat
+        else:
+            JR2 = self.exc.get_full_Jtensor_for_Rlist(order="i3j3_2D", asr=True)
+
         if self.method.lower() == "lowdin":
             d = JDownfolder(
                 JR2,
@@ -199,6 +214,8 @@ class JDownfolder_pickle:
                 **kwargs,
             )
             Jd, Rlist = d.get_JR()
+            # metal_sqrt_magmoms = np.sqrt(np.abs(self.exc.magmoms[self.iM]))
+            # Jd = Jd * np.outer(metal_sqrt_magmoms, metal_sqrt_magmoms)
         return Jd, Rlist
 
     def _Jd_to_exchange(self, Jd, Rlist):
@@ -217,15 +234,21 @@ class JDownfolder_pickle:
                 for j, jspin in enumerate(self.index_spin):
                     if ispin >= 0 and jspin >= 0:
                         if not (tuple(R) == (0, 0, 0) and ispin == jspin):
-                            # self interaction.
-                            J33 = Jd[
-                                iR, ispin * 3 : ispin * 3 + 3, jspin * 3 : jspin * 3 + 3
-                            ]
-                            J, DMI, Jani = decompose_J_tensor(J33)
-                            self.Jdict[(tuple(R), ispin, jspin)] = J
-                            if not self.iso_only:
-                                self.DMIdict[(tuple(R), ispin, jspin)] = DMI
-                                self.Janidict[(tuple(R), ispin, jspin)] = Jani
+                            if self.iso_only:
+                                J = Jd[iR, ispin, jspin]
+                                self.DMIdict = None
+                                self.Janidict = None
+                                self.Jdict[(tuple(R), ispin, jspin)] = J.real
+                            else:
+                                J33 = Jd[
+                                    iR,
+                                    ispin * 3 : ispin * 3 + 3,
+                                    jspin * 3 : jspin * 3 + 3,
+                                ]
+                                J, DMI, Jani = decompose_J_tensor(J33)
+                                self.Jdict[(tuple(R), ispin, jspin)] = J.real
+                                self.DMIdict[(tuple(R), ispin, jspin)] = DMI.real
+                                self.Janidict[(tuple(R), ispin, jspin)] = Jani.real
 
         io = SpinIO(
             atoms=self.atoms,

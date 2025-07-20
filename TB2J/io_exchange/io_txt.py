@@ -1,7 +1,9 @@
-import numpy as np
 import os
-from TB2J.utils import symbol_number
+
+import numpy as np
 from numpy import array_str
+
+from TB2J.utils import symbol_number
 
 
 def write_info_section(cls, myfile):
@@ -17,7 +19,7 @@ def write_atom_section(cls, myfile):
     write the atom section
     including the cell and the atomic positions.
     """
-    myfile.write("=" * 90 + "\n")
+    myfile.write("\n" + "=" * 90 + "\n")
     myfile.write("Cell (Angstrom):\n")
     cell = cls.atoms.get_cell()
     for c in cell:
@@ -42,7 +44,7 @@ def write_atom_section(cls, myfile):
         )
 
     symnum = symbol_number(cls.atoms)
-    sns = list(symnum.keys())
+    # sns = list(symnum.keys())
     poses = cls.atoms.get_positions()
 
     tchg, tmx, tmy, tmz = 0, 0, 0, 0
@@ -105,7 +107,7 @@ def write_exchange_section(
 ):
     symnum = symbol_number(cls.atoms)
     sns = list(symnum.keys())
-    poses = cls.atoms.get_positions()
+    # poses = cls.atoms.get_positions()
 
     myfile.write("=" * 90 + "\n")
     myfile.write("Exchange: \n")
@@ -183,9 +185,8 @@ def write_exchange_section(
                         DMI2[0], DMI2[1], DMI2[2]
                     )
                 )
-                pass
-            except:
-                pass
+            except Exception as e:
+                myfile.write(f"[Debug!] DMI2 not available: {e}\n")
 
         if cls.Jani_dict is not None:
             J = cls.Jani_dict[ll] * 1e3

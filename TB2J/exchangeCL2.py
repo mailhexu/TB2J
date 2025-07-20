@@ -186,15 +186,17 @@ class ExchangeCL2(ExchangeCL):
             jspin = self.ispin(jatom)
             keyspin = (R, ispin, jspin)
             is_nonself = not (R == (0, 0, 0) and iatom == jatom)
-            Jij = np.imag(val) / np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
             Jorbij = np.imag(self.Jorb[key]) / np.sign(
                 np.dot(self.spinat[iatom], self.spinat[jatom])
             )
+
+            Jij = np.imag(val) / np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
+
             if is_nonself:
                 self.exchange_Jdict[keyspin] = Jij
-                self.Jiso_orb[keyspin] = self.simplify_orbital_contributions(
-                    Jorbij, iatom, jatom
-                )
+                Jsimp = self.simplify_orbital_contributions(Jorbij, iatom, jatom)
+                self.Jiso_orb[keyspin] = Jsimp
+                self.exchange_Jdict[keyspin] = np.sum(Jsimp)
 
     def get_rho_e(self, rho_up, rho_dn):
         # self.rho_up_list.append(-1.0 / np.pi * np.imag(rho_up[(0,0,0)]))

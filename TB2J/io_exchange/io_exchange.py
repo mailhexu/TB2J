@@ -399,6 +399,26 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 )
         return Jmat
 
+    def get_full_Jtensor_for_one_R_ij(self, R, Jiso=True, Jani=True, DMI=True):
+        """
+        Return the full exchange tensor of all i and j for cell R.
+        param R (tuple of integers): cell index R
+        returns:
+            Jmat: (nspin,nspin,3,3) matrix.
+        """
+        if Jani or DMI:
+            raise ValueError(
+                "Jani and DMI are not supported for this method. Use get_full_Jtensor_for_one_R_ij33 instead."
+            )
+        n = self.nspin
+        Jmat = np.zeros((n, n), dtype=float)
+        for i in range(self.nspin):
+            for j in range(self.nspin):
+                J = self.get_Jiso(i, j, R)
+                if J is not None:
+                    Jmat[i, j] = J
+        return Jmat
+
     def get_full_Jtensor_for_Rlist(
         self, asr=False, Jiso=True, Jani=True, DMI=True, order="i3j3"
     ):
@@ -439,11 +459,28 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
                 assert np.linalg.norm(self.Rlist[iR0]) == 0
+                sum_JR = np.sum(np.sum(Jmat, axis=0))
                 for i in range(n3):
-                    sum_JRi = np.sum(np.sum(Jmat, axis=0)[i])
-                    Jmat[iR0][i, i] -= sum_JRi
+                    Jmat[iR0][i, i] -= sum_JRi[i]
+        elif order == "ij":
+            Jmat = np.zeros((nR, n, n), dtype=float)
+            for iR, R in enumerate(self.Rlist):
+                Jmat[iR] = self.get_full_Jtensor_for_one_R_ij(
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                )
+            if asr:
+                iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
+                assert np.linalg.norm(self.Rlist[iR0]) == 0
+                # check if Jmat has NaN values
+                # sum_JR = np.sum(np.sum(Jmat, axis=0), axis=0)
+                # sum over axis 0 and 1
+                sum_JR = np.sum(Jmat, axis=(0, 1))
+                for i in range(n):
+                    Jmat[iR0][i, i] -= sum_JR[i]
         else:
-            raise ValueError("order must be either 'i3j3' or 'ij33', or 'i3j3_2D'.")
+            raise ValueError(
+                "order must be either 'i3j3' or 'ij33', or 'i3j3_2D', or 'ij'."
+            )
         return Jmat
 
     def write_pickle(self, path="TB2J_results", fname="TB2J.pickle"):
@@ -473,6 +510,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
     def write_all(self, path="TB2J_results"):
         self.write_pickle(path=path)
+        self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
         self.write_txt(path=path)
         if self.Jiso_orb:
             self.write_txt(
@@ -491,11 +529,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         from TB2J.io_exchange.io_txt import write_txt
 
         write_txt(self, *args, **kwargs)
-
-    # def write_txt_with_orb(self, path):
-    #    from TB2J.io_exchange.io_txt import write_txt
-    #    write_txt_with_orb(
-    #        self, path=path, write_experimental=self.write_experimental)
 
     def write_multibinit(self, path):
         from TB2J.io_exchange.io_multibinit import write_multibinit

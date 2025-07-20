@@ -202,7 +202,6 @@ class Exchange(ExchangeParams):
                         include_only=self.include_orbs[syms[iatom]],
                     )
                 else:
-                    # print(f"orbs: {orbs}")
                     mmat, reduced_orbs = map_orbs_matrix(
                         orbs, spinor=not (self._is_collinear), include_only=None
                     )
