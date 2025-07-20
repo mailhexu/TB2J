@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TB2J"
-version = "0.9.10.2"
+version = "0.9.10.3"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
 license = { text = "BSD-2-Clause" }
