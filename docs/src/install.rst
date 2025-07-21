@@ -1,9 +1,51 @@
 Installation
 ============
 
+
+The easiest way to install TB2J is to use pip:
+
+::
+
+   pip install TB2J
+
+You can also download TB2J from the github page, and install with
+
+::
+
+   python setup.py install
+
+The `--user` option will help if there are permission problems.
+
+It is suggested that it being installed within a virtual environment
+using e.g. pyenv, uv or conda.
+
+You can install optional dependencies for specific interfaces or all of them:
+
+- For the Siesta interface:
+
+::
+
+    pip install TB2J[siesta]
+
+- For the lawaf interface:
+
+::
+
+    pip install TB2J[lawaf]
+
+- To install all optional dependencies:
+
+
+::
+
+    pip install TB2J[all]
+
+
+
+
 Dependencies
 ------------
-TB2J is a python package which requires python version higher than 3.6 to work.
+TB2J is a python package which requires python version higher than 3.8 to work.
 It depends on the following packages.
 
 -  numpy<2.0
@@ -30,47 +72,6 @@ There are some optional dependencies, which you need to install if needed.
 -  lawaf==0.2.3 (optional) for lawaf interface
 -  GPAW (optional) For gpaw interface (not yet fully operational).
 
-You can install optional dependencies for specific interfaces or all of them:
-
-- For the Siesta interface:
-
-::
-
-    pip install TB2J[siesta]
-
-- For the lawaf interface:
-
-::
-
-    pip install TB2J[lawaf]
-
-- To install all optional dependencies:
-
-::
-
-::
-
-    pip install TB2J[all]
-
-How to install
---------------
-
-The easiest way to install TB2J is to use pip:
-
-::
-
-   pip install TB2J
-
-You can also download TB2J from the github page, and install with
-
-::
-
-   python setup.py install
-
-The `--user` option will help if there are permission problems.
-
-It is suggested that it being installed within a virtual environment
-using e.g. pyenv or conda.
 
 By default, TB2J only forces the non-optional dependencies to be
 installed automatically. The `sisl` and `netcdf4` packages, which are
@@ -80,6 +81,16 @@ can be installed with the `[siesta]` extra. For example:
 ::
 
     pip install TB2J[siesta]
+
+installed automatically. The sisl package (with netcdf4) which is used to read the
+Hamiltonian from the Siesta or OpenMX output is needed, which can also
+be installed with pip. The GPAW-TB2J interface is through python
+directly, which of course requires the gpaw python package. The sisl and
+gpaw python package can be installed via pip, too. For example:
+
+::
+
+    pip3 install sisl netcdf4
 
 
 How to install in a virtual environment
