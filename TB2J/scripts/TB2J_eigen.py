@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+import argparse
+
 from TB2J.plot import write_eigen
 from TB2J.versioninfo import print_license
-import argparse
 
 """
 The script to plot the magnon band structure.

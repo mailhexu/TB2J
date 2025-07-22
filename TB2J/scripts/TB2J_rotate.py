@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
-from TB2J.rotate_atoms import rotate_atom_xyz, rotate_xyz, check_ftype
+
+from TB2J.rotate_atoms import rotate_xyz
 
 
 def main():
@@ -17,7 +18,7 @@ def main():
     parser.add_argument(
         "--noncollinear",
         action="store_true",
-        help="If present, six different configurations will be generated. These are required for non-collinear systems."
+        help="If present, six different configurations will be generated. These are required for non-collinear systems.",
     )
 
     args = parser.parse_args()
