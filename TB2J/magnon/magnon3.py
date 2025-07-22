@@ -31,6 +31,7 @@ class MagnonParameters:
     Q: Optional[List[float]] = None
     uz_file: Optional[str] = None
     n: Optional[List[float]] = None
+    spin_conf_file: Optional[str] = None
     show: bool = False
 
     @classmethod
@@ -57,6 +58,8 @@ class MagnonParameters:
         # Convert path to absolute path if uz_file is relative to it
         if self.uz_file and not Path(self.uz_file).is_absolute():
             self.uz_file = str(Path(self.path) / self.uz_file)
+        if self.spin_conf_file and not Path(self.spin_conf_file).is_absolute():
+            self.spin_conf_file = str(Path(self.path) / self.spin_conf_file)
 
 
 @dataclass
@@ -76,7 +79,7 @@ class Magnon:
     _n: np.ndarray
     pbc: tuple = (True, True, True)
 
-    def set_reference(self, Q, uz, n):
+    def set_reference(self, Q, uz, n, magmoms=None):
         """
         Set reference propagation vector and quantization axis
 
@@ -92,6 +95,8 @@ class Magnon:
         self.set_propagation_vector(Q)
         self._uz = np.array(uz, dtype=float)
         self._n = np.array(n, dtype=float)
+        if magmoms is not None:
+            self.magmom = np.array(magmoms, dtype=float)
 
     def set_propagation_vector(self, Q):
         """Set propagation vector"""
@@ -653,26 +658,40 @@ def plot_magnon_bands_from_TB2J(
     )
 
     # Set reference vectors if provided
-    if any(x is not None for x in [params.Q, params.uz_file, params.n]):
-        Q = [0, 0, 0] if params.Q is None else params.Q
-        n = [0, 0, 1] if params.n is None else params.n
+    Q = [0, 0, 0] if params.Q is None else params.Q
+    n = [0, 0, 1] if params.n is None else params.n
 
-        # Handle quantization axes
-        if params.uz_file is not None:
-            uz = np.loadtxt(params.uz_file)
-            if uz.shape[1] != 3:
-                raise ValueError(
-                    f"Quantization axes file should contain a natom×3 array. Got shape {uz.shape}"
-                )
-            if uz.shape[0] != magnon.nspin:
-                raise ValueError(
-                    f"Number of spins in uz file ({uz.shape[0]}) does not match the system ({magnon.nspin})"
-                )
-        else:
-            # Default: [0, 0, 1] for all spins
-            uz = np.array([[0.0, 0.0, 1.0] for _ in range(magnon.nspin)])
+    # Handle quantization axes
+    if params.uz_file is not None:
+        uz = np.loadtxt(params.uz_file)
+        if uz.shape[1] != 3:
+            raise ValueError(
+                f"Quantization axes file should contain a natom×3 array. Got shape {uz.shape}"
+            )
+        if uz.shape[0] != magnon.nspin:
+            raise ValueError(
+                f"Number of spins in uz file ({uz.shape[0]}) does not match the system ({magnon.nspin})"
+            )
+    else:
+        # Default: [0, 0, 1] for all spins
+        # uz = np.array([[0.0, 0.0, 1.0] for _ in range(magnon.nspin)])
+        uz = np.array([[0, 0, 1]], dtype=float)
 
-        magnon.set_reference(Q, uz, n)
+    print(params)
+    if params.spin_conf_file is not None:
+        magmoms = np.loadtxt(params.spin_conf_file)
+        if magmoms.shape[1] != 3:
+            raise ValueError(
+                f"Spin configuration file should contain a nspin×3 array. Got shape {magmoms.shape}"
+            )
+        if magmoms.shape[0] != magnon.nspin:
+            raise ValueError(
+                f"Number of spins in spin configuration file ({magmoms.shape[0]}) does not match the system ({magnon.nspin})"
+            )
+    else:
+        magmoms = None
+
+    magnon.set_reference(Q, uz, n, magmoms)
 
     # Get band structure data
     print(f"\nCalculating bands along path {params.kpath}...")
@@ -737,27 +756,32 @@ def main():
 
     # Command line arguments (used if no config file is provided)
     parser.add_argument(
+        "-p",
         "--path",
         default="TB2J_results",
         help="Path to TB2J results directory (default: TB2J_results)",
     )
     parser.add_argument(
+        "-k",
         "--kpath",
         default=None,
         help="k-path specification (default: auto-detected from type of cell)",
     )
     parser.add_argument(
+        "-n",
         "--npoints",
         type=int,
         default=300,
         help="Number of k-points along the path (default: 300)",
     )
     parser.add_argument(
+        "-o",
         "--output",
         default="magnon_bands.png",
         help="Output file name (default: magnon_bands.png)",
     )
     parser.add_argument(
+        "-j",
         "--Jiso",
         action="store_true",
         default=True,
@@ -770,18 +794,21 @@ def main():
         help="Exclude isotropic exchange interactions",
     )
     parser.add_argument(
+        "-a",
         "--Jani",
         action="store_true",
         default=False,
         help="Include anisotropic exchange interactions (default: False)",
     )
     parser.add_argument(
+        "-d",
         "--DMI",
         action="store_true",
         default=False,
         help="Include Dzyaloshinskii-Moriya interactions (default: False)",
     )
     parser.add_argument(
+        "-q",
         "--Q",
         nargs=3,
         type=float,
@@ -789,11 +816,19 @@ def main():
         help="Propagation vector [Qx, Qy, Qz] (default: [0, 0, 0])",
     )
     parser.add_argument(
+        "-u",
         "--uz-file",
         type=str,
-        help="Path to file containing quantization axes for each spin (natom×3 array)",
+        help="Path to file containing quantization axes for each spin (nspin×3 array)",
     )
     parser.add_argument(
+        "-c",
+        "--spin-conf-file",
+        type=str,
+        help="Path to file containing magnetic moments for each spin (nspin×3 array)",
+    )
+    parser.add_argument(
+        "-v",
         "--n",
         nargs=3,
         type=float,
@@ -802,6 +837,7 @@ def main():
     )
 
     parser.add_argument(
+        "-s",
         "--show",
         action="store_true",
         default=False,
@@ -833,6 +869,7 @@ def main():
             DMI=args.DMI,
             Q=args.Q if args.Q is not None else None,
             uz_file=args.uz_file,
+            spin_conf_file=args.spin_conf_file,
             n=args.n if args.n is not None else None,
             show=args.show,
         )
