@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
+import warnings
 
+from TB2J.magnon.magnon3 import main
 
-if __name__ == "__main__":
-    # add a warning messege that this functionality is under development and should not be used in production.
-    # make it visually distinct, e.g. with a different color or formatting.
-    import warnings
-
-    from TB2J.magnon.magnon3 import main
-
-    warnings.warn(
-        """ 
+warnings.warn(
+    """ 
         # !!!!!!!!!!!!!!!!!! WARNING: =============================
         # 
         # This functionality is under development and should not be used in production.
@@ -20,8 +15,8 @@ if __name__ == "__main__":
         # =====================================
 
         """,
-        UserWarning,
-        stacklevel=2,
-    )
-    # Call the main function from the magnons module
-    main()
+    UserWarning,
+    stacklevel=2,
+)
+# Call the main function from the magnons module
+main()

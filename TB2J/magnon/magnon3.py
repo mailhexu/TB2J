@@ -714,10 +714,25 @@ def plot_magnon_bands_from_TB2J(
     return magnon
 
 
-def main():
-    """Command line interface for plotting magnon bands from TB2J results."""
+def plot_magnon_bands_cli():
     import argparse
+    import warnings
 
+    warnings.warn(
+        """ 
+        # !!!!!!!!!!!!!!!!!! WARNING: =============================
+        # 
+        # This functionality is under development and should not be used in production.
+        # It is provided for testing and development purposes only.
+        # Please use with caution and report any issues to the developers.
+        #
+        # This warning will be removed in future releases.
+        # =====================================
+
+        """,
+        UserWarning,
+        stacklevel=2,
+    )
     parser = argparse.ArgumentParser(
         description="Plot magnon band structure from TB2J results"
     )
@@ -838,10 +853,6 @@ def main():
         )
 
     plot_magnon_bands_from_TB2J(params)
-
-
-if __name__ == "__main__":
-    main()
 
 
 class MagnonASEWrapper:
