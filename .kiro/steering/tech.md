@@ -56,6 +56,7 @@ pre-commit run --all-files
 - `abacus2J`: ABACUS interface
 - `TB2J_magnon`: Magnon calculations
 - `TB2J_plot_magnon_bands`: Magnon band plotting
+- `TB2J_plot_magnon_dos`: Magnon density of states plotting
 - `TB2J_rotate`: Rotate magnetic structures
 - `TB2J_merge`: Merge exchange parameters
 - `TB2J_downfold`: Downfolding utilities
