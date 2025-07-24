@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TB2J"
-version = "0.9.11.3"
+version = "0.9.12.3"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
 license = { text = "BSD-2-Clause" }
@@ -65,9 +65,9 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "TB2J_magnon_dos.py" = "TB2J.scripts.TB2J_magnon_dos:main"
 "TB2J_downfold.py" = "TB2J.scripts.TB2J_downfold:main"
 "TB2J_eigen.py" = "TB2J.scripts.TB2J_eigen:main"
-"TB2J_plot_magnon_bands.py" = "TB2J.scripts.TB2J_plot_magnon_bands:main"
 "TB2J_symmetrize.py" = "TB2J.symmetrize_J:symmetrize_J_cli"
 "lawaf2J.py" = "TB2J.interfaces.lawaf_interface:lawaf2J_cli"
+"TB2J_plot_magnon_bands.py" = "TB2J.magnon.magnon3:plot_magnon_bands_cli"
 "TB2J_plot_magnon_dos.py" = "TB2J.magnon.plot_magnon_dos_cli:main"
 
 [tool.setuptools]
