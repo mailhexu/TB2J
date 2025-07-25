@@ -18,12 +18,12 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 
-from TB2J import __version__
 from TB2J.io_exchange.io_txt import write_Jq_info
 from TB2J.Jtensor import combine_J_tensor
 from TB2J.kpoints import monkhorst_pack
 from TB2J.spinham.spin_api import SpinModel
 from TB2J.utils import symbol_number
+from TB2J.versioninfo import __version__
 
 
 class SpinIO(object):

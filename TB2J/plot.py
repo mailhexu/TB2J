@@ -1,11 +1,12 @@
-import matplotlib.pyplot as plt
-from TB2J.spinham.spin_api import SpinModel
-from TB2J.io_exchange.io_exchange import SpinIO
-import numpy as np
-from TB2J import __version__
-from TB2J.spinham.qsolver import QSolverASEWrapper
 import argparse
 import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from TB2J.io_exchange.io_exchange import SpinIO
+from TB2J.spinham.qsolver import QSolverASEWrapper
+from TB2J.spinham.spin_api import SpinModel
 
 
 def write_eigen(qmesh, gamma=True, path="./", output_fname="EigenJq.txt", **kwargs):
@@ -25,7 +26,7 @@ def plot_magnon_band(
     Jq=False,
     kpath_fname="exchange_kpth.txt",
     ax=None,
-    **kwargs
+    **kwargs,
 ):
     m = SpinModel(fname=fname, sc_matrix=None)
     m.set_ham(**kwargs)
@@ -57,7 +58,7 @@ def plot_magnon_dos(
     txt_filename="magnon_dos.txt",
     Jq=False,
     ax=None,
-    **kwargs
+    **kwargs,
 ):
     ffname = os.path.join(path, "exchange.xml")
     if not (os.path.exists(ffname) and os.path.isfile(ffname)):
