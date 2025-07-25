@@ -2,7 +2,7 @@
 import argparse
 
 from TB2J.io_merge import merge
-from TB2J.version_info import print_license
+from TB2J.versioninfo import print_license
 
 
 def main():

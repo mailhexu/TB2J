@@ -1,6 +1,9 @@
+import importlib.metadata
 from datetime import datetime
 
 import TB2J
+
+__version__ = importlib.metadata.version("TB2J")
 
 
 def print_license():

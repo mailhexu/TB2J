@@ -45,4 +45,5 @@ def write_eigen_info():
     write_eigen(args.qmesh, args.gamma, output_fname=args.output_fname)
 
 
-write_eigen_info()
+if __name__ == "__main__":
+    write_eigen_info()
