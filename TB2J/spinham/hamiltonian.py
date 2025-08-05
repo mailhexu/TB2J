@@ -19,7 +19,6 @@ from .plot import group_band_path
 from ase.cell import Cell
 from .qsolver import QSolver
 import json
-import os
 
 
 class NumpyEncoder(json.JSONEncoder):

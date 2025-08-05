@@ -1,7 +1,6 @@
 import numpy as np
-import scipy as sp
 from scipy.spatial.transform import Rotation
-from numpy.linalg import norm, det
+from numpy.linalg import norm
 
 
 # Rotation from a to b

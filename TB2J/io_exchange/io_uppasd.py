@@ -63,7 +63,6 @@ def write_uppasd_exchange(cls, fname):
             d = np.dot(np.array(R), cls.atoms.get_cell()) + pos[j] - pos[i]
             myfile.write(
                 "{i} {j} {Rx} {Ry} {Rz} {Jij}\n".format(
-                    IID=counter,
                     i=i + 1,
                     j=j + 1,
                     Rx=d[0],

@@ -3,10 +3,7 @@
 """
 class for basis set
 """
-from typing import Any
-import numpy as np
 import dataclasses
-from TB2J.utils import symbol_number
 
 
 @dataclasses.dataclass

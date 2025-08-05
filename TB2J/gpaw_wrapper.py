@@ -2,10 +2,8 @@ try:
     from gpaw.lcao.tightbinding import TightBinding
     from gpaw import restart, GPAW
     from gpaw.lcao.tools import (
-        get_lead_lcao_hamiltonian,
         get_lcao_hamiltonian,
         get_bf_centers,
-        get_bfi,
     )
 
     _has_gpaw = True
@@ -16,7 +14,6 @@ except:
 import numpy as np
 from scipy.linalg import eigh
 from ase.dft.kpoints import monkhorst_pack
-from ase.units import Ha
 import pickle
 
 

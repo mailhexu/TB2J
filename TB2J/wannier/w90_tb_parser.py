@@ -2,10 +2,8 @@
 parse the tb files in Wannier90
 """
 
-import os
 import re
 import numpy as np
-from typing import List, Tuple, Dict
 
 
 def ssrline(file):
