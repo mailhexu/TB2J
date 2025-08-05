@@ -339,8 +339,8 @@ class Anisotropy:
         # print(X_max, Y_max, X_min, Y_min)
         # ax.scatter(X_max, Y_max, color="r", marker="o")
         # ax.scatter(X_min, Y_min, color="b", marker="o")
-        ax.set_xlabel("$\theta$ (degree)")
-        ax.set_ylabel("$\phi$ degree")
+        ax.set_xlabel(r"$\theta$ (degree)")
+        ax.set_ylabel(r"$\phi$ degree")
         # ax.scatter(X_max, Y_max, color="r", marker="o")
         # ax.scatter(X_min, Y_min, color="r", marker="o")
 

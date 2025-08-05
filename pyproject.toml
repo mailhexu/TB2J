@@ -28,7 +28,7 @@ classifiers = [
 ]
 requires-python = ">=3.6"
 dependencies = [
-    "numpy<2.0",
+    "numpy",
     "scipy",
     "matplotlib",
     "ase>=3.19",
@@ -40,6 +40,7 @@ dependencies = [
     "sympair>0.1.0",
     "tomli>=2.0.0",
     "tomli-w>=1.0.0",
+    "typing_extensions",
 ]
 
 [project.optional-dependencies]

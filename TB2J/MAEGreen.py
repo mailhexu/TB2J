@@ -155,7 +155,6 @@ class MAEGreen(ExchangeNCL):
         dE_angle = np.zeros(na, dtype=complex)
         dE_angle_atom = np.zeros((na, self.natoms), dtype=complex)
         # dE_angle_orbitals = np.zeros((na, self.natoms, self.norb, self.norb), dtype=complex)
-        # dE_angle_orbitals = DefaultDict(lambda: 0)
         dE_angle_atom_orb = DefaultDict(lambda: 0)
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
             for ik, dHk in enumerate(Hsoc_k):
