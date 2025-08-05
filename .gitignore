@@ -3,8 +3,18 @@ doc/refs/*.pdf
 
 *.swp
 
-# Latex 
+# Latex
 *.aux
+
+
+# file for AI IDE
+# kiro
+.kiro/
+# cline
+.cline
+# roo coder
+.roo
+
 
 # xyz files
 
