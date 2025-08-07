@@ -22,7 +22,7 @@ jobs:
         fetch-depth: 0
     - name: Initialize test data
       run: |
-        ./init_test_data.sh
+        ./tests/init_test_data.sh
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:

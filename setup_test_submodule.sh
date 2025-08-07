@@ -15,7 +15,7 @@ echo "Adding test data submodule to repository..."
 if [ -f ".gitmodules" ] && grep -q "$SUBMODULE_PATH" .gitmodules; then
     echo "Error: Submodule already exists in .gitmodules"
     echo "If you need to update it, use: git submodule update --remote"
-    echo "If you need to reinitialize it, use: ./init_test_data.sh"
+    echo "If you need to reinitialize it, use: ./tests/init_test_data.sh"
     exit 1
 fi
 

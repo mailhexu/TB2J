@@ -28,7 +28,7 @@ git commit -m "Add test data submodule"
 git push
 ```
 
-### `init_test_data.sh` (Automatic in CI)
+### `tests/init_test_data.sh` (Automatic in CI)
 **Purpose**: Initializes existing submodules in CI/CD environments.
 
 **When to use**: 
@@ -37,7 +37,7 @@ git push
 
 **Usage:**
 ```bash
-./init_test_data.sh
+./tests/init_test_data.sh
 ```
 
 **What it does:**
@@ -58,14 +58,14 @@ git push
 2. **CI/CD automatic initialization** (runs in GitHub Actions):
    ```bash
    git checkout --recurse-submodules  # Done by GitHub Actions
-   ./init_test_data.sh                # Safety check and verification
+   ./tests/init_test_data.sh          # Safety check and verification
    ```
 
 3. **Developers cloning the repo**:
    ```bash
    git clone --recurse-submodules https://github.com/mailhexu/TB2J.git
    # OR after regular clone:
-   ./init_test_data.sh
+   ./tests/init_test_data.sh
    ```
 
 ## Do You Need Both Scripts?
@@ -75,4 +75,19 @@ git push
 - **`setup_test_submodule.sh`**: One-time setup (like installation)
 - **`init_test_data.sh`**: Runtime initialization (like starting a service)
 
-Think of it like installing software vs. starting it - you install once, but start it every time you need it.
+## Directory Structure
+
+After setup, your directory structure should look like:
+```
+TB2J/
+├── setup_test_submodule.sh    # One-time submodule setup script (root level)
+└── tests/
+    ├── data/                  # Git submodule containing test data
+    ├── init_test_data.sh      # CI initialization script
+    ├── setup_test_data.sh     # Original test data setup script
+    └── README.md              # This file
+```
+
+The scripts are organized as:
+- **Root level**: `setup_test_submodule.sh` - for initial repository setup
+- **tests/ directory**: `init_test_data.sh` - for runtime/CI initialization
