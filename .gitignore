@@ -1,6 +1,7 @@
 doc/refs/*.pdf
 
 
+# vim files
 *.swp
 
 # Latex

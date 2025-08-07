@@ -1,0 +1,7 @@
+# .gitmodules configuration file for TB2J repository
+# This file is created automatically when you run setup_test_submodule.sh
+# with the correct repository URL
+
+[submodule "tests/data"]
+	path = tests/data
+	url = https://github.com/mailhexu/TB2J_test_data.git
