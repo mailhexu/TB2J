@@ -47,8 +47,8 @@ class JDownfolder:
         self.qmesh = qmesh
         self.qpts = monkhorst_pack(qmesh)
         self.nqpt = len(self.qpts)
-        self.nMn = self.nM * 3
-        self.nLn = self.nL * 3
+        self.nMn = self.nM * self.nxyz
+        self.nLn = self.nL * self.nxyz
         self.iso_only = iso_only
 
     def get_JR(self):
@@ -62,6 +62,7 @@ class JDownfolder:
             for iR, R in enumerate(self.Rlist):
                 phase = np.exp(-2.0j * np.pi * np.dot(q, R))
                 JR_downfolded[iR] += np.real(Jq_downfolded[iq] * phase / self.nqpt)
+        return JR_downfolded, self.Rlist
 
     def downfold_oneq(self, J):
         JMM = J[np.ix_(self.iMn, self.iMn)]
@@ -121,7 +122,7 @@ class PWFDownfolder:
             marker="o",
             ax=None,
             savefig="downfold_band.png",
-            show=True,
+            show=False,
         )
         self.JR_downfolded = ewf.HwannR
         self.Rlist = ewf.Rlist
