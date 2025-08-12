@@ -4,7 +4,8 @@ from xml.dom import minidom
 from ase.data import atomic_masses
 from ase.units import eV, Hartree, Bohr, Ry, J
 import os
-from collections import Iterable, namedtuple
+from collections import  namedtuple
+from collections.abc import Iterable
 from itertools import groupby
 from TB2J.utils import symbol_number
 import pickle

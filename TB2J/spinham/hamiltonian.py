@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
-from collections import Iterable, defaultdict
+from collections import  defaultdict
+from collections.abc import Iterable
 import matplotlib.pyplot as plt
 from ase.dft.kpoints import bandpath, monkhorst_pack
 from .hamiltonian_terms import (ZeemanTerm, UniaxialMCATerm, ExchangeTerm,
