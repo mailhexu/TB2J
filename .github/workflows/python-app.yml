@@ -42,6 +42,7 @@ jobs:
       run: |
         #pytest
         #  - pwd
+        python -m pip install netcdf4 sisl
         python -m pip install . 
         cd examples/abinit-w90/SrMnO3
         ls -lah
