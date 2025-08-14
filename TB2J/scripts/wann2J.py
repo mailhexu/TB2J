@@ -61,7 +61,7 @@ def run_wann2J():
     if args.efermi is None:
         print("Please input fermi energy using --efermi ")
         sys.exit()
-    if args.elements is None or args.index_magnetic_atoms is None:
+    if args.elements is None and args.index_magnetic_atoms is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
 
