@@ -460,9 +460,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
                 assert np.linalg.norm(self.Rlist[iR0]) == 0
-                sum_JR = np.sum(np.sum(Jmat, axis=0))
+                sum_JR = np.sum(np.sum(Jmat, axis=0), axis=0)
+                print(sum_JR)
                 for i in range(n3):
-                    Jmat[iR0][i, i] -= sum_JRi[i]
+                    Jmat[iR0][i, i] -= sum_JR[i]
         elif order == "ij":
             Jmat = np.zeros((nR, n, n), dtype=float)
             for iR, R in enumerate(self.Rlist):
