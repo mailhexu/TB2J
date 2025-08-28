@@ -139,15 +139,15 @@ def write_espins_input(cls, fname):
 
             # Create a list of unique exchange parameters sorted by distance
             exchange_list = []
-            written_keys = set()
+            # written_keys = set()
 
             for key, jval in cls.exchange_Jdict.items():
                 R, i, j = key
 
                 # Skip if this is the symmetric counterpart of an already written pair
-                symmetric_key = (tuple(-np.array(R)), j, i)
-                if symmetric_key in written_keys:
-                    continue
+                # symmetric_key = (tuple(-np.array(R)), j, i)
+                # if symmetric_key in written_keys:
+                #    continue
 
                 # Get distance for sorting
                 distance = (
@@ -157,7 +157,7 @@ def write_espins_input(cls, fname):
                 )
 
                 exchange_list.append((distance, key, jval))
-                written_keys.add(key)
+                # written_keys.add(key)
 
             # Sort by distance
             exchange_list.sort(key=lambda x: x[0])
@@ -191,15 +191,15 @@ def write_espins_input(cls, fname):
 
             # Create a list of unique exchange parameters sorted by distance
             exchange_list = []
-            written_keys = set()
+            # written_keys = set()
 
             for key in cls.exchange_Jdict:
                 R, i, j = key
 
                 # Skip if this is the symmetric counterpart of an already written pair
-                symmetric_key = (tuple(-np.array(R)), j, i)
-                if symmetric_key in written_keys:
-                    continue
+                # symmetric_key = (tuple(-np.array(R)), j, i)
+                # if symmetric_key in written_keys:
+                #    continue
 
                 # Get distance for sorting
                 distance = (
@@ -209,7 +209,7 @@ def write_espins_input(cls, fname):
                 )
 
                 exchange_list.append((distance, key))
-                written_keys.add(key)
+                # written_keys.add(key)
 
             # Sort by distance
             exchange_list.sort(key=lambda x: x[0])
