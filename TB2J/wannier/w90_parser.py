@@ -38,10 +38,10 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
 
     # The lines of degeneracy of each R point. 15 per line.
     nline = int(math.ceil(n_R / 15.0))
-    dlist = []
+    Rdeg = []
     for i in range(3, 3 + nline):
         d = map(float, lines[i].strip().split())
-        dlist += d
+        Rdeg += d
     H_mnR = defaultdict(lambda: np.zeros((n_wann, n_wann), dtype=complex))
     for i in range(3 + nline, 3 + nline + n_wann**2 * n_R):
         t = lines[i].strip().split()
@@ -58,7 +58,10 @@ def parse_ham(fname='wannier90_hr.dat', cutoff=None):
                 H_mnR[R][m, n] = val
         else:
             H_mnR[R][m, n] = val
-    return n_wann, H_mnR
+    Rdeg = np.array(Rdeg, dtype=int)
+    n_R = len(H_mnR)
+    print(f"Number of R points: {n_R}, Number of Wannier functions: {n_wann}")
+    return n_wann, H_mnR, Rdeg
 
 
 def parse_cell(fname, unit=Angstrom):

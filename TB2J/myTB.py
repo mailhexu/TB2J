@@ -121,6 +121,7 @@ class MyTB(AbstractTB):
         self.k2Rfactor = -2.0j * np.pi
         self.is_siesta = False
         self.is_orthogonal = True
+        self.Rdeg = None
 
         self._name = 'Wannier'
 
@@ -186,7 +187,7 @@ class MyTB(AbstractTB):
         #    folder=path, prefix=prefix)
         #m = MyTB.from_tbmodel(tbmodel)
 
-        nbasis, data = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
+        nbasis, data, Rdeg = parse_ham(fname=os.path.join(path, prefix + '_hr.dat'))
         xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix +
                                                    '_centres.xyz'))
         cell = atoms.get_cell()
@@ -204,8 +205,10 @@ class MyTB(AbstractTB):
                 data[key][1::2, 1::2] = dtmp[norb:, norb:]
         ind, positions = auto_assign_basis_name(xred, atoms)
         m = MyTB(nbasis=nbasis, data=data, positions=xred)
-        nm = m.shift_position(positions)
-        nm.set_atoms(atoms)
+        #nm = m.shift_position(positions)
+        nm=m
+        #nm.set_atoms(atoms)
+        nm.Rdeg = Rdeg
         return nm
 
     @staticmethod
@@ -252,16 +255,19 @@ class MyTB(AbstractTB):
         """
         Hk = np.zeros((self.nbasis, self.nbasis), dtype='complex')
         if convention == 2:
-            for R, mat in self.data.items():
+            for i, (R, mat) in enumerate(self.data.items()):
+                print(f"R: {R}, Rdeg: {self.Rdeg[i]}")
+                Rdeg = self.Rdeg[i]
                 phase = np.exp(self.R2kfactor * np.dot(k, R))
-                H = mat * phase
+                H = mat * phase/Rdeg
                 Hk += H
         elif convention == 1:
             for R, mat in self.data.items():
+                Rdeg = self.Rdeg[i]
                 if self.rjminusri is None:
                     self.prepare_phase_rjri()
                 phase = np.exp(self.R2kfactor * np.dot(k, R + self.rjminusri))
-                H = mat * phase
+                H = mat * phase/Rdeg
                 Hk += H
         else:
             raise ValueError("convention should be either 1 or 2.")
