@@ -205,8 +205,8 @@ class MyTB(AbstractTB):
                 data[key][1::2, 1::2] = dtmp[norb:, norb:]
         ind, positions = auto_assign_basis_name(xred, atoms)
         m = MyTB(nbasis=nbasis, data=data, positions=xred)
-        #nm = m.shift_position(positions)
-        nm=m
+        nm = m.shift_position(positions)
+        #nm=m
         #nm.set_atoms(atoms)
         nm.Rdeg = Rdeg
         return nm
@@ -256,14 +256,16 @@ class MyTB(AbstractTB):
         Hk = np.zeros((self.nbasis, self.nbasis), dtype='complex')
         if convention == 2:
             for i, (R, mat) in enumerate(self.data.items()):
-                print(f"R: {R}, Rdeg: {self.Rdeg[i]}")
-                Rdeg = self.Rdeg[i]
+                #print(f"R: {R}, Rdeg: {self.Rdeg[i]}")
+                #Rdeg = self.Rdeg[i]
+                Rdeg = 1.0
                 phase = np.exp(self.R2kfactor * np.dot(k, R))
                 H = mat * phase/Rdeg
                 Hk += H
         elif convention == 1:
             for R, mat in self.data.items():
-                Rdeg = self.Rdeg[i]
+                #Rdeg = self.Rdeg[i]
+                Rdeg = 1.0
                 if self.rjminusri is None:
                     self.prepare_phase_rjri()
                 phase = np.exp(self.R2kfactor * np.dot(k, R + self.rjminusri))
