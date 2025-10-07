@@ -48,8 +48,11 @@ def gen_exchange_Oiju_epw(path,
                                                 nls=False)
         tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
 
-        epw = Epmat()
-        epw.read(path=epw_path, prefix=epw_prefix, epmat_ncfile='epmat.nc')
+        # Load spin-resolved EPW data
+        epw_up = Epmat()
+        epw_up.read(path=epw_path, prefix=epw_prefix + "_up", epmat_ncfile='epmat.nc')
+        epw_dn = Epmat()
+        epw_dn.read(path=epw_path, prefix=epw_prefix + "_dn", epmat_ncfile='epmat.nc')
 
         basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
 
@@ -68,7 +71,7 @@ def gen_exchange_Oiju_epw(path,
                                  list_iatom=list_iatom,
                                  orb_decomposition=orb_decomposition,
                                  description=description)
-        exchange.set_epw(Ru, imode=imode, epmat=epw)
+        exchange.set_epw(Ru, imode=imode, epmat_up=epw_up, epmat_dn=epw_dn)
         exchange.run(output_path)
 
 

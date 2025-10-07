@@ -11,11 +11,21 @@ from p_tqdm import p_map
 
 
 class ExchangePert2(ExchangeNCL):
-    def set_epw(self, Ru, imode=None, epmode=None, epmat=None):
-        if epmat is not None and imode is not None:
-            self.epc = EpmatOneMode(epmat, imode, close_nc=True)
+    def set_epw(self, Ru, imode=None, epmat_up=None, epmat_dn=None, epmode_up=None, epmode_dn=None):
+        # Validate that both spin up and down epmat files are provided
+        if (epmat_up is not None) != (epmat_dn is not None):
+            raise ValueError("Both epmat_up and epmat_dn must be provided together")
+        if (epmode_up is not None) != (epmode_dn is not None):
+            raise ValueError("Both epmode_up and epmode_dn must be provided together")
+        if (epmat_up is None and epmode_up is None) or (epmat_dn is None and epmode_dn is None):
+            raise ValueError("Either epmat_up/epmat_dn or epmode_up/epmode_dn must be provided")
+
+        if epmat_up is not None and imode is not None:
+            self.epc_up = EpmatOneMode(epmat_up, imode, close_nc=True)
+            self.epc_dn = EpmatOneMode(epmat_dn, imode, close_nc=True)
         else:
-            self.epc = epmode
+            self.epc_up = epmode_up
+            self.epc_dn = epmode_dn
         self.Ru = Ru
 
         self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
@@ -36,7 +46,7 @@ class ExchangePert2(ExchangeNCL):
         where u, v are I, x, y, z (index 0, 1,2,3). p(i) = self.get_P_iatom(iatom)
         T^u(ijR)  (u=0,1,2,3) = pauli_block_all(G)
 
-        :param G: Green's function for all R, i, j.
+        :param G: Green's function for all R, i, j (spin-resolved).
         :param iatom: i
         :param jatom: j
         :param R:  Rvector o j
@@ -44,27 +54,39 @@ class ExchangePert2(ExchangeNCL):
         :rtype:  4*4 matrix
         """
 
-        GR = G[R]
-        Gij = self.GR_atom(GR, iatom, jatom)
-        Gij_Ixyz = pauli_block_all(Gij)
+        GR_up, GR_dn = G[R]
+        Gij_up = self.GR_atom(GR_up, iatom, jatom)
+        Gij_dn = self.GR_atom(GR_dn, iatom, jatom)
+        Gij_Ixyz_up = pauli_block_all(Gij_up)
+        Gij_Ixyz_dn = pauli_block_all(Gij_dn)
 
         # G(j, i, -R)
         Rm = tuple(-x for x in R)
-        GRm = G[Rm]
-        Gji = self.GR_atom(GRm, jatom, iatom)
-        # Gji = Gij.T.conj()  # self.GR_atom(GRm, jatom, iatom)
-        Gji_Ixyz = pauli_block_all(Gji)
+        GRm_up, GRm_dn = G[Rm]
+        Gji_up = self.GR_atom(GRm_up, jatom, iatom)
+        Gji_dn = self.GR_atom(GRm_dn, jatom, iatom)
+        Gji_Ixyz_up = pauli_block_all(Gji_up)
+        Gji_Ixyz_dn = pauli_block_all(Gji_dn)
 
-        dGR = dG[R]
-        dGij = self.GR_atom(dGR, iatom, jatom)
+        dGR_up, dGR_dn = dG[R]
+        dGij_up = self.GR_atom(dGR_up, iatom, jatom)
+        dGij_dn = self.GR_atom(dGR_dn, iatom, jatom)
         # GijR , I, x, y, z component.
-        dGij_Ixyz = pauli_block_all(dGij)
+        dGij_Ixyz_up = pauli_block_all(dGij_up)
+        dGij_Ixyz_dn = pauli_block_all(dGij_dn)
 
         # dG(j, i, -R)
-        #Rm = tuple(-np.array(R))
-        dGRm = dGrev[R]
-        dGji = self.GR_atom(dGRm, jatom, iatom)
-        dGji_Ixyz = pauli_block_all(dGji)
+        dGRm_up, dGRm_dn = dGrev[R]
+        dGji_up = self.GR_atom(dGRm_up, jatom, iatom)
+        dGji_dn = self.GR_atom(dGRm_dn, jatom, iatom)
+        dGji_Ixyz_up = pauli_block_all(dGji_up)
+        dGji_Ixyz_dn = pauli_block_all(dGji_dn)
+
+        # Combine spin up and down contributions
+        Gij_Ixyz = (Gij_Ixyz_up + Gij_Ixyz_dn) / 2.0
+        Gji_Ixyz = (Gji_Ixyz_up + Gji_Ixyz_dn) / 2.0
+        dGij_Ixyz = (dGij_Ixyz_up + dGij_Ixyz_dn) / 2.0
+        dGji_Ixyz = (dGji_Ixyz_up + dGji_Ixyz_dn) / 2.0
 
         tmp = np.zeros((4, 4), dtype=complex)
         dtmp = np.zeros((4, 4), dtype=complex)
@@ -124,11 +146,35 @@ class ExchangePert2(ExchangeNCL):
         return A_ijR_list, dAdx_ijR_list, A_orb_ijR_list, dAdx_orb_ijR_list
 
     def get_AijR_rhoR(self, e):
-        GR, dGRij, dGRji, rhoR = self.G.get_GR_and_dGRdx_from_epw(self.Rlist, self.short_Rlist,
-                                                                  energy=e, epc=self.epc, Ru=self.Ru)
+        GR_up, dGRij_up, dGRji_up, rhoR_up = self.G.get_GR_and_dGRdx_from_epw(self.Rlist, self.short_Rlist,
+                                                                  energy=e, epc=self.epc_up, Ru=self.Ru)
+        GR_dn, dGRij_dn, dGRji_dn, rhoR_dn = self.G.get_GR_and_dGRdx_from_epw(self.Rlist, self.short_Rlist,
+                                                                  energy=e, epc=self.epc_dn, Ru=self.Ru)
+
+        # Combine spin up and down results
+        GR = {}
+        for R in GR_up:
+            GR[R] = (GR_up[R], GR_dn[R])
+        dGRij = {}
+        for R in dGRij_up:
+            dGRij[R] = (dGRij_up[R], dGRij_dn[R])
+        dGRji = {}
+        for R in dGRji_up:
+            dGRji[R] = (dGRji_up[R], dGRji_dn[R])
+        rhoR = {}
+        for R in rhoR_up:
+            rhoR[R] = (rhoR_up[R], rhoR_dn[R])
+
         AijR, dAdx_ijR, A_orb_ijR, dAdx_orb_ijR = self.get_all_A(
             GR, dGRij, dGRji)
-        return AijR, dAdx_ijR, self.get_rho_e(rhoR), A_orb_ijR, dAdx_orb_ijR
+        return AijR, dAdx_ijR, self.get_rho_e_spin(rhoR), A_orb_ijR, dAdx_orb_ijR
+
+    def get_rho_e_spin(self, rhoR):
+        """ add component to density matrix from spin-resolved green's function
+        :param rhoR: Spin-resolved density matrix in real space.
+        """
+        rho_up, rho_dn = rhoR[(0, 0, 0)]
+        return -1.0 / np.pi * (rho_up[0, 0, 0] + rho_dn[0, 0, 0]) / 2.0
 
     def A_to_Jtensor(self):
         """
