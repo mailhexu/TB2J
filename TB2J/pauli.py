@@ -212,3 +212,62 @@ def pauli_block_sigma_norm(M):
     evec = np.array((ex, ey, ez))
     evec = evec / np.linalg.norm(evec)
     return Mx * evec[0] + My * evec[1] + Mz * evec[2]
+
+
+def vec_pauli_block(array):
+    """
+    Vectorized version of pauli_block_all for compatibility with Python 3.8.
+    Returns the I, x, y, z components of a matrix array.
+
+    Parameters
+    ----------
+    array : np.ndarray
+        Input array of shape (..., 2n, 2n) containing matrices to decompose.
+        The matrices should be written in the spinor basis where the last
+        two dimensions are even (2n x 2n) to allow for spin block extraction.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (..., 4, n, n) containing the Pauli decomposition:
+        - block[..., 0, :, :] : Identity component (I)
+        - block[..., 1, :, :] : sigma_x component
+        - block[..., 2, :, :] : sigma_y component
+        - block[..., 3, :, :] : sigma_z component
+
+    Notes
+    -----
+    This function extracts the four Pauli matrix components from the input
+    matrices using the standard decomposition:
+
+    M = (M_00 + M_11)/2 * I + (M_01 + M_10)/2 * sigma_x
+        + (M_01 - M_10)/(2i) * sigma_y + (M_00 - M_11)/2 * sigma_z
+
+    where M_ij are the 2x2 spin blocks of the input matrix.
+
+    This version is compatible with Python 3.8 and does not use the 'out'
+    parameter in numpy operations.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> M = np.random.rand(10, 4, 4) + 1j * np.random.rand(10, 4, 4)
+    >>> pauli_components = vec_pauli_block(M)
+    >>> print(pauli_components.shape)  # (10, 4, 2, 2)
+    """
+    A00 = array[..., ::2, ::2]
+    A01 = array[..., ::2, 1::2]
+    A10 = array[..., 1::2, ::2]
+    A11 = array[..., 1::2, 1::2]
+    n2 = array.shape[-1] // 2
+
+    out_dtype = np.result_type(array.dtype, np.complex64)
+    block = np.empty((*array.shape[:-2], 4, n2, n2), dtype=out_dtype)
+
+    # Python 3.8 compatible version without using 'out' parameter
+    block[..., 0, :, :] = (A00 + A11) * 0.5
+    block[..., 1, :, :] = (A01 + A10) * 0.5
+    block[..., 2, :, :] = (A01 - A10) * 0.5j
+    block[..., 3, :, :] = (A00 - A11) * 0.5
+
+    return block
