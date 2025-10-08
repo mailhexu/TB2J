@@ -376,38 +376,28 @@ class TBGreen:
             Gk_all[ik] = self.get_Gk(ik, energy)
         return Gk_all
 
-    def get_GR(self, Rpts, energy, get_rho=False, Gk_all=None):
+    def compute_GR(self, Rpts, kpts, Gks):
+        Rvecs = np.array(Rpts)
+        phase = np.exp(self.k2Rfactor * np.einsum("ni,mi->nm", Rvecs, kpts))
+        phase *= self.kweights[None]
+        GR = np.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
+        return GR
+
+    def get_GR(self, Rpts, energy, Gk_all=None):
         """calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
-        :param energy:
-        :returns:  real space green's function for one energy for a list of R.
-        :rtype:  dictionary, the keys are tuple of R, values are matrices of nbasis*nbasis
+        :param energy: energy value
+        :param Gk_all: optional pre-computed Gk for all k-points
+        :returns: real space green's function for one energy for a list of R.
+        :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
         """
-        Rpts = [tuple(R) for R in Rpts]
-        GR = defaultdict(lambda: 0.0j)
-        rhoR = defaultdict(lambda: 0.0j)
-        for ik, kpt in enumerate(self.kpts):
-            if Gk_all is None:
-                Gk = self.get_Gk(ik, energy)
-            else:
-                Gk = Gk_all[ik]
-            if get_rho:
-                if self.is_orthogonal:
-                    rhok = Gk
-                else:
-                    rhok = self.get_Sk(ik) @ Gk
-            for iR, R in enumerate(Rpts):
-                phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                tmp = Gk * (phase * self.kweights[ik])
-                GR[R] += tmp
-                # change this if need full rho
-                if get_rho and R == (0, 0, 0):
-                    rhoR[R] += rhok * (phase * self.kweights[ik])
-        if get_rho:
-            return GR, rhoR
+        if Gk_all is None:
+            Gks = self.get_Gk_all(energy)
         else:
-            return GR
+            Gks = Gk_all
+
+        return self.compute_GR(Rpts, self.kpts, Gks)
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """

@@ -222,7 +222,7 @@ def op_norm(M):
     return max(svd(M)[1])
 
 
-def pauli_block_sigma_norm_old(M):
+def pauli_block_sigma_norm(M):
     """
     M= MI * I + \vec{P} dot \vec{sigma}
     = MI*I + p * \vec{e} dot \vec{sigma}
