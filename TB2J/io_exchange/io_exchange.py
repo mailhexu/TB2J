@@ -149,6 +149,7 @@ class SpinIO(object):
         self.has_biquadratic = not (
             biquadratic_Jdict == {} or biquadratic_Jdict is None
         )
+
         self.biquadratic_Jdict = biquadratic_Jdict
 
         if NJT_ddict is not None:
@@ -459,9 +460,10 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
                 assert np.linalg.norm(self.Rlist[iR0]) == 0
-                sum_JR = np.sum(np.sum(Jmat, axis=0))
+                sum_JR = np.sum(np.sum(Jmat, axis=0), axis=0)
+                print(sum_JR)
                 for i in range(n3):
-                    Jmat[iR0][i, i] -= sum_JRi[i]
+                    Jmat[iR0][i, i] -= sum_JR[i]
         elif order == "ij":
             Jmat = np.zeros((nR, n, n), dtype=float)
             for iR, R in enumerate(self.Rlist):
@@ -521,6 +523,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_multibinit(path=os.path.join(path, "Multibinit"))
         self.write_tom_format(path=os.path.join(path, "TomASD"))
         self.write_vampire(path=os.path.join(path, "Vampire"))
+        self.write_espins(path=os.path.join(path, "ESPInS"))
 
         self.plot_all(savefile=os.path.join(path, "JvsR.pdf"))
         # self.write_Jq(kmesh=[9, 9, 9], path=path)
@@ -683,6 +686,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         from TB2J.io_exchange.io_uppasd import write_uppasd
 
         write_uppasd(self, path=path)
+
+    def write_espins(self, path):
+        from TB2J.io_exchange.io_espins import write_espins
+
+        write_espins(self, path=path)
 
 
 def gen_distance_dict(ind_mag_atoms, atoms, Rlist):
