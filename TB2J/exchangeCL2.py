@@ -4,6 +4,7 @@ Exchange from Green's function
 
 import os
 from collections import defaultdict
+from itertools import product
 
 import numpy as np
 from tqdm import tqdm
@@ -192,6 +193,66 @@ class ExchangeCL2(ExchangeCL):
                         Rij_done.add((iRm, jatom, iatom))
         return Jorb_list, JJ_list
 
+    def get_all_A_vectorized(self, Gup, Gdn):
+        """
+        Vectorized calculation of all A matrix elements for collinear exchange.
+        Follows the pattern from TB2J/exchange.py get_all_A_vectorized method.
+
+        :param Gup: Green's function array for spin up, shape (nR, nbasis, nbasis)
+        :param Gdn: Green's function array for spin down, shape (nR, nbasis, nbasis)
+        :returns: tuple of (Jorb_list, JJ_list) with R vector keys
+        """
+        # Get magnetic sites and their orbital indices
+        magnetic_sites = self.ind_mag_atoms
+        iorbs = [self.iorb(site) for site in magnetic_sites]
+
+        # Build the Delta matrices for all magnetic sites
+        Delta = [self.get_Delta(site) for site in magnetic_sites]
+
+        # Initialize results dictionaries
+        Jorb_list = {}
+        JJ_list = {}
+
+        # Batch compute all exchange tensors following the vectorized approach
+        for i, j in product(range(len(magnetic_sites)), repeat=2):
+            idx, jdx = iorbs[i], iorbs[j]
+
+            # Extract Gij and Gji for all R vectors at once
+            Gij = Gup[:, idx][:, :, jdx]  # Shape: (nR, ni, nj)
+            # Since short_Rlist is properly ordered, we can flip Gji along R axis
+            # to get Gji(-R) for Gij(R)
+            Gji = np.flip(Gdn[:, jdx][:, :, idx], axis=0)  # Shape: (nR, nj, ni)
+
+            # Compute exchange tensors for all R vectors at once
+            # Following collinear formula: Delta_i @ Gij @ Delta_j @ Gji
+            t_tensor = np.einsum(
+                "ab,rbc,cd,rda->rac", Delta[i], Gij, Delta[j], Gji, optimize="optimal"
+            ) / (4.0 * np.pi)
+            tmp_tensor = np.sum(t_tensor, axis=(1, 2))  # Shape: (nR,)
+
+            mi, mj = (magnetic_sites[i], magnetic_sites[j])
+
+            # Store results for each R vector
+            for iR, R_vec in enumerate(self.short_Rlist):
+                # Store with R vector key for compatibility
+                Jorb_list[(R_vec, mi, mj)] = t_tensor[iR]  # Shape: (ni, nj)
+                JJ_list[(R_vec, mi, mj)] = tmp_tensor[iR]  # Scalar
+
+        # Filter results to only include atom pairs within cutoff distance
+        # This matches the behavior of the original get_all_A method
+        filtered_Jorb_list = {}
+        filtered_JJ_list = {}
+
+        for iR, atom_pairs in self.R_ijatom_dict.items():
+            R_vec = self.short_Rlist[iR]
+            for iatom, jatom in atom_pairs:
+                key = (R_vec, iatom, jatom)
+                if key in Jorb_list:
+                    filtered_Jorb_list[key] = Jorb_list[key]
+                    filtered_JJ_list[key] = JJ_list[key]
+
+        return filtered_Jorb_list, filtered_JJ_list
+
     def A_to_Jtensor(self):
         for key, val in self.JJ.items():
             # key:(R, iatom, jatom)
@@ -262,7 +323,13 @@ class ExchangeCL2(ExchangeCL):
         # short_Rlist now contains actual R vectors
         GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
         GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
-        Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+        # Use vectorized method with fallback to original method
+        try:
+            Jorb_list, JJ_list = self.get_all_A_vectorized(GR_up, GR_dn)
+            # Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+        except Exception as ex:
+            print(f"Vectorized method failed: {ex}, falling back to original method")
+            Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
         return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
 
     def calculate_all(self):
