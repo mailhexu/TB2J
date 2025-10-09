@@ -235,6 +235,7 @@ class Exchange(ExchangeParams):
         ind_matoms = self.ind_mag_atoms
 
         # First pass: identify which R vectors are within Rcut
+        # Add both R and -R when within cutoff
         valid_R_vectors = set()
         for R in self.Rlist:
             for ispin, iatom in enumerate(ind_matoms):
@@ -246,10 +247,13 @@ class Exchange(ExchangeParams):
                     vec = pos_jR - pos_i
                     distance = np.sqrt(np.sum(vec**2))
                     if self.Rcut is None or distance < self.Rcut:
-                        valid_R_vectors.add(tuple(R))
+                        R_tuple = tuple(R)
+                        valid_R_vectors.add(R_tuple)
+                        valid_R_vectors.add(tuple(-x for x in R_tuple))
 
-        # Create short_Rlist with actual R vectors
-        self.short_Rlist = list(valid_R_vectors)
+        # Sort the valid_R_vectors
+        self.short_Rlist = sorted(valid_R_vectors)
+        # print(f"short_Rlist contains {len(self.short_Rlist)} R vectors, which are: {self.short_Rlist}")
 
         # Second pass: build dictionaries using the clean indexing
         for iR, R_vec in enumerate(self.short_Rlist):
@@ -276,6 +280,24 @@ class Exchange(ExchangeParams):
                 self.R_negative_index[iR] = self.Rvec_to_shortlist_idx[Rm_vec]
             else:
                 self.R_negative_index[iR] = None  # No negative R found
+
+        # Verify the R vector pairing
+        pairing_good = True
+        for iR, R_vec in enumerate(self.short_Rlist):
+            neg_idx = self.R_negative_index[iR]
+            if neg_idx is not None:
+                expected_neg = tuple(-x for x in R_vec)
+                actual_neg = self.short_Rlist[neg_idx]
+                if expected_neg != actual_neg:
+                    print(
+                        f"  R[{iR}] = {R_vec} -> -R[{neg_idx}] = {actual_neg} ✗ (expected {expected_neg})"
+                    )
+                    pairing_good = False
+            else:
+                print(f"  R[{iR}] = {R_vec} -> No negative R found")
+
+        if not pairing_good:
+            raise ValueError("R vector pairing check failed.")
 
     def iorb(self, iatom):
         """
@@ -471,7 +493,8 @@ class ExchangeNCL(Exchange):
     def get_all_A_vectorized(self, GR):
         """
         Vectorized calculation of all A matrix elements.
-        Optimized version based on TB2J_optimization_prototype.ipynb.
+        Fully vectorized version based on TB2J_optimization_prototype.ipynb.
+        Now works with properly ordered short_Rlist.
 
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
         :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
@@ -495,6 +518,8 @@ class ExchangeNCL(Exchange):
             Gji = GR[:, jdx][:, :, idx]
             Gij = pauli_block_all(Gij)
             Gji = pauli_block_all(Gji)
+            # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
+            # the ith R vector's negative is at -i index.
             Gji = np.flip(Gji, axis=0)
             Pi = P[i]
             Pj = P[j]
