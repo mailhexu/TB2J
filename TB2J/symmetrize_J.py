@@ -33,7 +33,7 @@ class TB2JSymmetrizer:
             print("Symmetry found:")
             print(finder.spacegroup)
             print("-" * 30)
-        self.pgdict = finder.get_symmetry_pair_group_dict()
+        self.pgdict = finder.get_symmetry_pair_list_dict()
         self.exc = exc
         self.new_exc = copy.deepcopy(exc)
         self.Jonly = Jonly
@@ -48,7 +48,7 @@ class TB2JSymmetrizer:
         symJdict = {}
         # Jdict = self.exc.exchange_Jdict
         # ngroup = self.pgdict
-        for pairgroup in self.pgdict.groups:
+        for pairgroup in self.pgdict.pairlists:
             ijRs = pairgroup.get_all_ijR()
             ijRs_spin = [self.exc.ijR_index_atom_to_spin(*ijR) for ijR in ijRs]
             Js = [self.exc.get_J(*ijR_spin) for ijR_spin in ijRs_spin]
