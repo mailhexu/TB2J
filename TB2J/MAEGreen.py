@@ -52,6 +52,7 @@ class MAEGreen(ExchangeNCL):
         nangles = len(self.thetas)
         self.es = np.zeros(nangles, dtype=complex)
         self.es_atom = np.zeros((nangles, self.natoms), dtype=complex)
+        self.es_matrix = np.zeros((nangles, self.natoms, self.natoms), dtype=complex)
         self.es_atom_orb = DefaultDict(lambda: 0)
 
     def set_angles_xyz(self):
@@ -154,6 +155,7 @@ class MAEGreen(ExchangeNCL):
         na = len(thetas)
         dE_angle = np.zeros(na, dtype=complex)
         dE_angle_atom = np.zeros((na, self.natoms), dtype=complex)
+        dE_angle_matrix = np.zeros((na, self.natoms, self.natoms), dtype=complex)
         # dE_angle_orbitals = np.zeros((na, self.natoms, self.norb, self.norb), dtype=complex)
         dE_angle_atom_orb = DefaultDict(lambda: 0)
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
@@ -178,6 +180,28 @@ class MAEGreen(ExchangeNCL):
                 # dE_angle[iangle] += np.trace(GdH@GdH) * self.G.kweights[ik]
                 # dE_angle[iangle] += np.trace(GdH@G0K[ik].T.conj()@dHi ) * self.G.kweights[ik]
                 dE_angle[iangle] += dG2sum * self.G.kweights[ik]
+
+                # Calculate atom-atom matrix interactions
+                for iatom in range(self.natoms):
+                    iorb = self.iorb(iatom)
+                    for jatom in range(self.natoms):
+                        jorb = self.iorb(jatom)
+                        # Calculate cross terms between atoms i and j
+                        dE_ij_orb = dG2[np.ix_(iorb, jorb)] * self.G.kweights[ik]
+                        dE_ij_orb = (
+                            dE_ij_orb[::2, ::2]
+                            + dE_ij_orb[1::2, 1::2]
+                            + dE_ij_orb[1::2, ::2]
+                            + dE_ij_orb[::2, 1::2]
+                        )
+                        dE_ij = np.sum(dE_ij_orb)
+                        # Transform to local orbital basis
+                        mmat_i = self.mmats[iatom]
+                        mmat_j = self.mmats[jatom]
+                        dE_ij_orb = mmat_i.T @ dE_ij_orb @ mmat_j
+                        dE_angle_matrix[iangle, iatom, jatom] += dE_ij
+
+                # Original single atom contribution
                 for iatom in range(self.natoms):
                     iorb = self.iorb(iatom)
                     # dG2= dG2[::2, ::2] + dG2[1::2, 1::2] + dG2[1::2, ::2] + dG2[::2, 1::2]
@@ -194,7 +218,7 @@ class MAEGreen(ExchangeNCL):
                     dE_angle_atom_orb[(iangle, iatom)] += dE_atom_orb
                     # dE_atom = np.sum(dG2diag[iorb]) * self.G.kweights[ik]
                     dE_angle_atom[iangle, iatom] += dE_atom
-        return dE_angle, dE_angle_atom, dE_angle_atom_orb
+        return dE_angle, dE_angle_atom, dE_angle_atom_orb, dE_angle_matrix
 
     def get_perturbed_R(self, e, thetas, phis):
         self.tbmodel.set_so_strength(0.0)
@@ -232,9 +256,10 @@ class MAEGreen(ExchangeNCL):
             npole = len(self.contour.path)
             results = map(func, tqdm.tqdm(self.contour.path, total=npole))
         for i, result in enumerate(results):
-            dE_angle, dE_angle_atom, dE_angle_atom_orb = result
+            dE_angle, dE_angle_atom, dE_angle_atom_orb, dE_angle_matrix = result
             self.es += dE_angle * self.contour.weights[i]
             self.es_atom += dE_angle_atom * self.contour.weights[i]
+            self.es_matrix += dE_angle_matrix * self.contour.weights[i]
             for key, value in dE_angle_atom_orb.items():
                 self.es_atom_orb[key] += (
                     dE_angle_atom_orb[key] * self.contour.weights[i]
@@ -242,6 +267,7 @@ class MAEGreen(ExchangeNCL):
 
         self.es = -np.imag(self.es) / (2 * np.pi)
         self.es_atom = -np.imag(self.es_atom) / (2 * np.pi)
+        self.es_matrix = -np.imag(self.es_matrix) / (2 * np.pi)
         for key, value in self.es_atom_orb.items():
             self.es_atom_orb[key] = -np.imag(value) / (2 * np.pi)
 
@@ -259,6 +285,7 @@ class MAEGreen(ExchangeNCL):
         Path(output_path).mkdir(exist_ok=True)
         fname = f"{output_path}/MAE.dat"
         fname_orb = f"{output_path}/MAE_orb.dat"
+        fname_matrix = f"{output_path}/MAE_matrix.dat"
         # fname_tensor = f"{output_path}/MAE_tensor.dat"
         # if figure3d is not None:
         #    fname_fig3d = f"{output_path}/{figure3d}"
@@ -287,6 +314,22 @@ class MAEGreen(ExchangeNCL):
                 for ea in es:
                     f.write(f"{ea*1e3:.8f} ")
                 f.write("\n")
+
+        # Write matrix data to MAE_matrix.dat
+        with open(fname_matrix, "w") as fmat:
+            fmat.write("# MAE atom-atom interaction matrices\n")
+            fmat.write("# Format: angle_index theta phi atom_i atom_j MAE_ij(meV)\n")
+            fmat.write("# Units: theta and phi in radians, MAE in meV\n")
+            for iangle, (theta, phi) in enumerate(zip(self.thetas, self.phis)):
+                for iatom in range(self.natoms):
+                    for jatom in range(self.natoms):
+                        mae_ij = (
+                            self.es_matrix[iangle, iatom, jatom] * 1e3
+                        )  # Convert to meV
+                        fmat.write(
+                            f"{iangle:4d} {theta:.5f} {phi:.5f} {iatom:4d} {jatom:4d} {mae_ij:.8f}\n"
+                        )
+                fmat.write("\n")  # Empty line between angles for readability
 
         # self.ani = self.fit_anisotropy_tensor()
         # with open(fname_tensor, "w") as f:
