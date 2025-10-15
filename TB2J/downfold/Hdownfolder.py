@@ -184,7 +184,7 @@ class ExchangeDownfolder(ExchangeIO):
         Hjj = matrix[..., jdx.T, jdx]
 
         eigvals = np.linalg.eigvalsh(matrix)
-        Hjj[..., *diag_indices] -= eigvals.min()
+        Hjj[..., diag_indices[0], diag_indices[1]] -= eigvals.min()
         correction = np.einsum("...ij,...jk,...kl->...il", Hij, np.linalg.inv(Hjj), Hji)
 
         return Hii - correction

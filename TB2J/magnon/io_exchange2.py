@@ -338,9 +338,9 @@ class ExchangeIO(BaseMagneticStructure):
                 raise ValueError(
                     "The number of neighbors and exchange values does not coincide."
                 )
-            *array_indices, value_indices = self._get_neighbor_indices(
-                list(neighbors), tol=tol
-            )
+            indices = self._get_neighbor_indices(list(neighbors), tol=tol)
+            array_indices = indices[:-1]
+            value_indices = indices[-1]
         else:
             if self._exchange_values.shape[:2] != array.shape[:2]:
                 raise ValueError(
@@ -352,15 +352,21 @@ class ExchangeIO(BaseMagneticStructure):
             )
 
         if name == "Jiso":
-            self._exchange_values[*array_indices, 3] = array[value_indices]
+            self._exchange_values[array_indices[0], array_indices[1], 3] = array[
+                value_indices
+            ]
         elif name == "Biquad":
-            self._exchange_values[*array_indices, 4:6] = array[value_indices]
+            self._exchange_values[array_indices[0], array_indices[1], 4:6] = array[
+                value_indices
+            ]
         elif name == "DMI":
-            self._exchange_values[*array_indices, 6:9] = array[value_indices]
+            self._exchange_values[array_indices[0], array_indices[1], 6:9] = array[
+                value_indices
+            ]
         elif name == "Jani":
-            self._exchange_values[*array_indices, 9:] = array[value_indices].reshape(
-                array.shape[:2] + (9,)
-            )
+            self._exchange_values[array_indices[0], array_indices[1], 9:] = array[
+                value_indices
+            ].reshape(array.shape[:2] + (9,))
         else:
             raise ValueError(f"Unrecognized exchange array name: '{name}'.")
 
@@ -404,11 +410,17 @@ class ExchangeIO(BaseMagneticStructure):
             # DMI
             pos_indices = ([1, 2, 0], [2, 0, 1])
             neg_indices = ([2, 0, 1], [1, 2, 0])
-            tensor[:, :, *pos_indices] += self._exchange_values[:, :, 6:9]
-            tensor[:, :, *neg_indices] -= self._exchange_values[:, :, 6:9]
+            tensor[:, :, pos_indices[0], pos_indices[1]] += self._exchange_values[
+                :, :, 6:9
+            ]
+            tensor[:, :, neg_indices[0], neg_indices[1]] -= self._exchange_values[
+                :, :, 6:9
+            ]
         # isotropic exchange
         diag_indices = ([0, 1, 2], [0, 1, 2])
-        tensor[:, :, *diag_indices] += self._exchange_values[:, :, 3, None]
+        tensor[:, :, diag_indices[0], diag_indices[1]] += self._exchange_values[
+            :, :, 3, None
+        ]
 
         return tensor
 
