@@ -144,17 +144,17 @@ class ExchangeDownfolder(ExchangeIO):
 
     def set_exchange_tensor(self, J):
         idig = np.diag_indices(3)
-        Jiso = J[:, :, *idig].mean(axis=-1)
+        Jiso = J[:, :, idig[0], idig[1]].mean(axis=-1)
 
         idmi = ([1, 2, 0], [2, 0, 1])
         DMI = (J - J.swapaxes(-1, -2)) / 2
 
         Jani = (J + J.swapaxes(-1, -2)) / 2
-        Jani[:, :, *idig] -= Jiso[:, :, None]
+        Jani[:, :, idig[0], idig[1]] -= Jiso[:, :, None]
 
         self._exchange_values[:, :, 3] = Jiso
         if not self.collinear:
-            self._exchange_values[:, :, 6:9] = DMI[:, :, *idmi]
+            self._exchange_values[:, :, 6:9] = DMI[:, :, idmi[0], idmi[1]]
             self._exchange_values[:, :, 9:] = Jani.reshape(Jani.shape[:2] + (9,))
 
     @staticmethod
