@@ -4,6 +4,7 @@ Exchange from Green's function
 
 import os
 from collections import defaultdict
+from itertools import product
 
 import numpy as np
 from tqdm import tqdm
@@ -108,11 +109,15 @@ class ExchangeCL2(ExchangeCL):
         Rij_done = set()
         Jorb_list = dict()
         JJ_list = dict()
-        for R, ijpairs in self.R_ijatom_dict.items():
-            if (iatom, jatom) in ijpairs and (R, iatom, jatom) not in Rij_done:
-                Gij_up = self.GR_atom(Gup[R], iatom, jatom)
-                Rm = tuple(-x for x in R)
-                Gji_dn = self.GR_atom(Gdn[Rm], jatom, iatom)
+        for iR, ijpairs in self.R_ijatom_dict.items():
+            if (iatom, jatom) in ijpairs and (iR, iatom, jatom) not in Rij_done:
+                Gij_up = self.GR_atom(Gup[iR], iatom, jatom)
+                iRm = self.R_negative_index[iR]
+                if iRm is None:
+                    R_vec = self.R_vectors[iR]
+                    Rm_vec = tuple(-x for x in R_vec)
+                    raise KeyError(f"Negative R vector {Rm_vec} not found in R_vectors")
+                Gji_dn = self.GR_atom(Gdn[iRm], jatom, iatom)
                 tmp = 0.0j
                 Deltai = self.get_Delta(iatom)
                 Deltaj = self.get_Delta(jatom)
@@ -132,13 +137,13 @@ class ExchangeCL2(ExchangeCL):
                 #        np.matmul(Deltaj, Gji_down),
                 #    )
                 tmp = np.sum(t)
-                self.Jorb_list[(R, iatom, jatom)].append(t / (4.0 * np.pi))
-                self.JJ_list[(R, iatom, jatom)].append(tmp / (4.0 * np.pi))
-                Rij_done.add((R, iatom, jatom))
-                if (Rm, jatom, iatom) not in Rij_done:
-                    Jorb_list[(Rm, jatom, iatom)] = t.T / (4.0 * np.pi)
-                    JJ_list[(Rm, jatom, iatom)] = tmp / (4.0 * np.pi)
-                    Rij_done.add((Rm, jatom, iatom))
+                self.Jorb_list[(iR, iatom, jatom)].append(t / (4.0 * np.pi))
+                self.JJ_list[(iR, iatom, jatom)].append(tmp / (4.0 * np.pi))
+                Rij_done.add((iR, iatom, jatom))
+                if (iRm, jatom, iatom) not in Rij_done:
+                    Jorb_list[(iRm, jatom, iatom)] = t.T / (4.0 * np.pi)
+                    JJ_list[(iRm, jatom, iatom)] = tmp / (4.0 * np.pi)
+                    Rij_done.add((iRm, jatom, iatom))
         return Jorb_list, JJ_list
 
     def get_all_A(self, Gup, Gdn):
@@ -151,16 +156,23 @@ class ExchangeCL2(ExchangeCL):
         Rij_done = set()
         Jorb_list = dict()
         JJ_list = dict()
-        for R, ijpairs in self.R_ijatom_dict.items():
-            for iatom, jatom in ijpairs:
-                if (R, iatom, jatom) not in Rij_done:
-                    Rm = tuple(-x for x in R)
-                    if (Rm, jatom, iatom) in Rij_done:
+        for iR in self.R_ijatom_dict:
+            for iatom, jatom in self.R_ijatom_dict[iR]:
+                if (iR, iatom, jatom) not in Rij_done:
+                    iRm = self.R_negative_index[iR]
+                    if iRm is None:
+                        R_vec = self.short_Rlist[iR]
+                        Rm_vec = tuple(-x for x in R_vec)
                         raise KeyError(
-                            f"Strange (Rm, jatom, iatom) has already been calculated! {(Rm, jatom, iatom)}"
+                            f"Negative R vector {Rm_vec} not found in short_Rlist"
                         )
-                    Gij_up = self.GR_atom(Gup[R], iatom, jatom)
-                    Gji_dn = self.GR_atom(Gdn[Rm], jatom, iatom)
+
+                    if (iRm, jatom, iatom) in Rij_done:
+                        raise KeyError(
+                            f"Strange (iRm, jatom, iatom) has already been calculated! {(iRm, jatom, iatom)}"
+                        )
+                    Gij_up = self.GR_atom(Gup[iR], iatom, jatom)
+                    Gji_dn = self.GR_atom(Gdn[iRm], jatom, iatom)
                     tmp = 0.0j
                     # t = self.get_Delta(iatom) @ Gij_up @ self.get_Delta(jatom) @ Gji_dn
                     t = np.einsum(
@@ -169,14 +181,77 @@ class ExchangeCL2(ExchangeCL):
                         np.matmul(self.get_Delta(jatom), Gji_dn),
                     )
                     tmp = np.sum(t)
-                    Jorb_list[(R, iatom, jatom)] = t / (4.0 * np.pi)
-                    JJ_list[(R, iatom, jatom)] = tmp / (4.0 * np.pi)
-                    Rij_done.add((R, iatom, jatom))
-                    if (Rm, jatom, iatom) not in Rij_done:
-                        Jorb_list[(Rm, jatom, iatom)] = t.T / (4.0 * np.pi)
-                        JJ_list[(Rm, jatom, iatom)] = tmp / (4.0 * np.pi)
-                        Rij_done.add((Rm, jatom, iatom))
+                    # Use R vectors for keys for I/O compatibility
+                    R_vec = self.short_Rlist[iR]
+                    Rm_vec = self.short_Rlist[iRm]
+                    Jorb_list[(R_vec, iatom, jatom)] = t / (4.0 * np.pi)
+                    JJ_list[(R_vec, iatom, jatom)] = tmp / (4.0 * np.pi)
+                    Rij_done.add((iR, iatom, jatom))
+                    if (iRm, jatom, iatom) not in Rij_done:
+                        Jorb_list[(Rm_vec, jatom, iatom)] = t.T / (4.0 * np.pi)
+                        JJ_list[(Rm_vec, jatom, iatom)] = tmp / (4.0 * np.pi)
+                        Rij_done.add((iRm, jatom, iatom))
         return Jorb_list, JJ_list
+
+    def get_all_A_vectorized(self, Gup, Gdn):
+        """
+        Vectorized calculation of all A matrix elements for collinear exchange.
+        Follows the pattern from TB2J/exchange.py get_all_A_vectorized method.
+
+        :param Gup: Green's function array for spin up, shape (nR, nbasis, nbasis)
+        :param Gdn: Green's function array for spin down, shape (nR, nbasis, nbasis)
+        :returns: tuple of (Jorb_list, JJ_list) with R vector keys
+        """
+        # Get magnetic sites and their orbital indices
+        magnetic_sites = self.ind_mag_atoms
+        iorbs = [self.iorb(site) for site in magnetic_sites]
+
+        # Build the Delta matrices for all magnetic sites
+        Delta = [self.get_Delta(site) for site in magnetic_sites]
+
+        # Initialize results dictionaries
+        Jorb_list = {}
+        JJ_list = {}
+
+        # Batch compute all exchange tensors following the vectorized approach
+        for i, j in product(range(len(magnetic_sites)), repeat=2):
+            idx, jdx = iorbs[i], iorbs[j]
+
+            # Extract Gij and Gji for all R vectors at once
+            Gij = Gup[:, idx][:, :, jdx]  # Shape: (nR, ni, nj)
+            # Since short_Rlist is properly ordered, we can flip Gji along R axis
+            # to get Gji(-R) for Gij(R)
+            Gji = np.flip(Gdn[:, jdx][:, :, idx], axis=0)  # Shape: (nR, nj, ni)
+
+            # Compute exchange tensors for all R vectors at once
+            # Following collinear formula: Delta_i @ Gij @ Delta_j @ Gji
+            t_tensor = np.einsum(
+                "ab,rbc,cd,rda->rac", Delta[i], Gij, Delta[j], Gji, optimize="optimal"
+            ) / (4.0 * np.pi)
+            tmp_tensor = np.sum(t_tensor, axis=(1, 2))  # Shape: (nR,)
+
+            mi, mj = (magnetic_sites[i], magnetic_sites[j])
+
+            # Store results for each R vector
+            for iR, R_vec in enumerate(self.short_Rlist):
+                # Store with R vector key for compatibility
+                Jorb_list[(R_vec, mi, mj)] = t_tensor[iR]  # Shape: (ni, nj)
+                JJ_list[(R_vec, mi, mj)] = tmp_tensor[iR]  # Scalar
+
+        # Filter results to only include atom pairs within cutoff distance
+        # This matches the behavior of the original get_all_A method
+        filtered_Jorb_list = {}
+        filtered_JJ_list = {}
+
+        for iR, atom_pairs in self.R_ijatom_dict.items():
+            R_vec = self.short_Rlist[iR]
+            for iatom, jatom in atom_pairs:
+                key = (R_vec, iatom, jatom)
+                if key in Jorb_list:
+                    filtered_Jorb_list[key] = Jorb_list[key]
+                    filtered_JJ_list[key] = JJ_list[key]
+
+        return filtered_Jorb_list, filtered_JJ_list
 
     def A_to_Jtensor(self):
         for key, val in self.JJ.items():
@@ -230,25 +305,31 @@ class ExchangeCL2(ExchangeCL):
         #    integrate = trapezoidal_nonuniform
         # elif method == "simpson":
         #    integrate = simpson_nonuniform
-        for R, ijpairs in self.R_ijatom_dict.items():
-            for iatom, jatom in ijpairs:
-                # self.Jorb[(R, iatom, jatom)] = integrate(
-                #    self.contour.path, self.Jorb_list[(R, iatom, jatom)]
+        for iR in self.R_ijatom_dict:
+            for iatom, jatom in self.R_ijatom_dict[iR]:
+                # Use R vector key consistently
+                R_vec = self.short_Rlist[iR]
+                key = (R_vec, iatom, jatom)
+                # self.Jorb[key] = integrate(
+                #    self.contour.path, self.Jorb_list[key]
                 # )
-                # self.JJ[(R, iatom, jatom)] = integrate(
-                #    self.contour.path, self.JJ_list[(R, iatom, jatom)]
+                # self.JJ[key] = integrate(
+                #    self.contour.path, self.JJ_list[key]
                 # )
-                self.Jorb[(R, iatom, jatom)] = self.contour.integrate_values(
-                    self.Jorb_list[(R, iatom, jatom)]
-                )
-                self.JJ[(R, iatom, jatom)] = self.contour.integrate_values(
-                    self.JJ_list[(R, iatom, jatom)]
-                )
+                self.Jorb[key] = self.contour.integrate_values(self.Jorb_list[key])
+                self.JJ[key] = self.contour.integrate_values(self.JJ_list[key])
 
     def get_quantities_per_e(self, e):
-        GR_up = self.Gup.get_GR(self.short_Rlist, energy=e, get_rho=False)
-        GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e, get_rho=False)
-        Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+        # short_Rlist now contains actual R vectors
+        GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
+        GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
+        # Use vectorized method with fallback to original method
+        try:
+            Jorb_list, JJ_list = self.get_all_A_vectorized(GR_up, GR_dn)
+            # Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+        except Exception as ex:
+            print(f"Vectorized method failed: {ex}, falling back to original method")
+            Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
         return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
 
     def calculate_all(self):
@@ -271,9 +352,11 @@ class ExchangeCL2(ExchangeCL):
         for i, result in enumerate(results):
             Jorb_list = result["Jorb_list"]
             JJ_list = result["JJ_list"]
-            for iR, R in enumerate(self.R_ijatom_dict):
-                for iatom, jatom in self.R_ijatom_dict[R]:
-                    key = (R, iatom, jatom)
+            for iR in self.R_ijatom_dict:
+                for iatom, jatom in self.R_ijatom_dict[iR]:
+                    # Use R vector key consistently across all dictionaries
+                    R_vec = self.short_Rlist[iR]
+                    key = (R_vec, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
         self.integrate()
