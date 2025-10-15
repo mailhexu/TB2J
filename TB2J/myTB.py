@@ -1,15 +1,17 @@
-import os
-import numpy as np
 import copy
-from scipy.linalg import eigh
-from scipy.sparse import csr_matrix
-from scipy.io import netcdf_file
+import os
 from collections import defaultdict
+
+import numpy as np
 
 # from tbmodels import Model
 from ase.atoms import Atoms
+from scipy.io import netcdf_file
+from scipy.linalg import eigh
+from scipy.sparse import csr_matrix
+
 from TB2J.utils import auto_assign_basis_name
-from TB2J.wannier import parse_ham, parse_xyz, parse_atoms, parse_tb
+from TB2J.wannier import parse_atoms, parse_ham, parse_tb, parse_xyz
 
 
 class AbstractTB:
@@ -187,9 +189,7 @@ class MyTB(AbstractTB):
         if os.path.exists(tb_fname):
             xcart, nbasis, data, R_degens = parse_tb(fname=tb_fname)
         else:
-            nbasis, data, R_degens = parse_ham(
-                fname=os.path.join(path, prefix + "_hr.dat")
-            )
+            nbasis, data, R_degens = parse_ham(fname=hr_fname)
             xcart, _, _ = parse_xyz(fname=os.path.join(path, prefix + "_centres.xyz"))
 
         if atoms is None:
@@ -237,7 +237,7 @@ class MyTB(AbstractTB):
         return m
 
     def gen_ham(self, k, convention=2):
-        """
+        r"""
         generate hamiltonian matrix at k point.
         H_k( i, j)=\sum_R H_R(i, j)^phase.
         There are two conventions,
@@ -451,7 +451,7 @@ class MyTB(AbstractTB):
         nbasis = root.dimensions["nbasis"]
         nspin = root.dimensions["nspin"]
         ndim = root.dimensions["ndim"]
-        natom = root.dimensions["natom"]
+        _natom = root.dimensions["natom"]
         Rlist = root.variables["R"][:]
         mdata_real = root.variables["data_real"][:]
         mdata_imag = root.variables["data_imag"][:]
