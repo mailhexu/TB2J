@@ -66,7 +66,7 @@ def write_vampire_unitcell_file(cls, fname):
 
 def write_vampire_mat_file(cls, fname):
     mat_tmpl = """#---------------------------------------------------
-# Material {id} 
+# Material {id}
 #---------------------------------------------------
 material[{id}]:material-name={name}
 material[{id}]:damping-constant={damping}
@@ -75,6 +75,8 @@ material[{id}]:uniaxial-anisotropy-constant={k1}
 material[{id}]:material-element={name}
 material[{id}]:initial-spin-direction = {spinat}
 material[{id}]:uniaxial-anisotropy-direction = {k1dir}
+# The following line is required for vampire 5 and later. 
+material[{id}]:unit-cell-category =  {id}
 #---------------------------------------------------
 """
     with open(fname, "w") as myfile:
