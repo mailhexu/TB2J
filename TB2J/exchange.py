@@ -40,15 +40,17 @@ class Exchange(ExchangeParams):
         self.has_elistc = False
         self._clean_tbmodels()
 
+        # Initialize storage for Green's function diagonals (for charge and magnetic moment calculation)
+        self.G_diagonal = {iatom: [] for iatom in range(len(self.atoms))}
+
     def _prepare_Jorb_file(self):
         os.makedirs(self.output_path, exist_ok=True)
         self.orbpath = os.path.join(self.output_path, "OrbResolve")
         os.makedirs(self.orbpath, exist_ok=True)
 
     def _adjust_emin(self):
-        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
+        self.emin = self.G.adjusted_emin
         # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
-        # self.emin = -42.0
         # print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
@@ -347,6 +349,7 @@ class ExchangeNCL(Exchange):
             efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.nproc,
+            initial_emin=self.emin,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -358,10 +361,11 @@ class ExchangeNCL(Exchange):
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         # self.HR0 = self.tbmodel.get_H0()
-        if hasattr(self.tbmodel, "get_H0"):
-            self.HR0 = self.tbmodel.get_H0()
-        else:
-            self.HR0 = self.G.H0
+        # if hasattr(self.tbmodel, "get_H0"):
+        #    self.HR0 = self.tbmodel.get_H0()
+        # else:
+        #    self.HR0 = self.G.H0
+        self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
         if self.write_density_matrix:
@@ -736,6 +740,10 @@ class ExchangeNCL(Exchange):
         # TODO: get the MAE from Gk_all
         # short_Rlist now contains actual R vectors
         GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
+
+        # Save diagonal elements of Green's function for charge and magnetic moment calculation
+        self.save_greens_function_diagonals(GR)
+
         # TODO: define the quantities for one energy.
         # Use vectorized method for better performance
         try:
@@ -746,6 +754,69 @@ class ExchangeNCL(Exchange):
             print(f"Vectorized method failed: {e}, falling back to original method")
             AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
+
+    def save_greens_function_diagonals(self, GR):
+        """
+        Save diagonal elements of Green's function for each atom.
+        These will be used to compute charge and magnetic moments.
+
+        :param GR: Green's function array of shape (nR, nbasis, nbasis)
+        """
+        # Only need R=0 for diagonal elements (intra-atomic)
+        GR_R0 = GR[0]  # R=0 Green's function
+
+        for iatom in range(len(self.atoms)):
+            # Get orbital indices for this atom
+            orbi = self.iorb(iatom)
+            # Extract diagonal elements for this atom
+            G_diag = np.diag(GR_R0[np.ix_(orbi, orbi)])
+            self.G_diagonal[iatom].append(G_diag)
+
+    def compute_charge_and_magnetic_moments(self):
+        """
+        Compute charge and magnetic moments from stored Green's function diagonals.
+        Uses the relation:
+        - Charge: n_i = -1/π ∫ Im[G_ii(E)] dE
+        - Magnetic moment: m_i = -1/π ∫ Im[σ·G_ii(E)] dE
+        """
+        if not hasattr(self, "G_diagonal") or not self.G_diagonal:
+            print(
+                "Warning: No Green's function diagonals stored. Cannot compute charge and magnetic moments."
+            )
+            return
+
+        self.charges = np.zeros(len(self.atoms))
+        self.spinat = np.zeros((len(self.atoms), 3))
+
+        for iatom in range(len(self.atoms)):
+            if not self.G_diagonal[iatom]:
+                continue
+
+            # Stack all diagonal elements for this atom
+            G_diags = np.array(
+                self.G_diagonal[iatom]
+            )  # shape: (n_energies, n_orbitals)
+
+            # Integrate over energy using the same contour as exchange calculation
+            # Charge: -1/π ∫ Im[diag(G)] dE
+            integrated_diag = self.contour.integrate_values(
+                -np.imag(G_diags) / np.pi, axis=0
+            )
+
+            # Sum over orbitals to get total charge
+            self.charges[iatom] = np.sum(integrated_diag)
+
+            # For magnetic moments, we need to consider spin structure
+            # This depends on whether we're in collinear or non-collinear case
+            if self._is_collinear:
+                # In collinear case, magnetic moment comes from difference between up and down spin
+                # This is a simplified approach - actual implementation may need more detailed spin structure
+                pass  # TODO: Implement collinear magnetic moment calculation
+            else:
+                # Non-collinear case requires full spin matrix treatment
+                pass  # TODO: Implement non-collinear magnetic moment calculation
+
+        print(f"Computed charges: {self.charges}")
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
@@ -806,6 +877,10 @@ class ExchangeNCL(Exchange):
         # self.save_AijRs(AijRs)
         self.integrate(AijRs, AijRs_orb)
         self.get_rho_atom()
+
+        # Compute charge and magnetic moments from Green's function diagonals
+        self.compute_charge_and_magnetic_moments()
+
         self.A_to_Jtensor()
         self.A_to_Jtensor_orb()
 
