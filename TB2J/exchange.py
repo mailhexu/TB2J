@@ -1,6 +1,7 @@
 import os
 import pickle
 from collections import defaultdict
+from itertools import product
 
 import numpy as np
 from tqdm import tqdm
@@ -39,15 +40,17 @@ class Exchange(ExchangeParams):
         self.has_elistc = False
         self._clean_tbmodels()
 
+        # Initialize storage for Green's function diagonals (for charge and magnetic moment calculation)
+        self.G_diagonal = {iatom: [] for iatom in range(len(self.atoms))}
+
     def _prepare_Jorb_file(self):
         os.makedirs(self.output_path, exist_ok=True)
         self.orbpath = os.path.join(self.output_path, "OrbResolve")
         os.makedirs(self.orbpath, exist_ok=True)
 
     def _adjust_emin(self):
-        self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
+        self.emin = self.G.adjusted_emin
         # self.emin = self.G.find_energy_ingap(rbound=self.efermi - 15.0) - self.efermi
-        # self.emin = -42.0
         # print(f"A gap is found at {self.emin}, set emin to it.")
 
     def set_tbmodels(self, tbmodels):
@@ -229,12 +232,16 @@ class Exchange(ExchangeParams):
         prepare the distance between atoms.
         """
         self.distance_dict = {}
-        self.short_Rlist = []
+        self.short_Rlist = []  # Will contain actual R vectors, not indices
         self.R_ijatom_dict = defaultdict(lambda: [])
         ind_matoms = self.ind_mag_atoms
-        for ispin, iatom in enumerate(ind_matoms):
-            for jspin, jatom in enumerate(ind_matoms):
-                for R in self.Rlist:
+
+        # First pass: identify which R vectors are within Rcut
+        # Add both R and -R when within cutoff
+        valid_R_vectors = set()
+        for R in self.Rlist:
+            for ispin, iatom in enumerate(ind_matoms):
+                for jspin, jatom in enumerate(ind_matoms):
                     pos_i = self.atoms.get_positions()[iatom]
                     pos_jR = self.atoms.get_positions()[jatom] + np.dot(
                         R, self.atoms.get_cell()
@@ -242,9 +249,57 @@ class Exchange(ExchangeParams):
                     vec = pos_jR - pos_i
                     distance = np.sqrt(np.sum(vec**2))
                     if self.Rcut is None or distance < self.Rcut:
-                        self.distance_dict[(tuple(R), ispin, jspin)] = (vec, distance)
-                        self.R_ijatom_dict[tuple(R)].append((iatom, jatom))
-        self.short_Rlist = list(self.R_ijatom_dict.keys())
+                        R_tuple = tuple(R)
+                        valid_R_vectors.add(R_tuple)
+                        valid_R_vectors.add(tuple(-x for x in R_tuple))
+
+        # Sort the valid_R_vectors
+        self.short_Rlist = sorted(valid_R_vectors)
+        # print(f"short_Rlist contains {len(self.short_Rlist)} R vectors, which are: {self.short_Rlist}")
+
+        # Second pass: build dictionaries using the clean indexing
+        for iR, R_vec in enumerate(self.short_Rlist):
+            for ispin, iatom in enumerate(ind_matoms):
+                for jspin, jatom in enumerate(ind_matoms):
+                    pos_i = self.atoms.get_positions()[iatom]
+                    pos_jR = self.atoms.get_positions()[jatom] + np.dot(
+                        R_vec, self.atoms.get_cell()
+                    )
+                    vec = pos_jR - pos_i
+                    distance = np.sqrt(np.sum(vec**2))
+                    if self.Rcut is None or distance < self.Rcut:
+                        self.distance_dict[(R_vec, ispin, jspin)] = (vec, distance)
+                        self.R_ijatom_dict[iR].append((iatom, jatom))
+
+        # Create lookup dictionary for negative R vectors
+        self.Rvec_to_shortlist_idx = {
+            R_vec: iR for iR, R_vec in enumerate(self.short_Rlist)
+        }
+        self.R_negative_index = {}
+        for iR, R_vec in enumerate(self.short_Rlist):
+            Rm_vec = tuple(-x for x in R_vec)
+            if Rm_vec in self.Rvec_to_shortlist_idx:
+                self.R_negative_index[iR] = self.Rvec_to_shortlist_idx[Rm_vec]
+            else:
+                self.R_negative_index[iR] = None  # No negative R found
+
+        # Verify the R vector pairing
+        pairing_good = True
+        for iR, R_vec in enumerate(self.short_Rlist):
+            neg_idx = self.R_negative_index[iR]
+            if neg_idx is not None:
+                expected_neg = tuple(-x for x in R_vec)
+                actual_neg = self.short_Rlist[neg_idx]
+                if expected_neg != actual_neg:
+                    print(
+                        f"  R[{iR}] = {R_vec} -> -R[{neg_idx}] = {actual_neg} ✗ (expected {expected_neg})"
+                    )
+                    pairing_good = False
+            else:
+                print(f"  R[{iR}] = {R_vec} -> No negative R found")
+
+        if not pairing_good:
+            raise ValueError("R vector pairing check failed.")
 
     def iorb(self, iatom):
         """
@@ -294,6 +349,7 @@ class ExchangeNCL(Exchange):
             efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.nproc,
+            initial_emin=self.emin,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -305,10 +361,11 @@ class ExchangeNCL(Exchange):
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         # self.HR0 = self.tbmodel.get_H0()
-        if hasattr(self.tbmodel, "get_H0"):
-            self.HR0 = self.tbmodel.get_H0()
-        else:
-            self.HR0 = self.G.H0
+        # if hasattr(self.tbmodel, "get_H0"):
+        #    self.HR0 = self.tbmodel.get_H0()
+        # else:
+        #    self.HR0 = self.G.H0
+        self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
         if self.write_density_matrix:
@@ -362,7 +419,7 @@ class ExchangeNCL(Exchange):
         return GR[np.ix_(orbi, orbj)]
         # return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
 
-    def get_A_ijR(self, G, R, iatom, jatom):
+    def get_A_ijR(self, G, iR, iatom, jatom):
         """calculate A from G for a energy slice (de).
         It take the
         .. math::
@@ -371,20 +428,25 @@ class ExchangeNCL(Exchange):
         where u, v are I, x, y, z (index 0, 1,2,3). p(i) = self.get_P_iatom(iatom)
         T^u(ijR)  (u=0,1,2,3) = pauli_block_all(G)
 
-        :param G: Green's function for all R, i, j.
+        :param G: Green's function for all R, i, j (numpy array).
+        :param iR: index in short_Rlist (position in G array)
         :param iatom: i
         :param jatom: j
-        :param de:  energy step. used for integeration
         :returns: a matrix of A_ij(u, v), where u, v =(0)0, x(1), y(2), z(3)
         :rtype:  4*4 matrix
         """
-        GR = G[R]
+        GR = G[iR]
         Gij = self.GR_atom(GR, iatom, jatom)
         Gij_Ixyz = pauli_block_all(Gij)
 
-        # G(j, i, -R)
-        Rm = tuple(-x for x in R)
-        GRm = G[Rm]
+        # G(j, i, -R) - use optimized lookup
+        iRm = self.R_negative_index[iR]
+        if iRm is None:
+            R_vec = self.short_Rlist[iR]
+            Rm_vec = tuple(-x for x in R_vec)
+            raise KeyError(f"Negative R vector {Rm_vec} not found in short_Rlist")
+
+        GRm = G[iRm]
         Gji = self.GR_atom(GRm, jatom, iatom)
         Gji_Ixyz = pauli_block_all(Gji)
 
@@ -418,17 +480,84 @@ class ExchangeNCL(Exchange):
         """
         Calculate all A matrix elements
         Loop over all magnetic atoms.
-        :param G: Green's function.
+        :param G: Green's function (numpy array).
         :param de: energy step.
         """
         A_ijR_list = {}
         Aorb_ijR_list = {}
-        for iR, R in enumerate(self.R_ijatom_dict):
-            for iatom, jatom in self.R_ijatom_dict[R]:
-                A, A_orb = self.get_A_ijR(G, R, iatom, jatom)
-                A_ijR_list[(R, iatom, jatom)] = A
-                Aorb_ijR_list[(R, iatom, jatom)] = A_orb
+        for iR in self.R_ijatom_dict:
+            for iatom, jatom in self.R_ijatom_dict[iR]:
+                A, A_orb = self.get_A_ijR(G, iR, iatom, jatom)
+                # Store with actual R vector for compatibility with existing code
+                R_vec = self.short_Rlist[iR]
+                A_ijR_list[(R_vec, iatom, jatom)] = A
+                Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
+
+    def get_all_A_vectorized(self, GR):
+        """
+        Vectorized calculation of all A matrix elements.
+        Fully vectorized version based on TB2J_optimization_prototype.ipynb.
+        Now works with properly ordered short_Rlist.
+
+        :param GR: Green's function array of shape (nR, nbasis, nbasis)
+        :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
+        """
+
+        # Get magnetic sites and their orbital indices
+        magnetic_sites = self.ind_mag_atoms
+        iorbs = [self.iorb(site) for site in magnetic_sites]
+
+        # Build the P matrices for all magnetic sites using the same method as original
+        P = [self.get_P_iatom(site) for site in magnetic_sites]
+
+        # Initialize results dictionary
+        A = {}
+        A_orb = {}
+
+        # Batch compute all A tensors following the prototype
+        for i, j in product(range(len(magnetic_sites)), repeat=2):
+            idx, jdx = iorbs[i], iorbs[j]
+            Gij = GR[:, idx][:, :, jdx]
+            Gji = GR[:, jdx][:, :, idx]
+            Gij = pauli_block_all(Gij)
+            Gji = pauli_block_all(Gji)
+            # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
+            # the ith R vector's negative is at -i index.
+            Gji = np.flip(Gji, axis=0)
+            Pi = P[i]
+            Pj = P[j]
+            X = Pi @ Gij
+            Y = Pj @ Gji
+            mi, mj = (magnetic_sites[i], magnetic_sites[j])
+
+            if self.orb_decomposition:
+                # Vectorized orbital decomposition over all R vectors at once
+                # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
+                A_orb_tensor = (
+                    np.einsum("ruij,rvji->ruvij", X, Y) / np.pi
+                )  # Shape: (nR, 4, 4, ni, nj)
+                # Vectorized sum over orbitals for simplified A values
+                A_val_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # Shape: (nR, 4, 4)
+            else:
+                # Compute A_tensor for all R vectors at once
+                A_tensor = (
+                    np.einsum("...uij,...vji->...uv", X, Y) / np.pi
+                )  # Shape: (nR, 4, 4)
+                A_val_tensor = A_tensor  # Use pre-computed A_tensor directly
+                A_orb_tensor = None
+
+            # Store results for each R vector
+            for iR, R_vec in enumerate(self.short_Rlist):
+                A_val = A_val_tensor[iR]  # Shape: (4, 4)
+                A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
+
+                # Store with R vector key for compatibility
+                A[(R_vec, mi, mj)] = A_val
+                if A_orb_val is not None:
+                    A_orb[(R_vec, mi, mj)] = A_orb_val
+
+        return A, A_orb
 
     def A_to_Jtensor_orb(self):
         """
@@ -589,27 +718,105 @@ class ExchangeNCL(Exchange):
         #
 
         # self.rho = integrate(self.contour.path, rhoRs)
-        for iR, R in enumerate(self.R_ijatom_dict):
-            for iatom, jatom in self.R_ijatom_dict[R]:
-                f = AijRs[(R, iatom, jatom)]
-                # self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
-                self.A_ijR[(R, iatom, jatom)] = self.contour.integrate_values(f)
+        for iR in self.R_ijatom_dict:
+            R_vec = self.short_Rlist[iR]
+            for iatom, jatom in self.R_ijatom_dict[iR]:
+                f = AijRs[(R_vec, iatom, jatom)]
+                # self.A_ijR[(R_vec, iatom, jatom)] = integrate(self.contour.path, f)
+                self.A_ijR[(R_vec, iatom, jatom)] = self.contour.integrate_values(f)
 
                 if self.orb_decomposition:
-                    # self.A_ijR_orb[(R, iatom, jatom)] = integrate(
-                    #    self.contour.path, AijRs_orb[(R, iatom, jatom)]
+                    # self.A_ijR_orb[(R_vec, iatom, jatom)] = integrate(
+                    #    self.contour.path, AijRs_orb[(R_vec, iatom, jatom)]
                     # )
-                    self.contour.integrate_values(AijRs_orb[(R, iatom, jatom)])
+                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
+                        self.contour.integrate_values(AijRs_orb[(R_vec, iatom, jatom)])
+                    )
 
     def get_quantities_per_e(self, e):
         Gk_all = self.G.get_Gk_all(e)
         # mae = self.get_mae_kspace(Gk_all)
         mae = None
         # TODO: get the MAE from Gk_all
-        GR = self.G.get_GR(self.short_Rlist, energy=e, get_rho=False, Gk_all=Gk_all)
+        # short_Rlist now contains actual R vectors
+        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
+
+        # Save diagonal elements of Green's function for charge and magnetic moment calculation
+        self.save_greens_function_diagonals(GR)
+
         # TODO: define the quantities for one energy.
-        AijR, AijR_orb = self.get_all_A(GR)
+        # Use vectorized method for better performance
+        try:
+            #
+            AijR, AijR_orb = self.get_all_A_vectorized(GR)
+            # AijR, AijR_orb = self.get_all_A(GR)
+        except Exception as e:
+            print(f"Vectorized method failed: {e}, falling back to original method")
+            AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
+
+    def save_greens_function_diagonals(self, GR):
+        """
+        Save diagonal elements of Green's function for each atom.
+        These will be used to compute charge and magnetic moments.
+
+        :param GR: Green's function array of shape (nR, nbasis, nbasis)
+        """
+        # Only need R=0 for diagonal elements (intra-atomic)
+        GR_R0 = GR[0]  # R=0 Green's function
+
+        for iatom in range(len(self.atoms)):
+            # Get orbital indices for this atom
+            orbi = self.iorb(iatom)
+            # Extract diagonal elements for this atom
+            G_diag = np.diag(GR_R0[np.ix_(orbi, orbi)])
+            self.G_diagonal[iatom].append(G_diag)
+
+    def compute_charge_and_magnetic_moments(self):
+        """
+        Compute charge and magnetic moments from stored Green's function diagonals.
+        Uses the relation:
+        - Charge: n_i = -1/π ∫ Im[G_ii(E)] dE
+        - Magnetic moment: m_i = -1/π ∫ Im[σ·G_ii(E)] dE
+        """
+        if not hasattr(self, "G_diagonal") or not self.G_diagonal:
+            print(
+                "Warning: No Green's function diagonals stored. Cannot compute charge and magnetic moments."
+            )
+            return
+
+        self.charges = np.zeros(len(self.atoms))
+        self.spinat = np.zeros((len(self.atoms), 3))
+
+        for iatom in range(len(self.atoms)):
+            if not self.G_diagonal[iatom]:
+                continue
+
+            # Stack all diagonal elements for this atom
+            G_diags = np.array(
+                self.G_diagonal[iatom]
+            )  # shape: (n_energies, n_orbitals)
+
+            # Integrate over energy using the same contour as exchange calculation
+            # Charge: -1/π ∫ Im[diag(G)] dE
+            integrated_diag = self.contour.integrate_values(
+                -np.imag(G_diags) / np.pi, axis=0
+            )
+
+            # Sum over orbitals to get total charge
+            self.charges[iatom] = np.sum(integrated_diag)
+
+            # For magnetic moments, we need to consider spin structure
+            # This depends on whether we're in collinear or non-collinear case
+            if self._is_collinear:
+                # In collinear case, magnetic moment comes from difference between up and down spin
+                # This is a simplified approach - actual implementation may need more detailed spin structure
+                pass  # TODO: Implement collinear magnetic moment calculation
+            else:
+                # Non-collinear case requires full spin matrix treatment
+                pass  # TODO: Implement non-collinear magnetic moment calculation
+
+        print(f"Computed charges: {self.charges}")
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
@@ -644,27 +851,36 @@ class ExchangeNCL(Exchange):
             )
 
         for i, result in enumerate(results):
-            for iR, R in enumerate(self.R_ijatom_dict):
-                for iatom, jatom in self.R_ijatom_dict[R]:
-                    if (R, iatom, jatom) in AijRs:
-                        AijRs[(R, iatom, jatom)].append(result["AijR"][R, iatom, jatom])
+            for iR in self.R_ijatom_dict:
+                R_vec = self.short_Rlist[iR]
+                for iatom, jatom in self.R_ijatom_dict[iR]:
+                    if (R_vec, iatom, jatom) in AijRs:
+                        AijRs[(R_vec, iatom, jatom)].append(
+                            result["AijR"][(R_vec, iatom, jatom)]
+                        )
                         if self.orb_decomposition:
-                            AijRs_orb[(R, iatom, jatom)].append(
-                                result["AijR_orb"][R, iatom, jatom]
+                            AijRs_orb[(R_vec, iatom, jatom)].append(
+                                result["AijR_orb"][(R_vec, iatom, jatom)]
                             )
 
                     else:
-                        AijRs[(R, iatom, jatom)] = []
-                        AijRs[(R, iatom, jatom)].append(result["AijR"][R, iatom, jatom])
+                        AijRs[(R_vec, iatom, jatom)] = []
+                        AijRs[(R_vec, iatom, jatom)].append(
+                            result["AijR"][(R_vec, iatom, jatom)]
+                        )
                         if self.orb_decomposition:
-                            AijRs_orb[(R, iatom, jatom)] = []
-                            AijRs_orb[(R, iatom, jatom)].append(
-                                result["AijR_orb"][R, iatom, jatom]
+                            AijRs_orb[(R_vec, iatom, jatom)] = []
+                            AijRs_orb[(R_vec, iatom, jatom)].append(
+                                result["AijR_orb"][(R_vec, iatom, jatom)]
                             )
 
         # self.save_AijRs(AijRs)
         self.integrate(AijRs, AijRs_orb)
         self.get_rho_atom()
+
+        # Compute charge and magnetic moments from Green's function diagonals
+        self.compute_charge_and_magnetic_moments()
+
         self.A_to_Jtensor()
         self.A_to_Jtensor_orb()
 

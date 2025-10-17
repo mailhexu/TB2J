@@ -56,13 +56,26 @@ def find_energy_ingap(evals, rbound, gap=2.0):
     find a energy inside a gap below rbound (right bound),
     return the energy gap top - 0.5.
     """
+    # print("Finding energy in gap...")
+    # print(f"Right bound: {rbound}, min gap size: {gap}")
     m0 = np.sort(evals.flatten())
-    m = m0[m0 < rbound]
+    # print(f"Min eigenvalue: {m0[0]}, Max eigenvalue: {m0[-1]}")
+    m = m0[m0 <= rbound]
+    # append the next state above rbound to m
+    if len(m0) > len(m):
+        m = np.append(m, m0[len(m)])
+    # print(f"Number of states below right bound: {len(m)}")
+    # print(f"Max eigenvalue below right bound: {m[-1]}")
     ind = np.where(np.diff(m) > gap)[0]
+    # print(f"Number of gaps found: {len(ind)}")
+    # print("ind[-1]: ", ind[-1] if len(ind) > 0 else "N/A")
+    emin = 0.0
     if len(ind) == 0:
-        return m0[0] - 0.5
+        emin = m0[0] - 0.5
     else:
-        return m[ind[-1] + 1] - 0.5
+        emin = m[ind[-1] + 1] - 0.5
+    # print("emin:", emin)
+    return emin
 
 
 class TBGreen:
@@ -79,12 +92,22 @@ class TBGreen:
         use_cache=False,
         cache_path=None,
         nproc=1,
+        initial_emin=-25,
     ):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
         :param efermi: fermi energy.
+        :param gamma: whether to include gamma point in monkhorst pack
+        :param kpts: user defined kpoints
+        :param kweights: weights for user defined kpoints
+        :param k_sym: whether the kpoints are symmetrized
+        :param use_cache: whether to use cache to store wavefunctions
+        :param cache_path: path to store cache
+        :param nproc: number of processes to use
+        :param emin: minimum energy relative to fermi level to consider
         """
+        self.initial_emin = initial_emin
         self.tbmodel = tbmodel
         self.is_orthogonal = tbmodel.is_orthogonal
         self.R2kfactor = tbmodel.R2kfactor
@@ -235,9 +258,19 @@ class TBGreen:
             self.efermi = occ.efermi(copy.deepcopy(self.evals))
             print(f"Fermi energy found: {self.efermi}")
 
-        # self.evals, self.evecs = self._reduce_eigens(
-        #    self.evals, self.evecs, emin=self.efermi - 15.0, emax=self.efermi + 10.1
-        # )
+        self.adjusted_emin = (
+            find_energy_ingap(
+                self.evals, rbound=self.efermi + self.initial_emin, gap=2.0
+            )
+            - self.efermi
+        )
+        # print(f"Adjusted emin relative to Fermi level: {self.adjusted_emin}")
+        self.evals, self.evecs = self._reduce_eigens(
+            self.evals,
+            self.evecs,
+            emin=self.efermi + self.adjusted_emin,
+            emax=self.efermi + 5.1,
+        )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
@@ -376,38 +409,28 @@ class TBGreen:
             Gk_all[ik] = self.get_Gk(ik, energy)
         return Gk_all
 
-    def get_GR(self, Rpts, energy, get_rho=False, Gk_all=None):
+    def compute_GR(self, Rpts, kpts, Gks):
+        Rvecs = np.array(Rpts)
+        phase = np.exp(self.k2Rfactor * np.einsum("ni,mi->nm", Rvecs, kpts))
+        phase *= self.kweights[None]
+        GR = np.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
+        return GR
+
+    def get_GR(self, Rpts, energy, Gk_all=None):
         """calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
-        :param energy:
-        :returns:  real space green's function for one energy for a list of R.
-        :rtype:  dictionary, the keys are tuple of R, values are matrices of nbasis*nbasis
+        :param energy: energy value
+        :param Gk_all: optional pre-computed Gk for all k-points
+        :returns: real space green's function for one energy for a list of R.
+        :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
         """
-        Rpts = [tuple(R) for R in Rpts]
-        GR = defaultdict(lambda: 0.0j)
-        rhoR = defaultdict(lambda: 0.0j)
-        for ik, kpt in enumerate(self.kpts):
-            if Gk_all is None:
-                Gk = self.get_Gk(ik, energy)
-            else:
-                Gk = Gk_all[ik]
-            if get_rho:
-                if self.is_orthogonal:
-                    rhok = Gk
-                else:
-                    rhok = self.get_Sk(ik) @ Gk
-            for iR, R in enumerate(Rpts):
-                phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
-                tmp = Gk * (phase * self.kweights[ik])
-                GR[R] += tmp
-                # change this if need full rho
-                if get_rho and R == (0, 0, 0):
-                    rhoR[R] += rhok * (phase * self.kweights[ik])
-        if get_rho:
-            return GR, rhoR
+        if Gk_all is None:
+            Gks = self.get_Gk_all(energy)
         else:
-            return GR
+            Gks = Gk_all
+
+        return self.compute_GR(Rpts, self.kpts, Gks)
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """
