@@ -27,8 +27,9 @@ class Contour:
         integrate f along the path
         """
         ret = 0
-        for i in range(len(values)):
-            ret += values[i] * self.weights[i]
+        ret = np.einsum("i...,i->...", values, self.weights)
+        # for i in range(len(values)):
+        #    ret += values[i] * self.weights[i]
         return ret
 
     def build_path_semicircle(self, npoints, endpoint=True):

@@ -763,9 +763,10 @@ class ExchangeNCL(Exchange):
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
         """
         # Only need R=0 for diagonal elements (intra-atomic)
-        GR_R0 = GR[0]  # R=0 Green's function
+        iR_R0 = self.Rvec_to_shortlist_idx[(0, 0, 0)]
+        GR_R0 = GR[iR_R0]  # R=0 Green's function
 
-        for iatom in range(len(self.atoms)):
+        for iatom in self.orb_dict:
             # Get orbital indices for this atom
             orbi = self.iorb(iatom)
             # Extract diagonal elements for this atom
@@ -798,25 +799,41 @@ class ExchangeNCL(Exchange):
             )  # shape: (n_energies, n_orbitals)
 
             # Integrate over energy using the same contour as exchange calculation
-            # Charge: -1/π ∫ Im[diag(G)] dE
-            integrated_diag = self.contour.integrate_values(
-                -np.imag(G_diags) / np.pi, axis=0
-            )
+            # Charge: -1/π Im[∫ diag(G) dE]
+            integrated_diag = -np.imag(self.contour.integrate_values(G_diags)) / np.pi
 
             # Sum over orbitals to get total charge
             self.charges[iatom] = np.sum(integrated_diag)
 
-            # For magnetic moments, we need to consider spin structure
-            # This depends on whether we're in collinear or non-collinear case
-            if self._is_collinear:
-                # In collinear case, magnetic moment comes from difference between up and down spin
-                # This is a simplified approach - actual implementation may need more detailed spin structure
-                pass  # TODO: Implement collinear magnetic moment calculation
-            else:
-                # Non-collinear case requires full spin matrix treatment
-                pass  # TODO: Implement non-collinear magnetic moment calculation
+            # For non-collinear case, compute magnetic moments from Green's function
+            # Note: The stored diagonals only contain G_ii elements, not the full spin structure
+            # For proper magnetic moment calculation, we need the full Green's function matrix
+            # Here we'll compute the charge from diagonals and use density matrix for moments
 
-        print(f"Computed charges: {self.charges}")
+            # The Green's function method can only compute charge from stored diagonals
+            gf_charge = np.sum(integrated_diag)
+
+            # For magnetic moments, we would need the full G matrix with spin structure
+            # Since only diagonals are stored, we cannot compute magnetic moments from GF method
+            # gf_spinat = np.array(
+            #    [np.nan, np.nan, np.nan]
+            # )  # Placeholder - cannot compute from diagonals
+
+            # Compute using density matrix method
+            self.get_rho_atom()  # This computes charges and spinat using density matrix
+            dm_spinat = self.spinat[iatom].copy()
+            dm_charge = self.charges[iatom]
+
+            # Compare methods
+            print(f"Atom {iatom}:")
+            print(f"  Green's function charge: {gf_charge:.6f}")
+            print(f"  Density matrix charge: {dm_charge:.6f}")
+            print(
+                f"  Density matrix magnetic moment: [{dm_spinat[0]:.6f}, {dm_spinat[1]:.6f}, {dm_spinat[2]:.6f}]"
+            )
+            print(
+                "  Note: Magnetic moments from GF method require full Green's function matrix, not just diagonals"
+            )
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)

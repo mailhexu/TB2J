@@ -345,10 +345,11 @@ class ExchangeCL2(ExchangeCL):
         :param GR_dn: Spin-down Green's function array of shape (nR, nbasis, nbasis)
         """
         # Only need R=0 for diagonal elements (intra-atomic)
-        GR_up_R0 = GR_up[0]  # R=0 spin-up Green's function
-        GR_dn_R0 = GR_dn[0]  # R=0 spin-down Green's function
+        iR_R0 = self.Rvec_to_shortlist_idx[(0, 0, 0)]
+        GR_up_R0 = GR_up[iR_R0]  # R=0 spin-up Green's function
+        GR_dn_R0 = GR_dn[iR_R0]  # R=0 spin-down Green's function
 
-        for iatom in range(len(self.atoms)):
+        for iatom in self.orb_dict:
             # Get orbital indices for this atom
             orbi = self.iorb(iatom)
             # Extract diagonal elements for this atom
@@ -379,6 +380,10 @@ class ExchangeCL2(ExchangeCL):
         self.charges = np.zeros(len(self.atoms))
         self.spinat = np.zeros((len(self.atoms), 3))
 
+        # Arrays to store Green's function results for comparison
+        gf_charges = np.zeros(len(self.atoms))
+        gf_spinat = np.zeros((len(self.atoms), 3))
+
         for iatom in range(len(self.atoms)):
             if not self.G_diagonal_up[iatom] or not self.G_diagonal_dn[iatom]:
                 continue
@@ -397,16 +402,30 @@ class ExchangeCL2(ExchangeCL):
             integrated_dn = -np.imag(self.contour.integrate_values(G_dn_diags)) / np.pi
 
             # Sum over orbitals and spin channels to get total charge
-            self.charges[iatom] = np.sum(integrated_up) + np.sum(integrated_dn)
+            gf_charge = np.sum(integrated_up) + np.sum(integrated_dn)
 
             # Magnetic moment (assuming z-direction for collinear case)
             # m_z = -1/π ∫ Im[G_up - G_dn] dE
-            self.spinat[iatom, 2] = np.sum(integrated_up) - np.sum(
-                integrated_dn
-            )  # z-component
+            gf_spin_z = np.sum(integrated_up) - np.sum(integrated_dn)
 
-        print(f"Computed charges: {self.charges}")
-        print(f"Computed magnetic moments (z-component): {self.spinat[:, 2]}")
+            # Store Green's function results
+            gf_charges[iatom] = gf_charge
+            gf_spinat[iatom, 2] = gf_spin_z
+
+            # Compute using density matrix method for comparison
+            self.get_rho_atom()  # This computes charges and spinat using density matrix
+            dm_charge = self.charges[iatom]
+            dm_spin_z = self.spinat[iatom, 2]
+
+            # Compare methods
+            print(f"Atom {iatom}:")
+            print(f"  Green's function charge: {gf_charge:.6f}")
+            print(f"  Density matrix charge: {dm_charge:.6f}")
+            print(f"  Green's function magnetic moment (z): {gf_spin_z:.6f}")
+            print(f"  Density matrix magnetic moment (z): {dm_spin_z:.6f}")
+
+        # Restore the final values from density matrix method
+        self.get_rho_atom()
 
     def calculate_all(self):
         """
