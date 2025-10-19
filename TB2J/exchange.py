@@ -38,6 +38,15 @@ class Exchange(ExchangeParams):
         # self._prepare_NijR()
         self._is_collinear = True
         self.has_elistc = False
+
+        # Store overlap matrix before cleaning tbmodels
+        if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "SR"):
+            # Find R=0 index in tbmodel.Rlist
+            iR_S0 = np.argmin(np.linalg.norm(self.tbmodel.Rlist, axis=1))
+            self.S_R0 = self.tbmodel.SR[iR_S0]  # R=0 overlap matrix
+        else:
+            self.S_R0 = None
+
         self._clean_tbmodels()
 
         # Initialize storage for Green's function diagonals (for charge and magnetic moment calculation)
@@ -742,7 +751,7 @@ class ExchangeNCL(Exchange):
         GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
 
         # Save diagonal elements of Green's function for charge and magnetic moment calculation
-        self.save_greens_function_diagonals(GR)
+        self.save_greens_function_diagonals(GR, e)
 
         # TODO: define the quantities for one energy.
         # Use vectorized method for better performance
@@ -755,30 +764,57 @@ class ExchangeNCL(Exchange):
             AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
 
-    def save_greens_function_diagonals(self, GR):
+    def save_greens_function_diagonals(self, GR, energy):
         """
         Save diagonal elements of Green's function for each atom.
         These will be used to compute charge and magnetic moments.
 
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
+        :param energy: Current energy value
         """
-        # Only need R=0 for diagonal elements (intra-atomic)
-        iR_R0 = self.Rvec_to_shortlist_idx[(0, 0, 0)]
-        GR_R0 = GR[iR_R0]  # R=0 Green's function
+        # For proper charge and magnetic moment calculation, we need to sum over k-points
+        # with weights: Σ_k S(k)·G(k)·w(k)
+        # Since this function is called for each energy, we'll compute the k-sum here
+
+        # Initialize the k-summed SG matrix for this energy
+        nbasis = GR.shape[1]
+        SG_ksum = np.zeros((nbasis, nbasis), dtype=complex)
+
+        # Get k-points and weights from Green's function object
+        kpts = self.G.kpts
+        kweights = self.G.kweights
+
+        # Use the passed energy parameter
+        current_energy = energy
+
+        # Sum over all k-points
+        for ik, kpt in enumerate(kpts):
+            # Get G(k) for current energy
+            Gk = self.G.get_Gk(ik, energy=current_energy)
+
+            if not self.G.is_orthogonal:
+                Sk = self.G.get_Sk(ik)
+                SG_ksum += Sk @ Gk * kweights[ik]
+            else:
+                # For orthogonal case, S is identity
+                SG_ksum += Gk * kweights[ik]
+
+        # Now SG_ksum contains Σ_k S(k)·G(k)·w(k) for this energy
 
         for iatom in self.orb_dict:
             # Get orbital indices for this atom
             orbi = self.iorb(iatom)
             # Extract diagonal elements for this atom
-            G_diag = np.diag(GR_R0[np.ix_(orbi, orbi)])
+            G_diag = np.diag(SG_ksum[np.ix_(orbi, orbi)])
             self.G_diagonal[iatom].append(G_diag)
 
     def compute_charge_and_magnetic_moments(self):
         """
         Compute charge and magnetic moments from stored Green's function diagonals.
         Uses the relation:
-        - Charge: n_i = -1/π ∫ Im[G_ii(E)] dE
-        - Magnetic moment: m_i = -1/π ∫ Im[σ·G_ii(E)] dE
+        - Charge: n_i = -1/π ∫ Im[Tr(S·G_ii(E))] dE
+        - Magnetic moment: m_i = -1/π ∫ Im[Tr(S·σ·G_ii(E))] dE
+        where S is the overlap matrix.
         """
         if not hasattr(self, "G_diagonal") or not self.G_diagonal:
             print(

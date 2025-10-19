@@ -325,7 +325,7 @@ class ExchangeCL2(ExchangeCL):
         GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
 
         # Save diagonal elements of Green's functions for charge and magnetic moment calculation
-        self.save_greens_function_diagonals_collinear(GR_up, GR_dn)
+        self.save_greens_function_diagonals_collinear(GR_up, GR_dn, e)
 
         # Use vectorized method with fallback to original method
         try:
@@ -336,30 +336,56 @@ class ExchangeCL2(ExchangeCL):
             Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
         return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
 
-    def save_greens_function_diagonals_collinear(self, GR_up, GR_dn):
+    def save_greens_function_diagonals_collinear(self, GR_up, GR_dn, energy):
         """
         Save diagonal elements of spin-resolved Green's functions for each atom.
         These will be used to compute charge and magnetic moments in collinear case.
 
         :param GR_up: Spin-up Green's function array of shape (nR, nbasis, nbasis)
         :param GR_dn: Spin-down Green's function array of shape (nR, nbasis, nbasis)
+        :param energy: Current energy value
         """
-        # Only need R=0 for diagonal elements (intra-atomic)
-        iR_R0 = self.Rvec_to_shortlist_idx[(0, 0, 0)]
-        GR_up_R0 = GR_up[iR_R0]  # R=0 spin-up Green's function
-        GR_dn_R0 = GR_dn[iR_R0]  # R=0 spin-down Green's function
+        # For proper charge and magnetic moment calculation, we need to sum over k-points
+        # with weights: Σ_k S(k)·G(k)·w(k)
+
+        # Initialize the k-summed SG matrices for this energy
+        nbasis = GR_up.shape[1]
+        SG_up_ksum = np.zeros((nbasis, nbasis), dtype=complex)
+        SG_dn_ksum = np.zeros((nbasis, nbasis), dtype=complex)
+
+        # Get k-points and weights from Green's function object
+        kpts = self.Gup.kpts
+        kweights = self.Gup.kweights
+
+        # Use the passed energy parameter
+        current_energy = energy
+
+        # Sum over all k-points
+        for ik, kpt in enumerate(kpts):
+            # Get G(k) for current energy
+            Gk_up = self.Gup.get_Gk(ik, energy=current_energy)
+            Gk_dn = self.Gdn.get_Gk(ik, energy=current_energy)
+
+            if not self.Gup.is_orthogonal:
+                Sk = self.Gup.get_Sk(ik)  # Same overlap for both spins
+                SG_up_ksum += Sk @ Gk_up * kweights[ik]
+                SG_dn_ksum += Sk @ Gk_dn * kweights[ik]
+            else:
+                # For orthogonal case, S is identity
+                SG_up_ksum += Gk_up * kweights[ik]
+                SG_dn_ksum += Gk_dn * kweights[ik]
+
+        # Store both spin channels
+        if not hasattr(self, "G_diagonal_up"):
+            self.G_diagonal_up = {iatom: [] for iatom in range(len(self.atoms))}
+            self.G_diagonal_dn = {iatom: [] for iatom in range(len(self.atoms))}
 
         for iatom in self.orb_dict:
             # Get orbital indices for this atom
             orbi = self.iorb(iatom)
             # Extract diagonal elements for this atom
-            G_up_diag = np.diag(GR_up_R0[np.ix_(orbi, orbi)])
-            G_dn_diag = np.diag(GR_dn_R0[np.ix_(orbi, orbi)])
-
-            # Store both spin channels
-            if not hasattr(self, "G_diagonal_up"):
-                self.G_diagonal_up = {iatom: [] for iatom in range(len(self.atoms))}
-                self.G_diagonal_dn = {iatom: [] for iatom in range(len(self.atoms))}
+            G_up_diag = np.diag(SG_up_ksum[np.ix_(orbi, orbi)])
+            G_dn_diag = np.diag(SG_dn_ksum[np.ix_(orbi, orbi)])
 
             self.G_diagonal_up[iatom].append(G_up_diag)
             self.G_diagonal_dn[iatom].append(G_dn_diag)
@@ -368,8 +394,9 @@ class ExchangeCL2(ExchangeCL):
         """
         Compute charge and magnetic moments from stored spin-resolved Green's function diagonals.
         Uses the relation for collinear case:
-        - Charge: n_i = -1/π ∫ (Im[G_ii^↑(E)] + Im[G_ii^↓(E)]) dE
-        - Magnetic moment: m_i = -1/π ∫ (Im[G_ii^↑(E)] - Im[G_ii^↓(E)]) dE
+        - Charge: n_i = -1/π ∫ (Im[Tr(S·G_ii^↑(E))] + Im[Tr(S·G_ii^↓(E))]) dE
+        - Magnetic moment: m_i = -1/π ∫ (Im[Tr(S·G_ii^↑(E))] - Im[Tr(S·G_ii^↓(E))]) dE
+        where S is the overlap matrix.
         """
         if not hasattr(self, "G_diagonal_up") or not self.G_diagonal_up:
             print(
