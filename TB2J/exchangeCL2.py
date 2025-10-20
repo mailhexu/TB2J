@@ -325,7 +325,9 @@ class ExchangeCL2(ExchangeCL):
         GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
 
         # Save diagonal elements of Green's functions for charge and magnetic moment calculation
-        self.save_greens_function_diagonals_collinear(GR_up, GR_dn, e)
+        # Only if debug option is enabled
+        if self.debug_options.get("compute_charge_moments", False):
+            self.save_greens_function_diagonals_collinear(GR_up, GR_dn, e)
 
         # Use vectorized method with fallback to original method
         try:
@@ -398,6 +400,12 @@ class ExchangeCL2(ExchangeCL):
         - Magnetic moment: m_i = -1/π ∫ (Im[Tr(S·G_ii^↑(E))] - Im[Tr(S·G_ii^↓(E))]) dE
         where S is the overlap matrix.
         """
+        # Only run if debug option is enabled
+        if not self.debug_options.get("compute_charge_moments", False):
+            # Just use density matrix method directly
+            self.get_rho_atom()
+            return
+
         if not hasattr(self, "G_diagonal_up") or not self.G_diagonal_up:
             print(
                 "Warning: No Green's function diagonals stored. Cannot compute charge and magnetic moments."
@@ -444,12 +452,31 @@ class ExchangeCL2(ExchangeCL):
             dm_charge = self.charges[iatom]
             dm_spin_z = self.spinat[iatom, 2]
 
-            # Compare methods
-            print(f"Atom {iatom}:")
-            print(f"  Green's function charge: {gf_charge:.6f}")
-            print(f"  Density matrix charge: {dm_charge:.6f}")
-            print(f"  Green's function magnetic moment (z): {gf_spin_z:.6f}")
-            print(f"  Density matrix magnetic moment (z): {dm_spin_z:.6f}")
+            # Compare methods if difference is above threshold
+            charge_diff = abs(gf_charge - dm_charge)
+            spin_diff = abs(gf_spin_z - dm_spin_z)
+            threshold = self.debug_options.get("charge_moment_threshold", 1e-4)
+
+            if charge_diff > threshold or spin_diff > threshold:
+                print(f"Atom {iatom}:")
+                print(f"  Green's function charge: {gf_charge:.6f}")
+                print(f"  Density matrix charge: {dm_charge:.6f}")
+                if charge_diff > threshold:
+                    print(
+                        f"  Charge difference: {charge_diff:.6f} (threshold: {threshold})"
+                    )
+                print(f"  Green's function magnetic moment (z): {gf_spin_z:.6f}")
+                print(f"  Density matrix magnetic moment (z): {dm_spin_z:.6f}")
+                if spin_diff > threshold:
+                    print(
+                        f"  Spin difference: {spin_diff:.6f} (threshold: {threshold})"
+                    )
+
+            # By default, use density matrix output unless debug option says otherwise
+            if not self.debug_options.get("use_density_matrix_output", True):
+                # Override with Green's function values (not recommended)
+                self.charges[iatom] = gf_charge
+                self.spinat[iatom, 2] = gf_spin_z
 
         # Restore the final values from density matrix method
         self.get_rho_atom()

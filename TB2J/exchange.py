@@ -751,7 +751,9 @@ class ExchangeNCL(Exchange):
         GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
 
         # Save diagonal elements of Green's function for charge and magnetic moment calculation
-        self.save_greens_function_diagonals(GR, e)
+        # Only if debug option is enabled
+        if self.debug_options.get("compute_charge_moments", False):
+            self.save_greens_function_diagonals(GR, e)
 
         # TODO: define the quantities for one energy.
         # Use vectorized method for better performance
@@ -816,6 +818,12 @@ class ExchangeNCL(Exchange):
         - Magnetic moment: m_i = -1/π ∫ Im[Tr(S·σ·G_ii(E))] dE
         where S is the overlap matrix.
         """
+        # Only run if debug option is enabled
+        if not self.debug_options.get("compute_charge_moments", False):
+            # Just use density matrix method directly
+            self.get_rho_atom()
+            return
+
         if not hasattr(self, "G_diagonal") or not self.G_diagonal:
             print(
                 "Warning: No Green's function diagonals stored. Cannot compute charge and magnetic moments."
@@ -860,16 +868,27 @@ class ExchangeNCL(Exchange):
             dm_spinat = self.spinat[iatom].copy()
             dm_charge = self.charges[iatom]
 
-            # Compare methods
-            print(f"Atom {iatom}:")
-            print(f"  Green's function charge: {gf_charge:.6f}")
-            print(f"  Density matrix charge: {dm_charge:.6f}")
-            print(
-                f"  Density matrix magnetic moment: [{dm_spinat[0]:.6f}, {dm_spinat[1]:.6f}, {dm_spinat[2]:.6f}]"
-            )
-            print(
-                "  Note: Magnetic moments from GF method require full Green's function matrix, not just diagonals"
-            )
+            # Compare methods if difference is above threshold
+            charge_diff = abs(gf_charge - dm_charge)
+            threshold = self.debug_options.get("charge_moment_threshold", 1e-4)
+
+            if charge_diff > threshold:
+                print(f"Atom {iatom}:")
+                print(f"  Green's function charge: {gf_charge:.6f}")
+                print(f"  Density matrix charge: {dm_charge:.6f}")
+                print(f"  Difference: {charge_diff:.6f} (threshold: {threshold})")
+                print(
+                    f"  Density matrix magnetic moment: [{dm_spinat[0]:.6f}, {dm_spinat[1]:.6f}, {dm_spinat[2]:.6f}]"
+                )
+                print(
+                    "  Note: Magnetic moments from GF method require full Green's function matrix, not just diagonals"
+                )
+
+            # By default, use density matrix output unless debug option says otherwise
+            if not self.debug_options.get("use_density_matrix_output", True):
+                # Override with Green's function charge (not recommended)
+                self.charges[iatom] = gf_charge
+                # Magnetic moments cannot be computed from diagonals in non-collinear case
 
     def save_AijR(self, AijRs, fname):
         result = dict(path=self.contour.path, AijRs=AijRs)
