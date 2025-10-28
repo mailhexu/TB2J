@@ -56,13 +56,26 @@ def find_energy_ingap(evals, rbound, gap=2.0):
     find a energy inside a gap below rbound (right bound),
     return the energy gap top - 0.5.
     """
+    # print("Finding energy in gap...")
+    # print(f"Right bound: {rbound}, min gap size: {gap}")
     m0 = np.sort(evals.flatten())
-    m = m0[m0 < rbound]
+    # print(f"Min eigenvalue: {m0[0]}, Max eigenvalue: {m0[-1]}")
+    m = m0[m0 <= rbound]
+    # append the next state above rbound to m
+    if len(m0) > len(m):
+        m = np.append(m, m0[len(m)])
+    # print(f"Number of states below right bound: {len(m)}")
+    # print(f"Max eigenvalue below right bound: {m[-1]}")
     ind = np.where(np.diff(m) > gap)[0]
+    # print(f"Number of gaps found: {len(ind)}")
+    # print("ind[-1]: ", ind[-1] if len(ind) > 0 else "N/A")
+    emin = 0.0
     if len(ind) == 0:
-        return m0[0] - 0.5
+        emin = m0[0] - 0.5
     else:
-        return m[ind[-1] + 1] - 0.5
+        emin = m[ind[-1] + 1] - 0.5
+    # print("emin:", emin)
+    return emin
 
 
 class TBGreen:
@@ -79,12 +92,22 @@ class TBGreen:
         use_cache=False,
         cache_path=None,
         nproc=1,
+        initial_emin=-25,
     ):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
         :param efermi: fermi energy.
+        :param gamma: whether to include gamma point in monkhorst pack
+        :param kpts: user defined kpoints
+        :param kweights: weights for user defined kpoints
+        :param k_sym: whether the kpoints are symmetrized
+        :param use_cache: whether to use cache to store wavefunctions
+        :param cache_path: path to store cache
+        :param nproc: number of processes to use
+        :param emin: minimum energy relative to fermi level to consider
         """
+        self.initial_emin = initial_emin
         self.tbmodel = tbmodel
         self.is_orthogonal = tbmodel.is_orthogonal
         self.R2kfactor = tbmodel.R2kfactor
@@ -235,9 +258,19 @@ class TBGreen:
             self.efermi = occ.efermi(copy.deepcopy(self.evals))
             print(f"Fermi energy found: {self.efermi}")
 
-        # self.evals, self.evecs = self._reduce_eigens(
-        #    self.evals, self.evecs, emin=self.efermi - 15.0, emax=self.efermi + 10.1
-        # )
+        self.adjusted_emin = (
+            find_energy_ingap(
+                self.evals, rbound=self.efermi + self.initial_emin, gap=2.0
+            )
+            - self.efermi
+        )
+        # print(f"Adjusted emin relative to Fermi level: {self.adjusted_emin}")
+        self.evals, self.evecs = self._reduce_eigens(
+            self.evals,
+            self.evecs,
+            emin=self.efermi + self.adjusted_emin,
+            emax=self.efermi + 5.1,
+        )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
