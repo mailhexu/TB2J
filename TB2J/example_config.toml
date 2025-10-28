@@ -1,0 +1,45 @@
+# Sample TOML configuration file for Oiju_epw2.py
+# This file demonstrates how to configure spin-phonon coupling calculations
+
+# Basic calculation parameters
+path = "~/projects/TB2J_examples/Wannier/SrMnO3_QE_Wannier90/W90"
+colinear = true
+posfile = "SrMnO3.scf.pwi"
+
+# Wannier90 file prefixes
+prefix_up = "SrMnO3_up"
+prefix_dn = "SrMnO3_down"
+prefix_SOC = "wannier90"
+
+# EPW calculation parameters
+epw_path = "~/projects/projects/SrMnO3/epw"
+epw_prefix_up = "SrMnO3_up"
+epw_prefix_dn = "SrMnO3_dn"
+
+# Calculation settings
+Ru = [0, 0, 0]  # R vector for unit cell
+Rcut = 8.0       # Cutoff radius in Angstroms
+efermi = 10.67   # Fermi energy in eV
+magnetic_elements = ["Mn"]
+
+# k-point mesh and energy integration
+kmesh = [5, 5, 5]
+emin = -7.3363330034071295
+emax = 0.0
+nz = 70
+np = 1
+
+# Output settings
+description = "Spin-phonon coupling calculation for SrMnO3"
+output_path = "TB2J_results"
+
+# Multiple displacement modes to calculate
+idisp_list = [3, 6, 7, 10, 12]
+
+# Alternatively, for a single displacement mode:
+# idisp = 3
+
+# Optional parameters
+# exclude_orbs = []
+# list_iatom = [1]
+# min_hopping_norm = 1e-6

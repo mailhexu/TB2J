@@ -1,0 +1,41 @@
+# TOML configuration file for Oije_example.py
+# This configuration reproduces the original calculation parameters from the example
+
+# Basic calculation parameters
+path = "/home_phythema/hexu/spinphon/2025-10-02_newdata/k555q555"
+colinear = true
+posfile = "scf.pwi"
+
+# Wannier90 file prefixes
+prefix_up = "up/SrMnO3"
+prefix_dn = "down/SrMnO3.down"
+
+# EPW calculation parameters
+epw_path = "/home_phythema/hexu/spinphon/2025-10-02_newdata/k555q555"
+epw_prefix_up = "up/SrMnO3"
+epw_prefix_dn = "down/SrMnO3.down"
+
+# Calculation settings
+Ru = [0, 0, 0]  # R vector for unit cell
+Rcut = 8.0      # Cutoff radius in Angstroms
+efermi = 11.26  # Fermi energy in eV
+magnetic_elements = ["Mn"]
+
+# k-point mesh and energy integration
+kmesh = [6, 6, 6]
+emin = -8.3363330034071295
+emax = 0.0
+nz = 50
+np = 1
+
+# Output settings
+description = "Example calculation using TOML configuration"
+output_path = "dJdx_toml_config"
+
+# Multiple displacement modes to calculate (same as original example)
+idisp_list = [0, 3, 4, 5, 6, 7, 8]
+
+# Optional parameters
+# exclude_orbs = []
+# list_iatom = null
+# min_hopping_norm = 1e-6
