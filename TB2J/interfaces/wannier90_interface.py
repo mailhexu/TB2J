@@ -1,8 +1,8 @@
 import os
 
 from ase.io import read
+from HamiltonIO.wannier import WannierHam
 
-from TB2J.myTB import MyTB
 from TB2J.utils import auto_assign_basis_name
 from TB2J.wannier import parse_atoms
 
@@ -62,11 +62,11 @@ class WannierManager(Manager):
 
     def prepare_model_colinear(self, path, prefix_up, prefix_dn, atoms, output_path):
         print("Reading Wannier90 hamiltonian: spin up.")
-        tbmodel_up = MyTB.read_from_wannier_dir(
+        tbmodel_up = WannierHam.read_from_wannier_dir(
             path=path, prefix=prefix_up, atoms=atoms, nls=False
         )
         print("Reading Wannier90 hamiltonian: spin down.")
-        tbmodel_dn = MyTB.read_from_wannier_dir(
+        tbmodel_dn = WannierHam.read_from_wannier_dir(
             path=path, prefix=prefix_dn, atoms=atoms, nls=False
         )
         basis, _ = auto_assign_basis_name(
@@ -82,7 +82,7 @@ class WannierManager(Manager):
         groupby = groupby.lower().strip()
         if groupby not in ["spin", "orbital"]:
             raise ValueError("groupby can only be spin or orbital.")
-        tbmodel = MyTB.read_from_wannier_dir(
+        tbmodel = WannierHam.read_from_wannier_dir(
             path=path, prefix=prefix_SOC, atoms=atoms, groupby=groupby, nls=True
         )
         basis, _ = auto_assign_basis_name(
