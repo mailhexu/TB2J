@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TB2J"
-version = "0.9.12.16"
+version = "0.9.12.17"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
 license = { text = "BSD-2-Clause" }
@@ -35,7 +35,7 @@ dependencies = [
     "tqdm",
     "pathos",
     "packaging>=20.0",
-    "HamiltonIO>=0.2.7",
+    "HamiltonIO>=0.2.8",
     "pre-commit",
     "sympair>0.1.1",
     "tomli>=2.0.0",
