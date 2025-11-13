@@ -33,6 +33,12 @@ class ExchangeParams:
     mae_angles = None
     orth = False
     ibz = False
+    # Debug options
+    debug_options = {
+        "compute_charge_moments": False,  # Whether to compute charge and magnetic moments with Green's function method
+        "use_density_matrix_output": True,  # Whether to use density matrix results as default output
+        "charge_moment_threshold": 1e-4,  # Threshold for printing comparison when difference > threshold
+    }
 
     def __init__(
         self,
@@ -57,6 +63,7 @@ class ExchangeParams:
         orth=False,
         ibz=False,
         index_magnetic_atoms=None,
+        debug_options=None,
     ):
         self.efermi = efermi
         self.basis = basis
@@ -82,6 +89,23 @@ class ExchangeParams:
         self.orth = orth
         self.ibz = ibz
         self.index_magnetic_atoms = index_magnetic_atoms
+
+        # Initialize debug options
+        if debug_options is None:
+            self.debug_options = {
+                "compute_charge_moments": False,
+                "use_density_matrix_output": True,
+                "charge_moment_threshold": 1e-4,
+            }
+        else:
+            # Update default debug options with user-provided ones
+            default_debug = {
+                "compute_charge_moments": False,
+                "use_density_matrix_output": True,
+                "charge_moment_threshold": 1e-4,
+            }
+            default_debug.update(debug_options)
+            self.debug_options = default_debug
 
     def set_params(self, **kwargs):
         for key, val in kwargs.items():

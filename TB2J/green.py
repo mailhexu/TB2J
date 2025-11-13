@@ -270,6 +270,8 @@ class TBGreen:
             self.evecs,
             emin=self.efermi + self.adjusted_emin,
             emax=self.efermi + 5.1,
+            # emin=self.efermi -10,
+            # emax=self.efermi + 10,
         )
         if self._use_cache:
             evecs = self.evecs
