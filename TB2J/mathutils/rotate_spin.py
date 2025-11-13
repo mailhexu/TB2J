@@ -92,7 +92,7 @@ def rotate_spinor_matrix_einsum(M, theta, phi):
     Rotate the spinor matrix M by theta and phi,
     """
     shape = M.shape
-    n1 = np.product(shape[:-1]) // 2
+    n1 = np.prod(shape[:-1]) // 2
     n2 = M.shape[-1] // 2
     Mnew = np.reshape(M, (n1, 2, n2, 2))  # .swapaxes(1, 2)
     U = rotation_matrix(theta, phi)

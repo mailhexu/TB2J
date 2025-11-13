@@ -52,8 +52,10 @@ class ExchangeCL2(ExchangeCL):
         self.rho_dn = self.Gdn.get_density_matrix()
         self.Jorb_list = defaultdict(lambda: [])
         self.JJ_list = defaultdict(lambda: [])
+        self.J2_ijR_list = defaultdict(lambda: [])
         self.JJ = defaultdict(lambda: 0.0j)
         self.Jorb = defaultdict(lambda: 0.0j)
+        self.J2_ijR = defaultdict(lambda: np.zeros(1, dtype=complex))
         self.HR0_up = self.Gup.H0
         self.HR0_dn = self.Gdn.H0
         self.Delta = self.HR0_up - self.HR0_dn
@@ -66,7 +68,9 @@ class ExchangeCL2(ExchangeCL):
         self.exchange_Jdict = {}
         self.Jiso_orb = {}
 
-        self.biquadratic = False
+        # Use the biquadratic parameter from parent class (default True)
+        if not hasattr(self, "biquadratic"):
+            self.biquadratic = True
 
         self._is_collinear = True
 
@@ -121,9 +125,9 @@ class ExchangeCL2(ExchangeCL):
                 tmp = 0.0j
                 Deltai = self.get_Delta(iatom)
                 Deltaj = self.get_Delta(jatom)
-                t = np.einsum(
-                    "ij, ji-> ij", np.matmul(Deltai, Gij_up), np.matmul(Deltaj, Gji_dn)
-                )
+                DiGij = Deltai @ Gij_up
+                DjGji = Deltaj @ Gji_dn
+                t = np.einsum("ij, ji-> ij", DiGij, DjGji)
 
                 # if self.biquadratic:
                 #    A = np.einsum(
@@ -136,13 +140,26 @@ class ExchangeCL2(ExchangeCL):
                 #        np.matmul(Deltai, Gij_down),
                 #        np.matmul(Deltaj, Gji_down),
                 #    )
+
+                if self.biquadratic:
+                    # Gij_0 = 0.5 * (Gij_up + Gij_dn)
+                    Gij_dn = self.GR_atom(Gdn[iR], iatom, jatom)
+                    Gij_z = 0.5 * (Gij_up - Gij_dn)
+
+                    Gji_up = self.GR_atom(Gup[iRm], jatom, iatom)
+                    Gji_z = 0.5 * (Gji_up - Gji_dn)
+                    DGDG = Deltai @ Gij_z @ Deltaj @ Gji_z
+                    t2 = np.trace(DGDG)
                 tmp = np.sum(t)
                 self.Jorb_list[(iR, iatom, jatom)].append(t / (4.0 * np.pi))
                 self.JJ_list[(iR, iatom, jatom)].append(tmp / (4.0 * np.pi))
+                # 16 for biquadratic to match noncollinear definition.  Should it be 32?
+                self.J2_list[(iR, iatom, jatom)].append(t2 / (2.0 * np.pi))
                 Rij_done.add((iR, iatom, jatom))
                 if (iRm, jatom, iatom) not in Rij_done:
                     Jorb_list[(iRm, jatom, iatom)] = t.T / (4.0 * np.pi)
                     JJ_list[(iRm, jatom, iatom)] = tmp / (4.0 * np.pi)
+                    self.J2_list[(iRm, jatom, iatom)] = t2 / (2.0 * np.pi)
                     Rij_done.add((iRm, jatom, iatom))
         return Jorb_list, JJ_list
 
@@ -156,6 +173,7 @@ class ExchangeCL2(ExchangeCL):
         Rij_done = set()
         Jorb_list = dict()
         JJ_list = dict()
+        J2_list = dict()
         for iR in self.R_ijatom_dict:
             for iatom, jatom in self.R_ijatom_dict[iR]:
                 if (iR, iatom, jatom) not in Rij_done:
@@ -181,17 +199,27 @@ class ExchangeCL2(ExchangeCL):
                         np.matmul(self.get_Delta(jatom), Gji_dn),
                     )
                     tmp = np.sum(t)
+
+                    # Biquadratic J2: Tr[(Delta_i @ Gij_up @ Delta_j @ Gji_dn)^2] / (16π)
+                    Gijz = 0.5 * (Gij_up - Gji_dn)
+                    Gjiz = 0.5 * (Gji_dn - Gij_up)
+                    DGDG = self.get_Delta(iatom) @ Gijz @ self.get_Delta(jatom) @ Gjiz
+                    # DGDG = self.get_Delta(iatom) @ Gij_up @ self.get_Delta(jatom) @ Gji_dn
+                    J2 = np.trace(DGDG @ DGDG) / (32.0 * np.pi)
+
                     # Use R vectors for keys for I/O compatibility
                     R_vec = self.short_Rlist[iR]
                     Rm_vec = self.short_Rlist[iRm]
                     Jorb_list[(R_vec, iatom, jatom)] = t / (4.0 * np.pi)
                     JJ_list[(R_vec, iatom, jatom)] = tmp / (4.0 * np.pi)
+                    J2_list[(R_vec, iatom, jatom)] = J2
                     Rij_done.add((iR, iatom, jatom))
                     if (iRm, jatom, iatom) not in Rij_done:
                         Jorb_list[(Rm_vec, jatom, iatom)] = t.T / (4.0 * np.pi)
                         JJ_list[(Rm_vec, jatom, iatom)] = tmp / (4.0 * np.pi)
+                        J2_list[(Rm_vec, jatom, iatom)] = J2
                         Rij_done.add((iRm, jatom, iatom))
-        return Jorb_list, JJ_list
+        return Jorb_list, JJ_list, J2_list
 
     def get_all_A_vectorized(self, Gup, Gdn):
         """
@@ -200,7 +228,7 @@ class ExchangeCL2(ExchangeCL):
 
         :param Gup: Green's function array for spin up, shape (nR, nbasis, nbasis)
         :param Gdn: Green's function array for spin down, shape (nR, nbasis, nbasis)
-        :returns: tuple of (Jorb_list, JJ_list) with R vector keys
+        :returns: tuple of (Jorb_list, JJ_list, J2_list) with R vector keys
         """
         # Get magnetic sites and their orbital indices
         magnetic_sites = self.ind_mag_atoms
@@ -212,6 +240,7 @@ class ExchangeCL2(ExchangeCL):
         # Initialize results dictionaries
         Jorb_list = {}
         JJ_list = {}
+        J2_list = {}
 
         # Batch compute all exchange tensors following the vectorized approach
         for i, j in product(range(len(magnetic_sites)), repeat=2):
@@ -230,6 +259,27 @@ class ExchangeCL2(ExchangeCL):
             ) / (4.0 * np.pi)
             tmp_tensor = np.sum(t_tensor, axis=(1, 2))  # Shape: (nR,)
 
+            # Biquadratic J2: Tr[(Delta_i @ Gij_up @ Delta_j @ Gji_dn)^2] / (16π)
+            # t_tensor is already (Delta_i @ Gij @ Delta_j @ Gji) / (4π)
+            # So we need to compute Tr[t_tensor^2] and adjust the prefactor
+            # t_tensor shape: (nR, ni, nj) but it's contracted, should be (nR, ni, ni)
+            # Let me recalculate: DGD = Delta_i @ Gij @ Delta_j @ Gji
+            Gij_z = (Gup[:, idx][:, :, jdx] - Gdn[:, idx][:, :, jdx]) / 2
+            Gji_z = np.flip(Gdn[:, jdx][:, :, idx] - Gup[:, jdx][:, :, idx], axis=0) / 2
+            DGD = np.einsum(
+                "ab,rbc,cd,rde->rae",
+                Delta[i],
+                Gij_z,
+                Delta[j],
+                Gji_z,
+                optimize="optimal",
+            )  # Shape: (nR, ni, ni)
+            # Tr[(DGD)^2] = Tr[DGD @ DGD]
+            DGD_squared = np.einsum("rab,rbc->rac", DGD, DGD)  # Shape: (nR, ni, ni)
+            J2_tensor = np.trace(DGD_squared, axis1=1, axis2=2) / (
+                32.0 * np.pi
+            )  # Shape: (nR,)
+
             mi, mj = (magnetic_sites[i], magnetic_sites[j])
 
             # Store results for each R vector
@@ -237,11 +287,13 @@ class ExchangeCL2(ExchangeCL):
                 # Store with R vector key for compatibility
                 Jorb_list[(R_vec, mi, mj)] = t_tensor[iR]  # Shape: (ni, nj)
                 JJ_list[(R_vec, mi, mj)] = tmp_tensor[iR]  # Scalar
+                J2_list[(R_vec, mi, mj)] = J2_tensor[iR]  # Scalar
 
         # Filter results to only include atom pairs within cutoff distance
         # This matches the behavior of the original get_all_A method
         filtered_Jorb_list = {}
         filtered_JJ_list = {}
+        filtered_J2_list = {}
 
         for iR, atom_pairs in self.R_ijatom_dict.items():
             R_vec = self.short_Rlist[iR]
@@ -250,8 +302,9 @@ class ExchangeCL2(ExchangeCL):
                 if key in Jorb_list:
                     filtered_Jorb_list[key] = Jorb_list[key]
                     filtered_JJ_list[key] = JJ_list[key]
+                    filtered_J2_list[key] = J2_list[key]
 
-        return filtered_Jorb_list, filtered_JJ_list
+        return filtered_Jorb_list, filtered_JJ_list, filtered_J2_list
 
     def A_to_Jtensor(self):
         for key, val in self.JJ.items():
@@ -312,12 +365,15 @@ class ExchangeCL2(ExchangeCL):
                 key = (R_vec, iatom, jatom)
                 # self.Jorb[key] = integrate(
                 #    self.contour.path, self.Jorb_list[key]
-                # )
-                # self.JJ[key] = integrate(
+                # )\n                # self.JJ[key] = integrate(
                 #    self.contour.path, self.JJ_list[key]
                 # )
                 self.Jorb[key] = self.contour.integrate_values(self.Jorb_list[key])
                 self.JJ[key] = self.contour.integrate_values(self.JJ_list[key])
+                if self.biquadratic:
+                    self.J2_ijR[key] = self.contour.integrate_values(
+                        self.J2_ijR_list[key]
+                    )
 
     def get_quantities_per_e(self, e):
         # short_Rlist now contains actual R vectors
@@ -331,12 +387,12 @@ class ExchangeCL2(ExchangeCL):
 
         # Use vectorized method with fallback to original method
         try:
-            Jorb_list, JJ_list = self.get_all_A_vectorized(GR_up, GR_dn)
-            # Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+            Jorb_list, JJ_list, J2_list = self.get_all_A_vectorized(GR_up, GR_dn)
+            # Jorb_list, JJ_list, J2_list = self.get_all_A(GR_up, GR_dn)
         except Exception as ex:
             print(f"Vectorized method failed: {ex}, falling back to original method")
-            Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
-        return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
+            Jorb_list, JJ_list, J2_list = self.get_all_A(GR_up, GR_dn)
+        return dict(Jorb_list=Jorb_list, JJ_list=JJ_list, J2_list=J2_list)
 
     def save_greens_function_diagonals_collinear(self, GR_up, GR_dn, energy):
         """
@@ -501,6 +557,7 @@ class ExchangeCL2(ExchangeCL):
         for i, result in enumerate(results):
             Jorb_list = result["Jorb_list"]
             JJ_list = result["JJ_list"]
+            J2_list = result.get("J2_list", {})
             for iR in self.R_ijatom_dict:
                 for iatom, jatom in self.R_ijatom_dict[iR]:
                     # Use R vector key consistently across all dictionaries
@@ -508,6 +565,8 @@ class ExchangeCL2(ExchangeCL):
                     key = (R_vec, iatom, jatom)
                     self.Jorb_list[key].append(Jorb_list[key])
                     self.JJ_list[key].append(JJ_list[key])
+                    if self.biquadratic and key in J2_list:
+                        self.J2_ijR_list[key].append(J2_list[key])
         self.integrate()
         self.get_rho_atom()
 
@@ -515,6 +574,10 @@ class ExchangeCL2(ExchangeCL):
         self.compute_charge_and_magnetic_moments()
 
         self.A_to_Jtensor()
+
+        # Convert J2 to biquadratic exchange if enabled
+        if self.biquadratic:
+            self.J2_to_Jbiquadratic()
 
     def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
@@ -532,7 +595,7 @@ class ExchangeCL2(ExchangeCL):
             NJT_Jdict=None,
             NJT_ddict=None,
             Jani_dict=None,
-            biquadratic_Jdict=None,
+            biquadratic_Jdict=self.biquadratic_Jdict if self.biquadratic else None,
             description=self.description,
         )
         output.write_all(path=path)

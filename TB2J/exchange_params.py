@@ -29,6 +29,7 @@ class ExchangeParams:
     description: str = ""
     write_density_matrix: bool = False
     orb_decomposition: bool = False
+    biquadratic: bool = True
     output_path: str = "TB2J_results"
     mae_angles = None
     orth = False
@@ -57,6 +58,7 @@ class ExchangeParams:
         description="",
         write_density_matrix=False,
         orb_decomposition=False,
+        biquadratic=True,
         output_path="TB2J_results",
         exclude_orbs=[],
         mae_angles=None,
@@ -84,6 +86,7 @@ class ExchangeParams:
         self.description = description
         self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
+        self.biquadratic = biquadratic
         self.output_path = output_path
         self.mae_angles = mae_angles
         self.orth = orth

@@ -2,6 +2,7 @@ doc/refs/*.pdf
 
 
 uv.lock
+.serena
 
 # vim files
 *.swp

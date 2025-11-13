@@ -369,6 +369,9 @@ class ExchangeNCL(Exchange):
         self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
+        self.J2_ijR_list = defaultdict(lambda: [])
+        self.J2_ijR = defaultdict(lambda: np.zeros(1, dtype=complex))
+        self.J2_biquadratic = {}
         # self.HR0 = self.tbmodel.get_H0()
         # if hasattr(self.tbmodel, "get_H0"):
         #    self.HR0 = self.tbmodel.get_H0()
@@ -483,7 +486,14 @@ class ExchangeNCL(Exchange):
                     AijRab = pGp @ Gji_Ixyz[b]
                     tmp[a, b] = np.trace(AijRab) / np.pi
             torb = None
-        return tmp, torb
+
+        # Biquadratic exchange term (no orbital decomposition)
+        P_i = self.get_P_iatom(iatom)
+        P_j = self.get_P_iatom(jatom)
+        PGP = P_i @ Gij_Ixyz[3] @ P_j @ Gji_Ixyz[3]
+        J2 = np.trace(PGP @ PGP) / (2.0 * np.pi)
+
+        return tmp, torb, J2
 
     def get_all_A(self, G):
         """
@@ -494,14 +504,16 @@ class ExchangeNCL(Exchange):
         """
         A_ijR_list = {}
         Aorb_ijR_list = {}
+        J2_ijR_list = {}
         for iR in self.R_ijatom_dict:
             for iatom, jatom in self.R_ijatom_dict[iR]:
-                A, A_orb = self.get_A_ijR(G, iR, iatom, jatom)
+                A, A_orb, J2 = self.get_A_ijR(G, iR, iatom, jatom)
                 # Store with actual R vector for compatibility with existing code
                 R_vec = self.short_Rlist[iR]
                 A_ijR_list[(R_vec, iatom, jatom)] = A
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
-        return A_ijR_list, Aorb_ijR_list
+                J2_ijR_list[(R_vec, iatom, jatom)] = J2
+        return A_ijR_list, Aorb_ijR_list, J2_ijR_list
 
     def get_all_A_vectorized(self, GR):
         """
@@ -510,7 +522,7 @@ class ExchangeNCL(Exchange):
         Now works with properly ordered short_Rlist.
 
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
-        :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
+        :returns: tuple of (A_ijR_list, Aorb_ijR_list, J2_ijR_list) with R vector keys
         """
 
         # Get magnetic sites and their orbital indices
@@ -523,16 +535,16 @@ class ExchangeNCL(Exchange):
         # Initialize results dictionary
         A = {}
         A_orb = {}
+        J2 = {}
 
-        # Batch compute all A tensors following the prototype
+        # Batch compute all A tensors and J2 following the prototype
         for i, j in product(range(len(magnetic_sites)), repeat=2):
             idx, jdx = iorbs[i], iorbs[j]
             Gij = GR[:, idx][:, :, jdx]
             Gji = GR[:, jdx][:, :, idx]
             Gij = pauli_block_all(Gij)
             Gji = pauli_block_all(Gji)
-            # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
-            # the ith R vector's negative is at -i index.
+            # short_Rlist is ordered so that negative R is at mirrored index
             Gji = np.flip(Gji, axis=0)
             Pi = P[i]
             Pj = P[j]
@@ -543,30 +555,35 @@ class ExchangeNCL(Exchange):
             if self.orb_decomposition:
                 # Vectorized orbital decomposition over all R vectors at once
                 # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
-                A_orb_tensor = (
-                    np.einsum("ruij,rvji->ruvij", X, Y) / np.pi
-                )  # Shape: (nR, 4, 4, ni, nj)
+                A_orb_tensor = np.einsum("ruij,rvji->ruvij", X, Y) / np.pi
                 # Vectorized sum over orbitals for simplified A values
-                A_val_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # Shape: (nR, 4, 4)
+                A_val_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # (nR, 4, 4)
             else:
                 # Compute A_tensor for all R vectors at once
-                A_tensor = (
-                    np.einsum("...uij,...vji->...uv", X, Y) / np.pi
-                )  # Shape: (nR, 4, 4)
-                A_val_tensor = A_tensor  # Use pre-computed A_tensor directly
+                A_tensor = np.einsum("ruij,rvji->ruv", X, Y) / np.pi  # (nR, 4, 4)
+                A_val_tensor = A_tensor
                 A_orb_tensor = None
+
+            # Biquadratic J2 from identity channel only
+            # Select u=v=0 component: X[:,0], Y[:,0]
+            # PGP shape: (nR, ni, ni)
+            PGP = np.einsum("rij,rjk->rik", X[:, 3], Y[:, 3])
+            # Tr(PGP @ PGP) for each R
+            PGP_squared = np.einsum("rij,rjk->rik", PGP, PGP)
+            J2_vals = np.trace(PGP_squared, axis1=1, axis2=2) / (2.0 * np.pi)
 
             # Store results for each R vector
             for iR, R_vec in enumerate(self.short_Rlist):
-                A_val = A_val_tensor[iR]  # Shape: (4, 4)
+                A_val = A_val_tensor[iR]
                 A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
 
-                # Store with R vector key for compatibility
-                A[(R_vec, mi, mj)] = A_val
+                key = (R_vec, mi, mj)
+                A[key] = A_val
                 if A_orb_val is not None:
-                    A_orb[(R_vec, mi, mj)] = A_orb_val
+                    A_orb[key] = A_orb_val
+                J2[key] = J2_vals[iR]
 
-        return A, A_orb
+        return A, A_orb, J2
 
     def A_to_Jtensor_orb(self):
         """
@@ -681,6 +698,25 @@ class ExchangeNCL(Exchange):
                 B = np.imag(val[3, 3])
                 self.B[keyspin] = Jprime, B
 
+    def J2_to_Jbiquadratic(self):
+        """
+        Convert integrated J2 to biquadratic exchange parameter.
+        J_biquadratic = Im(J2)
+        """
+        self.biquadratic_Jdict = {}
+
+        for key, val in self.J2_ijR.items():
+            R, iatom, jatom = key
+            ispin = self.ispin(iatom)
+            jspin = self.ispin(jatom)
+            keyspin = (R, ispin, jspin)
+            is_nonself = not (R == (0, 0, 0) and iatom == jatom)
+
+            if is_nonself:
+                # Extract biquadratic J from J2
+                J_biq = float(np.imag(val))
+                self.biquadratic_Jdict[keyspin] = J_biq
+
     # def get_N_e(self, GR, de):
     #    """
     #    calcualte density matrix for all R,i, j
@@ -715,32 +751,27 @@ class ExchangeNCL(Exchange):
         self.rho_dict = rho
         return self.rho_dict
 
-    def integrate(self, AijRs, AijRs_orb=None, method="simpson"):
+    def integrate(self, AijRs, AijRs_orb=None, J2ijRs=None, method="simpson"):
         """
-        AijRs: a list of AijR,
-        wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
-        """
-        # if method == "trapezoidal":
-        #    integrate = trapezoidal_nonuniform
-        # elif method == "simpson":
-        #    integrate = simpson_nonuniform
-        #
+        Integrate A and J2 over energy contour.
 
-        # self.rho = integrate(self.contour.path, rhoRs)
+        AijRs: list of AijR per energy
+        AijRs_orb: list of AijR_orb per energy (optional)
+        J2ijRs: list of J2 per energy (optional)
+        """
         for iR in self.R_ijatom_dict:
             R_vec = self.short_Rlist[iR]
             for iatom, jatom in self.R_ijatom_dict[iR]:
-                f = AijRs[(R_vec, iatom, jatom)]
-                # self.A_ijR[(R_vec, iatom, jatom)] = integrate(self.contour.path, f)
-                self.A_ijR[(R_vec, iatom, jatom)] = self.contour.integrate_values(f)
+                key = (R_vec, iatom, jatom)
+                f = AijRs[key]
+                self.A_ijR[key] = self.contour.integrate_values(f)
 
-                if self.orb_decomposition:
-                    # self.A_ijR_orb[(R_vec, iatom, jatom)] = integrate(
-                    #    self.contour.path, AijRs_orb[(R_vec, iatom, jatom)]
-                    # )
-                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                        self.contour.integrate_values(AijRs_orb[(R_vec, iatom, jatom)])
-                    )
+                if self.orb_decomposition and AijRs_orb is not None:
+                    self.A_ijR_orb[key] = self.contour.integrate_values(AijRs_orb[key])
+
+                if J2ijRs is not None:
+                    f_J2 = J2ijRs[key]
+                    self.J2_ijR[key] = self.contour.integrate_values(f_J2)
 
     def get_quantities_per_e(self, e):
         Gk_all = self.G.get_Gk_all(e)
@@ -758,13 +789,11 @@ class ExchangeNCL(Exchange):
         # TODO: define the quantities for one energy.
         # Use vectorized method for better performance
         try:
-            #
-            AijR, AijR_orb = self.get_all_A_vectorized(GR)
-            # AijR, AijR_orb = self.get_all_A(GR)
+            AijR, AijR_orb, J2ijR = self.get_all_A_vectorized(GR)
         except Exception as e:
             print(f"Vectorized method failed: {e}, falling back to original method")
-            AijR, AijR_orb = self.get_all_A(GR)
-        return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
+            AijR, AijR_orb, J2ijR = self.get_all_A(GR)
+        return dict(AijR=AijR, AijR_orb=AijR_orb, J2ijR=J2ijR, mae=mae)
 
     def save_greens_function_diagonals(self, GR, energy):
         """
@@ -909,6 +938,7 @@ class ExchangeNCL(Exchange):
 
         AijRs = {}
         AijRs_orb = {}
+        J2ijRs = {}
 
         self.validate()
 
@@ -926,28 +956,20 @@ class ExchangeNCL(Exchange):
             for iR in self.R_ijatom_dict:
                 R_vec = self.short_Rlist[iR]
                 for iatom, jatom in self.R_ijatom_dict[iR]:
-                    if (R_vec, iatom, jatom) in AijRs:
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
+                    key = (R_vec, iatom, jatom)
+                    if key in AijRs:
+                        AijRs[key].append(result["AijR"][key])
+                        J2ijRs[key].append(result["J2ijR"][key])
                         if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
-
+                            AijRs_orb[key].append(result["AijR_orb"][key])
                     else:
-                        AijRs[(R_vec, iatom, jatom)] = []
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
+                        AijRs[key] = [result["AijR"][key]]
+                        J2ijRs[key] = [result["J2ijR"][key]]
                         if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)] = []
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
+                            AijRs_orb[key] = [result["AijR_orb"][key]]
 
         # self.save_AijRs(AijRs)
-        self.integrate(AijRs, AijRs_orb)
+        self.integrate(AijRs, AijRs_orb, J2ijRs)
         self.get_rho_atom()
 
         # Compute charge and magnetic moments from Green's function diagonals
@@ -955,6 +977,7 @@ class ExchangeNCL(Exchange):
 
         self.A_to_Jtensor()
         self.A_to_Jtensor_orb()
+        self.J2_to_Jbiquadratic()
 
     def _prepare_index_spin(self):
         # index_spin: index in spin hamiltonian of atom. starts from 1. -1 means not considered.
@@ -987,7 +1010,7 @@ class ExchangeNCL(Exchange):
             Jani_dict=self.Jani,
             DMI_orb=self.DMI_orb,
             Jani_orb=self.Jani_orb,
-            biquadratic_Jdict=self.B,
+            biquadratic_Jdict=self.biquadratic_Jdict,
             debug_dict=self.debug_dict,
             description=self.description,
         )
@@ -1025,7 +1048,7 @@ class ExchangeCL(ExchangeNCL):
             distance_dict=self.distance_dict,
             exchange_Jdict=self.exchange_Jdict,
             dmi_ddict=None,
-            biquadratic_Jdict=self.B,
+            biquadratic_Jdict=self.biquadratic_Jdict,
             description=self.description,
         )
         output.write_all(path=path)

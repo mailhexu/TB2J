@@ -157,11 +157,14 @@ def write_exchange_section(
         Jiso = cls.exchange_Jdict[ll] * 1e3
         myfile.write(f"J_iso: {Jiso:7.4f} \n")
 
-        write_experimental = False
+        # Write biquadratic J if available (one value per pair)
+        if getattr(cls, "has_biquadratic", False) and ll in getattr(
+            cls, "biquadratic_Jdict", {}
+        ):
+            J_biq = cls.biquadratic_Jdict[ll] * 1e3
+            myfile.write(f"J_biquadratic: {J_biq:7.4f} \n")
 
-        if cls.has_biquadratic and write_experimental:
-            Jprime, B = cls.biquadratic_Jdict[ll]
-            myfile.write(f"[Testing!] Jprime: {Jprime*1e3:.3f},  B: {B*1e3:.3f}\n")
+        write_experimental = False
 
         if cls.dJdx is not None:
             dJdx = cls.dJdx[ll]
