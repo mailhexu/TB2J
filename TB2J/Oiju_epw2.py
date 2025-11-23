@@ -11,8 +11,8 @@ import os
 from os.path import expanduser
 
 from ase.io import read
+from HamiltonIO.epw.epwparser import Epmat
 
-from TB2J.epwparser import Epmat
 from TB2J.exchange_pert2 import ExchangePert2
 from TB2J.myTB import MyTB, merge_tbmodels_spin
 from TB2J.utils import auto_assign_basis_name
@@ -149,23 +149,21 @@ if __name__ == "__main__":
     # for imode in range(3, 15):
     for idisp in [3, 6, 7]:
         gen_exchange_Oiju_epw(
-            # path="./U3_SrMnO3_111_slater0.00",
-            # path="/home/hexu/projects/SrMnO3/origin_wannier/SrMnO3_FM/center_SrMnO3_slater0.00",
-            path=expanduser("~/projects/TB2J_examples/Wannier/SrMnO3_QE_Wannier90/W90"),
+            path=expanduser("~/projects/spinphon/Oiju/spin_polarized"),
             colinear=True,
-            posfile="SrMnO3.scf.pwi",
+            posfile="SrMnO3.pwi",
             # prefix_up='wannier90.up',
             # prefix_dn='wannier90.dn',
             prefix_up="SrMnO3_up",
             prefix_dn="SrMnO3_down",
             prefix_SOC="wannier90",
-            epw_path=expanduser("~/projects/projects/SrMnO3/epw"),
-            epw_prefix_up="SrMnO3_up",
-            epw_prefix_dn="SrMnO3_dn",
+            epw_path=expanduser("/Users/hexu/projects/spinphon/Oiju/spin_polarized"),
+            epw_prefix_up="epmat_up",
+            epw_prefix_dn="epmat_dn",
             idisp=idisp,
             Ru=(0, 0, 0),
             Rcut=8,
-            efermi=10.67,
+            efermi=11.26,
             magnetic_elements=["Mn"],
             kmesh=[5, 5, 5],
             emin=-7.3363330034071295,
