@@ -1,24 +1,38 @@
-import numpy as np
-from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
-from TB2J.io_exchange import SpinIO
-from functools import lru_cache
-from TB2J.exchange import ExchangeNCL
 from collections import defaultdict
-from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
-from TB2J.epwparser import Epmat, EpmatOneMode
-from tqdm import tqdm
+from functools import lru_cache
+
+import numpy as np
 from p_tqdm import p_map
+from tqdm import tqdm
+
+from TB2J.epwparser import EpmatOneMode
+from TB2J.exchange import ExchangeNCL
+from TB2J.io_exchange import SpinIO
+from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
+from TB2J.utils import simpson_nonuniform, trapezoidal_nonuniform
 
 
 class ExchangePert2(ExchangeNCL):
-    def set_epw(self, Ru, imode=None, epmat_up=None, epmat_dn=None, epmode_up=None, epmode_dn=None):
+    def set_epw(
+        self,
+        Ru,
+        imode=None,
+        epmat_up=None,
+        epmat_dn=None,
+        epmode_up=None,
+        epmode_dn=None,
+    ):
         # Validate that both spin up and down epmat files are provided
         if (epmat_up is not None) != (epmat_dn is not None):
             raise ValueError("Both epmat_up and epmat_dn must be provided together")
         if (epmode_up is not None) != (epmode_dn is not None):
             raise ValueError("Both epmode_up and epmode_dn must be provided together")
-        if (epmat_up is None and epmode_up is None) or (epmat_dn is None and epmode_dn is None):
-            raise ValueError("Either epmat_up/epmat_dn or epmode_up/epmode_dn must be provided")
+        if (epmat_up is None and epmode_up is None) or (
+            epmat_dn is None and epmode_dn is None
+        ):
+            raise ValueError(
+                "Either epmat_up/epmat_dn or epmode_up/epmode_dn must be provided"
+            )
 
         if epmat_up is not None and imode is not None:
             self.epc_up = EpmatOneMode(epmat_up, imode, close_nc=True)
@@ -38,7 +52,7 @@ class ExchangePert2(ExchangeNCL):
         return pauli_block_sigma_norm(self.dHdxR0[np.ix_(orbs, orbs)])
 
     def get_A_ijR(self, G, dG, dGrev, R, iatom, jatom):
-        """ calculate A from G for a energy .
+        """calculate A from G for a energy .
         It take the
         .. math::
            A^{uv} = p T^u p T^v dE / pi
@@ -83,10 +97,10 @@ class ExchangePert2(ExchangeNCL):
         dGji_Ixyz_dn = pauli_block_all(dGji_dn)
 
         # Combine spin up and down contributions
-        Gij_Ixyz = (Gij_Ixyz_up + Gij_Ixyz_dn) / 2.0
-        Gji_Ixyz = (Gji_Ixyz_up + Gji_Ixyz_dn) / 2.0
-        dGij_Ixyz = (dGij_Ixyz_up + dGij_Ixyz_dn) / 2.0
-        dGji_Ixyz = (dGji_Ixyz_up + dGji_Ixyz_dn) / 2.0
+        Gij_Ixyz = tuple((up + dn) / 2.0 for up, dn in zip(Gij_Ixyz_up, Gij_Ixyz_dn))
+        Gji_Ixyz = tuple((up + dn) / 2.0 for up, dn in zip(Gji_Ixyz_up, Gji_Ixyz_dn))
+        dGij_Ixyz = tuple((up + dn) / 2.0 for up, dn in zip(dGij_Ixyz_up, dGij_Ixyz_dn))
+        dGji_Ixyz = tuple((up + dn) / 2.0 for up, dn in zip(dGji_Ixyz_up, dGji_Ixyz_dn))
 
         tmp = np.zeros((4, 4), dtype=complex)
         dtmp = np.zeros((4, 4), dtype=complex)
@@ -102,27 +116,27 @@ class ExchangePert2(ExchangeNCL):
                 pidGij = self.get_P_iatom(iatom) @ dGij_Ixyz[a]
                 pjdGji = self.get_P_iatom(jatom) @ dGji_Ixyz[a]
                 torb[a, b] = self.simplify_orbital_contributions(
-                    np.einsum('ij, ji -> ij', piGij, pjGji) / np.pi, iatom,
-                    jatom)
-                d = (np.einsum('ij, ji -> ij', pidGij, pjGji) +
-                     np.einsum('ij, ji -> ij', piGij, pjdGji))
+                    np.einsum("ij, ji -> ij", piGij, pjGji) / np.pi, iatom, jatom
+                )
+                d = np.einsum("ij, ji -> ij", pidGij, pjGji) + np.einsum(
+                    "ij, ji -> ij", piGij, pjdGji
+                )
                 dtorb[a, b] = self.simplify_orbital_contributions(
-                    d / np.pi, iatom, jatom)
+                    d / np.pi, iatom, jatom
+                )
                 tmp[a, b] = np.sum(torb[a, b])
                 dtmp[a, b] = np.sum(dtorb[a, b])
         else:
             torb = None
             dtorb = None
             for a, b in ([0, 0], [3, 3]):
-                pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(
-                    jatom)
-                pdGp = self.get_P_iatom(iatom) @ dGij_Ixyz[a] @ self.get_P_iatom(
-                    jatom)
+                pGp = self.get_P_iatom(iatom) @ Gij_Ixyz[a] @ self.get_P_iatom(jatom)
+                pdGp = self.get_P_iatom(iatom) @ dGij_Ixyz[a] @ self.get_P_iatom(jatom)
                 AijRab = pGp @ Gji_Ixyz[b]
                 A1 = pdGp @ Gji_Ixyz[b]
                 A2 = pGp @ dGji_Ixyz[b]
                 tmp[a, b] = np.trace(AijRab) / np.pi
-                dtmp[a, b] = np.trace(A1+A2) / np.pi
+                dtmp[a, b] = np.trace(A1 + A2) / np.pi
         return tmp, dtmp, torb, dtorb
 
     def get_all_A(self, G, dGij, dGji):
@@ -136,9 +150,10 @@ class ExchangePert2(ExchangeNCL):
         A_orb_ijR_list = {}
         dAdx_orb_ijR_list = {}
         for iR, R in enumerate(self.R_ijatom_dict):
-            for (iatom, jatom) in self.R_ijatom_dict[R]:
+            for iatom, jatom in self.R_ijatom_dict[R]:
                 A, dAdx, A_orb, dAdx_orb = self.get_A_ijR(
-                    G, dGij, dGji, R, iatom, jatom)
+                    G, dGij, dGji, R, iatom, jatom
+                )
                 A_ijR_list[(R, iatom, jatom)] = A
                 dAdx_ijR_list[(R, iatom, jatom)] = dAdx
                 A_orb_ijR_list[(R, iatom, jatom)] = A_orb
@@ -146,10 +161,12 @@ class ExchangePert2(ExchangeNCL):
         return A_ijR_list, dAdx_ijR_list, A_orb_ijR_list, dAdx_orb_ijR_list
 
     def get_AijR_rhoR(self, e):
-        GR_up, dGRij_up, dGRji_up, rhoR_up = self.G.get_GR_and_dGRdx_from_epw(self.Rlist, self.short_Rlist,
-                                                                  energy=e, epc=self.epc_up, Ru=self.Ru)
-        GR_dn, dGRij_dn, dGRji_dn, rhoR_dn = self.G.get_GR_and_dGRdx_from_epw(self.Rlist, self.short_Rlist,
-                                                                  energy=e, epc=self.epc_dn, Ru=self.Ru)
+        GR_up, dGRij_up, dGRji_up, rhoR_up = self.G.get_GR_and_dGRdx_from_epw(
+            self.Rlist, self.short_Rlist, energy=e, epc=self.epc_up, Ru=self.Ru
+        )
+        GR_dn, dGRij_dn, dGRji_dn, rhoR_dn = self.G.get_GR_and_dGRdx_from_epw(
+            self.Rlist, self.short_Rlist, energy=e, epc=self.epc_dn, Ru=self.Ru
+        )
 
         # Combine spin up and down results
         GR = {}
@@ -165,12 +182,11 @@ class ExchangePert2(ExchangeNCL):
         for R in rhoR_up:
             rhoR[R] = (rhoR_up[R], rhoR_dn[R])
 
-        AijR, dAdx_ijR, A_orb_ijR, dAdx_orb_ijR = self.get_all_A(
-            GR, dGRij, dGRji)
+        AijR, dAdx_ijR, A_orb_ijR, dAdx_orb_ijR = self.get_all_A(GR, dGRij, dGRji)
         return AijR, dAdx_ijR, self.get_rho_e_spin(rhoR), A_orb_ijR, dAdx_orb_ijR
 
     def get_rho_e_spin(self, rhoR):
-        """ add component to density matrix from spin-resolved green's function
+        """add component to density matrix from spin-resolved green's function
         :param rhoR: Spin-resolved density matrix in real space.
         """
         rho_up, rho_dn = rhoR[(0, 0, 0)]
@@ -194,8 +210,7 @@ class ExchangePert2(ExchangeNCL):
             dJiso = np.zeros((3, 3), dtype=float)
             # Heisenberg like J.
             for i in range(3):
-                dJiso[i, i] = np.imag(val[0, 0] - val[1, 1] - val[2, 2] -
-                                      val[3, 3])
+                dJiso[i, i] = np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
             if is_nonself:
                 self.dJdx[keyspin] = dJiso[0, 0]
 
@@ -230,7 +245,7 @@ class ExchangePert2(ExchangeNCL):
                 R, iatom, jatom = key
                 Rm = tuple(-x for x in R)
                 valm = self.A_ijR_orb[(Rm, jatom, iatom)]
-                #dvalm = self.dA_ijR_orb[(Rm, jatom, iatom)]
+                # dvalm = self.dA_ijR_orb[(Rm, jatom, iatom)]
 
                 ni = self.norb_reduced[iatom]
                 nj = self.norb_reduced[jatom]
@@ -243,15 +258,13 @@ class ExchangePert2(ExchangeNCL):
                 # isotropic J
                 Jiso = np.imag(val[0, 0] - val[1, 1] - val[2, 2] - val[3, 3])
 
-                dJdx = np.imag(dval[0, 0] - dval[1, 1] -
-                               dval[2, 2] - dval[3, 3])
+                dJdx = np.imag(dval[0, 0] - dval[1, 1] - dval[2, 2] - dval[3, 3])
 
                 # off-diagonal anisotropic exchange
                 Ja = np.zeros((3, 3, ni, nj), dtype=float)
                 for i in range(3):
                     for j in range(3):
-                        Ja[i,
-                           j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
+                        Ja[i, j] = np.imag(val[i + 1, j + 1] + valm[i + 1, j + 1])
                 # DMI
 
                 Dtmp = np.zeros((3, ni, nj), dtype=float)
@@ -271,7 +284,7 @@ class ExchangePert2(ExchangeNCL):
         print("Green's function Calculation started.")
 
         rhoRs = []
-        GRs = []
+        # GRs = []
         AijRs = {}
         dAijRs = {}
 
@@ -280,42 +293,31 @@ class ExchangePert2(ExchangeNCL):
 
         npole = len(self.contour.path)
         if self.np > 1:
-            results = p_map(self.get_AijR_rhoR,
-                            self.contour.path,
-                            num_cpus=self.np)
+            results = p_map(self.get_AijR_rhoR, self.contour.path, num_cpus=self.np)
         else:
-            results = map(self.get_AijR_rhoR,
-                          tqdm(self.contour.path, total=npole))
+            results = map(self.get_AijR_rhoR, tqdm(self.contour.path, total=npole))
 
         for i, result in enumerate(results):
             for iR, R in enumerate(self.R_ijatom_dict):
-                for (iatom, jatom) in self.R_ijatom_dict[R]:
+                for iatom, jatom in self.R_ijatom_dict[R]:
                     if (R, iatom, jatom) in AijRs:
-                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
-                                                                  jatom])
-                        dAijRs[(R, iatom, jatom)].append(result[1][R, iatom,
-                                                                   jatom])
-                        AijRs_orb[(R, iatom, jatom)].append(result[3][R, iatom,
-                                                                      jatom])
-                        dAijRs_orb[(R, iatom, jatom)].append(result[4][R, iatom,
-                                                                       jatom])
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
+                        dAijRs[(R, iatom, jatom)].append(result[1][R, iatom, jatom])
+                        AijRs_orb[(R, iatom, jatom)].append(result[3][R, iatom, jatom])
+                        dAijRs_orb[(R, iatom, jatom)].append(result[4][R, iatom, jatom])
 
                     else:
                         AijRs[(R, iatom, jatom)] = []
-                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom,
-                                                                  jatom])
+                        AijRs[(R, iatom, jatom)].append(result[0][R, iatom, jatom])
 
                         dAijRs[(R, iatom, jatom)] = []
-                        dAijRs[(R, iatom, jatom)].append(result[1][R, iatom,
-                                                                   jatom])
+                        dAijRs[(R, iatom, jatom)].append(result[1][R, iatom, jatom])
 
                         AijRs_orb[(R, iatom, jatom)] = []
-                        AijRs_orb[(R, iatom, jatom)].append(result[3][R, iatom,
-                                                                      jatom])
+                        AijRs_orb[(R, iatom, jatom)].append(result[3][R, iatom, jatom])
 
                         dAijRs_orb[(R, iatom, jatom)] = []
-                        dAijRs_orb[(R, iatom, jatom)].append(result[4][R, iatom,
-                                                                       jatom])
+                        dAijRs_orb[(R, iatom, jatom)].append(result[4][R, iatom, jatom])
 
             rhoRs.append(result[2])
         if self.np > 1:
@@ -328,37 +330,34 @@ class ExchangePert2(ExchangeNCL):
         self.A_to_Jtensor()
         self.A_to_Jtensor_orb()
 
-    def integrate(self,
-                  rhoRs,
-                  AijRs,
-                  dAijRs,
-                  AijRs_orb=None,
-                  dAijRs_orb=None,
-                  method='simpson'):
+    def integrate(
+        self, rhoRs, AijRs, dAijRs, AijRs_orb=None, dAijRs_orb=None, method="simpson"
+    ):
         """
-        AijRs: a list of AijR, 
+        AijRs: a list of AijR,
         wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
         """
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
-        elif method == 'simpson':
+        elif method == "simpson":
             integrate = simpson_nonuniform
 
         self.rho = integrate(self.contour.path, rhoRs)
         for iR, R in enumerate(self.R_ijatom_dict):
-            for (iatom, jatom) in self.R_ijatom_dict[R]:
+            for iatom, jatom in self.R_ijatom_dict[R]:
                 f = AijRs[(R, iatom, jatom)]
                 df = dAijRs[(R, iatom, jatom)]
                 self.A_ijR[(R, iatom, jatom)] = integrate(self.contour.path, f)
-                self.dA_ijR[(R, iatom,
-                             jatom)] = integrate(self.contour.path, df)
+                self.dA_ijR[(R, iatom, jatom)] = integrate(self.contour.path, df)
                 if self.orb_decomposition:
                     self.A_ijR_orb[(R, iatom, jatom)] = integrate(
-                        self.contour.path, AijRs_orb[(R, iatom, jatom)])
+                        self.contour.path, AijRs_orb[(R, iatom, jatom)]
+                    )
                     self.dA_ijR_orb[(R, iatom, jatom)] = integrate(
-                        self.contour.path, dAijRs_orb[(R, iatom, jatom)])
+                        self.contour.path, dAijRs_orb[(R, iatom, jatom)]
+                    )
 
-    def write_output(self, path='TB2J_results'):
+    def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
             atoms=self.atoms,

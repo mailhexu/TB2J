@@ -8,7 +8,6 @@ spin and lattice degrees of freedom.
 """
 
 import os
-from os.path import expanduser
 
 from ase.io import read
 from HamiltonIO.epw.epwparser import Epmat
@@ -25,7 +24,8 @@ def gen_exchange_Oiju_epw(
     prefix_up="wannier90.up",
     prefix_dn="wannier90.dn",
     prefix_SOC="wannier90",
-    epw_path="./",
+    epw_up_path="./",
+    epw_down_path="./",
     epw_prefix_up="SrMnO3_up",
     epw_prefix_dn="SrMnO3_dn",
     idisp=0,
@@ -118,9 +118,9 @@ def gen_exchange_Oiju_epw(
 
         # Load spin-resolved EPW data
         epw_up = Epmat()
-        epw_up.read(path=epw_path, prefix=epw_prefix_up, epmat_ncfile="epmat.nc")
+        epw_up.read(path=epw_up_path, prefix=epw_prefix_up, epmat_ncfile="epmat.nc")
         epw_dn = Epmat()
-        epw_dn.read(path=epw_path, prefix=epw_prefix_dn, epmat_ncfile="epmat.nc")
+        epw_dn.read(path=epw_down_path, prefix=epw_prefix_dn, epmat_ncfile="epmat.nc")
 
         basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
 
@@ -147,19 +147,21 @@ def gen_exchange_Oiju_epw(
 if __name__ == "__main__":
     # for imode in range(15):
     # for imode in range(3, 15):
+    path = "/home/hexu/spinphon/2025-10-02_newdata/k555q555"
     for idisp in [3, 6, 7]:
         gen_exchange_Oiju_epw(
-            path=expanduser("~/projects/spinphon/Oiju/spin_polarized"),
+            path=path,
             colinear=True,
-            posfile="SrMnO3.pwi",
+            posfile="scf.pwi",
             # prefix_up='wannier90.up',
             # prefix_dn='wannier90.dn',
-            prefix_up="SrMnO3_up",
-            prefix_dn="SrMnO3_down",
+            prefix_up="up/SrMnO3",
+            prefix_dn="down/SrMnO3.down",
             prefix_SOC="wannier90",
-            epw_path=expanduser("/Users/hexu/projects/spinphon/Oiju/spin_polarized"),
-            epw_prefix_up="epmat_up",
-            epw_prefix_dn="epmat_dn",
+            epw_up_path=f"{path}/up",
+            epw_down_path=f"{path}/down",
+            epw_prefix_up="epmat",
+            epw_prefix_dn="epmat",
             idisp=idisp,
             Ru=(0, 0, 0),
             Rcut=8,
