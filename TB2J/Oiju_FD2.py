@@ -12,12 +12,71 @@ import os
 import numpy as np
 from ase.io import read
 from supercellmap import SupercellMaker
+from HamiltonIO.epw.epwparser import Epmat
 
-from TB2J.epw import epw_to_dHdx, generate_TB_with_distortion
+from TB2J.epw import generate_TB_with_distortion
 from TB2J.exchange import ExchangeNCL
 from TB2J.FDTB import dHdx
 from TB2J.myTB import MyTB, merge_tbmodels_spin
 from TB2J.utils import auto_assign_basis_name
+from collections import defaultdict
+
+
+def epw_to_dHdx(epw_path, epw_prefix, imode, Rpprime=(0, 0, 0), scmaker=SupercellMaker(np.eye(3))):
+    """
+    Convert EPW data to dHdx using HamiltonIO Epmat parser.
+    
+    For a given perturbation at Rp',
+    <Rm|Rp'=Rp+Rm|Rk+Rm>
+    =H(Rp,Rk)=<0|Rp|Rk> is a matrix of nbasis*nbasis
+    First: Rm = Rp'-Rp, Rk+Rm = Rp'-Rp+Rm
+    Input: Rplist, Rklist, H
+    H: [iRg, iRk, ibasis, ibasis]
+    
+    Parameters
+    ----------
+    epw_path : str
+        Path to EPW data files
+    epw_prefix : str
+        Prefix for EPW files
+    imode : int
+        Phonon mode index
+    Rpprime : tuple, default=(0,0,0)
+        R vector for perturbation
+    scmaker : SupercellMaker
+        Supercell maker object
+        
+    Returns
+    -------
+    dHdx
+        Derivative of Hamiltonian with respect to displacement
+    """
+    ep = Epmat()
+    ep.read(path=epw_path, prefix=epw_prefix, epmat_ncfile='epmat.nc')
+    n_basis = ep.nwann
+    sc_nbasis = n_basis * scmaker.ncell
+    sc_RHdict = defaultdict(lambda: np.zeros((sc_nbasis, sc_nbasis), dtype=complex))
+    
+    for iRp, Rp in enumerate(ep.Rq):
+        Rm = np.array(Rpprime) - np.array(Rp)
+        sc_part_i, pair_ind_i = scmaker._sc_R_to_pair_ind(tuple(np.array(Rm)))
+        ii = pair_ind_i * n_basis
+        
+        for iRk, Rk in enumerate(ep.Rk):
+            Rn = np.array(Rk) + np.array(Rm)
+            sc_part_j, pair_ind_j = scmaker._sc_R_to_pair_ind(tuple(Rn))
+            
+            if tuple(sc_part_i) == (0, 0, 0):
+                jj = pair_ind_j * n_basis
+                sc_RHdict[tuple(sc_part_j)][ii:ii + n_basis, jj:jj + n_basis] += \
+                    ep.get_epmat_Rv_from_RgRk(imode, Rm, Rk)
+    
+    Rlist = np.array(list(sc_RHdict.keys()))
+    dH = dHdx(Rlist, nbasis=sc_nbasis, dHR=sc_RHdict, dHR2=None, wsdeg=None)
+    
+    return dH
+
+
 
 
 def merge_dHdx_spin(dH_up, dH_dn):
@@ -206,6 +265,9 @@ def gen_exchange_Oiju_epw(
             path=path, prefix=prefix_dn, atoms=atoms, nls=False
         )
         tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
+        
+        # Set atoms in tbmodel (needed for make_supercell)
+        tbmodel.set_atoms(atoms)
 
         # Create supercell maker
         scmaker = SupercellMaker(supercell_matrix, center=True)
