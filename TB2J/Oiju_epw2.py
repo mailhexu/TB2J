@@ -7,14 +7,11 @@ matrix elements. It uses perturbation theory to compute the coupling between
 spin and lattice degrees of freedom.
 """
 
-import argparse
 import os
-from os.path import expanduser
 
-import toml
 from ase.io import read
+from HamiltonIO.epw.epwparser import Epmat
 
-from TB2J.epwparser import Epmat
 from TB2J.exchange_pert2 import ExchangePert2
 from TB2J.myTB import MyTB, merge_tbmodels_spin
 from TB2J.utils import auto_assign_basis_name
@@ -27,7 +24,8 @@ def gen_exchange_Oiju_epw(
     prefix_up="wannier90.up",
     prefix_dn="wannier90.dn",
     prefix_SOC="wannier90",
-    epw_path="./",
+    epw_up_path="./",
+    epw_down_path="./",
     epw_prefix_up="SrMnO3_up",
     epw_prefix_dn="SrMnO3_dn",
     idisp=0,
@@ -120,9 +118,9 @@ def gen_exchange_Oiju_epw(
 
         # Load spin-resolved EPW data
         epw_up = Epmat()
-        epw_up.read(path=epw_path, prefix=epw_prefix_up, epmat_ncfile="epmat.nc")
+        epw_up.read(path=epw_up_path, prefix=epw_prefix_up, epmat_ncfile="epmat.nc")
         epw_dn = Epmat()
-        epw_dn.read(path=epw_path, prefix=epw_prefix_dn, epmat_ncfile="epmat.nc")
+        epw_dn.read(path=epw_down_path, prefix=epw_prefix_dn, epmat_ncfile="epmat.nc")
 
         basis, _ = auto_assign_basis_name(tbmodel.xred, atoms)
 
@@ -146,302 +144,36 @@ def gen_exchange_Oiju_epw(
         exchange.run(output_path)
 
 
-def gen_exchange_Oiju_epw_multiple(
-    path: str,
-    colinear=True,
-    posfile="POSCAR",
-    prefix_up="wannier90.up",
-    prefix_dn="wannier90.dn",
-    prefix_SOC="wannier90",
-    epw_path="./",
-    epw_prefix_up="SrMnO3_up",
-    epw_prefix_dn="SrMnO3_dn",
-    idisp_list=None,
-    Ru=(0, 0, 0),
-    min_hopping_norm=1e-6,
-    Rcut=None,
-    efermi=3.0,
-    magnetic_elements=[],
-    kmesh=[5, 5, 5],
-    emin=-12.0,
-    emax=0.0,
-    nz=50,
-    np=1,
-    exclude_orbs=[],
-    description: str = "",
-    list_iatom: list = None,
-    output_path: str = "TB2J_results",
-):
-    """Calculate spin-phonon coupling parameters for multiple idisp values.
-
-    Parameters
-    ----------
-    idisp_list : list, optional
-        List of idisp values to calculate. If None, defaults to [3, 6, 7]
-
-    Returns
-    -------
-    None
-        Results are written to individual output directories for each idisp
-    """
-    if idisp_list is None:
-        idisp_list = [3, 6, 7]
-
-    for idisp in idisp_list:
-        print(f"Calculating for idisp = {idisp}")
+if __name__ == "__main__":
+    # for imode in range(15):
+    # for imode in range(3, 15):
+    path = "/home/hexu/spinphon/2025-10-02_newdata/k555q555"
+    for idisp in [0]:
         gen_exchange_Oiju_epw(
             path=path,
-            colinear=colinear,
-            posfile=posfile,
-            prefix_up=prefix_up,
-            prefix_dn=prefix_dn,
-            prefix_SOC=prefix_SOC,
-            epw_path=epw_path,
-            epw_prefix_up=epw_prefix_up,
-            epw_prefix_dn=epw_prefix_dn,
+            colinear=True,
+            posfile="scf.pwi",
+            # prefix_up='wannier90.up',
+            # prefix_dn='wannier90.dn',
+            prefix_up="up/SrMnO3",
+            prefix_dn="down/SrMnO3.down",
+            prefix_SOC="wannier90",
+            epw_up_path=f"{path}/up",
+            epw_down_path=f"{path}/down",
+            epw_prefix_up="epmat",
+            epw_prefix_dn="epmat",
             idisp=idisp,
-            Ru=Ru,
-            min_hopping_norm=min_hopping_norm,
-            Rcut=Rcut,
-            efermi=efermi,
-            magnetic_elements=magnetic_elements,
-            kmesh=kmesh,
-            emin=emin,
-            emax=emax,
-            nz=nz,
-            np=np,
-            exclude_orbs=exclude_orbs,
-            description=description,
-            list_iatom=list_iatom,
-            output_path=f"{output_path}_idisp_{idisp}",
+            Ru=(0, 0, 0),
+            Rcut=8,
+            efermi=11.26,
+            magnetic_elements=["Mn"],
+            kmesh=[5, 5, 5],
+            emin=-7.3363330034071295,
+            emax=0.0,
+            nz=70,
+            np=1,
+            exclude_orbs=[],
+            description="",
+            # list_iatom=[1],
+            output_path=f"VT_{idisp}_withcutoff0.1",
         )
-
-
-def run_from_toml(config_file: str):
-    """Run spin-phonon coupling calculation from a TOML configuration file.
-
-    Parameters
-    ----------
-    config_file : str
-        Path to the TOML configuration file
-    """
-    with open(config_file, "r") as f:
-        config = toml.load(f)
-
-    # Extract parameters from config
-    params = {
-        "path": config.get("path", "./"),
-        "colinear": config.get("colinear", True),
-        "posfile": config.get("posfile", "POSCAR"),
-        "prefix_up": config.get("prefix_up", "wannier90.up"),
-        "prefix_dn": config.get("prefix_dn", "wannier90.dn"),
-        "prefix_SOC": config.get("prefix_SOC", "wannier90"),
-        "epw_path": config.get("epw_path", "./"),
-        "epw_prefix_up": config.get("epw_prefix_up", "SrMnO3_up"),
-        "epw_prefix_dn": config.get("epw_prefix_dn", "SrMnO3_dn"),
-        "Ru": tuple(config.get("Ru", [0, 0, 0])),
-        "min_hopping_norm": config.get("min_hopping_norm", 1e-6),
-        "Rcut": config.get("Rcut", None),
-        "efermi": config.get("efermi", 3.0),
-        "magnetic_elements": config.get("magnetic_elements", []),
-        "kmesh": config.get("kmesh", [5, 5, 5]),
-        "emin": config.get("emin", -12.0),
-        "emax": config.get("emax", 0.0),
-        "nz": config.get("nz", 50),
-        "np": config.get("np", 1),
-        "exclude_orbs": config.get("exclude_orbs", []),
-        "description": config.get("description", ""),
-        "list_iatom": config.get("list_iatom", None),
-        "output_path": config.get("output_path", "TB2J_results"),
-    }
-
-    # Handle multiple idisp values
-    if "idisp_list" in config:
-        params["idisp_list"] = config["idisp_list"]
-        gen_exchange_Oiju_epw_multiple(**params)
-    elif "idisp" in config:
-        params["idisp"] = config["idisp"]
-        gen_exchange_Oiju_epw(**params)
-    else:
-        # Default to multiple idisp values
-        gen_exchange_Oiju_epw_multiple(**params)
-
-
-def create_cli():
-    """Create command line interface for the spin-phonon coupling calculation."""
-    parser = argparse.ArgumentParser(
-        description="Calculate spin-phonon coupling parameters using EPW data"
-    )
-    parser.add_argument(
-        "--config", "-c", type=str, help="Path to TOML configuration file"
-    )
-    parser.add_argument(
-        "--path",
-        "-p",
-        type=str,
-        default="./",
-        help="Path to the Wannier90 calculation directory",
-    )
-    parser.add_argument(
-        "--posfile", type=str, default="POSCAR", help="Name of the structure file"
-    )
-    parser.add_argument(
-        "--prefix-up",
-        type=str,
-        default="wannier90.up",
-        help="Prefix for spin-up Wannier90 files",
-    )
-    parser.add_argument(
-        "--prefix-dn",
-        type=str,
-        default="wannier90.dn",
-        help="Prefix for spin-down Wannier90 files",
-    )
-    parser.add_argument(
-        "--epw-path",
-        type=str,
-        default="./",
-        help="Path to the EPW calculation directory",
-    )
-    parser.add_argument(
-        "--epw-prefix-up",
-        type=str,
-        default="SrMnO3_up",
-        help="Prefix for spin-up EPW files",
-    )
-    parser.add_argument(
-        "--epw-prefix-dn",
-        type=str,
-        default="SrMnO3_dn",
-        help="Prefix for spin-down EPW files",
-    )
-    parser.add_argument(
-        "--idisp",
-        type=int,
-        nargs="+",
-        help="Idisp values to calculate (space-separated)",
-    )
-    parser.add_argument("--rcut", type=float, help="Cutoff radius for interactions")
-    parser.add_argument("--efermi", type=float, default=3.0, help="Fermi energy in eV")
-    parser.add_argument(
-        "--magnetic-elements",
-        type=str,
-        nargs="+",
-        default=[],
-        help="List of magnetic elements",
-    )
-    parser.add_argument(
-        "--kmesh", type=int, nargs=3, default=[5, 5, 5], help="k-point mesh dimensions"
-    )
-    parser.add_argument(
-        "--emin", type=float, default=-12.0, help="Minimum energy for integration"
-    )
-    parser.add_argument(
-        "--emax", type=float, default=0.0, help="Maximum energy for integration"
-    )
-    parser.add_argument("--nz", type=int, default=50, help="Number of energy points")
-    parser.add_argument(
-        "--np",
-        type=int,
-        default=1,
-        help="Number of processors for parallel calculation",
-    )
-    parser.add_argument(
-        "--output-path", type=str, default="TB2J_results", help="Path for output files"
-    )
-
-    return parser
-
-
-if __name__ == "__main__":
-    parser = create_cli()
-    args = parser.parse_args()
-
-    if args.config:
-        # Run from TOML configuration file
-        run_from_toml(args.config)
-    else:
-        # Run from command line arguments
-        if args.idisp and len(args.idisp) > 1:
-            # Multiple idisp values
-            gen_exchange_Oiju_epw_multiple(
-                path=args.path,
-                colinear=True,
-                posfile=args.posfile,
-                prefix_up=args.prefix_up,
-                prefix_dn=args.prefix_dn,
-                prefix_SOC="wannier90",
-                epw_path=args.epw_path,
-                epw_prefix_up=args.epw_prefix_up,
-                epw_prefix_dn=args.epw_prefix_dn,
-                idisp_list=args.idisp,
-                Ru=(0, 0, 0),
-                Rcut=args.rcut,
-                efermi=args.efermi,
-                magnetic_elements=args.magnetic_elements,
-                kmesh=args.kmesh,
-                emin=args.emin,
-                emax=args.emax,
-                nz=args.nz,
-                np=args.np,
-                exclude_orbs=[],
-                description="",
-                list_iatom=None,
-                output_path=args.output_path,
-            )
-        elif args.idisp and len(args.idisp) == 1:
-            # Single idisp value
-            gen_exchange_Oiju_epw(
-                path=args.path,
-                colinear=True,
-                posfile=args.posfile,
-                prefix_up=args.prefix_up,
-                prefix_dn=args.prefix_dn,
-                prefix_SOC="wannier90",
-                epw_path=args.epw_path,
-                epw_prefix_up=args.epw_prefix_up,
-                epw_prefix_dn=args.epw_prefix_dn,
-                idisp=args.idisp[0],
-                Ru=(0, 0, 0),
-                Rcut=args.rcut,
-                efermi=args.efermi,
-                magnetic_elements=args.magnetic_elements,
-                kmesh=args.kmesh,
-                emin=args.emin,
-                emax=args.emax,
-                nz=args.nz,
-                np=args.np,
-                exclude_orbs=[],
-                description="",
-                list_iatom=None,
-                output_path=args.output_path,
-            )
-        else:
-            # Default behavior (same as original)
-            gen_exchange_Oiju_epw_multiple(
-                path=expanduser(
-                    "~/projects/TB2J_examples/Wannier/SrMnO3_QE_Wannier90/W90"
-                ),
-                colinear=True,
-                posfile="SrMnO3.scf.pwi",
-                prefix_up="SrMnO3_up",
-                prefix_dn="SrMnO3_down",
-                prefix_SOC="wannier90",
-                epw_path=expanduser("~/projects/projects/SrMnO3/epw"),
-                epw_prefix_up="SrMnO3_up",
-                epw_prefix_dn="SrMnO3_dn",
-                idisp_list=[3, 6, 7],
-                Ru=(0, 0, 0),
-                Rcut=8,
-                efermi=10.67,
-                magnetic_elements=["Mn"],
-                kmesh=[5, 5, 5],
-                emin=-7.3363330034071295,
-                emax=0.0,
-                nz=70,
-                np=1,
-                exclude_orbs=[],
-                description="",
-                list_iatom=None,
-                output_path="VT_withcutoff0.1",
-            )
