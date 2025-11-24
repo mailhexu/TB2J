@@ -190,7 +190,7 @@ class ExchangePert2(ExchangeNCL):
         :param rhoR: Spin-resolved density matrix in real space.
         """
         rho_up, rho_dn = rhoR[(0, 0, 0)]
-        return -1.0 / np.pi * (rho_up[0, 0, 0] + rho_dn[0, 0, 0]) / 2.0
+        return -1.0 / np.pi * (rho_up + rho_dn) / 2.0
 
     def A_to_Jtensor(self):
         """
