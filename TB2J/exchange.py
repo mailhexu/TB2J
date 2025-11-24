@@ -567,7 +567,7 @@ class ExchangeNCL(Exchange):
             # Biquadratic J2 from identity channel only
             # Select u=v=0 component: X[:,0], Y[:,0]
             # PGP shape: (nR, ni, ni)
-            PGP = np.einsum("rij,rjk->rik", X[:, 3], Y[:, 3])
+            PGP = np.einsum("rij,rjk->rik", X[:, 3, :, :], Y[:, 3, :, :])
             # Tr(PGP @ PGP) for each R
             PGP_squared = np.einsum("rij,rjk->rik", PGP, PGP)
             J2_vals = np.trace(PGP_squared, axis1=1, axis2=2) / (2.0 * np.pi)
