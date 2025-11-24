@@ -8,7 +8,6 @@ spin and lattice degrees of freedom.
 """
 
 import os
-from os.path import expanduser
 
 from ase.io import read
 from HamiltonIO.epw.epwparser import Epmat
@@ -148,8 +147,8 @@ def gen_exchange_Oiju_epw(
 if __name__ == "__main__":
     # for imode in range(15):
     # for imode in range(3, 15):
-    path="/home/hexu/spinphon/2025-10-02_newdata/k555q555"
-    for idisp in [3, 6, 7]:
+    path = "/home/hexu/spinphon/2025-10-02_newdata/k555q555"
+    for idisp in [0]:
         gen_exchange_Oiju_epw(
             path=path,
             colinear=True,
