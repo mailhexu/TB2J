@@ -1,18 +1,19 @@
-import numpy as np
-from numpy.linalg import norm
-import scipy.linalg as sl
-from collections import defaultdict
-from ase.dft.kpoints import monkhorst_pack
-from shutil import rmtree
 import os
-import tempfile
-from pathos.multiprocessing import ProcessPool
-from TB2J.epwparser import EpmatOneMode
 import sys
+import tempfile
+from collections import defaultdict
+from shutil import rmtree
+
+import numpy as np
+from ase.dft.kpoints import monkhorst_pack
+from numpy.linalg import norm
+from pathos.multiprocessing import ProcessPool
+
+from TB2J.epwparser import EpmatOneMode
 
 
 def eigen_to_G(evals, evecs, efermi, energy):
-    """ calculate green's function from eigenvalue/eigenvector for energy(e-ef): G(e-ef).
+    """calculate green's function from eigenvalue/eigenvector for energy(e-ef): G(e-ef).
     :param evals:  eigen values
     :param evecs:  eigen vectors
     :param efermi: fermi energy
@@ -20,8 +21,10 @@ def eigen_to_G(evals, evecs, efermi, energy):
     :returns: Green's function G,
     :rtype:  Matrix with same shape of the Hamiltonian (and eigenvector)
     """
-    return np.einsum("ij, j-> ij", evecs, 1.0 /
-                     (-evals + (energy + efermi))) @ evecs.conj().T
+    return (
+        np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
+        @ evecs.conj().T
+    )
     # return np.einsum("ij, j, jk -> ik", evecs, 1.0 / (-evals + (energy + efermi)), evecs.conj().T)
     # return evecs.dot(np.diag(1.0 / (-evals + (energy + efermi)))).dot(
     #    evecs.conj().T)
@@ -57,16 +60,17 @@ def find_energy_ingap(evals, rbound, gap=1.0):
         return m[ind[-1] + 1] - 0.5
 
 
-class TBGreen():
+class TBGreen:
     def __init__(
-            self,
-            tbmodel,
-            kmesh,  # [ikpt, 3]
-            efermi,  # efermi
-            k_sym=False,
-            use_cache=False,
-            cache_path=None,
-            nproc=1):
+        self,
+        tbmodel,
+        kmesh,  # [ikpt, 3]
+        efermi,  # efermi
+        k_sym=False,
+        use_cache=False,
+        cache_path=None,
+        nproc=1,
+    ):
         """
         :param tbmodel: A tight binding model
         :param kmesh: size of monkhorst pack. e.g [6,6,6]
@@ -108,18 +112,16 @@ class TBGreen():
 
     def _prepare_cache(self):
         if self.cache_path is None:
-            if 'TMPDIR' in os.environ:
-                rpath = os.environ['TMPDIR']
+            if "TMPDIR" in os.environ:
+                rpath = os.environ["TMPDIR"]
             else:
-                rpath = '/dev/shm/TB2J_cache'
+                rpath = "/dev/shm/TB2J_cache"
         else:
             rpath = self.cache_path
         if not os.path.exists(rpath):
             os.makedirs(rpath)
-        self.cache_path = tempfile.mkdtemp(prefix='TB2J', dir=rpath)
-        print(
-            f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}"
-        )
+        self.cache_path = tempfile.mkdtemp(prefix="TB2J", dir=rpath)
+        print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
 
     def clean_cache(self):
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
@@ -136,39 +138,42 @@ class TBGreen():
         self.nkpts = nkpts
         self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         if self._use_cache:
-            self.evecs = np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
-                                   mode='w+',
-                                   shape=(nkpts, self.nbasis, self.nbasis),
-                                   dtype=complex)
+            self.evecs = np.memmap(
+                os.path.join(self.cache_path, "evecs.dat"),
+                mode="w+",
+                shape=(nkpts, self.nbasis, self.nbasis),
+                dtype=complex,
+            )
             self.evecs_shape = self.evecs.shape
-            H = np.memmap(os.path.join(self.cache_path, 'H.dat'),
-                          mode='w+',
-                          shape=(nkpts, self.nbasis, self.nbasis),
-                          dtype=complex)
+            H = np.memmap(
+                os.path.join(self.cache_path, "H.dat"),
+                mode="w+",
+                shape=(nkpts, self.nbasis, self.nbasis),
+                dtype=complex,
+            )
             if not self.is_orthogonal:
-                self.S = np.memmap(os.path.join(self.cache_path, 'S.dat'),
-                                   mode='w+',
-                                   shape=(nkpts, self.nbasis, self.nbasis),
-                                   dtype=complex)
+                self.S = np.memmap(
+                    os.path.join(self.cache_path, "S.dat"),
+                    mode="w+",
+                    shape=(nkpts, self.nbasis, self.nbasis),
+                    dtype=complex,
+                )
             else:
                 self.S = None
 
         else:
-            self.evecs = np.zeros(
-                (nkpts, self.nbasis, self.nbasis), dtype=complex)
+            self.evecs = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
             H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
 
             if not self.is_orthogonal:
-                self.S = np.zeros(
-                    (nkpts, self.nbasis, self.nbasis), dtype=complex)
+                self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
             else:
                 self.S = None
         if self.nproc == 1:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:
             executor = ProcessPool(nodes=self.nproc)
-            results = executor.map(self.tbmodel.HSE_k, self.kpts,
-                                   [2] * len(self.kpts))
+            results = executor.map(self.tbmodel.HSE_k, self.kpts, [2] * len(self.kpts))
             executor.close()
             executor.join()
             executor.clear()
@@ -207,10 +212,12 @@ class TBGreen():
 
     def get_evecs(self, ik):
         if self._use_cache:
-            return np.memmap(os.path.join(self.cache_path, 'evecs.dat'),
-                             mode='r',
-                             shape=self.evecs_shape,
-                             dtype=complex)[ik]
+            return np.memmap(
+                os.path.join(self.cache_path, "evecs.dat"),
+                mode="r",
+                shape=self.evecs_shape,
+                dtype=complex,
+            )[ik]
         else:
             return self.evecs[ik]
 
@@ -219,10 +226,12 @@ class TBGreen():
 
     def get_Hk(self, ik):
         if self._use_cache:
-            return np.memmap(os.path.join(self.cache_path, 'H.dat'),
-                             mode='r',
-                             shape=(self.nkpts, self.nbasis, self.nbasis),
-                             dtype=complex)[ik]
+            return np.memmap(
+                os.path.join(self.cache_path, "H.dat"),
+                mode="r",
+                shape=(self.nkpts, self.nbasis, self.nbasis),
+                dtype=complex,
+            )[ik]
         else:
             return self.evecs[ik]
 
@@ -230,41 +239,48 @@ class TBGreen():
         if self.is_orthogonal:
             return None
         elif self._use_cache:
-            return np.memmap(os.path.join(self.cache_path, 'S.dat'),
-                             mode='r',
-                             shape=(self.nkpts, self.nbasis, self.nbasis),
-                             dtype=complex)[ik]
+            return np.memmap(
+                os.path.join(self.cache_path, "S.dat"),
+                mode="r",
+                shape=(self.nkpts, self.nbasis, self.nbasis),
+                dtype=complex,
+            )[ik]
         else:
             return self.S[ik]
 
     def get_density_matrix(self):
         rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         for ik, _ in enumerate(self.kpts):
-            rho += (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi)
-                    ) @ self.get_evecs(ik).T.conj() * self.kweights[ik]
+            rho += (
+                (self.get_evecs(ik) * fermi(self.evals[ik], self.efermi))
+                @ self.get_evecs(ik).T.conj()
+                * self.kweights[ik]
+            )
         return rho
 
     def get_density(self):
         return np.real(np.diag(self.get_density_matrix()))
 
     def get_Gk(self, ik, energy):
-        """ Green's function G(k) for one energy
+        """Green's function G(k) for one energy
         G(\epsilon)= (\epsilon I- H)^{-1}
         :param ik: indices for kpoint
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
-        Gk = eigen_to_G(evals=self.get_evalue(ik),
-                        evecs=self.get_evecs(ik),
-                        efermi=self.efermi,
-                        energy=energy)
+        Gk = eigen_to_G(
+            evals=self.get_evalue(ik),
+            evecs=self.get_evecs(ik),
+            efermi=self.efermi,
+            energy=energy,
+        )
 
         # A slower version. For test.
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
     def get_GR(self, Rpts, energy, get_rho=True):
-        """ calculate real space Green's function for one energy, all R points.
+        """calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
         :param energy:
@@ -344,14 +360,13 @@ class TBGreen():
                 GR[R] += Gkp * phase
                 if R == (0, 0, 0):
                     rhoR[R] += rhok * (phase * self.kweights[ik])
-        dGRijdx, dGRjidx = self.get_dGR(
-            GR, Rpts, Rjlist, epc, Ru, cutoff=cutoff)
+        dGRijdx, dGRjidx = self.get_dGR(GR, Rpts, Rjlist, epc, Ru, cutoff=cutoff)
         return GR, dGRijdx, dGRjidx, rhoR
 
     def get_dGR(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, cutoff=1.1, diag=False):
         Rpts = [tuple(R) for R in Rpts]
         Rset = set(Rpts)
-        Rdict = dict(zip(Rpts, range(len(Rpts))))
+        # Rdict = dict(zip(Rpts, range(len(Rpts))))
 
         ij_path = set()
         ji_path = set()
@@ -364,66 +379,221 @@ class TBGreen():
                 for Rq in epc.Rqdict:
                     for Rk in epc.Rkdict:
                         if norm(Rk) < cutoff:
-                            Rm = tuple(np.array(Ru)-np.array(Rq))
+                            Rm = tuple(np.array(Ru) - np.array(Rq))
                             Rn = tuple(np.array(Rm) + np.array(Rk))
-                            Rnj = tuple(np.array(Rj)-np.array(Rn))
+                            Rnj = tuple(np.array(Rj) - np.array(Rn))
                             if Rm in Rset and Rnj in Rset:
                                 counter += 1
                                 self._Rmap.append((Rq, Rk, Rm, Rnj, Rj))
-                                ij_path.add(
-                                    (Rm, Rn, Rj))
-
-            print(counter)
+                                ij_path.add((Rm, Rn, Rj))
 
             counter = 0
             for Rj in Rjlist:
                 for Rq in epc.Rqdict:
                     for Rk in epc.Rkdict:
                         if norm(Rk) < cutoff:
-                            Rn = tuple(np.array(Ru)-np.array(Rq))
+                            Rn = tuple(np.array(Ru) - np.array(Rq))
                             Rm = tuple(np.array(Rn) + np.array(Rk))
-                            Rjn = tuple(np.array(Rn)-np.array(Rj))
+                            Rjn = tuple(np.array(Rn) - np.array(Rj))
                             Rmi = tuple(-np.array(Rm))
                             if Rmi in Rset and Rjn in Rset:
                                 counter += 1
                                 self._Rmap_rev.append((Rq, Rk, Rjn, Rmi, Rj))
-                                ji_path.add(
-                                    (Rm, Rn, Rj))
-            print(counter)
+                                ji_path.add((Rm, Rn, Rj))
 
             # print(ij_path.difference(ji_path))
         dGRdxij = defaultdict(lambda: 0.0 + 0j)
         dGRdxji = defaultdict(lambda: 0.0 + 0j)
         for Rq, Rk, Rm, Rnj, Rj in self._Rmap:
             if diag:
-                dV = np.diag(
-                    np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
+                dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
             else:
                 dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
-            dG = GR[Rm]@dV@GR[Rnj]
+            dG = GR[Rm] @ dV @ GR[Rnj]
             dGRdxij[Rj] += dG
 
-            #dGRdxij[Rj] += dG/2
-            #dGRdxji[Rj] += dG.T/2
+            # dGRdxij[Rj] += dG/2
+            # dGRdxji[Rj] += dG.T/2
 
-            #dGRdxji[Rj] += dG.T.conj()
+            # dGRdxji[Rj] += dG.T.conj()
             pass
 
         for Rq, Rk, Rjn, Rmi, Rj in self._Rmap_rev:
             if diag:
-                dV = np.diag(
-                    np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
+                dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
             else:
                 dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
-            dG = GR[Rjn]@dV@GR[Rmi]
+            dG = GR[Rjn] @ dV @ GR[Rmi]
             dGRdxji[Rj] += dG
 
-            #dGRdxji[Rj] += dG/2
-            #dGRdxij[Rj] += dG.T/2
+            # dGRdxji[Rj] += dG/2
+            # dGRdxij[Rj] += dG.T/2
 
-            #dGRdxij[Rj] += dG.T
+            # dGRdxij[Rj] += dG.T
 
         return dGRdxij, dGRdxji
+
+    def get_dGR_vectorized(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, diag=False):
+        """
+        Vectorized version of get_dGR using einsum for performance.
+        No cutoff is applied - processes all Rk vectors.
+
+        Computes: dG(Rj) = sum_{Rq,Rk} G(Rm) @ dV(Rq,Rk) @ G(Rnj)
+        where Rm = Ru - Rq, Rn = Rm + Rk, Rnj = Rj - Rn
+
+        :param GR: Green's function in R-space
+        :param Rpts: R points
+        :param Rjlist: List of Rj points
+        :param epc: Electron-phonon coupling matrix elements
+        :param Ru: Reference R vector
+        :param diag: If True, only use diagonal elements of dV
+        :returns: dGRdxij, dGRdxji
+        """
+        Rpts = [tuple(R) for R in Rpts]
+        Rset = set(Rpts)
+
+        # Pre-build mapping for ij path
+        if self._Rmap is None:
+            self._build_Rmaps(Rpts, Rset, Rjlist, epc, Ru)
+
+        nbasis = list(GR.values())[0].shape[0]
+        dGRdxij = defaultdict(lambda: np.zeros((nbasis, nbasis), dtype=complex))
+        dGRdxji = defaultdict(lambda: np.zeros((nbasis, nbasis), dtype=complex))
+
+        # Vectorize ij path
+        if len(self._Rmap) > 0:
+            # Group by Rj for more efficient computation
+            Rj_groups = defaultdict(list)
+            for entry in self._Rmap:
+                Rq, Rk, Rm, Rnj, Rj = entry
+                Rj_groups[Rj].append((Rq, Rk, Rm, Rnj))
+
+            for Rj, entries in Rj_groups.items():
+                n_entries = len(entries)
+                # Preallocate arrays for this Rj
+                GRm_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                GRnj_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                dV_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+
+                # Collect data for vectorization
+                for idx, (Rq, Rk, Rm, Rnj) in enumerate(entries):
+                    GRm_array[idx] = GR[Rm]
+                    GRnj_array[idx] = GR[Rnj]
+                    if diag:
+                        dV = np.diag(
+                            np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False))
+                        )
+                    else:
+                        dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+                    dV_array[idx] = dV
+
+                # Vectorized computation: dG = sum_idx GRm[idx] @ dV[idx] @ GRnj[idx]
+                # Using einsum: 'nij,njk,nkl->il' sums over n and contracts matrices
+                dGRdxij[Rj] = np.einsum(
+                    "nij,njk,nkl->il", GRm_array, dV_array, GRnj_array
+                )
+
+        # Vectorize ji path
+        if len(self._Rmap_rev) > 0:
+            Rj_groups = defaultdict(list)
+            for entry in self._Rmap_rev:
+                Rq, Rk, Rjn, Rmi, Rj = entry
+                Rj_groups[Rj].append((Rq, Rk, Rjn, Rmi))
+
+            for Rj, entries in Rj_groups.items():
+                n_entries = len(entries)
+                GRjn_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                GRmi_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                dV_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+
+                for idx, (Rq, Rk, Rjn, Rmi) in enumerate(entries):
+                    GRjn_array[idx] = GR[Rjn]
+                    GRmi_array[idx] = GR[Rmi]
+                    if diag:
+                        dV = np.diag(
+                            np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False))
+                        )
+                    else:
+                        dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+                    dV_array[idx] = dV
+
+                dGRdxji[Rj] = np.einsum(
+                    "nij,njk,nkl->il", GRjn_array, dV_array, GRmi_array
+                )
+
+        return dGRdxij, dGRdxji
+
+    def _build_Rmaps(self, Rpts, Rset, Rjlist, epc, Ru):
+        """Helper to build R-space mapping arrays for vectorization."""
+        self._Rmap = []
+        self._Rmap_rev = []
+
+        counter = 0
+        for Rj in Rjlist:
+            for Rq in epc.Rqdict:
+                for Rk in epc.Rkdict:
+                    Rm = tuple(np.array(Ru) - np.array(Rq))
+                    Rn = tuple(np.array(Rm) + np.array(Rk))
+                    Rnj = tuple(np.array(Rj) - np.array(Rn))
+                    if Rm in Rset and Rnj in Rset:
+                        counter += 1
+                        self._Rmap.append((Rq, Rk, Rm, Rnj, Rj))
+
+        print(f"ij path entries: {counter}")
+
+        counter = 0
+        for Rj in Rjlist:
+            for Rq in epc.Rqdict:
+                for Rk in epc.Rkdict:
+                    Rn = tuple(np.array(Ru) - np.array(Rq))
+                    Rm = tuple(np.array(Rn) + np.array(Rk))
+                    Rjn = tuple(np.array(Rn) - np.array(Rj))
+                    Rmi = tuple(-np.array(Rm))
+                    if Rmi in Rset and Rjn in Rset:
+                        counter += 1
+                        self._Rmap_rev.append((Rq, Rk, Rjn, Rmi, Rj))
+
+        print(f"ji path entries: {counter}")
+
+    def get_GR_and_dGRdx_from_epw_vectorized(self, Rpts, Rjlist, energy, epc, Ru):
+        """
+        Vectorized version of get_GR_and_dGRdx_from_epw without cutoff.
+
+        Calculate G(R) and dG(R)/dx using vectorized operations.
+        dG(k)/dx = G(k) (dH(k)/dx) G(k).
+        dG(R)/dx = sum_k dG(k)/dx * e^{-ikR}
+
+        :param Rpts: R points
+        :param Rjlist: List of Rj points for derivative calculation
+        :param energy: Energy value
+        :param epc: Electron-phonon coupling matrix
+        :param Ru: Reference R vector
+        :returns: GR, dGRijdx, dGRjidx, rhoR
+        """
+        Rpts = [tuple(R) for R in Rpts]
+        GR = defaultdict(lambda: 0.0 + 0.0j)
+        rhoR = defaultdict(lambda: 0.0j)
+
+        # Compute GR (this part is already fairly efficient)
+        for ik, kpt in enumerate(self.kpts):
+            Gk = self.get_Gk(ik, energy)
+            if self.is_orthogonal:
+                rhok = Gk
+            else:
+                rhok = self.get_Sk(ik) @ Gk
+            Gkp = Gk * self.kweights[ik]
+            for R in Rpts:
+                phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
+                GR[R] += Gkp * phase
+                if R == (0, 0, 0):
+                    rhoR[R] += rhok * (phase * self.kweights[ik])
+
+        # Use vectorized version for derivatives
+        dGRijdx, dGRjidx = self.get_dGR_vectorized(
+            GR, Rpts, Rjlist, epc, Ru, diag=False
+        )
+
+        return GR, dGRijdx, dGRjidx, rhoR
 
     def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, Rjlist, energy, dHdx):
         """
