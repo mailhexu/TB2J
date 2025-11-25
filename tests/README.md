@@ -91,3 +91,36 @@ TB2J/
 The scripts are organized as:
 - **Root level**: `setup_test_submodule.sh` - for initial repository setup
 - **tests/ directory**: `init_test_data.sh` - for runtime/CI initialization
+
+## Running tests with pytest
+
+Once dependencies and test data are available, you can run pytest-based tests.
+
+### Prerequisites
+
+1. Install Python dependencies (from the repository root):
+   ```bash
+   python -m pip install --upgrade pip
+   python -m pip install -r requirements.txt
+   python -m pip install .
+   python -m pip install pytest
+   ```
+2. Ensure the test data submodule is initialized:
+   ```bash
+   # If you did not clone with --recurse-submodules
+   ./tests/init_test_data.sh
+   ```
+
+### Running tests
+
+- To run all available tests from the repository root:
+  ```bash
+  pytest
+  ```
+
+- To run a lightweight smoke test that does not depend on external DFT data (only core numerical libraries):
+  ```bash
+  pytest TB2J/interfaces/abacus/test_density_matrix.py -q
+  ```
+
+Some test and example scripts in `TB2J/interfaces/abacus` and other modules expect DFT-derived inputs (e.g. ABACUS examples) to be present under `tests/data` or the appropriate example directories. Make sure the test-data submodule has been fully initialized before running tests that rely on these datasets.

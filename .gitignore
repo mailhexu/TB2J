@@ -19,6 +19,10 @@ uv.lock
 .roo
 agent_files/
 */agent_files/
+AGENTS.md
+CLAUDE.md
+.opencode
+openspec
 
 
 # xyz files
