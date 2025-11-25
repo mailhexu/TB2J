@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-rm ./dist/*
+rm -rf ./dist/*
 #python3 setup.py sdist bdist_wheel
 #python -m build
 uv build

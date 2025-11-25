@@ -1,6 +1,8 @@
 doc/refs/*.pdf
 
 
+uv.lock
+
 # vim files
 *.swp
 
