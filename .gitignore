@@ -15,6 +15,11 @@ doc/refs/*.pdf
 .cline
 # roo coder
 .roo
+AGENTS.md
+CLAUDE.md
+.opencode
+openspec
+
 
 
 # xyz files
