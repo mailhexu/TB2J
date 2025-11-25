@@ -17,6 +17,8 @@ uv.lock
 .cline
 # roo coder
 .roo
+agent_files/
+*/agent_files/
 
 
 # xyz files
