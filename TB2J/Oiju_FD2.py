@@ -140,13 +140,7 @@ def merge_dHdx_spin(dH_up, dH_dn):
 
 
 def compute_dJdx_from_exchanges(
-    exchange_orig,
-    exchange_neg,
-    exchange_pos,
-    amplitude,
-    output_path,
-    compute_d2J=True,
-    ispin0_only=False,
+    exchange_orig, exchange_neg, exchange_pos, amplitude, output_path, compute_d2J=True
 ):
     """
     Compute dJ/dx and optionally d2J/dx2 from three exchange calculations using double-sided finite difference.
@@ -158,6 +152,7 @@ def compute_dJdx_from_exchanges(
     ----------
     exchange_orig : ExchangeNCL
         Exchange object for original (zero displacement) structure
+        Can be None if compute_d2J=False
     exchange_neg : ExchangeNCL
         Exchange object for negative displacement
     exchange_pos : ExchangeNCL
@@ -168,8 +163,6 @@ def compute_dJdx_from_exchanges(
         Path to save dJ/dx results
     compute_d2J : bool, default=True
         Whether to compute second derivative d2J/dx2
-    ispin0_only : bool, default=False
-        If True, only compute for pairs where first spin index (ispin) is 0
 
     Notes
     -----
@@ -200,17 +193,11 @@ def compute_dJdx_from_exchanges(
 
     # Compute dJ_iso/dx and optionally d2J_iso/dx2 for each pair
     # Note: Exchange values are stored internally in eV, so multiply by 1000 to get meV
+    # Note: If ispin0_only=True, the exchange objects will only contain pairs where ispin=0
     dJiso_dx = {}
     d2Jiso_dx2 = {}
 
     for key in Jiso_pos.keys():
-        # Key format is (R, ispin, jspin)
-        R, ispin, jspin = key
-
-        # Skip if ispin0_only is True and ispin != 0
-        if ispin0_only and ispin != 0:
-            continue
-
         if key in Jiso_neg:
             # First derivative: (J_pos - J_neg) / (2*dx)
             # Convert from eV/Angstrom to meV/Angstrom
@@ -442,9 +429,9 @@ def gen_exchange_Oiju_FD_double_sided(
     compute_d2J : bool, default=True
         Whether to compute second derivative d2J/dx2
     ispin0_only : bool, default=False
-        If True, only compute exchanges where first spin index (ispin) is 0.
-        This significantly reduces computation time when only interactions from
-        the first magnetic atom are needed.
+        If True, only compute exchanges where either ispin=0 or jspin=0.
+        This significantly reduces computation time when only interactions
+        involving the first magnetic atom are needed.
 
     Returns
     -------
@@ -533,6 +520,7 @@ def gen_exchange_Oiju_FD_double_sided(
                 exclude_orbs=exclude_orbs,
                 list_iatom=list_iatom,
                 description=description,
+                ispin0_only=ispin0_only,
             )
             exchange_orig.run(os.path.join(idisp_output_path, "original"))
         else:
@@ -554,6 +542,7 @@ def gen_exchange_Oiju_FD_double_sided(
             exclude_orbs=exclude_orbs,
             list_iatom=list_iatom,
             description=description,
+            ispin0_only=ispin0_only,
         )
         exchange_neg.run(os.path.join(idisp_output_path, "negative"))
 
@@ -573,6 +562,7 @@ def gen_exchange_Oiju_FD_double_sided(
             exclude_orbs=exclude_orbs,
             list_iatom=list_iatom,
             description=description,
+            ispin0_only=ispin0_only,
         )
         exchange_pos.run(os.path.join(idisp_output_path, "positive"))
 
