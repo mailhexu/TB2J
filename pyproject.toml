@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TB2J"
-version = "0.9.12.17"
+version = "0.9.12.18"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
 license = { text = "BSD-2-Clause" }
@@ -41,6 +41,7 @@ dependencies = [
     "tomli>=2.0.0",
     "tomli-w>=1.0.0",
     "typing_extensions",
+    "sisl>=0.16.2",
 ]
 
 [project.optional-dependencies]
