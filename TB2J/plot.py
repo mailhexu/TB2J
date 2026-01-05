@@ -20,6 +20,7 @@ def plot_exchange(
     marker="o",
     fname=None,
     show=False,
+    by_species=True,
     **kwargs,
 ):
     """Plot exchange parameters vs distance grouped by species.
@@ -34,8 +35,8 @@ def plot_exchange(
             )
     else:
         m = input_data
-    return m.plot_JvsR_by_species(
-        ax=ax, marker=marker, fname=fname, show=show, **kwargs
+    return m.plot_JvsR(
+        ax=ax, marker=marker, fname=fname, show=show, by_species=by_species, **kwargs
     )
 
 

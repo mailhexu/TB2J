@@ -565,8 +565,13 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         marker="o",
         fname=None,
         show=False,
+        by_species=False,
         **kwargs,
     ):
+        if by_species:
+            return self.plot_JvsR_by_species(
+                ax=ax, marker=marker, fname=fname, show=show, **kwargs
+            )
         if ax is None:
             fig, ax = plt.subplots()
         ds = []
