@@ -14,6 +14,31 @@ def write_eigen(qmesh, gamma=True, path="./", output_fname="EigenJq.txt", **kwar
     m.write_Jq(kmesh=qmesh, path=path, gamma=gamma, output_fname=output_fname, **kwargs)
 
 
+def plot_exchange(
+    input_data,
+    ax=None,
+    marker="o",
+    fname=None,
+    show=False,
+    **kwargs,
+):
+    """Plot exchange parameters vs distance grouped by species.
+    input_data: SpinIO object or path to the pickle file/directory.
+    """
+    if isinstance(input_data, str):
+        if os.path.isdir(input_data):
+            m = SpinIO.load_pickle(input_data)
+        else:
+            m = SpinIO.load_pickle(
+                os.path.dirname(input_data), os.path.basename(input_data)
+            )
+    else:
+        m = input_data
+    return m.plot_JvsR_by_species(
+        ax=ax, marker=marker, fname=fname, show=show, **kwargs
+    )
+
+
 def plot_magnon_band(
     fname="exchange.xml",
     path="./",

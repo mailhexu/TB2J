@@ -585,6 +585,44 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
+    def plot_JvsR_by_species(
+        self,
+        ax=None,
+        marker="o",
+        fname=None,
+        show=False,
+        **kwargs,
+    ):
+        if ax is None:
+            fig, ax = plt.subplots()
+        groups = {}
+        for key, val in self.exchange_Jdict.items():
+            R, i, j = key
+            idx_i = self.ind_atoms[i]
+            idx_j = self.ind_atoms[j]
+            spec_i = self.atoms[idx_i].symbol
+            spec_j = self.atoms[idx_j].symbol
+            pair = tuple(sorted([spec_i, spec_j]))
+            pair_name = "-".join(pair)
+            if pair_name not in groups:
+                groups[pair_name] = {"ds": [], "Js": []}
+            d = self.distance_dict[key][1]
+            groups[pair_name]["ds"].append(d)
+            groups[pair_name]["Js"].append(val * 1e3)
+
+        for pair_name, data in groups.items():
+            ax.scatter(data["ds"], data["Js"], marker=marker, label=pair_name, **kwargs)
+
+        ax.axhline(color="gray")
+        ax.set_xlabel(r"Distance ($\AA$)")
+        ax.set_ylabel("J (meV)")
+        ax.legend()
+        if fname is not None:
+            plt.savefig(fname)
+        if show:
+            plt.show()
+        return ax
+
     def plot_DvsR(self, ax=None, fname=None, show=False):
         if ax is None:
             fig, ax = plt.subplots()
