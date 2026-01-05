@@ -609,25 +609,68 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
-    def plot_DvsR(self, ax=None, fname=None, show=False):
+    def plot_DvsR(self, ax=None, fname=None, show=False, by_species=False):
         if ax is None:
             fig, ax = plt.subplots()
-        ds = []
-        Ds = []
-        for key, val in self.dmi_ddict.items():
-            d = self.distance_dict[key][1]
-            ds.append(d)
-            Ds.append(val * 1e3)
-        Ds = np.array(Ds)
-        ax.scatter(ds, Ds[:, 0], marker="s", color="r", label="Dx")
-        ax.scatter(
-            ds, Ds[:, 1], marker="o", edgecolors="g", facecolors="none", label="Dy"
-        )
-        ax.scatter(
-            ds, Ds[:, 2], marker="D", edgecolors="b", facecolors="none", label="Dz"
-        )
+        if by_species:
+            groups = {}
+            for key, val in self.dmi_ddict.items():
+                R, i, j = key
+                idx_i = self.ind_atoms[i]
+                idx_j = self.ind_atoms[j]
+                spec_i = self.atoms[idx_i].symbol
+                spec_j = self.atoms[idx_j].symbol
+                pair = tuple(sorted([spec_i, spec_j]))
+                pair_name = "-".join(pair)
+                if pair_name not in groups:
+                    groups[pair_name] = {"ds": [], "Ds": []}
+                d = self.distance_dict[key][1]
+                groups[pair_name]["ds"].append(d)
+                groups[pair_name]["Ds"].append(val * 1e3)
+
+            markers = ["s", "o", "D", "v", "^", "<", ">", "p", "*", "h", "H"]
+            for idx, (pair_name, data) in enumerate(groups.items()):
+                Ds = np.array(data["Ds"])
+                marker = markers[idx % len(markers)]
+                ax.scatter(
+                    data["ds"],
+                    Ds[:, 0],
+                    marker=marker,
+                    color="r",
+                    label=f"{pair_name} Dx",
+                )
+                ax.scatter(
+                    data["ds"],
+                    Ds[:, 1],
+                    marker=marker,
+                    color="g",
+                    label=f"{pair_name} Dy",
+                )
+                ax.scatter(
+                    data["ds"],
+                    Ds[:, 2],
+                    marker=marker,
+                    color="b",
+                    label=f"{pair_name} Dz",
+                )
+            ax.legend(ncol=3, fontsize="small")
+        else:
+            ds = []
+            Ds = []
+            for key, val in self.dmi_ddict.items():
+                d = self.distance_dict[key][1]
+                ds.append(d)
+                Ds.append(val * 1e3)
+            Ds = np.array(Ds)
+            ax.scatter(ds, Ds[:, 0], marker="s", color="r", label="Dx")
+            ax.scatter(
+                ds, Ds[:, 1], marker="o", edgecolors="g", facecolors="none", label="Dy"
+            )
+            ax.scatter(
+                ds, Ds[:, 2], marker="D", edgecolors="b", facecolors="none", label="Dz"
+            )
+            ax.legend(loc=1)
         ax.axhline(color="gray")
-        ax.legend(loc=1)
         ax.set_ylabel("D (meV)")
         ax.set_xlabel(r"Distance ($\AA$)")
         if fname is not None:
@@ -636,31 +679,71 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
-    def plot_JanivsR(self, ax=None, fname=None, show=False):
+    def plot_JanivsR(self, ax=None, fname=None, show=False, by_species=False):
         if ax is None:
             fig, ax = plt.subplots()
-        ds = []
-        Jani = []
-        for key, val in self.Jani_dict.items():
-            d = self.distance_dict[key][1]
-            ds.append(d)
-            # val = val - np.diag([np.trace(val) / 3] * 3)
-            Jani.append(val * 1e3)
-        Jani = np.array(Jani)
-        s = "xyz"
-        for i in range(3):
-            ax.scatter(ds, Jani[:, i, i], marker="s", label=f"J{s[i]}{s[i]}")
-        c = "rgb"
-        for ic, (i, j) in enumerate([(0, 1), (0, 2), (1, 2)]):
-            ax.scatter(
-                ds,
-                Jani[:, i, j],
-                edgecolors=c[ic],
-                facecolors="none",
-                label=f"J{s[i]}{s[j]}",
-            )
+        if by_species:
+            groups = {}
+            for key, val in self.Jani_dict.items():
+                R, i, j = key
+                idx_i = self.ind_atoms[i]
+                idx_j = self.ind_atoms[j]
+                spec_i = self.atoms[idx_i].symbol
+                spec_j = self.atoms[idx_j].symbol
+                pair = tuple(sorted([spec_i, spec_j]))
+                pair_name = "-".join(pair)
+                if pair_name not in groups:
+                    groups[pair_name] = {"ds": [], "Jani": []}
+                d = self.distance_dict[key][1]
+                groups[pair_name]["ds"].append(d)
+                groups[pair_name]["Jani"].append(val * 1e3)
+
+            markers = ["s", "o", "D", "v", "^", "<", ">", "p", "*", "h", "H"]
+            s = "xyz"
+            for idx, (pair_name, data) in enumerate(groups.items()):
+                Jani = np.array(data["Jani"])
+                marker = markers[idx % len(markers)]
+                # Diagonal
+                for i in range(3):
+                    ax.scatter(
+                        data["ds"],
+                        Jani[:, i, i],
+                        marker=marker,
+                        label=f"{pair_name} J{s[i]}{s[i]}",
+                    )
+                # Off-diagonal
+                for i, j in [(0, 1), (0, 2), (1, 2)]:
+                    ax.scatter(
+                        data["ds"],
+                        Jani[:, i, j],
+                        marker=marker,
+                        facecolors="none",
+                        label=f"{pair_name} J{s[i]}{s[j]}",
+                    )
+            ax.legend(ncol=3, fontsize="small")
+        else:
+            ds = []
+            Jani = []
+            for key, val in self.Jani_dict.items():
+                d = self.distance_dict[key][1]
+                ds.append(d)
+                # val = val - np.diag([np.trace(val) / 3] * 3)
+                Jani.append(val * 1e3)
+            Jani = np.array(Jani)
+            s = "xyz"
+            for i in range(3):
+                ax.scatter(ds, Jani[:, i, i], marker="s", label=f"J{s[i]}{s[i]}")
+            c = "rgb"
+            for ic, (i, j) in enumerate([(0, 1), (0, 2), (1, 2)]):
+                ax.scatter(
+                    ds,
+                    Jani[:, i, j],
+                    edgecolors=c[ic],
+                    facecolors="none",
+                    label=f"J{s[i]}{s[j]}",
+                )
+            ax.legend(loc=1, ncol=2)
         ax.axhline(color="gray")
-        ax.legend(loc=1, ncol=2)
         ax.set_xlabel(r"Distance ($\AA$)")
         ax.set_ylabel("Jani (meV)")
         if fname is not None:
@@ -669,7 +752,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
-    def plot_all(self, title=None, savefile=None, show=False):
+    def plot_all(self, title=None, savefile=None, show=False, by_species=False):
         if self.has_dmi and self.has_bilinear:
             naxis = 3
         else:
@@ -677,11 +760,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         fig, axes = plt.subplots(naxis, 1, sharex=True, figsize=(5, 2.2 * naxis))
 
         if self.has_dmi and self.has_bilinear:
-            self.plot_JvsR(axes[0])
-            self.plot_DvsR(axes[1])
-            self.plot_JanivsR(axes[2])
+            self.plot_JvsR(axes[0], by_species=by_species)
+            self.plot_DvsR(axes[1], by_species=by_species)
+            self.plot_JanivsR(axes[2], by_species=by_species)
         else:
-            self.plot_JvsR(axes)
+            self.plot_JvsR(axes, by_species=by_species)
 
         if title is not None:
             fig.suptitle(title)
