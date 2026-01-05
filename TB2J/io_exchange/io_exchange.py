@@ -568,60 +568,41 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         by_species=False,
         **kwargs,
     ):
+        if ax is None:
+            fig, ax = plt.subplots()
         if by_species:
-            return self.plot_JvsR_by_species(
-                ax=ax, marker=marker, fname=fname, show=show, **kwargs
-            )
-        if ax is None:
-            fig, ax = plt.subplots()
-        ds = []
-        Js = []
-        for key, val in self.exchange_Jdict.items():
-            d = self.distance_dict[key][1]
-            ds.append(d)
-            Js.append(val * 1e3)
-        ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
-        ax.axhline(color="gray")
-        ax.set_xlabel(r"Distance ($\AA$)")
-        ax.set_ylabel("J (meV)")
-        if fname is not None:
-            plt.savefig(fname)
-        if show:
-            plt.show()
-        return ax
+            groups = {}
+            for key, val in self.exchange_Jdict.items():
+                R, i, j = key
+                idx_i = self.ind_atoms[i]
+                idx_j = self.ind_atoms[j]
+                spec_i = self.atoms[idx_i].symbol
+                spec_j = self.atoms[idx_j].symbol
+                pair = tuple(sorted([spec_i, spec_j]))
+                pair_name = "-".join(pair)
+                if pair_name not in groups:
+                    groups[pair_name] = {"ds": [], "Js": []}
+                d = self.distance_dict[key][1]
+                groups[pair_name]["ds"].append(d)
+                groups[pair_name]["Js"].append(val * 1e3)
 
-    def plot_JvsR_by_species(
-        self,
-        ax=None,
-        marker="o",
-        fname=None,
-        show=False,
-        **kwargs,
-    ):
-        if ax is None:
-            fig, ax = plt.subplots()
-        groups = {}
-        for key, val in self.exchange_Jdict.items():
-            R, i, j = key
-            idx_i = self.ind_atoms[i]
-            idx_j = self.ind_atoms[j]
-            spec_i = self.atoms[idx_i].symbol
-            spec_j = self.atoms[idx_j].symbol
-            pair = tuple(sorted([spec_i, spec_j]))
-            pair_name = "-".join(pair)
-            if pair_name not in groups:
-                groups[pair_name] = {"ds": [], "Js": []}
-            d = self.distance_dict[key][1]
-            groups[pair_name]["ds"].append(d)
-            groups[pair_name]["Js"].append(val * 1e3)
-
-        for pair_name, data in groups.items():
-            ax.scatter(data["ds"], data["Js"], marker=marker, label=pair_name, **kwargs)
+            for pair_name, data in groups.items():
+                ax.scatter(
+                    data["ds"], data["Js"], marker=marker, label=pair_name, **kwargs
+                )
+            ax.legend()
+        else:
+            ds = []
+            Js = []
+            for key, val in self.exchange_Jdict.items():
+                d = self.distance_dict[key][1]
+                ds.append(d)
+                Js.append(val * 1e3)
+            ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
 
         ax.axhline(color="gray")
         ax.set_xlabel(r"Distance ($\AA$)")
         ax.set_ylabel("J (meV)")
-        ax.legend()
         if fname is not None:
             plt.savefig(fname)
         if show:
