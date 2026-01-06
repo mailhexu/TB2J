@@ -389,6 +389,28 @@ class TBGreen:
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
+        if hasattr(self.tbmodel, "get_sigma"):
+            # DMFT case
+            sigma = self.tbmodel.get_sigma(energy)
+            # sigma has shape (n_spin, n_orb, n_orb)
+
+            Hk = self.tbmodel.get_hamiltonian(self.kpts[ik])
+            Sk = self.get_Sk(ik)
+            if Sk is None:
+                Sk = np.eye(self.nbasis)
+
+            # For now, if sigma has 2 spins, we return a (2, norb, norb) Gk
+            # or we need to know if the system is NCL.
+            if sigma.ndim == 3:
+                Gk = np.zeros(sigma.shape, dtype=complex)
+                for ispin in range(sigma.shape[0]):
+                    Gk[ispin] = np.linalg.inv(
+                        (energy + self.efermi) * Sk - (Hk + sigma[ispin])
+                    )
+            else:
+                Gk = np.linalg.inv((energy + self.efermi) * Sk - (Hk + sigma))
+            return Gk
+
         if evals is None:
             evals = self.get_evalue(ik)
         if evecs is None:
