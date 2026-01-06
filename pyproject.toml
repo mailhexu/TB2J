@@ -73,6 +73,7 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "lawaf2J.py" = "TB2J.interfaces.lawaf_interface:lawaf2J_cli"
 "TB2J_edit.py" = "TB2J.scripts.TB2J_edit:main"
 "TB2J_plot_exchange.py" = "TB2J.scripts.TB2J_plot_exchange:main"
+"dmft2J.py" = "TB2J.scripts.dmft2J:run_dmft2J"
 
 
 [tool.setuptools]

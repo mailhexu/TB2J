@@ -93,3 +93,53 @@ class W2DynamicsParser(DMFTParser):
             mesh = 1j * (2 * n_points + 1) * np.pi / beta
 
             return sigma_data, mesh
+
+
+class DMFTManager:
+    """
+    Manager for DMFT calculations.
+    Combines static Wannier90 model with dynamic self-energy.
+    """
+
+    def __init__(self, path, prefix_SOC, atoms, dmft_file, **kwargs):
+        from TB2J.interfaces.wannier90_interface import WannierHam
+        from TB2J.utils import auto_assign_basis_name
+
+        self.path = path
+        self.prefix_SOC = prefix_SOC
+        self.atoms = atoms
+        self.dmft_file = dmft_file
+        self.parser = W2DynamicsParser(dmft_file)
+        self.output_path = kwargs.get("output_path", "TB2J_results")
+
+        # 1. Read static model (NCL)
+        print("Reading static Wannier90 model...")
+        self.static_model = WannierHam.read_from_wannier_dir(
+            path=path, prefix=prefix_SOC, atoms=atoms, nls=True
+        )
+
+        # 2. Generate basis
+        basis, _ = auto_assign_basis_name(
+            self.static_model.xred,
+            atoms,
+            write_basis_file=os.path.join(self.output_path, "assigned_basis.txt"),
+        )
+        self.basis = basis
+
+    def description(self):
+        desc = f""" Input from DMFT calculation.
+Tight binding data from {self.path}.
+Prefix of Wannier90 files:{self.prefix_SOC}.
+DMFT self-energy from:{self.dmft_file}.
+Warning: Please check if the noise level of Wannier function Hamiltonian is much smaller than the exchange values.
+"""
+        return desc
+
+    def __call__(self):
+        # Wrap static model with DMFT data
+        from TB2J.dmft_model import TBModelDMFT
+
+        print("Wrapping static model with DMFT self-energy...")
+        dmft_model = TBModelDMFT(self.static_model, self.parser)
+
+        return dmft_model, self.basis, self.description()
