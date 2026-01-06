@@ -23,20 +23,26 @@ from TB2J.utils import (
 class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
-        super().__init__(**params)
+        # Filter params for ExchangeParams
+        import inspect
+
+        sig = inspect.signature(ExchangeParams.__init__)
+        params_for_init = {k: v for k, v in params.items() if k in sig.parameters}
+        super().__init__(**params_for_init)
         self._prepare_kmesh(self._kmesh)
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        # self._prepare_elist(method="CFR")
-        self._prepare_elist(method="legendre")
+        method = params.get("method", "legendre")
+        self._prepare_elist(method=method)
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
 
-        # whether to calculate J and DMI with NJt method.
-        # self._prepare_NijR()
-        self._is_collinear = True
+        if hasattr(self, "backend_name") and self.backend_name == "DMFT":
+            pass  # Keep what was set in set_tbmodels
+        else:
+            self._is_collinear = True
         self.has_elistc = False
 
         # Store overlap matrix before cleaning tbmodels
@@ -997,110 +1003,12 @@ class ExchangeNCL(Exchange):
         #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
 
-class ExchangeDMFT(ExchangeNCL):
-    """
-    Exchange calculation using DMFT self-energies.
-    Uses Matsubara frequencies instead of energy contour integration.
-    """
-
-    def set_tbmodels(self, tbmodels):
-        """
-        tbmodels should be a TBModelDMFT instance.
-        """
-        self.tbmodel = tbmodels
-        # We need a static reference for name/basis properties
-        # TBModelDMFT wraps the static model
-        self.backend_name = "DMFT"
-        # Ensure emin is int for TBGreen
-        emin_int = int(self.G.adjusted_emin)
-        self.G = TBGreen(
-            tbmodel=self.tbmodel,
-            kmesh=self.kmesh,
-            ibz=self.ibz,
-            gamma=True,
-            efermi=self.efermi,
-            use_cache=self._use_cache,
-            nproc=self.nproc,
-            initial_emin=emin_int,
-        )
-        if self.efermi is None:
-            self.efermi = self.G.efermi
-        self.norb = self.G.norb
-        self.nbasis = self.G.nbasis
-
-        # DMFT specific: Get temperature from mesh
-        # mesh from DMFT contains Matsubara frequencies
-        _, self.dmft_mesh = self.tbmodel.mesh
-        # Temperature T = 1/beta
-        # iwn = (2n+1)pi/beta => beta = (2n+1)pi/iw0
-        # Assuming iw0 is first mesh point
-        iw0 = self.dmft_mesh[0]
-        inv_beta = (2 * 0 + 1) * np.pi / iw0.imag if iw0.imag > 0 else 1.0
-        self.temperature = 1.0 / inv_beta
-        self.beta = inv_beta  # Store beta for later use in integration
-
-        # Initialize standard ExchangeNCL attributes
-        self.rho = self.G.get_density_matrix()
-        self.A_ijR_list = defaultdict(lambda: [])
-        self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
-        self.A_ijR_orb = dict()
-        self.HR0 = self.G.H0
-        self._is_collinear = False  # DMFT usually requires full Hamiltonian
-        self.Pdict = {}
-        if self.write_density_matrix:
-            self.G.write_rho_R()
-
-    def _prepare_elist(self, method="matsubara"):
-        """
-        For DMFT, we use the discrete Matsubara frequency mesh
-        provided by the self-energy file, not a generated contour.
-        """
-        if method.lower() != "matsubara":
-            raise ValueError("DMFT calculations only support Matsubara mesh.")
-
-        self.contour = self.dmft_mesh
-
-    def integrate(self, AijRs, AijRs_orb=None, method="matsubara"):
-        """
-        For DMFT, integration is a sum over Matsubara frequencies.
-        Standard contour integration sum: Integrate(f(E) dE)
-        Matsubara sum: (1/beta) * Sum_n f(iwn)
-        """
-        beta = self.beta
-        T = self.temperature
-
-        for iR in self.R_ijatom_dict:
-            R_vec = self.short_Rlist[iR]
-            for iatom, jatom in self.R_ijatom_dict[iR]:
-                f = AijRs[(R_vec, iatom, jatom)]
-
-                # Simple Riemann sum approximation: T * Sum(f)
-                # If weights are needed for higher-order integration, they should be in mesh
-                # For now assuming uniform Matsubara grid
-                integral = np.sum(f) * T
-
-                self.A_ijR[(R_vec, iatom, jatom)] = integral
-
-                if self.orb_decomposition:
-                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                        np.sum(AijRs_orb[(R_vec, iatom, jatom)], axis=0) * T
-                    )
-
-    def finalize(self):
-        self.G.clean_cache()
-
-    def run(self, path="TB2J_results"):
-        self.calculate_all()
-        self.write_output(path=path)
-        self.finalize()
-
-
 class ExchangeCL(ExchangeNCL):
-    def set_tbmodels(self, tbmodel):
+    def set_tbmodels(self, tbmodels):
         """
         only difference is a colinear tag.
         """
-        super().set_tbmodels(tbmodel)
+        super().set_tbmodels(tbmodels)
         self._is_collinear = True
 
     def write_output(self, path="TB2J_results"):

@@ -101,21 +101,22 @@ class DMFTManager:
     Combines static Wannier90 model with dynamic self-energy.
     """
 
-    def __init__(self, path, prefix_SOC, atoms, dmft_file, **kwargs):
+    def __init__(self, path, prefix, atoms, dmft_file, **kwargs):
         from TB2J.interfaces.wannier90_interface import WannierHam
         from TB2J.utils import auto_assign_basis_name
 
         self.path = path
-        self.prefix_SOC = prefix_SOC
+        self.prefix = prefix
         self.atoms = atoms
         self.dmft_file = dmft_file
         self.parser = W2DynamicsParser(dmft_file)
         self.output_path = kwargs.get("output_path", "TB2J_results")
 
-        # 1. Read static model (NCL)
+        # 1. Read static model
         print("Reading static Wannier90 model...")
+        nspin = kwargs.get("nspin", 2)
         self.static_model = WannierHam.read_from_wannier_dir(
-            path=path, prefix=prefix_SOC, atoms=atoms, nls=True
+            path=path, prefix=prefix, atoms=atoms, nls=(nspin == 2)
         )
 
         # 2. Generate basis
@@ -129,7 +130,7 @@ class DMFTManager:
     def description(self):
         desc = f""" Input from DMFT calculation.
 Tight binding data from {self.path}.
-Prefix of Wannier90 files:{self.prefix_SOC}.
+Prefix of Wannier90 files:{self.prefix}.
 DMFT self-energy from:{self.dmft_file}.
 Warning: Please check if the noise level of Wannier function Hamiltonian is much smaller than the exchange values.
 """

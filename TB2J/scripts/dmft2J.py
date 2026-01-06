@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 
-from TB2J.exchange import ExchangeDMFT
+from TB2J.exchange_dmft import ExchangeDMFTNCL
 from TB2J.exchange_params import add_exchange_args_to_parser
 from TB2J.interfaces.dmft import DMFTManager
 from TB2J.versioninfo import print_license
@@ -19,8 +19,8 @@ def run_dmft2J():
         "--posfile", help="name of the position file", default="POSCAR", type=str
     )
     parser.add_argument(
-        "--prefix_SOC",
-        help="prefix to Wannier90 non-colinear files",
+        "--prefix",
+        help="prefix to Wannier90 files",
         default="wannier90",
         type=str,
     )
@@ -37,25 +37,30 @@ def run_dmft2J():
     args = parser.parse_args()
 
     # Initialize DMFT manager
-    # Note: DMFTManager handles reading Wannier90 and wrapping with DMFT data
     dmft_manager = DMFTManager(
         path=args.path,
-        prefix_SOC=args.prefix_SOC,
+        prefix=args.prefix,
         atoms=None,  # Will be read from Wannier files
         dmft_file=args.dmft_file,
         output_path=args.output,
-        **vars(args),  # Pass other args like kmesh, nspin, etc.
+        **vars(args),
     )
 
     # Get model, basis, description
     dmft_model, basis, description = dmft_manager()
 
     # Run exchange calculation
-    # We select ExchangeDMFT explicitly (not through Manager selection logic)
     print("Starting DMFT exchange calculation...")
-    exchange = ExchangeDMFT(
+    if args.nspin == 1:
+        from TB2J.exchange import ExchangeCLDMFT
+
+        ExchangeClass = ExchangeCLDMFT
+    else:
+        ExchangeClass = ExchangeDMFTNCL
+
+    exchange = ExchangeClass(
         tbmodels=dmft_model,
-        atoms=None,
+        atoms=dmft_model.atoms,
         basis=basis,
         description=description,
         **vars(args),

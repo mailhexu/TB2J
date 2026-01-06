@@ -52,10 +52,16 @@ class TB2JSymmetrizer:
         for pairgroup in self.pgdict.pairlists:
             ijRs = pairgroup.get_all_ijR()
             ijRs_spin = [self.exc.ijR_index_atom_to_spin(*ijR) for ijR in ijRs]
-            Js = [self.exc.get_J(*ijR_spin) for ijR_spin in ijRs_spin]
-            Javg = np.average(Js)
-            for i, j, R in ijRs_spin:
-                symJdict[(R, i, j)] = Javg
+            Js = []
+            for ijR_spin in ijRs_spin:
+                i, j, R = ijR_spin
+                J = self.exc.get_J(i, j, R)
+                if J is not None:
+                    Js.append(J)
+            if Js:
+                Javg = np.average(Js)
+                for i, j, R in ijRs_spin:
+                    symJdict[(R, i, j)] = Javg
         self.new_exc.exchange_Jdict = symJdict
         if self.Jonly:
             self.new_exc.has_dmi = False
