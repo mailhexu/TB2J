@@ -1,6 +1,5 @@
 import copy
 from collections import defaultdict
-from pathlib import Path
 
 import numpy as np
 from sympair import SymmetryPairFinder
@@ -52,10 +51,16 @@ class TB2JSymmetrizer:
         for pairgroup in self.pgdict.pairlists:
             ijRs = pairgroup.get_all_ijR()
             ijRs_spin = [self.exc.ijR_index_atom_to_spin(*ijR) for ijR in ijRs]
-            Js = [self.exc.get_J(*ijR_spin) for ijR_spin in ijRs_spin]
-            Javg = np.average(Js)
-            for i, j, R in ijRs_spin:
-                symJdict[(R, i, j)] = Javg
+            Js = []
+            for ijR_spin in ijRs_spin:
+                i, j, R = ijR_spin
+                J = self.exc.get_J(i, j, R)
+                if J is not None:
+                    Js.append(J)
+            if Js:
+                Javg = np.average(Js)
+                for i, j, R in ijRs_spin:
+                    symJdict[(R, i, j)] = Javg
         self.new_exc.exchange_Jdict = symJdict
         if self.Jonly:
             self.new_exc.has_dmi = False
@@ -68,10 +73,10 @@ class TB2JSymmetrizer:
 
     def output(self, path="TB2J_symmetrized"):
         if path is None:
-            path = Path(".")
+            path = "TB2J_symmetrized"
         self.new_exc.write_all(path=path)
 
-    def run(self, path=None):
+    def run(self, path="TB2J_symmetrized"):
         print("** Symmetrizing exchange parameters.")
         self.symmetrize_J()
         print("** Outputing the symmetrized exchange parameters.")
@@ -94,6 +99,8 @@ def symmetrize_J(
     exc: exchange
     """
     if exc is None:
+        if path is None:
+            raise ValueError("Please provide the path to the exchange parameters.")
         exc = SpinIO.load_pickle(path=path, fname=fname)
     symmetrizer = TB2JSymmetrizer(exc, symprec=symprec, Jonly=Jonly)
     symmetrizer.run(path=output_path)
@@ -169,7 +176,7 @@ def symmetrize_exchange(spinio, atoms, symprec=1e-3):
     >>> symmetrize_exchange(spinio, atoms=spinio.atoms)
     """
     try:
-        from spglib import get_symmetry_dataset
+        from spglib import spglib as spg
     except ImportError:
         raise ImportError(
             "spglib is required for symmetrization. Install it with: pip install spglib"
@@ -177,10 +184,10 @@ def symmetrize_exchange(spinio, atoms, symprec=1e-3):
 
     # Get symmetry dataset from the provided structure
     lattice = atoms.get_cell()
-    positions = atoms.get_positions()
+    positions = atoms.get_scaled_positions()
     numbers = atoms.get_atomic_numbers()
 
-    dataset = get_symmetry_dataset((lattice, positions, numbers), symprec=symprec)
+    dataset = spg.get_symmetry_dataset((lattice, positions, numbers), symprec=symprec)
     if dataset is None:
         raise ValueError(
             "spglib could not detect symmetry from the provided structure. "

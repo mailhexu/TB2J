@@ -228,12 +228,14 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return self.index_spin[symdict[symnum]]
 
     def i_spin(self, i):
-        if isinstance(i, int):
-            return i
+        if isinstance(i, (int, np.integer)):
+            return int(i)
         elif isinstance(i, str):
             return self.get_symbol_number_ispin(i)
         else:
-            raise ValueError("i must be either an integer or a string.")
+            raise ValueError(
+                f"i must be either an integer or a string. Got {type(i)}: {i}"
+            )
 
     def get_charge_ispin(self, i):
         i = self.i_spin(i)
