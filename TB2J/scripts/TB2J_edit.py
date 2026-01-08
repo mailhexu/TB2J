@@ -163,6 +163,21 @@ def cmd_symmetrize(args):
     print("  Done!")
 
 
+def cmd_remove_sublattice(args):
+    """Remove interactions associated with a sublattice."""
+    from TB2J.io_exchange.edit import load, remove_sublattice, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    print(f"Removing sublattice: {args.sublattice}")
+    remove_sublattice(spinio, args.sublattice)
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
 def cmd_info(args):
     """Show information about TB2J results."""
     from TB2J.io_exchange.edit import load
@@ -304,6 +319,18 @@ def main():
         help="Symmetry precision in Angstrom (default: 1e-3)",
     )
     parser_symm.set_defaults(func=cmd_symmetrize)
+
+    parser_rm_sub = subparsers.add_parser(
+        "remove-sublattice",
+        help="Remove all interactions for a sublattice",
+        aliases=["rm-sub"],
+    )
+    parser_rm_sub.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_rm_sub.add_argument("-o", "--output", required=True, help="Output directory")
+    parser_rm_sub.add_argument(
+        "-s", "--sublattice", required=True, help="Sublattice name (species symbol)"
+    )
+    parser_rm_sub.set_defaults(func=cmd_remove_sublattice)
 
     # info command
     parser_info = subparsers.add_parser(

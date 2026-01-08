@@ -24,6 +24,7 @@ __all__ = [
     "set_anisotropy",
     "toggle_DMI",
     "toggle_Jani",
+    "remove_sublattice",
     "symmetrize_exchange",
 ]
 
@@ -53,6 +54,8 @@ def load(path="TB2J_results/TB2J.pickle"):
     >>> print(spinio.exchange_Jdict)
     """
     path = os.path.abspath(path)
+    if os.path.isdir(path):
+        path = os.path.join(path, "TB2J.pickle")
     if not os.path.exists(path):
         raise FileNotFoundError(f"TB2J pickle file not found: {path}")
 
@@ -259,6 +262,71 @@ def toggle_Jani(spinio, enabled=None):
         spinio._jani_backup = spinio.Jani_dict
         spinio.Jani_dict = {}
         spinio.has_bilinear = False
+
+
+def remove_sublattice(spinio, sublattice_name):
+    """
+    Remove all magnetic interactions associated with a specific sublattice.
+
+    This includes:
+    - Single-ion anisotropy (SIA) for atoms in the sublattice.
+    - Exchange interactions (J) where i or j belongs to the sublattice.
+    - Dzyaloshinskii-Moriya interactions (DMI) where i or j belongs to the sublattice.
+    - Anisotropic exchange where i or j belongs to the sublattice.
+
+    Parameters
+    ----------
+    spinio : SpinIO
+        The SpinIO object to modify.
+    sublattice_name : str
+        The name of the sublattice (species symbol) to remove.
+
+    Examples
+    --------
+    >>> # Remove all interactions involving Sm atoms
+    >>> remove_sublattice(spinio, 'Sm')
+    """
+    symbols = spinio.atoms.get_chemical_symbols()
+    sublattice_indices = [
+        i
+        for i, (sym, idx) in enumerate(zip(symbols, spinio.index_spin))
+        if sym == sublattice_name and idx >= 0
+    ]
+
+    if not sublattice_indices:
+        import warnings
+
+        warnings.warn(f"No magnetic atoms found for sublattice '{sublattice_name}'.")
+        return
+
+    sublattice_spin_indices = set(spinio.index_spin[i] for i in sublattice_indices)
+
+    for i in sublattice_indices:
+        spinio.index_spin[i] = -1
+
+    if spinio.has_uniaxial_anistropy:
+        if spinio.k1 is not None:
+            for idx in sublattice_spin_indices:
+                spinio.k1[idx] = 0.0
+
+    def filter_interaction(interaction_dict):
+        if interaction_dict is None:
+            return None
+        new_dict = {}
+        for key, val in interaction_dict.items():
+            R, i, j = key
+            if i not in sublattice_spin_indices and j not in sublattice_spin_indices:
+                new_dict[key] = val
+        return new_dict
+
+    if spinio.has_exchange:
+        spinio.exchange_Jdict = filter_interaction(spinio.exchange_Jdict)
+
+    if spinio.has_dmi:
+        spinio.dmi_ddict = filter_interaction(spinio.dmi_ddict)
+
+    if spinio.has_bilinear:
+        spinio.Jani_dict = filter_interaction(spinio.Jani_dict)
 
 
 def symmetrize_exchange(spinio, atoms, symprec=1e-3):
