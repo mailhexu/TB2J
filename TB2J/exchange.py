@@ -743,12 +743,11 @@ class ExchangeNCL(Exchange):
                     )
 
     def get_quantities_per_e(self, e):
-        Gk_all = self.G.get_Gk_all(e)
         # mae = self.get_mae_kspace(Gk_all)
         mae = None
         # TODO: get the MAE from Gk_all
         # short_Rlist now contains actual R vectors
-        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
+        GR = self.G.get_GR(self.short_Rlist, energy=e)
 
         # Save diagonal elements of Green's function for charge and magnetic moment calculation
         # Only if debug option is enabled

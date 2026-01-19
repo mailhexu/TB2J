@@ -406,10 +406,10 @@ class TBGreen:
 
     def get_Gk_all(self, energy):
         """Green's function G(k) for one energy for all kpoints"""
-        Gk_all = np.zeros((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
-        for ik, _ in enumerate(self.kpts):
-            Gk_all[ik] = self.get_Gk(ik, energy)
-        return Gk_all
+        middle = 1.0 / ((energy + self.efermi) - self.evals)
+        Gk = self.evecs @ (middle[:, :, None] * self.evecs.swapaxes(-1, -2).conj())
+
+        return Gk
 
     def compute_GR(self, Rpts, kpts, Gks):
         Rvecs = np.array(Rpts)
