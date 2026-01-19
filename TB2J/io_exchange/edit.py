@@ -24,6 +24,7 @@ __all__ = [
     "set_anisotropy",
     "toggle_DMI",
     "toggle_Jani",
+    "toggle_exchange",
     "remove_sublattice",
     "symmetrize_exchange",
 ]
@@ -264,6 +265,50 @@ def toggle_Jani(spinio, enabled=None):
         spinio.has_bilinear = False
 
 
+def toggle_exchange(spinio, enabled=None):
+    """
+    Enable or disable isotropic exchange parameters.
+
+    When disabling, the exchange values are backed up and can be restored
+    by re-enabling.
+
+    Parameters
+    ----------
+    spinio : SpinIO
+        The SpinIO object to modify.
+    enabled : bool, optional
+        If True, enable exchange. If False, disable exchange.
+        If None, toggle the current state.
+
+    Examples
+    --------
+    >>> # Disable isotropic exchange
+    >>> toggle_exchange(spinio, enabled=False)
+
+    >>> # Toggle isotropic exchange
+    >>> toggle_exchange(spinio)
+
+    >>> # Re-enable isotropic exchange
+    >>> toggle_exchange(spinio, enabled=True)
+    """
+    if enabled is None:
+        # Toggle current state
+        enabled = not spinio.has_exchange
+
+    if enabled and not spinio.has_exchange:
+        # Re-enable: restore from backup or initialize empty
+        if hasattr(spinio, "_exchange_backup"):
+            spinio.exchange_Jdict = spinio._exchange_backup
+        else:
+            spinio.exchange_Jdict = {}
+        spinio.has_exchange = bool(spinio.exchange_Jdict)
+    elif not enabled and spinio.has_exchange:
+        # Disable: backup and clear
+        spinio._exchange_backup = spinio.exchange_Jdict
+        spinio.exchange_Jdict = {}
+        spinio.has_exchange = False
+
+
 def remove_sublattice(spinio, sublattice_name):
     """
     Remove all magnetic interactions associated with a specific sublattice.
@@ -304,10 +349,32 @@ def remove_sublattice(spinio, sublattice_name):
     for i in sublattice_indices:
         spinio.index_spin[i] = -1
 
-    if spinio.has_uniaxial_anistropy:
-        if spinio.k1 is not None:
-            for idx in sublattice_spin_indices:
-                spinio.k1[idx] = 0.0
+    # Re-index spins
+    # Map old spin indices to new spin indices
+    # Remaining spins will be compacted to 0, 1, 2...
+
+    old_to_new_spin_index = {}
+    current_spin_index = 0
+    # max_old_spin = max(spinio.index_spin)
+
+    for iatom, ispin in enumerate(spinio.index_spin):
+        if ispin >= 0:
+            if ispin not in old_to_new_spin_index:
+                old_to_new_spin_index[ispin] = current_spin_index
+                current_spin_index += 1
+            spinio.index_spin[iatom] = old_to_new_spin_index[ispin]
+
+    def reindex_interaction(interaction_dict):
+        if interaction_dict is None:
+            return None
+        new_dict = {}
+        for key, val in interaction_dict.items():
+            R, i, j = key
+            if i in old_to_new_spin_index and j in old_to_new_spin_index:
+                new_i = old_to_new_spin_index[i]
+                new_j = old_to_new_spin_index[j]
+                new_dict[(R, new_i, new_j)] = val
+        return new_dict
 
     def filter_interaction(interaction_dict):
         if interaction_dict is None:
@@ -319,14 +386,72 @@ def remove_sublattice(spinio, sublattice_name):
                 new_dict[key] = val
         return new_dict
 
+    def filter_distance_dict(distance_dict):
+        if distance_dict is None:
+            return None
+        new_dict = {}
+        for key, val in distance_dict.items():
+            R, i, j = key
+            if i not in sublattice_spin_indices and j not in sublattice_spin_indices:
+                new_dict[key] = val
+        return new_dict
+
     if spinio.has_exchange:
         spinio.exchange_Jdict = filter_interaction(spinio.exchange_Jdict)
+        spinio.exchange_Jdict = reindex_interaction(spinio.exchange_Jdict)
+        spinio.distance_dict = filter_distance_dict(spinio.distance_dict)
+        spinio.distance_dict = reindex_interaction(spinio.distance_dict)
+        if hasattr(spinio, "Jiso_orb") and spinio.Jiso_orb:
+            spinio.Jiso_orb = filter_interaction(spinio.Jiso_orb)
+            spinio.Jiso_orb = reindex_interaction(spinio.Jiso_orb)
 
     if spinio.has_dmi:
         spinio.dmi_ddict = filter_interaction(spinio.dmi_ddict)
+        spinio.dmi_ddict = reindex_interaction(spinio.dmi_ddict)
+        if hasattr(spinio, "DMI_orb") and spinio.DMI_orb:
+            spinio.DMI_orb = filter_interaction(spinio.DMI_orb)
+            spinio.DMI_orb = reindex_interaction(spinio.DMI_orb)
 
     if spinio.has_bilinear:
         spinio.Jani_dict = filter_interaction(spinio.Jani_dict)
+        spinio.Jani_dict = reindex_interaction(spinio.Jani_dict)
+        if hasattr(spinio, "Jani_orb") and spinio.Jani_orb:
+            spinio.Jani_orb = filter_interaction(spinio.Jani_orb)
+            spinio.Jani_orb = reindex_interaction(spinio.Jani_orb)
+
+    if hasattr(spinio, "dJdx") and spinio.dJdx:
+        spinio.dJdx = filter_distance_dict(spinio.dJdx)
+        spinio.dJdx = reindex_interaction(spinio.dJdx)
+    if hasattr(spinio, "dJdx2") and spinio.dJdx2:
+        spinio.dJdx2 = filter_distance_dict(spinio.dJdx2)
+        spinio.dJdx2 = reindex_interaction(spinio.dJdx2)
+    if hasattr(spinio, "biquadratic_Jdict") and spinio.biquadratic_Jdict:
+        spinio.biquadratic_Jdict = filter_interaction(spinio.biquadratic_Jdict)
+        spinio.biquadratic_Jdict = reindex_interaction(spinio.biquadratic_Jdict)
+    if hasattr(spinio, "NJT_Jdict") and spinio.NJT_Jdict:
+        spinio.NJT_Jdict = filter_interaction(spinio.NJT_Jdict)
+        spinio.NJT_Jdict = reindex_interaction(spinio.NJT_Jdict)
+    if hasattr(spinio, "NJT_ddict") and spinio.NJT_ddict:
+        spinio.NJT_ddict = filter_interaction(spinio.NJT_ddict)
+        spinio.NJT_ddict = reindex_interaction(spinio.NJT_ddict)
+
+    if spinio.has_uniaxial_anistropy:
+        if spinio.k1 is not None:
+            new_k1 = [0.0] * current_spin_index
+            new_k1dir = [[0.0, 0.0, 1.0]] * current_spin_index
+
+            for old_idx, new_idx in old_to_new_spin_index.items():
+                if old_idx < len(spinio.k1):
+                    new_k1[new_idx] = spinio.k1[old_idx]
+                    new_k1dir[new_idx] = spinio.k1dir[old_idx]
+
+            spinio.k1 = new_k1
+            spinio.k1dir = new_k1dir
+
+    spinio._ind_atoms = {}
+    for iatom, ispin in enumerate(spinio.index_spin):
+        if ispin >= 0:
+            spinio._ind_atoms[ispin] = iatom
 
 
 def symmetrize_exchange(spinio, atoms, symprec=1e-3):

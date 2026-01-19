@@ -37,6 +37,9 @@ TB2J_edit.py toggle-dmi -i TB2J_results/TB2J.pickle -o modified_results --disabl
 
 # Enable Anisotropic Exchange
 TB2J_edit.py toggle-jani -i TB2J_results/TB2J.pickle -o modified_results --enable
+
+# Disable Isotropic Exchange
+TB2J_edit.py toggle-exchange -i TB2J_results/TB2J.pickle -o modified_results --disable
 ```
 
 ### Symmetrize Exchange
@@ -48,6 +51,16 @@ TB2J_edit.py symmetrize -i TB2J_results/TB2J.pickle -S structure.cif -o modified
 ```
 
 *   `-S STRUCTURE`: Path to the reference structure file (e.g., CIF, POSCAR).
+
+### Remove Sublattice
+
+Remove all magnetic interactions associated with a specific sublattice. This includes Single-Ion Anisotropy (SIA), Exchange (J), DMI, and Anisotropic Exchange involving atoms of the specified species.
+
+```bash
+TB2J_edit.py remove-sublattice -i TB2J_results/TB2J.pickle -o modified_results -s Sm
+```
+
+*   `-s SUBLATTICE`: The name of the sublattice (species symbol) to remove (e.g., 'Sm', 'Fe').
 
 ### Info
 
@@ -62,7 +75,7 @@ TB2J_edit.py info -i TB2J_results/TB2J.pickle
 You can also use the `TB2J.io_exchange.edit` module in your Python scripts.
 
 ```python
-from TB2J.io_exchange.edit import load, set_anisotropy, toggle_DMI, save
+from TB2J.io_exchange.edit import load, set_anisotropy, toggle_DMI, toggle_exchange, save
 
 # Load results
 spinio = load('TB2J_results/TB2J.pickle')
@@ -70,6 +83,7 @@ spinio = load('TB2J_results/TB2J.pickle')
 # Modify results
 set_anisotropy(spinio, species='Sm', k1=5.0, k1dir=[0, 0, 1]) # k1 in eV
 toggle_DMI(spinio, enabled=False)
+toggle_exchange(spinio, enabled=False)
 
 # Save results
 save(spinio, 'modified_results')
@@ -82,4 +96,6 @@ save(spinio, 'modified_results')
 *   `set_anisotropy(spinio, species, k1, k1dir)`: Set single-ion anisotropy.
 *   `toggle_DMI(spinio, enabled)`: Enable/disable DMI.
 *   `toggle_Jani(spinio, enabled)`: Enable/disable anisotropic exchange.
+*   `toggle_exchange(spinio, enabled)`: Enable/disable isotropic exchange.
+*   `remove_sublattice(spinio, sublattice_name)`: Remove interactions for a sublattice.
 *   `symmetrize_exchange(spinio, atoms, symprec)`: Symmetrize exchange parameters.

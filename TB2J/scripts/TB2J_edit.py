@@ -8,6 +8,7 @@ Usage:
     TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -s Fe 1.0 -o OUTPUT_DIR
     TB2J_edit toggle-dmi -i INPUT.pickle --disable -o OUTPUT_DIR
     TB2J_edit toggle-jani -i INPUT.pickle --disable -o OUTPUT_DIR
+    TB2J_edit toggle-exchange -i INPUT.pickle --disable -o OUTPUT_DIR
     TB2J_edit symmetrize -i INPUT.pickle -S STRUCTURE.cif -o OUTPUT_DIR
 """
 
@@ -131,6 +132,34 @@ def cmd_toggle_jani(args):
     print(f"{action} anisotropic exchange...")
     toggle_Jani(spinio, enabled=enabled)
     print(f"  Jani is now: {'enabled' if spinio.has_bilinear else 'disabled'}")
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_toggle_exchange(args):
+    """Toggle isotropic exchange on/off."""
+    from TB2J.io_exchange.edit import load, save, toggle_exchange
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    if args.disable:
+        enabled = False
+        action = "Disabling"
+    elif args.enable:
+        enabled = True
+        action = "Enabling"
+    else:
+        enabled = None
+        action = "Toggling"
+
+    print(f"{action} isotropic exchange...")
+    toggle_exchange(spinio, enabled=enabled)
+    print(
+        f"  Isotropic exchange is now: {'enabled' if spinio.has_exchange else 'disabled'}"
+    )
 
     print(f"Saving to: {args.output}")
     save(spinio, args.output)
@@ -298,6 +327,25 @@ def main():
         "-d", "--disable", action="store_true", help="Disable anisotropic exchange"
     )
     parser_jani.set_defaults(func=cmd_toggle_jani)
+
+    parser_exchange = subparsers.add_parser(
+        "toggle-exchange",
+        help="Enable/disable isotropic exchange",
+        aliases=["exchange"],
+    )
+    parser_exchange.add_argument(
+        "-i", "--input", required=True, help="Input pickle file"
+    )
+    parser_exchange.add_argument(
+        "-o", "--output", required=True, help="Output directory"
+    )
+    parser_exchange.add_argument(
+        "-e", "--enable", action="store_true", help="Enable isotropic exchange"
+    )
+    parser_exchange.add_argument(
+        "-d", "--disable", action="store_true", help="Disable isotropic exchange"
+    )
+    parser_exchange.set_defaults(func=cmd_toggle_exchange)
 
     # symmetrize command
     parser_symm = subparsers.add_parser(

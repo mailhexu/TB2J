@@ -1,6 +1,7 @@
-import numpy as np
 import os
 from itertools import groupby
+
+import numpy as np
 
 
 def write_tom_ucf(cls, fname):
@@ -25,8 +26,8 @@ def write_tom_ucf(cls, fname):
                 gyro_ratio = cls.gyro_ratio[i]
                 symbol = cls.atoms.get_chemical_symbols()[i]
                 if cls.has_uniaxial_anistropy:
-                    k1 = cls.k1[i]
-                    k1dir = cls.k1dir[i]
+                    k1 = cls.k1[id_spin]
+                    k1dir = cls.k1dir[id_spin]
                 else:
                     k1 = 0.0
                     k1dir = [0.0, 0.0, 1.0]
