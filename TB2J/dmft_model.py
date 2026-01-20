@@ -16,6 +16,8 @@ class TBModelDMFT:
         self.static_model = static_model
         self.dmft_parser = dmft_parser
         self.sigma, self.mesh = dmft_parser.read_self_energy()
+        if self.sigma.ndim == 4 and self.sigma.shape[0] == 1:
+            self.sigma = np.squeeze(self.sigma, axis=0)
         self.mu = dmft_parser.get_chemical_potential()
 
         # Properties to mimic the static model
@@ -24,29 +26,39 @@ class TBModelDMFT:
         self.norb = static_model.norb
         self.nbasis = static_model.nbasis
         self.atoms = static_model.atoms
-        self.nel = static_model.nel
+        self.nel = getattr(static_model, "nel", 0.0)
+        self.efermi = getattr(static_model, "efermi", 0.0)
 
-    def get_sigma(self, energy):
+    def get_sigma(self, energy, ispin=0):
         """
         Interpolates or selects the self-energy for a given energy.
-        Since we currently use discrete Matsubara frequencies, we look for
-        an exact match or nearest neighbor.
-
-        :param energy: complex energy relative to Fermi level (e - efermi)
-        :returns: Sigma(energy) matrix of shape (n_spin, n_orb, n_orb)
+        If NCL, it returns a spinor matrix.
+        If collinear, it returns the ispin channel.
+        If ispin is None, it returns all channels.
         """
-        # Find index in mesh. Note: energy in TB2J is e - efermi.
-        # DMFT mesh is usually Matsubara iwn.
-        # In TB2J, G(z) = (z+efermi - H)^-1
-        # So z is the energy parameter.
+        idx = np.argmin(np.abs(self.mesh - (energy + self.efermi)))
 
-        # Simple exact match for now (Phase 2)
-        idx = np.argmin(np.abs(self.mesh - (energy + self.static_model.efermi)))
-        if not np.isclose(self.mesh[idx], energy + self.static_model.efermi, atol=1e-5):
-            # Warning or interpolation could go here
-            pass
+        sigma_at_e = self.sigma[..., idx, :, :]
 
-        return self.sigma[:, idx, :, :]
+        # Scenario 1: NCL/SOC (Spinor)
+        if not getattr(self.static_model, "colinear", True) or getattr(
+            self.static_model, "nls", False
+        ):
+            if sigma_at_e.ndim == 3 and sigma_at_e.shape[0] == 2:
+                n = sigma_at_e.shape[1]
+                sigma_full = np.zeros((2 * n, 2 * n), dtype=complex)
+                sigma_full[:n, :n] = sigma_at_e[0]
+                sigma_full[n:, n:] = sigma_at_e[1]
+                return sigma_full
+            return sigma_at_e
+
+        # Scenario 2: Collinear
+        if sigma_at_e.ndim == 3 and sigma_at_e.shape[0] == 2:
+            if ispin is None:
+                return sigma_at_e
+            return sigma_at_e[ispin]
+
+        return sigma_at_e
 
     def HSE_k(self, kpt, convention=2):
         """
@@ -55,5 +67,12 @@ class TBModelDMFT:
         """
         return self.static_model.HSE_k(kpt, convention=convention)
 
-    def get_hamiltonian(self, kpt):
-        return self.static_model.gen_ham(kpt)
+    def get_hamiltonian(self, kpt, ispin=0):
+        if hasattr(self.static_model, "gen_ham"):
+            try:
+                return self.static_model.gen_ham(kpt, ispin=ispin)
+            except TypeError:
+                return self.static_model.gen_ham(kpt)
+        else:
+            H, S, _, _ = self.static_model.HSE_k(kpt)
+            return H

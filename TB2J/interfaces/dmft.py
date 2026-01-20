@@ -25,7 +25,7 @@ class DMFTParser(ABC):
                                 Note: Currently ignoring k-dependence for local DMFT.
             mesh (np.ndarray): Frequency mesh (complex array of Matsubara frequencies).
         """
-        pass
+        return None, None
 
     @abstractmethod
     def get_chemical_potential(self):
@@ -35,7 +35,7 @@ class DMFTParser(ABC):
         Returns:
             mu (float): The chemical potential.
         """
-        pass
+        return 0.0
 
 
 class W2DynamicsParser(DMFTParser):
@@ -102,15 +102,28 @@ class DMFTManager:
     """
 
     def __init__(self, path, prefix, atoms, dmft_file, **kwargs):
+        from ase.io import read
+
         from TB2J.interfaces.wannier90_interface import WannierHam
         from TB2J.utils import auto_assign_basis_name
+        from TB2J.wannier import parse_atoms
 
         self.path = path
         self.prefix = prefix
-        self.atoms = atoms
         self.dmft_file = dmft_file
         self.parser = W2DynamicsParser(dmft_file)
         self.output_path = kwargs.get("output_path", "TB2J_results")
+
+        if atoms is None:
+            posfile = kwargs.get("posfile", None)
+            if posfile is not None:
+                try:
+                    atoms = read(os.path.join(path, posfile))
+                except Exception:
+                    atoms = parse_atoms(os.path.join(path, f"{prefix}.win"))
+            else:
+                atoms = parse_atoms(os.path.join(path, f"{prefix}.win"))
+        self.atoms = atoms
 
         # 1. Read static model
         print("Reading static Wannier90 model...")
