@@ -13,7 +13,7 @@ from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
 from TB2J.mycfr import CFR
 from TB2J.orbmap import map_orbs_matrix
-from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
+from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_sigma_norm
 from TB2J.utils import (
     kmesh_to_R,
     symbol_number,
@@ -380,6 +380,9 @@ class ExchangeNCL(Exchange):
         if self.write_density_matrix:
             self.G.write_rho_R()
 
+        self._IORBS = None
+        self._P = None
+
     def get_MAE(self, thetas, phis):
         """
         Calculate the magnetic anisotropy energy.
@@ -393,7 +396,17 @@ class ExchangeNCL(Exchange):
 
     def _prepare_Patom(self):
         for iatom in self.ind_mag_atoms:
-            self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
+            self.Pdict[iatom] = pauli_sigma_norm(self.get_H_atom(iatom))
+
+    def _initialize_worker(self):
+        print("Ran worker initialization")
+
+        self._IORBS = [ self.iorb(site) for site in self.ind_mag_atoms ]
+        self._P = [pauli_block_sigma_norm(
+            np.take(np.take(self.HR0, idx, axis=-2), idx, axis=-1)
+        )
+            for idx in self._IORBS
+        ]
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
@@ -503,7 +516,7 @@ class ExchangeNCL(Exchange):
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
 
-    def get_all_A_vectorized(self, GR):
+    def compute_all_A_vectorized(self, energy):
         """
         Vectorized calculation of all A matrix elements.
         Fully vectorized version based on TB2J_optimization_prototype.ipynb.
@@ -512,21 +525,23 @@ class ExchangeNCL(Exchange):
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
         :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
         """
+        # Initialize _P and _IORBS if not present already
+        if self._P is None or self._IORBS is None:
+            self._initialize_worker()
 
-        # Get magnetic sites and their orbital indices
-        magnetic_sites = self.ind_mag_atoms
-        iorbs = [self.iorb(site) for site in magnetic_sites]
-
-        # Build the P matrices for all magnetic sites using the same method as original
-        P = [self.get_P_iatom(site) for site in magnetic_sites]
+        # Compute GR
+        mae = None
+        # TODO: get the MAE from Gk_all
+        # short_Rlist now contains actual R vectors
+        GR = self.G.get_GR(self.short_Rlist, energy=energy)
 
         # Initialize results dictionary
         A = {}
         A_orb = {}
 
         # Batch compute all A tensors following the prototype
-        for i, j in product(range(len(magnetic_sites)), repeat=2):
-            idx, jdx = iorbs[i], iorbs[j]
+        for i, j in product(range(len(self._IORBS)), repeat=2):
+            idx, jdx = self._IORBS[i], self._IORBS[j]
             Gij = GR[:, idx][:, :, jdx]
             Gji = GR[:, jdx][:, :, idx]
             Gij = pauli_block_all(Gij)
@@ -534,39 +549,36 @@ class ExchangeNCL(Exchange):
             # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
             # the ith R vector's negative is at -i index.
             Gji = np.flip(Gji, axis=0)
-            Pi = P[i]
-            Pj = P[j]
+            Pi = self._P[i]
+            Pj = self._P[j]
             X = Pi @ Gij
             Y = Pj @ Gji
-            mi, mj = (magnetic_sites[i], magnetic_sites[j])
+            mi = self.ind_mag_atoms[i]
+            mj = self.ind_mag_atoms[j]
 
             if self.orb_decomposition:
                 # Vectorized orbital decomposition over all R vectors at once
                 # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
                 A_orb_tensor = (
-                    np.einsum("ruij,rvji->ruvij", X, Y) / np.pi
+                    np.einsum("...ruij,...rvji->...ruvij", X, Y) / np.pi
                 )  # Shape: (nR, 4, 4, ni, nj)
                 # Vectorized sum over orbitals for simplified A values
-                A_val_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # Shape: (nR, 4, 4)
+                A_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # Shape: (nR, 4, 4)
             else:
                 # Compute A_tensor for all R vectors at once
+                A_orb_tensor = None
                 A_tensor = (
                     np.einsum("...uij,...vji->...uv", X, Y) / np.pi
                 )  # Shape: (nR, 4, 4)
-                A_val_tensor = A_tensor  # Use pre-computed A_tensor directly
-                A_orb_tensor = None
 
             # Store results for each R vector
             for iR, R_vec in enumerate(self.short_Rlist):
-                A_val = A_val_tensor[iR]  # Shape: (4, 4)
-                A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
-
                 # Store with R vector key for compatibility
-                A[(R_vec, mi, mj)] = A_val
-                if A_orb_val is not None:
-                    A_orb[(R_vec, mi, mj)] = A_orb_val
+                A[(R_vec, mi, mj)] = A_tensor[iR]
+                if A_orb_tensor is not None:
+                    A_orb[(R_vec, mi, mj)] = A_orb_tensor[iR]
 
-        return A, A_orb
+        return {'AijR': A, 'AijR_orb': A_orb, 'mae': {}}
 
     def A_to_Jtensor_orb(self):
         """
@@ -918,7 +930,7 @@ class ExchangeNCL(Exchange):
             )
         else:
             results = map(
-                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+                self.compute_all_A_vectorized, tqdm(self.contour.path, total=npole)
             )
 
         for i, result in enumerate(results):
