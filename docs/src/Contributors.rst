@@ -21,7 +21,7 @@ After the first public release, the following people has made significant contri
 
 * Aldo Romero (West Virginia University)
 
-* Andrey Rubakov (ICMol, University of Valencia)
+* Andrey Rybakov (ICMol, University of Valencia)
 
 * Gan Jin (University of Science and Technology of China)
 
