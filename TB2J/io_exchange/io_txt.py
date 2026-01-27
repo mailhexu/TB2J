@@ -84,6 +84,24 @@ def write_atom_section(cls, myfile):
             )
         )
 
+    # write single ion anisotropy
+    if cls.k1 is not None and cls.k1dir is not None:
+        myfile.write("\n")
+        myfile.write("-" * 90 + "\n")
+        myfile.write("Single Ion Anisotropy (meV): \n")
+        myfile.write("(k1 is the anisotropy constant, k1dir is the direction vector)\n")
+        myfile.write("{:^12s} {:^12s} {:^24s}\n".format("Atom number", "k1", "k1dir"))
+        for i, s in enumerate(symnum):
+            ispin = cls.index_spin[i]
+            if ispin >= 0:
+                k1 = cls.k1[ispin] * 1e3
+                k1dir = cls.k1dir[ispin]
+                myfile.write(
+                    "{:<12s} {:12.4f} ({:7.4f}, {:7.4f}, {:7.4f})\n".format(
+                        s, k1, k1dir[0], k1dir[1], k1dir[2]
+                    )
+                )
+
     myfile.write("\n")
 
 
@@ -171,7 +189,7 @@ def write_exchange_section(
             dJdx2 = cls.dJdx2[ll]
             myfile.write(f"d2J/dx2: {dJdx2 * 1e3:.3f}\n")
 
-        if cls.dmi_ddict is not None:
+        if cls.dmi_ddict is not None and ll in cls.dmi_ddict:
             DMI = cls.dmi_ddict[ll] * 1e3
             myfile.write(
                 "[Testing!] DMI: ({:7.4f} {:7.4f} {:7.4f})\n".format(
@@ -190,13 +208,13 @@ def write_exchange_section(
             except Exception as e:
                 myfile.write(f"[Debug!] DMI2 not available: {e}\n")
 
-        if cls.Jani_dict is not None:
+        if cls.Jani_dict is not None and ll in cls.Jani_dict:
             J = cls.Jani_dict[ll] * 1e3
             myfile.write(
                 f"[Testing!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
             )
 
-        if cls.NJT_ddict is not None:
+        if cls.NJT_ddict is not None and ll in cls.NJT_ddict:
             DMI = cls.NJT_ddict[ll] * 1e3
             myfile.write(
                 "[Experimental!] DMI_NJt: ({:7.4f} {:7.4f} {:7.4f})\n".format(
@@ -204,7 +222,7 @@ def write_exchange_section(
                 )
             )
 
-        if cls.NJT_Jdict is not None:
+        if cls.NJT_Jdict is not None and ll in cls.NJT_Jdict:
             J = cls.NJT_Jdict[ll] * 1e3
             myfile.write(
                 "[Testing!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n".format(

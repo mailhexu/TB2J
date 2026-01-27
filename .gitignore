@@ -20,7 +20,9 @@ uv.lock
 .opencode
 openspec/
 AGENTS.md
-agent_files
+agent_files/
+*/agent_files/
+CLAUDE.md
 
 
 # xyz files

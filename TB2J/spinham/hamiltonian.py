@@ -186,6 +186,122 @@ class SpinHamiltonian(object):
         self.iprim = iprim
         self.Rlist = Rlist
 
+    def remove_sublattice(self, sublattice_name):
+        """
+        Remove all magnetic interactions associated with a specific sublattice.
+        This includes:
+        - Single-ion anisotropy (SIA) for atoms in the sublattice.
+        - Exchange interactions (J) where i or j belongs to the sublattice.
+        - Dzyaloshinskii-Moriya interactions (DMI) where i or j belongs to the sublattice.
+        - Anisotropic exchange where i or j belongs to the sublattice.
+
+        :param sublattice_name: The name of the sublattice (species symbol) to remove.
+        """
+        symbols = self.lattice.get_chemical_symbols()
+        sublattice_indices = [
+            i
+            for i, (sym, idx) in enumerate(zip(symbols, self.index_spin))
+            if sym == sublattice_name and idx >= 0
+        ]
+
+        if not sublattice_indices:
+            print(
+                f"Warning: No magnetic atoms found for sublattice '{sublattice_name}'."
+            )
+            return
+
+        sublattice_spin_indices = set(self.index_spin[i] for i in sublattice_indices)
+
+        # Mark atoms as non-magnetic
+        for i in sublattice_indices:
+            self.index_spin[i] = -1
+
+        if self.has_uniaxial_anisotropy:
+            if self.k1 is not None:
+                for idx in sublattice_spin_indices:
+                    self.k1[idx] = 0.0
+                if "UMCA" in self.hamiltonians:
+                    self.set_uniaxial_mca(self.k1, self.k1dir)
+
+        old_to_new_spin_index = {}
+        current_spin_index = 0
+
+        for iatom, ispin in enumerate(self.index_spin):
+            if ispin >= 0:
+                if ispin not in old_to_new_spin_index:
+                    old_to_new_spin_index[ispin] = current_spin_index
+                    current_spin_index += 1
+                self.index_spin[iatom] = old_to_new_spin_index[ispin]
+
+        def reindex_interaction(interaction_dict):
+            if interaction_dict is None:
+                return None
+            new_dict = {}
+            for key, val in interaction_dict.items():
+                i, j = key[0], key[1]
+                if i in old_to_new_spin_index and j in old_to_new_spin_index:
+                    new_i = old_to_new_spin_index[i]
+                    new_j = old_to_new_spin_index[j]
+                    if len(key) > 2:
+                        new_key = (new_i, new_j) + key[2:]
+                    else:
+                        new_key = (new_i, new_j)
+                    new_dict[new_key] = val
+            return new_dict
+
+        def filter_interaction(interaction_dict):
+            if interaction_dict is None:
+                return None
+            new_dict = {}
+            for key, val in interaction_dict.items():
+                i, j = key[0], key[1]
+                if (
+                    i not in sublattice_spin_indices
+                    and j not in sublattice_spin_indices
+                ):
+                    new_dict[key] = val
+            return new_dict
+
+        if self.has_exchange:
+            self.exchange_Jdict = filter_interaction(self.exchange_Jdict)
+            self.exchange_Jdict = reindex_interaction(self.exchange_Jdict)
+            self.set_exchange_ijR(self.exchange_Jdict)
+
+        if self.has_dmi:
+            self.dmi_ddict = filter_interaction(self.dmi_ddict)
+            self.dmi_ddict = reindex_interaction(self.dmi_ddict)
+            self.set_dmi_ijR(self.dmi_ddict)
+
+        if self.has_bilinear:
+            self.bilinear_dict = filter_interaction(self.bilinear_dict)
+            self.bilinear_dict = reindex_interaction(self.bilinear_dict)
+            self.set_bilinear_ijR(self.bilinear_dict)
+
+        if self.has_uniaxial_anisotropy:
+            if self.k1 is not None:
+                new_k1 = np.zeros(current_spin_index)
+                new_k1dir = np.zeros((current_spin_index, 3))
+                new_k1dir[:, 2] = 1.0
+
+                for old_idx, new_idx in old_to_new_spin_index.items():
+                    if old_idx < len(self.k1):
+                        new_k1[new_idx] = self.k1[old_idx]
+                        new_k1dir[new_idx] = self.k1dir[old_idx]
+
+                self.k1 = new_k1
+                self.k1dir = new_k1dir
+
+        if hasattr(self, "ms"):
+            new_ms = np.zeros(current_spin_index)
+            for old_idx, new_idx in old_to_new_spin_index.items():
+                if old_idx < len(self.ms):
+                    new_ms[new_idx] = self.ms[old_idx]
+            self.ms = new_ms
+            self.nspin = current_spin_index
+
+        if self.has_uniaxial_anisotropy and "UMCA" in self.hamiltonians:
+            self.set_uniaxial_mca(self.k1, self.k1dir)
+
     def set_lattice(self, atoms, index_spin):
         self.lattice = atoms
         self.index_spin = index_spin

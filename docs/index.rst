@@ -27,6 +27,7 @@ Welcome to TB2J's documentation!
    src/convention.rst
    src/tutorial.rst
    src/applications.rst
+   src/edit.md
    src/extend.rst
    src/roadmap.md
    src/ecosystem.md

@@ -374,7 +374,6 @@ def abacus_get_MAE(
     phis,
     gamma=True,
     output_path="TB2J_anisotropy",
-    magnetic_elements=None,
     nel=None,
     width=0.1,
     with_eigen=False,
@@ -395,7 +394,6 @@ def abacus_get_MAE(
         efermi=None,
         basis=model.basis,
         angles=[thetas, phis],
-        magnetic_elements=magnetic_elements,
         **kwargs,
     )
     mae.run(output_path=output_path, with_eigen=with_eigen)

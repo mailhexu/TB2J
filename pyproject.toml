@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TB2J"
-version = "0.9.12.20"
+version = "0.9.12.21"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
 license = { text = "BSD-2-Clause" }
@@ -32,7 +32,7 @@ classifiers = [
 #requires-python = ">3.6"
 dependencies = [
     "numpy",
-    "scipy>1.9, <1.17",
+    "scipy>=1.9,<1.17",
     "matplotlib",
     "ase>=3.19",
     "tqdm",
@@ -40,10 +40,11 @@ dependencies = [
     "packaging>=20.0",
     "HamiltonIO>=0.3.0",
     "pre-commit",
-    "sympair>0.1.1",
+    "sympair>=0.1.4",
     "tomli>=2.0.0",
     "tomli-w>=1.0.0",
     "typing_extensions",
+    "sisl>=0.16.2",
 ]
 
 [project.optional-dependencies]
@@ -72,6 +73,9 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "TB2J_plot_magnon_dos.py" = "TB2J.magnon.plot_magnon_dos_cli:main"
 "TB2J_symmetrize.py" = "TB2J.symmetrize_J:symmetrize_J_cli"
 "lawaf2J.py" = "TB2J.interfaces.lawaf_interface:lawaf2J_cli"
+"TB2J_edit.py" = "TB2J.scripts.TB2J_edit:main"
+"TB2J_plot_exchange.py" = "TB2J.scripts.TB2J_plot_exchange:main"
+
 
 [tool.setuptools]
 packages = ["TB2J"]
