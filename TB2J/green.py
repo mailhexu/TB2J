@@ -434,23 +434,50 @@ class TBGreen:
         return Gk
 
     def compute_GR(self, Rpts, kpts, Gks):
-        Rvecs = np.array(Rpts)
-        phase = np.exp(self.k2Rfactor * np.einsum("ni,mi->nm", Rvecs, kpts))
-        phase *= self.kweights[None]
-        GR = np.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
+        """Transforms Green's function G(k) into real-space"""
+        Rvecs = np.asarray(Rpts)
+        phase = np.einsum(
+            '...ni,...mi->...nm', Rvecs, kpts
+        )
+        expvals = self.kweights * np.exp(self.k2Rfactor * phase)
+        GR = np.einsum(
+            '...kij,...rk->...rij', Gks, phase, 
+            optimize="optimal"
+        )
+
         return GR
 
-    def get_GR(self, Rpts, energy, Gk_all=None):
-        """calculate real space Green's function for one energy, all R points.
-        G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
-        :param Rpts: R points
-        :param energy: energy value
-        :param Gk_all: optional pre-computed Gk for all k-points
-        :returns: real space green's function for one energy for a list of R.
-        :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
+    def get_GR(self, 
+            Rpts, 
+            energy, 
+            idx=slice(None),
+            jdx=slice(None),
+            Gk_all=None
+        ):
+        """Green's function at multiple energies for all R points.
+        G_ij(R, epsilon) = G_ij(k, epsilon) exp(-2\pi i R.dot. k)
+
+        Parameters
+        ----------
+        Rpts : list or ndarray
+            Real-space points to evaluate G_ij(R)
+        energy : ndarray
+            Energy values
+        idx : int or slice
+            Index (i) of G_ij(R)
+        jdx : int or slice
+            Index (j) of G_ij(R)
+        Gk_all : ndarray
+            Optional pre-compute G_ij(k) for all k-points
+
+        Returns
+        -------
+            Green's function G_ij(R) evaluated at given energies
+            and real-space points, projected onto indices (i, j).
+            Shape of (nenergies, nR, len(idx), len(jdx))
         """
         if Gk_all is None:
-            Gks = self.get_Gk_all(energy)
+            Gks = self.get_Gk_all(energy, idx=idx, jdx=jdx)
         else:
             Gks = Gk_all
 
