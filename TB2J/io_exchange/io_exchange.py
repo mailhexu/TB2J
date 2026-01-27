@@ -55,6 +55,7 @@ class SpinIO(object):
         write_experimental=True,
         description=None,
         standardize_Jani=False,
+        sia_tensor=None,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -80,6 +81,7 @@ class SpinIO(object):
         :param gyro_ratio:  gyromagnetic ratio
         :param write_experimental: write_experimental data to output files
         :param description: add some description into the xml file.
+        :param sia_tensor: single ion anisotropy tensor, dictionary {i: 3x3 tensor}
         """
         self.atoms = atoms  #: atomic structures, ase.Atoms object
         self.index_spin = index_spin
@@ -151,6 +153,13 @@ class SpinIO(object):
         )
 
         self.biquadratic_Jdict = biquadratic_Jdict
+
+        if sia_tensor is not None:
+            self.has_sia_tensor = True
+            self.sia_tensor = sia_tensor
+        else:
+            self.has_sia_tensor = False
+            self.sia_tensor = None
 
         if NJT_ddict is not None:
             self.has_NJT_dmi = True
@@ -332,7 +341,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         else:
             return default
 
-    def get_J_tensor(self, i, j, R, Jiso=True, Jani=False, DMI=False):
+    def get_J_tensor(self, i, j, R, Jiso=True, Jani=False, DMI=False, SIA=False):
         """
         Return the full exchange tensor for atom i and j, and cell R.
         param i : spin index i
@@ -354,6 +363,16 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
 
+        if (
+            SIA
+            and self.has_sia_tensor
+            and self.sia_tensor is not None
+            and i == j
+            and np.linalg.norm(R) < 0.001
+        ):
+            if i in self.sia_tensor:
+                Jtensor += self.sia_tensor[i]
+
         # if iso_only:
         #    J = self.get_Jiso(i, j, R)
         #    if J is not None:
@@ -368,7 +387,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         #    )
         return Jtensor
 
-    def get_full_Jtensor_for_one_R_i3j3(self, R, Jiso=True, Jani=True, DMI=True):
+    def get_full_Jtensor_for_one_R_i3j3(
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=False
+    ):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
@@ -380,11 +401,13 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for i in range(self.nspin):
             for j in range(self.nspin):
                 Jmat[i * 3 : i * 3 + 3, j * 3 : j * 3 + 3] = self.get_J_tensor(
-                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
         return Jmat
 
-    def get_full_Jtensor_for_one_R_ij33(self, R, Jiso=True, Jani=True, DMI=True):
+    def get_full_Jtensor_for_one_R_ij33(
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=False
+    ):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
@@ -396,20 +419,22 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for i in range(self.nspin):
             for j in range(self.nspin):
                 Jmat[i, j, :, :] = self.get_J_tensor(
-                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
         return Jmat
 
-    def get_full_Jtensor_for_one_R_ij(self, R, Jiso=True, Jani=True, DMI=True):
+    def get_full_Jtensor_for_one_R_ij(
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=False
+    ):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
         returns:
             Jmat: (nspin,nspin,3,3) matrix.
         """
-        if Jani or DMI:
+        if Jani or DMI or SIA:
             raise ValueError(
-                "Jani and DMI are not supported for this method. Use get_full_Jtensor_for_one_R_ij33 instead."
+                "Jani, DMI and SIA are not supported for this method. Use get_full_Jtensor_for_one_R_ij33 instead."
             )
         n = self.nspin
         Jmat = np.zeros((n, n), dtype=float)
@@ -421,7 +446,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return Jmat
 
     def get_full_Jtensor_for_Rlist(
-        self, asr=False, Jiso=True, Jani=True, DMI=True, order="i3j3"
+        self, asr=False, Jiso=True, Jani=True, DMI=True, SIA=False, order="i3j3"
     ):
         n = self.nspin
         n3 = n * 3
@@ -430,7 +455,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n3, n3), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -443,7 +468,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -455,7 +480,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n3, n3), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 ).reshape((n3, n3))
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -468,7 +493,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n, n), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))

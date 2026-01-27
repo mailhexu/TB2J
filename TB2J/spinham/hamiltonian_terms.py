@@ -1,8 +1,10 @@
 """
 Hamiltonian terms
 """
-import numpy as np
+
 from collections import defaultdict
+
+import numpy as np
 import scipy.sparse as ssp
 
 
@@ -329,3 +331,40 @@ class DipDip(TwoBodyTerm):
 
     def __init__(self):
         pass
+
+
+class SIATensorTerm(SingleBodyTerm):
+    """
+    Single Ion Anisotropy tensor term.
+    $H_{SIA} = -\\sum_i \\vec{S}_i^T \\mathbf{A}_i \\vec{S}_i$
+    where A_i is a 3x3 anisotropy tensor for each atom i.
+    """
+
+    def __init__(self, sia_tensor_dict, ms=None):
+        super(SIATensorTerm, self).__init__(ms=ms)
+        self.sia_tensor_dict = sia_tensor_dict
+
+    def func_i(self, S, i):
+        return -np.dot(S[i], np.dot(self.sia_tensor_dict[i], S[i]))
+
+    def eff_field(self, S, Heff):
+        for i, A in self.sia_tensor_dict.items():
+            Heff[i] += np.dot(A + A.T, S[i])
+
+    def jacobian_i(self, S, i):
+        return np.dot(self.sia_tensor_dict[i] + self.sia_tensor_dict[i].T, S[i])
+
+    def calc_hessian(self):
+        self._hessian = ssp.lil_matrix(
+            (self.nmatoms * 3, self.nmatoms * 3), dtype=float
+        )
+        for i, A in self.sia_tensor_dict.items():
+            self._hessian[i * 3 : i * 3 + 3, i * 3 : i * 3 + 3] = A + A.T
+        self._hessian = ssp.csr_matrix(self._hessian)
+        return self._hessian
+
+    def calc_hessian_ijR(self):
+        self._hessian_ijR = {}
+        for i, A in self.sia_tensor_dict.items():
+            self._hessian_ijR[(i, i, (0, 0, 0))] = A + A.T
+        return self._hessian_ijR

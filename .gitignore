@@ -17,6 +17,10 @@ uv.lock
 .cline
 # roo coder
 .roo
+.opencode
+openspec/
+AGENTS.md
+agent_files
 
 
 # xyz files

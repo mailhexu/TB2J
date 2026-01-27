@@ -1,24 +1,28 @@
 #!/usr/bin/env python
-import numpy as np
-from collections.abc import Iterable
-from collections import defaultdict
-import matplotlib.pyplot as plt
-from ase.dft.kpoints import bandpath
-from TB2J.kpoints import monkhorst_pack
-from .hamiltonian_terms import (
-    ZeemanTerm,
-    UniaxialMCATerm,
-    ExchangeTerm,
-    DMITerm,
-    BilinearTerm,
-)
-from .constants import mu_B, gyromagnetic_ratio
-from .supercell import SupercellMaker
-from .spin_xml import SpinXmlParser, SpinXmlWriter
-from .plot import group_band_path
-from ase.cell import Cell
-from .qsolver import QSolver
 import json
+from collections import defaultdict
+from collections.abc import Iterable
+
+import matplotlib.pyplot as plt
+import numpy as np
+from ase.cell import Cell
+from ase.dft.kpoints import bandpath
+
+from TB2J.kpoints import monkhorst_pack
+
+from .constants import gyromagnetic_ratio, mu_B
+from .hamiltonian_terms import (
+    BilinearTerm,
+    DMITerm,
+    ExchangeTerm,
+    SIATensorTerm,
+    UniaxialMCATerm,
+    ZeemanTerm,
+)
+from .plot import group_band_path
+from .qsolver import QSolver
+from .spin_xml import SpinXmlParser, SpinXmlWriter
+from .supercell import SupercellMaker
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -154,6 +158,10 @@ class SpinHamiltonian(object):
         # bilinear term
         self.has_bilinear = False
         self.bilinear_dict = None
+
+        # single ion anisotropy tensor term
+        self.has_sia_tensor = False
+        self.sia_tensor_dict = None
 
         # calculation parameters
 
@@ -303,6 +311,17 @@ class SpinHamiltonian(object):
         umcaterm = UniaxialMCATerm(k1, k1dir, ms=self.ms)
         self.hamiltonians["UMCA"] = umcaterm
 
+    def set_sia_tensor(self, sia_tensor_dict):
+        """
+        Add single ion anisotropy tensor term.
+        H = - sum_i S_i^T A_i S_i
+        where A_i is a 3x3 tensor for each atom i.
+        """
+        self.has_sia_tensor = True
+        self.sia_tensor_dict = sia_tensor_dict
+        siaterm = SIATensorTerm(sia_tensor_dict, ms=self.ms)
+        self.hamiltonians["SIATensor"] = siaterm
+
     def add_Hamiltonian_term(self, Hamiltonian_term, name=None):
         """
         add Hamiltonian term which is not pre_defined.
@@ -379,6 +398,13 @@ class SpinHamiltonian(object):
         if self.has_bilinear:
             sc_bilinear_dict = smaker.sc_ijR(self.bilinear_dict, n_basis=len(self.pos))
             sc_ham.set_bilinear_ijR(sc_bilinear_dict)
+
+        if self.has_sia_tensor:
+            sc_sia_tensor_dict = {}
+            for i, A in self.sia_tensor_dict.items():
+                sc_i = smaker.sc_trans_invariant([i])[0]
+                sc_sia_tensor_dict[sc_i] = A
+            sc_ham.set_sia_tensor(sc_sia_tensor_dict)
 
         return sc_ham
 
@@ -457,7 +483,7 @@ class SpinHamiltonian(object):
             allevals.append(evals)
             # Plot band structure
             nbands = evals.shape[1]
-            emin = np.min(evals[:, 0])
+            # emin = np.min(evals[:, 0])
             for i in range(nbands):
                 ax.plot(xs, (evals[:, i]) / 1.6e-22, color=color)
 
@@ -474,7 +500,6 @@ class SpinHamiltonian(object):
             "xlist": xlist,
             "knames": knames,
             "X_for_highsym_kpoints": Xs,
-            "knames": knames,
             "nbands": nbands,
             "nkpts": len(kptlist),
             "evals": allevals,
@@ -518,4 +543,6 @@ def read_spin_ham_from_file(fname):
         ham.set_dmi_ijR(parser.dmi)
     if parser.has_bilinear:
         ham.set_bilinear_ijR(parser.bilinear)
+    if parser.has_sia_tensor:
+        ham.set_sia_tensor(parser.sia_tensor)
     return ham

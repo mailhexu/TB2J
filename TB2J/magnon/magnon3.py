@@ -28,6 +28,7 @@ class MagnonParameters:
     Jiso: bool = True
     Jani: bool = False
     DMI: bool = False
+    SIA: bool = True
     Q: Optional[List[float]] = None
     uz_file: Optional[str] = None
     n: Optional[List[float]] = None
@@ -398,11 +399,18 @@ class Magnon:
         cell = exc.atoms.get_cell()
         pbc = exc.atoms.get_pbc()
 
+        # Extract SIA from kwargs, default True if not present
+        include_SIA = kwargs.pop("SIA", True)
+
+        JR = exc.get_full_Jtensor_for_Rlist(
+            order="ij33", asr=False, SIA=include_SIA, **kwargs
+        )
+
         return cls(
             nspin=exc.nspin,
             magmom=magmoms,
             Rlist=exc.Rlist,
-            JR=exc.get_full_Jtensor_for_Rlist(order="ij33", asr=False, **kwargs),
+            JR=JR,
             cell=cell,
             _Q=np.zeros(3),  # Default propagation vector
             _uz=np.array([[0.0, 0.0, 1.0]]),  # Default quantization axis
@@ -654,7 +662,11 @@ def plot_magnon_bands_from_TB2J(
     # Load magnon calculator from TB2J results
     print(f"Loading exchange parameters from {params.path}...")
     magnon = Magnon.from_TB2J_results(
-        path=params.path, Jiso=params.Jiso, Jani=params.Jani, DMI=params.DMI
+        path=params.path,
+        Jiso=params.Jiso,
+        Jani=params.Jani,
+        DMI=params.DMI,
+        SIA=params.SIA,
     )
 
     # Set reference vectors if provided
@@ -816,6 +828,18 @@ def plot_magnon_bands_cli():
         help="Include anisotropic exchange interactions (default: False)",
     )
     parser.add_argument(
+        "--SIA",
+        action="store_true",
+        default=True,
+        help="Include single ion anisotropy (default: True)",
+    )
+    parser.add_argument(
+        "--no-SIA",
+        action="store_false",
+        dest="SIA",
+        help="Exclude single ion anisotropy",
+    )
+    parser.add_argument(
         "-d",
         "--DMI",
         action="store_true",
@@ -881,6 +905,7 @@ def plot_magnon_bands_cli():
             filename=args.output,
             Jiso=args.Jiso,
             Jani=args.Jani,
+            SIA=args.SIA,
             DMI=args.DMI,
             Q=args.Q if args.Q is not None else None,
             uz_file=args.uz_file,

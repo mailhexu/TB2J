@@ -161,15 +161,15 @@ def write_exchange_section(
 
         if cls.has_biquadratic and write_experimental:
             Jprime, B = cls.biquadratic_Jdict[ll]
-            myfile.write(f"[Testing!] Jprime: {Jprime*1e3:.3f},  B: {B*1e3:.3f}\n")
+            myfile.write(f"[Testing!] Jprime: {Jprime * 1e3:.3f},  B: {B * 1e3:.3f}\n")
 
         if cls.dJdx is not None:
             dJdx = cls.dJdx[ll]
-            myfile.write(f"dJ/dx: {dJdx*1e3:.3f}\n")
+            myfile.write(f"dJ/dx: {dJdx * 1e3:.3f}\n")
 
         if cls.dJdx2 is not None:
             dJdx2 = cls.dJdx2[ll]
-            myfile.write(f"d2J/dx2: {dJdx2*1e3:.3f}\n")
+            myfile.write(f"d2J/dx2: {dJdx2 * 1e3:.3f}\n")
 
         if cls.dmi_ddict is not None:
             DMI = cls.dmi_ddict[ll] * 1e3
@@ -307,6 +307,50 @@ def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
         print(f"{sns[cls.ind_atoms[i]]}, {v[0]: 8.3f}, {v[2]: 8.3f}, {v[2]: 8.3f}\n")
 
 
+def write_sia_section(cls, myfile):
+    """
+    Write single ion anisotropy tensor section.
+    """
+    if cls.has_sia_tensor and cls.sia_tensor is not None:
+        myfile.write("\n")
+        myfile.write("=" * 90 + "\n")
+        myfile.write("Single Ion Anisotropy: \n")
+        symnum = symbol_number(cls.atoms)
+        sns = list(symnum.keys())
+        myfile.write(
+            "{:^12s} {:^13s} {:^13s} {:^13s}\n".format(
+                "Atom_number", "A_xx", "A_xy", "A_xz"
+            )
+        )
+        myfile.write(
+            "{:^12s} {:^13s} {:^13s} {:^13s}\n".format("", "A_yx", "A_yy", "A_yz")
+        )
+        myfile.write(
+            "{:^12s} {:^13s} {:^13s} {:^13s}\n".format("", "A_zx", "A_zy", "A_zz")
+        )
+        for i, tensor in cls.sia_tensor.items():
+            iatom = cls.ind_atoms[i]
+            myfile.write(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f}\n".format(
+                    sns[iatom],
+                    tensor[0, 0] * 1e3,
+                    tensor[0, 1] * 1e3,
+                    tensor[0, 2] * 1e3,
+                )
+            )
+            myfile.write(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f}\n".format(
+                    "", tensor[1, 0] * 1e3, tensor[1, 1] * 1e3, tensor[1, 2] * 1e3
+                )
+            )
+            myfile.write(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f}\n".format(
+                    "", tensor[2, 0] * 1e3, tensor[2, 1] * 1e3, tensor[2, 2] * 1e3
+                )
+            )
+            myfile.write("-" * 88 + "\n")
+
+
 def write_txt(
     cls,
     path="TB2J_results",
@@ -323,6 +367,7 @@ def write_txt(
         write_info_section(cls, myfile)
         write_atom_section(cls, myfile)
         write_orbital_section(cls, myfile)
+        write_sia_section(cls, myfile)
         write_exchange_section(
             cls,
             myfile,
