@@ -75,13 +75,19 @@ TB2J_edit.py info -i TB2J_results/TB2J.pickle
 You can also use the `TB2J.io_exchange.edit` module in your Python scripts.
 
 ```python
-from TB2J.io_exchange.edit import load, set_anisotropy, toggle_DMI, toggle_exchange, save
+from TB2J.io_exchange.edit import load, set_anisotropy, set_sia_tensor, remove_sia_tensor, toggle_DMI, toggle_exchange, save
 
 # Load results
 spinio = load('TB2J_results/TB2J.pickle')
 
 # Modify results
 set_anisotropy(spinio, species='Sm', k1=5.0, k1dir=[0, 0, 1]) # k1 in eV
+
+# Set full 3x3 SIA tensor
+import numpy as np
+tensor = np.diag([0.001, 0.002, 0.003]) # eV
+set_sia_tensor(spinio, species='Sm', tensor=tensor)
+
 toggle_DMI(spinio, enabled=False)
 toggle_exchange(spinio, enabled=False)
 
@@ -93,7 +99,9 @@ save(spinio, 'modified_results')
 
 *   `load(path)`: Load TB2J results from a pickle file.
 *   `save(spinio, path)`: Save modified results to a directory.
-*   `set_anisotropy(spinio, species, k1, k1dir)`: Set single-ion anisotropy.
+*   `set_anisotropy(spinio, species, k1, k1dir)`: Set uniaxial single-ion anisotropy.
+*   `set_sia_tensor(spinio, species, tensor)`: Set full single-ion anisotropy tensor.
+*   `remove_sia_tensor(spinio, species)`: Remove single-ion anisotropy tensor.
 *   `toggle_DMI(spinio, enabled)`: Enable/disable DMI.
 *   `toggle_Jani(spinio, enabled)`: Enable/disable anisotropic exchange.
 *   `toggle_exchange(spinio, enabled)`: Enable/disable isotropic exchange.
