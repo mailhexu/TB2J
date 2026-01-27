@@ -3,6 +3,7 @@ import pickle
 from collections import defaultdict
 from itertools import product
 
+import ase.units
 import numpy as np
 from tqdm import tqdm
 
@@ -28,8 +29,8 @@ class Exchange(ExchangeParams):
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        # self._prepare_elist(method="CFR")
-        self._prepare_elist(method="legendre")
+        self._prepare_elist(method="CFR")
+        # self._prepare_elist(method="legendre")
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
@@ -74,12 +75,14 @@ class Exchange(ExchangeParams):
         for k in kmesh:
             self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
-    def _prepare_elist(self, method="CFR"):
+    def _prepare_elist(self, method=None):
         """
         prepare list of energy for integration.
         The path has three segments:
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
+        if method is None:
+            method = "CFR"
         # if method.lower() == "rectangle":
         #    self.contour.build_path_rectangle(
         #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
@@ -91,7 +94,10 @@ class Exchange(ExchangeParams):
             self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
         elif method.lower() == "cfr":
-            self.contour = CFR(nz=self.nz, T=600)
+            # Convert smearing from eV to temperature (K) for CFR
+            # smearing = kB * T => T = smearing / kB
+            T_kelvin = self.smearing / ase.units.kB
+            self.contour = CFR(nz=self.nz, T=T_kelvin)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
 
@@ -359,6 +365,7 @@ class ExchangeNCL(Exchange):
             use_cache=self._use_cache,
             nproc=self.nproc,
             initial_emin=self.emin,
+            smearing_width=self.smearing,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi

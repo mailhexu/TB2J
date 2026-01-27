@@ -5,21 +5,18 @@
 Continued fraction representation.
 """
 
+import ase.units.kB as kb
 import numpy as np
 from scipy.linalg import eig
 
-kb = 8.61733e-5  # Boltzmann constant in eV
-
 
 class CFR:
-    """
-    Integration with the continued fraction representation.
-    """
+    """Integration with the continued fraction representation."""
 
-    def __init__(self, nz=50, T=60):
+    def __init__(self, nz: int = 50, T: float = 200.0):
         self.nz = nz
-        self.T = 600
-        self.beta = 1 / (kb * self.T)
+        self.T = float(T)
+        self.beta = 1.0 / (kb * self.T)
         self.Rinf = 1e10
         if nz <= 0:
             raise ValueError("nz should be larger than 0.")
@@ -65,8 +62,8 @@ class CFR:
         # Rp = 0.25 * np.diag(eigv)**2 * zp **2
 
         # print the poles and the weights
-        for i in range(len(self.poles)):
-            print("Pole: ", self.poles[i], "Weight: ", self.weights[i])
+        # for i in range(len(self.poles)):
+        #    print("Pole: ", self.poles[i], "Weight: ", self.weights[i])
 
         # add a point to the poles: 1e10j
         self.path = np.concatenate((self.path, [self.Rinf * 1j]))
@@ -110,7 +107,10 @@ def test_cfr():
 
     r = cfr.integrate_func(test_gf, ef=2)
     r = -np.imag(r) / np.pi * 2
-    print(r)
+    if not np.close(r, -1.0):
+        raise AssertionError(
+            f"Test failed, the integration should be close to -1.0 but get {r}"
+        )
     return r
 
 

@@ -37,10 +37,11 @@ K-space and Real Space Parameters
 Energy Integration Parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^
 * efermi: Fermi energy in eV. Handling varies by tool:
-   - siesta2J.py/abacus2J.py: Automatically read from output
-   - wann2J.py: Must be provided from DFT calculation
-   - For insulators: Can be within the band gap
-   - For metals: Should match the DFT value
+    - siesta2J.py/abacus2J.py: Automatically read from output
+    - wann2J.py: Must be provided from DFT calculation
+    - For insulators: Can be within band gap
+    - For metals: Should match the DFT value
+* smearing: Fermi smearing width for density computation and CFR. Controls the temperature used in numerical integration. Accepts values like "600K" or "0.2eV". Default: 600K.
 
 * emin, emax: Energy range for integration, relative to efermi:
    - emin: Should be low enough to include all magnetically relevant states

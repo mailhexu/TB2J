@@ -29,6 +29,7 @@ class ExchangeCL2(ExchangeCL):
             efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.nproc,
+            smearing_width=self.smearing,
         )
         self.Gdn = TBGreen(
             tbmodel=self.tbmodel_dn,
@@ -36,6 +37,7 @@ class ExchangeCL2(ExchangeCL):
             efermi=self.efermi,
             use_cache=self._use_cache,
             nproc=self.nproc,
+            smearing_width=self.smearing,
         )
         if self.write_density_matrix:
             self.Gup.write_rho_R(

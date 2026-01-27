@@ -1,6 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
+import ase.units
 import yaml
 
 __all__ = ["ExchangeParams", "add_exchange_args_to_parser", "parser_argument_to_dict"]
@@ -13,6 +14,7 @@ class ExchangeParams:
     """
 
     efermi: float
+    smearing: float = 600.0 * ase.units.kB
     basis = []
     magnetic_elements = []
     index_magnetic_atoms = None
@@ -43,6 +45,7 @@ class ExchangeParams:
     def __init__(
         self,
         efermi=-10.0,
+        smearing=600.0 * ase.units.kB,
         basis=None,
         magnetic_elements=None,
         include_orbs=None,
@@ -66,6 +69,7 @@ class ExchangeParams:
         debug_options=None,
     ):
         self.efermi = efermi
+        self.smearing = smearing
         self.basis = basis
         # self.magnetic_elements = magnetic_elements
         # self.include_orbs = include_orbs
@@ -157,6 +161,12 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         type=float,
     )
     parser.add_argument("--efermi", help="Fermi energy in eV", default=None, type=float)
+    parser.add_argument(
+        "--smearing",
+        help="Fermi smearing width for density computation and CFR. Units: K (default) or eV. Example: '600K', '0.2eV'. Default: 600K.",
+        default="600K",
+        type=str,
+    )
     parser.add_argument(
         "--ne",
         help="number of electrons in the unit cell. If not given, TB2J will use the fermi energy to compute it.",
@@ -279,8 +289,22 @@ def parser_argument_to_dict(args) -> dict:
         ind_mag_atoms = [int(i) - 1 for i in ind_mag_atoms]
     else:
         ind_mag_atoms = None
+
+    smearing_str = args.smearing
+    if smearing_str is None:
+        smearing = 600.0 * ase.units.kB
+    else:
+        s = smearing_str.strip().lower()
+        if s.endswith("ev"):
+            smearing = float(s[:-2])
+        elif s.endswith("k"):
+            smearing = float(s[:-1]) * ase.units.kB
+        else:
+            smearing = float(s) * ase.units.kB
+
     return {
         "efermi": args.efermi,
+        "smearing": smearing,
         "magnetic_elements": args.elements,
         "kmesh": args.kmesh,
         "emin": args.emin,

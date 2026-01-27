@@ -91,11 +91,12 @@ data directory: {outpath}
             Rcut=Rcut,
             nproc=nproc,
             use_cache=use_cache,
+            output_path=output_path,
             orb_decomposition=orb_decomposition,
             index_magnetic_atoms=index_magnetic_atoms,
             description=description,
         )
-        exchange.run()
+        exchange.run(path=output_path)
         print("\n")
         print("All calculation finsihed. The results are in TB2J_results directory.")
 
