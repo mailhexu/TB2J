@@ -404,10 +404,32 @@ class TBGreen:
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
-    def get_Gk_all(self, energy):
-        """Green's function G(k) for one energy for all kpoints"""
-        middle = 1.0 / ((energy + self.efermi) - self.evals)
-        Gk = self.evecs @ (middle[:, :, None] * self.evecs.swapaxes(-1, -2).conj())
+    def get_Gk_all(self, energy, idx=slice(None), jdx=slice(None)):
+        """
+        Green's function G(k) for multiple energies for all kpoints
+
+        Parameters
+        ----------
+        energy : float or ndarray
+            Energy values
+        idx : int or slice
+            Index (i) of G_ij(k)
+        jdx : int or slice
+            Index (j) of G_ij(k)
+
+        Returns
+        -------
+        Gij(k) : ndarray
+            Green's function G_ij(k) at given energis,
+            projected onto indices (i, j)
+        """
+        evals = self.evals[..., None]
+        V = self.evecs[..., idx, :]
+        Vh = G.evecs[..., jdx, :]
+        Vh = Vh.swapaxes(-1, -2).conj()
+        energy = energy[..., None, None, None]
+        middle = 1.0 / (energy + self.efermi - self.evals)
+        Gk = V @ (middle * Vh)
 
         return Gk
 
