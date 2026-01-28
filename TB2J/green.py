@@ -425,10 +425,10 @@ class TBGreen:
         """
         evals = self.evals[..., None]
         V = self.evecs[..., idx, :]
-        Vh = G.evecs[..., jdx, :]
+        Vh = self.evecs[..., jdx, :]
         Vh = Vh.swapaxes(-1, -2).conj()
         energy = energy[..., None, None, None]
-        middle = 1.0 / (energy + self.efermi - self.evals)
+        middle = 1.0 / (energy + self.efermi - evals)
         Gk = V @ (middle * Vh)
 
         return Gk
