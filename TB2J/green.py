@@ -441,7 +441,7 @@ class TBGreen:
         )
         expvals = self.kweights * np.exp(self.k2Rfactor * phase)
         GR = np.einsum(
-            '...kij,...rk->...rij', Gks, phase, 
+            '...kij,...rk->...rij', Gks, expvals, 
             optimize="optimal"
         )
 
