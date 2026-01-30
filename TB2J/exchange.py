@@ -516,6 +516,70 @@ class ExchangeNCL(Exchange):
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
 
+    def compute_A_ij(self, i, j):
+        '''
+        Computes the A_ij tensor along magnetic site indices 
+        i and j. It internally performs the energy integral of
+        the Green's function.
+
+        Parameters
+        ----------
+            i : int
+                Magnetic site index i
+            j : int 
+                Magnetic site index j
+
+        Returns
+        -------
+            A_ij : ndarray
+                A_ij tensor with shape (nR, 4, 4) where nR is the
+                number of lattice vectors
+            A_ij_orb : ndarray (optional)
+                Orbital decomposition of A_ij. Only produced if
+                self.orb_decomposition == True
+        '''
+
+        idx = self.iorb(i)
+        jdx = self.iorb(j)
+        energy = self.contour.path
+        Gij = self.G.get_GR(
+            self.short_Rlist, energy, idx=idx, jdx=jdx
+        )
+        Gji = self.G.get_GR(
+            self.short_Rlist, energy, idx=jdx, jdx=idx
+        )
+
+        Gij = pauli_block_all(Gij)
+        Gji = pauli_block_all(Gji)
+            # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
+            # the ith R vector's negative is at -i index.
+        Gji = np.flip(Gji, axis=0)
+        Pi = self._P[i]
+        Pj = self._P[j]
+        X = Pi @ Gij
+        Y = Pj @ Gji
+        mi = self.ind_mag_atoms[i]
+        mj = self.ind_mag_atoms[j]
+
+        if self.orb_decomposition:
+                # Vectorized orbital decomposition over all R vectors at once
+                # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
+            A_orb_ij = (
+                np.einsum("...ruij,...rvji->...ruvij", X, Y) / np.pi
+            )  # Shape: (nR, 4, 4, ni, nj)
+            A_orb_ij = self.contour.integrate_values(A_orb_ij)
+                # Vectorized sum over orbitals for simplified A values
+            A_ij = np.sum(A_orb_ij, axis=(-2, -1))  # Shape: (nR, 4, 4)
+        else:
+                # Compute A_tensor for all R vectors at once
+            A_orb_ij = None
+            A_ij = (
+                np.einsum("...uij,...vji->...uv", X, Y) / np.pi
+            )  # Shape: (nE, nR, 4, 4)
+        A_ij = self.contour.integrate_values(A_ij)
+
+        return A_ij, A_orb_ij
+
     def compute_all_A_vectorized(self, energy):
         """
         Vectorized calculation of all A matrix elements.
