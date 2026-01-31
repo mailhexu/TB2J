@@ -5,6 +5,7 @@ from itertools import product
 
 import numpy as np
 from tqdm import tqdm
+from multiprocessing import Pool
 
 from TB2J.contour import Contour
 from TB2J.exchange_params import ExchangeParams
@@ -398,14 +399,13 @@ class ExchangeNCL(Exchange):
         for iatom in self.ind_mag_atoms:
             self.Pdict[iatom] = pauli_sigma_norm(self.get_H_atom(iatom))
 
-    def _initialize_worker(self):
-        print("Ran worker initialization")
-
-        self._IORBS = [ self.iorb(site) for site in self.ind_mag_atoms ]
+    def _prepare_Pmatrix(self):
+        '''Computes projector matrices'''
+        iorbs = [self.iorb(site) for site in self.ind_mag_atoms]
         self._P = [pauli_block_sigma_norm(
             np.take(np.take(self.HR0, idx, axis=-2), idx, axis=-1)
         )
-            for idx in self._IORBS
+            for idx in iorbs
         ]
 
     def get_H_atom(self, iatom):
@@ -516,7 +516,7 @@ class ExchangeNCL(Exchange):
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
 
-    def compute_A_ij(self, i, j):
+    def compute_Aij(self, i, j):
         '''
         Computes the A_ij tensor along magnetic site indices 
         i and j. It internally performs the energy integral of
@@ -551,31 +551,32 @@ class ExchangeNCL(Exchange):
 
         Gij = pauli_block_all(Gij)
         Gji = pauli_block_all(Gji)
-            # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
-            # the ith R vector's negative is at -i index.
-        Gji = np.flip(Gji, axis=0)
+        # NOTE: becareful: this assumes that short_Rlist is 
+        # properly ordered so tha the ith R vector's negative is 
+        # at -i index.
+        Gji = np.flip(Gji, axis=1)
         Pi = self._P[i]
         Pj = self._P[j]
         X = Pi @ Gij
         Y = Pj @ Gji
-        mi = self.ind_mag_atoms[i]
-        mj = self.ind_mag_atoms[j]
 
+        # Vectorized orbital decomposition over all R vectors
+        # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
         if self.orb_decomposition:
-                # Vectorized orbital decomposition over all R vectors at once
-                # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
             A_orb_ij = (
                 np.einsum("...ruij,...rvji->...ruvij", X, Y) / np.pi
             )  # Shape: (nR, 4, 4, ni, nj)
             A_orb_ij = self.contour.integrate_values(A_orb_ij)
-                # Vectorized sum over orbitals for simplified A values
-            A_ij = np.sum(A_orb_ij, axis=(-2, -1))  # Shape: (nR, 4, 4)
+            
+            # Vectorized sum over orbitals for simplified A values
+            A_ij = np.sum(A_orb_ij, axis=(-2, -1))
         else:
-                # Compute A_tensor for all R vectors at once
             A_orb_ij = None
             A_ij = (
                 np.einsum("...uij,...vji->...uv", X, Y) / np.pi
             )  # Shape: (nE, nR, 4, 4)
+
+        # Integrate
         A_ij = self.contour.integrate_values(A_ij)
 
         return A_ij, A_orb_ij
@@ -982,50 +983,46 @@ class ExchangeNCL(Exchange):
         """
         print("Green's function Calculation started.")
 
-        AijRs = {}
-        AijRs_orb = {}
-
         self.validate()
+        self._prepare_Pmatrix()
+        exch_pairs = list(product(self.ind_mag_atoms, repeat=2))
+        npairs = len(exch_pairs)
 
-        npole = len(self.contour.path)
-        if self.nproc > 1:
-            results = p_map(
-                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
-            )
-        else:
-            results = map(
-                self.compute_all_A_vectorized, tqdm(self.contour.path, total=npole)
-            )
+        with tqdm(total=npairs) as progress_bar:
 
-        for i, result in enumerate(results):
-            for iR in self.R_ijatom_dict:
-                R_vec = self.short_Rlist[iR]
-                for iatom, jatom in self.R_ijatom_dict[iR]:
-                    if (R_vec, iatom, jatom) in AijRs:
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
+            def store_Aij(Atensors, iatom, jatom):
+                '''Callback function to store A tensors'''
+                A_ij, A_orb_ij = Atensors
+                for iR, AijR in enumerate(A_ij):
+                    Rvec = self.short_Rlist[iR]
+                    key = (Rvec, iatom, jatom)
+                    self.A_ijR[key] = AijR
+                    if self.orb_decomposition:
+                        self.A_ij_orb[key] = A_orb_ij[iR]
+                progress_bar.update(1)
+
+            if self.nproc > 1:
+
+                with Pool(processes=self.nproc) as pool:
+
+                    for i, j in exch_pairs:
+                        pool.apply_async(
+                            self.compute_Aij, 
+                            args=(i, j),
+                            callback=lambda A, i=i, j=j : store_Aij(A, i, j)
                         )
-                        if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
 
-                    else:
-                        AijRs[(R_vec, iatom, jatom)] = []
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
-                        if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)] = []
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
+                    pool.close()
+                    pool.join()
 
-        # self.save_AijRs(AijRs)
-        self.integrate(AijRs, AijRs_orb)
+            else:
+
+                for i, j in exch_pairs:
+                    Atensors = self.compute_Aij(i, j)
+                    store_Aij(Atensors, i, j)
+
+        # Compute charge and magnetic moments from Green's function
         self.get_rho_atom()
-
-        # Compute charge and magnetic moments from Green's function diagonals
         self.compute_charge_and_magnetic_moments()
 
         self.A_to_Jtensor()
