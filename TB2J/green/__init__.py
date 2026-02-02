@@ -1,8 +1,8 @@
 from .green import TBGreen
-from .runtime import GreenConfig, GreenRuntime
+from .runtime import GreenContext, GreenRuntime
 
 __all__ = (
     'TBGreen',
-    'GreenConfig',
+    'GreenContext',
     'GreenRuntime'
 )

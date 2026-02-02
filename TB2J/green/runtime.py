@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from TB2J.pauli import pauli_sigma_norm, pauli_block_all
 
 @dataclass(frozen=True)
-class GreenConfig:
+class GreenContext:
     efermi: float
     evals: np.ndarray
     evecs_path: str
     atom_indices: tuple
     energies: np.ndarray
     eweights: np.ndarray
+    norb: int
     iorbs: Tuple[np.ndarray, ...]
     kpts: np.ndarray
     k2Rfactor: float
@@ -31,7 +32,7 @@ class GreenRuntime:
 
     Parameters
     ----------
-    cfg: GreenConfig
+    ctx: GreenContext
         Dataclass to construct attributes
     
     Attributes
@@ -46,6 +47,8 @@ class GreenRuntime:
         Energy values to evaluate the Green's function
     eweights : np.ndarray
         Energy weights of the integration contour
+    norb : int
+        Total number of orbitals
     iorbs : tuple(np.ndarray)
         Orbital indices of each magnetic site
     kpts : np.ndarray
@@ -59,26 +62,26 @@ class GreenRuntime:
     Pmatrix : tuple(np.ndarray)
         Projector matrix of each magnetic site
     """
-    def __init__(self, cfg: GreenConfig):
+    def __init__(self, ctx: GreenContext):
 
-        self.efermi = cfg.efermi
-        self.evals = cfg.evals
-        self.atom_indices = cfg.atom_indices
-        self.iorbs = cfg.iorbs
-        self.kpts = cfg.kpts
-        self.k2Rfactor = cfg.k2Rfactor
-        self.kweights = cfg.kweights
-        self.Rvecs = cfg.Rvecs
-        self.energies = cfg.energies
-        self.eweights = cfg.eweights
-        self.P = cfg.Pmatrix
+        self.efermi = ctx.efermi
+        self.evals = ctx.evals
+        self.atom_indices = ctx.atom_indices
+        self.norb = ctx.norb
+        self.iorbs = ctx.iorbs
+        self.kpts = ctx.kpts
+        self.k2Rfactor = ctx.k2Rfactor
+        self.kweights = ctx.kweights
+        self.Rvecs = ctx.Rvecs
+        self.energies = ctx.energies
+        self.eweights = ctx.eweights
+        self.P = ctx.Pmatrix
 
-        self.set_eigenvectors(cfg.evecs_path)
+        self.set_eigenvectors(ctx.evecs_path)
 
     def set_eigenvectors(self, path):
 
-        norbs = sum( len(idx) for idx in self.iorbs )
-        shape = (len(self.Rvecs), norbs, self.evals.shape[-1])
+        shape = (len(self.Rvecs), self.norb, self.evals.shape[-1])
         self.evecs = np.memmap(
                 path, 
                 dtype=np.complex128, 
