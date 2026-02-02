@@ -105,12 +105,10 @@ class SpinIO(object):
                 self._ind_atoms[ispin] = iatom
 
         if exchange_Jdict is not None:
-            self.has_exchange = True  #: whether there is isotropic exchange
             #: The dictionary of :math:`J_{ij}(R)`, the keys are (i,j, R),
             # where R is a tuple, and the value is the isotropic exchange
             self.exchange_Jdict = exchange_Jdict
         else:
-            self.has_exchange = False
             self.exchange_Jdict = None
 
         self.Jiso_orb = Jiso_orb
@@ -122,20 +120,36 @@ class SpinIO(object):
         self.dJdx2 = dJdx2
 
         if dmi_ddict is not None:
-            self.has_dmi = True  #: Whether there is DMI.
             #: The dictionary of DMI. the key is the same as exchange_Jdict, the values are 3-d vectors (Dx, Dy, Dz).
             self.dmi_ddict = dmi_ddict
         else:
-            self.has_dmi = False
             self.dmi_ddict = None
 
         if Jani_dict is not None:
-            self.has_bilinear = True  #: Whether there is anisotropic exchange term
             #: The dictionary of anisotropic exchange. The vlaues are matrices of shape (3,3).
             self.Jani_dict = Jani_dict
         else:
-            self.has_bilinear = False
             self.Jani_dict = None
+
+        if k1 is not None and k1dir is not None:
+            # Convert uniaxial anisotropy to SIA tensor
+            if sia_tensor is None:
+                sia_tensor = {}
+            for i, (K, axis) in enumerate(zip(k1, k1dir)):
+                if abs(K) > 1e-10:
+                    e = np.array(axis)
+                    norm = np.linalg.norm(e)
+                    if norm > 1e-6:
+                        e = e / norm
+                        # A = K * e * e^T
+                        A = K * np.outer(e, e)
+                        if i in sia_tensor:
+                            sia_tensor[i] += A
+                        else:
+                            sia_tensor[i] = A
+            # Clear k1 and k1dir as they are now integrated into sia_tensor
+            k1 = None
+            k1dir = None
 
         if k1 is not None and k1dir is not None:
             self.has_uniaxial_anistropy = True
@@ -145,8 +159,6 @@ class SpinIO(object):
             self.has_uniaxial_anistropy = False
             self.k1 = None
             self.k1dir = None
-
-        self.has_bilinear = not (Jani_dict == {} or Jani_dict is None)
 
         self.has_biquadratic = not (
             biquadratic_Jdict == {} or biquadratic_Jdict is None
@@ -197,6 +209,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         self.orbital_names = orbital_names
         self.TB2J_version = __version__
+
+    @property
+    def has_exchange(self):
+        return self.exchange_Jdict is not None
+
+    @property
+    def has_dmi(self):
+        return self.dmi_ddict is not None
+
+    @property
+    def has_bilinear(self):
+        return self.Jani_dict is not None
 
     def _build_Rlist(self):
         Rset = set()
@@ -343,7 +367,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         else:
             return default
 
-    def get_J_tensor(self, i, j, R, Jiso=True, Jani=False, DMI=False, SIA=False):
+    def get_J_tensor(self, i, j, R, Jiso=True, Jani=True, DMI=True, SIA=True):
         """
         Return the full exchange tensor for atom i and j, and cell R.
         param i : spin index i
@@ -364,6 +388,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if Ja is not None:
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
+        if np.linalg.norm(R) < 0.001 and i == j:
+            print(f"{SIA=} , {i=}")
+            print(f"{self.has_sia_tensor=}")
 
         if (
             SIA
@@ -373,6 +400,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             and np.linalg.norm(R) < 0.001
         ):
             if i in self.sia_tensor:
+                print(f"Adding SIA tensor for {i}, with {self.sia_tensor[i]}")
                 Jtensor += self.sia_tensor[i]
 
         # if iso_only:
@@ -390,7 +418,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return Jtensor
 
     def get_full_Jtensor_for_one_R_i3j3(
-        self, R, Jiso=True, Jani=True, DMI=True, SIA=False
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=True
     ):
         """
         Return the full exchange tensor of all i and j for cell R.
@@ -408,7 +436,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return Jmat
 
     def get_full_Jtensor_for_one_R_ij33(
-        self, R, Jiso=True, Jani=True, DMI=True, SIA=False
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=True
     ):
         """
         Return the full exchange tensor of all i and j for cell R.
@@ -426,7 +454,12 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return Jmat
 
     def get_full_Jtensor_for_one_R_ij(
-        self, R, Jiso=True, Jani=True, DMI=True, SIA=False
+        self,
+        R,
+        Jiso=True,
+        Jani=True,
+        DMI=True,
+        SIA=True,
     ):
         """
         Return the full exchange tensor of all i and j for cell R.
@@ -448,7 +481,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return Jmat
 
     def get_full_Jtensor_for_Rlist(
-        self, asr=False, Jiso=True, Jani=True, DMI=True, SIA=False, order="i3j3"
+        self, asr=False, Jiso=True, Jani=True, DMI=True, SIA=True, order="i3j3"
     ):
         n = self.nspin
         n3 = n * 3
@@ -469,6 +502,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         elif order == "ij33":
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
             for iR, R in enumerate(self.Rlist):
+                print(f"R={R}")
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(
                     R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
@@ -481,6 +515,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         elif order == "i3j3_2D":
             Jmat = np.zeros((nR, n3, n3), dtype=float)
             for iR, R in enumerate(self.Rlist):
+                print(f"R={R}")
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(
                     R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 ).reshape((n3, n3))

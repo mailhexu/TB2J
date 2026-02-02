@@ -107,22 +107,23 @@ class Merger:
         projv = {}
         coeff_matrix = {}
         projectors = {}
-        for key in self.main_dat.projv.keys():
-            vectors = [obj.projv[key] for obj in self.dat]
-            coefficients, u, v = zip(
-                *[get_Jani_coefficients(vectors[i], R=R[i]) for i in indices]
-            )
-            projectors[key] = np.vstack([u[i] @ R[i].T for i in indices])
-            coeff_matrix[key] = np.vstack(coefficients)
-            proju[key] = np.stack(u)
-            projv[key] = np.stack(v)
-            if np.linalg.matrix_rank(coeff_matrix[key], tol=1e-2) < 6:
-                warnings.warn("""
-                    WARNING: The matrix of equations to reconstruct the exchange tensors is
-                    close to being singular. This happens when the magnetic moments between
-                    different configurations are cloes to being parallel. You need to consider 
-                    more rotated spin configurations, otherwise the results might have a large 
-                    error.""")
+        if self.main_dat.projv is not None:
+            for key in self.main_dat.projv.keys():
+                vectors = [obj.projv[key] for obj in self.dat]
+                coefficients, u, v = zip(
+                    *[get_Jani_coefficients(vectors[i], R=R[i]) for i in indices]
+                )
+                projectors[key] = np.vstack([u[i] @ R[i].T for i in indices])
+                coeff_matrix[key] = np.vstack(coefficients)
+                proju[key] = np.stack(u)
+                projv[key] = np.stack(v)
+                if np.linalg.matrix_rank(coeff_matrix[key], tol=1e-2) < 6:
+                    warnings.warn("""
+                        WARNING: The matrix of equations to reconstruct the exchange tensors is
+                        close to being singular. This happens when the magnetic moments between
+                        different configurations are cloes to being parallel. You need to consider 
+                        more rotated spin configurations, otherwise the results might have a large 
+                        error.""")
 
         self.proju = proju
         self.projv = projv
@@ -134,13 +135,23 @@ class Merger:
         proju = self.proju
         projv = self.projv
         coeff_matrix = self.coeff_matrix
-        for key in self.main_dat.Jani_dict.keys():
+        for key in self.main_dat.exchange_Jdict.keys():
             try:
                 R, i, j = key
                 u = proju[i, j]
                 v = projv[i, j]
-                Jani = np.stack([sio.Jani_dict[key] for sio in self.dat])
-                projections = np.einsum("nmi,nij,nmj->nm", u, Jani, v).flatten()
+                projections = []
+                for idx, sio in enumerate(self.dat):
+                    if sio.has_bilinear and key in sio.Jani_dict:
+                        Jmat = sio.get_J_tensor(
+                            i, j, R, Jiso=False, Jani=True, DMI=False
+                        )
+                    else:
+                        # J_scalar = sio.exchange_Jdict.get(key, 0.0)
+                        Jmat = np.eye(3) * 0.0
+                    proj = np.einsum("mi,ij,mj->m", u[idx], Jmat, v[idx])
+                    projections.append(proj)
+                projections = np.concatenate(projections)
             except KeyError as err:
                 raise KeyError(
                     "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
@@ -158,28 +169,36 @@ class Merger:
 
     def merge_Jiso(self):
         Jdict = {}
-        for key in self.main_dat.exchange_Jdict.keys():
-            try:
-                J = np.mean([obj.exchange_Jdict[key] for obj in self.dat])
-            except KeyError as err:
-                raise KeyError(
-                    "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
-                    % err
-                )
-            Jdict[key] = J
-        self.main_dat.exchange_Jdict = Jdict
+        if self.main_dat.exchange_Jdict is not None:
+            for key in self.main_dat.exchange_Jdict.keys():
+                try:
+                    J = np.mean([obj.exchange_Jdict[key] for obj in self.dat])
+                except KeyError as err:
+                    raise KeyError(
+                        "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
+                        % err
+                    )
+                Jdict[key] = J
+            self.main_dat.exchange_Jdict = Jdict
 
     def merge_DMI(self):
         dmi_ddict = {}
-        if all(obj.has_dmi for obj in self.dat):
+        if any(obj.has_dmi for obj in self.dat):
             projectors = self.projectors
             proju = self.proju
-            for key in self.main_dat.dmi_ddict.keys():
+            for key in self.main_dat.exchange_Jdict.keys():
                 try:
                     R, i, j = key
                     u = proju[i, j]
-                    DMI = np.stack([sio.dmi_ddict[key] for sio in self.dat])
-                    projections = np.einsum("nmi,ni->nm", u, DMI).flatten()
+                    projections = []
+                    for idx, sio in enumerate(self.dat):
+                        if sio.has_dmi and key in sio.dmi_ddict:
+                            DMI = sio.dmi_ddict[key]
+                        else:
+                            DMI = np.zeros(3)
+                        proj = np.einsum("mi,i->m", u[idx], DMI)
+                        projections.append(proj)
+                    projections = np.concatenate(projections)
                 except KeyError as err:
                     raise KeyError(
                         "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
@@ -193,13 +212,14 @@ class Merger:
         # make sure that the Jani has the trace of zero
         Jdict = self.main_dat.exchange_Jdict
         Jani_dict = self.main_dat.Jani_dict
-        for key in self.main_dat.Jani_dict.keys():
-            Jani = self.main_dat.Jani_dict[key]
-            shift = np.trace(Jani) / 3.0
-            Jani_dict[key] -= shift * np.eye(3)
-            Jdict[key] += shift
-        self.main_dat.Jani_dict = Jani_dict
-        self.main_dat.exchange_Jdict = Jdict
+        if Jani_dict is not None:
+            for key in Jani_dict.keys():
+                Jani = Jani_dict[key]
+                shift = np.trace(Jani) / 3.0
+                Jani_dict[key] -= shift * np.eye(3)
+                Jdict[key] += shift
+            self.main_dat.Jani_dict = Jani_dict
+            self.main_dat.exchange_Jdict = Jdict
 
 
 def merge(*paths, main_path=None, save=True, write_path="TB2J_results"):

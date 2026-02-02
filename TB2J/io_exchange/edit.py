@@ -305,12 +305,10 @@ def toggle_DMI(spinio, enabled=None):
             spinio.dmi_ddict = spinio._dmi_backup
         else:
             spinio.dmi_ddict = {}
-        spinio.has_dmi = True
     elif not enabled and spinio.has_dmi:
         # Disable: backup and clear
         spinio._dmi_backup = spinio.dmi_ddict
-        spinio.dmi_ddict = {}
-        spinio.has_dmi = False
+        spinio.dmi_ddict = None
 
 
 def toggle_Jani(spinio, enabled=None):
@@ -349,12 +347,10 @@ def toggle_Jani(spinio, enabled=None):
             spinio.Jani_dict = spinio._jani_backup
         else:
             spinio.Jani_dict = {}
-        spinio.has_bilinear = bool(spinio.Jani_dict)
     elif not enabled and spinio.has_bilinear:
         # Disable: backup and clear
         spinio._jani_backup = spinio.Jani_dict
-        spinio.Jani_dict = {}
-        spinio.has_bilinear = False
+        spinio.Jani_dict = None
 
 
 def toggle_exchange(spinio, enabled=None):
@@ -393,12 +389,10 @@ def toggle_exchange(spinio, enabled=None):
             spinio.exchange_Jdict = spinio._exchange_backup
         else:
             spinio.exchange_Jdict = {}
-        spinio.has_exchange = bool(spinio.exchange_Jdict)
     elif not enabled and spinio.has_exchange:
         # Disable: backup and clear
         spinio._exchange_backup = spinio.exchange_Jdict
-        spinio.exchange_Jdict = {}
-        spinio.has_exchange = False
+        spinio.exchange_Jdict = None
 
 
 def remove_sublattice(spinio, sublattice_name):

@@ -5,8 +5,8 @@
 Continued fraction representation.
 """
 
-import ase.units.kB as kb
 import numpy as np
+from ase.units import kB
 from scipy.linalg import eig
 
 
@@ -16,7 +16,7 @@ class CFR:
     def __init__(self, nz: int = 50, T: float = 200.0):
         self.nz = nz
         self.T = float(T)
-        self.beta = 1.0 / (kb * self.T)
+        self.beta = 1.0 / (kB * self.T)
         self.Rinf = 1e10
         if nz <= 0:
             raise ValueError("nz should be larger than 0.")
@@ -24,7 +24,7 @@ class CFR:
             self.prepare_poles()
 
     def prepare_poles(self):
-        ##b_mat = [1 / (2.0 * np.sqrt((2 * (j + 1) - 1) * (2 * (j + 1) + 1)) / (kb * self.#T)) for j in range(0, self.nz- 1)]
+        ##b_mat = [1 / (2.0 * np.sqrt((2 * (j + 1) - 1) * (2 * (j + 1) + 1)) / (kB * self.#T)) for j in range(0, self.nz- 1)]
         jmat = np.arange(0, self.nz - 1)
         b_mat = 1 / (2.0 * np.sqrt((2 * (jmat + 1) - 1) * (2 * (jmat + 1) + 1)))
         b_mat = np.diag(b_mat, -1) + np.diag(b_mat, 1)
@@ -39,16 +39,16 @@ class CFR:
         #    np.real(self.poles) > 0, 2.0j / self.beta * residules, 0.0
         # )
 
-        # self.path = 1j / self.poles * kb * self.T
+        # self.path = 1j / self.poles * kB * self.T
 
         self.path = []
         self.weights = []
         for p, r in zip(self.poles, residules):
             if p > 0:
-                self.path.append(1j / p * kb * self.T)
+                self.path.append(1j / p * kB * self.T)
                 w = 2.0j / self.beta * r
                 self.weights.append(w)
-                self.path.append(-1j / p * kb * self.T)
+                self.path.append(-1j / p * kB * self.T)
                 self.weights.append(w)
 
         self.path = np.array(self.path)
@@ -58,7 +58,7 @@ class CFR:
         # A_mat =  -1/2 *np.diag(1, -1) + np.diag(1, 1)
         # B_mat = np.diag([2*i-1 for i in range(1, self.nz)])
         # eigp, eigv = eig(A_mat, B_mat)
-        # zp = 1j / eigp * kb * self.T
+        # zp = 1j / eigp * kB * self.T
         # Rp = 0.25 * np.diag(eigv)**2 * zp **2
 
         # print the poles and the weights
