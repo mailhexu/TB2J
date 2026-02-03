@@ -10,6 +10,7 @@ import numpy as np
 from HamiltonIO.model.occupations import GaussOccupations
 from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
+from threadpoolctl import threadpool_limits
 
 from TB2J.kpoints import ir_kpts, monkhorst_pack
 
@@ -92,6 +93,7 @@ class TBGreen:
         use_cache=False,
         cache_path=None,
         nproc=1,
+        thlim=1,
         initial_emin=-25,
         smearing_width=0.01,
     ):
@@ -106,6 +108,7 @@ class TBGreen:
         :param use_cache: whether to use cache to store wavefunctions
         :param cache_path: path to store cache
         :param nproc: number of processes to use
+        :param thlim: maximum number of threads used by NumPy/BLAS
         :param emin: minimum energy relative to fermi level to consider
         """
         self.initial_emin = initial_emin
@@ -132,6 +135,7 @@ class TBGreen:
         self.k_sym = k_sym
         self.nproc = nproc
         self.fermi_width = float(smearing_width)
+        self.thlim = thlim
         self._prepare_eigen()
 
     def prepare_kpts(
@@ -208,6 +212,11 @@ class TBGreen:
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
 
+    def _HSE_k_limited(self, kpt):
+    
+        with threadpool_limits(limits=self.thlim):
+            return self.tbmodel.HSE_k(kpt, convention=2)
+
     def _prepare_eigen(self, solve=True, saveH=False):
         """
         calculate eigen values and vectors for all kpts and save.
@@ -228,7 +237,7 @@ class TBGreen:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:
             executor = ProcessPool(nodes=self.nproc)
-            results = executor.map(self.tbmodel.HSE_k, self.kpts, [2] * len(self.kpts))
+            results = executor.map(self._HSE_k_limited, self.kpts)
             executor.close()
             executor.join()
             executor.clear()
@@ -415,36 +424,6 @@ class TBGreen:
         # A slower version. For test.
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
-
-    def get_Gk_all(self, energy):
-        """Green's function G(k) for one energy for all kpoints"""
-        Gk_all = np.zeros((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
-        for ik, _ in enumerate(self.kpts):
-            Gk_all[ik] = self.get_Gk(ik, energy)
-        return Gk_all
-
-    def compute_GR(self, Rpts, kpts, Gks):
-        Rvecs = np.array(Rpts)
-        phase = np.exp(self.k2Rfactor * np.einsum("ni,mi->nm", Rvecs, kpts))
-        phase *= self.kweights[None]
-        GR = np.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
-        return GR
-
-    def get_GR(self, Rpts, energy, Gk_all=None):
-        """calculate real space Green's function for one energy, all R points.
-        G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
-        :param Rpts: R points
-        :param energy: energy value
-        :param Gk_all: optional pre-computed Gk for all k-points
-        :returns: real space green's function for one energy for a list of R.
-        :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
-        """
-        if Gk_all is None:
-            Gks = self.get_Gk_all(energy)
-        else:
-            Gks = Gk_all
-
-        return self.compute_GR(Rpts, self.kpts, Gks)
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """
