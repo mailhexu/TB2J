@@ -26,6 +26,7 @@ class ExchangeParams:
     Rcut: float = None
     _use_cache: bool = False
     nproc: int = 1
+    thlim: int = None
     description: str = ""
     write_density_matrix: bool = False
     orb_decomposition: bool = False
@@ -54,6 +55,7 @@ class ExchangeParams:
         Rcut=None,
         use_cache=False,
         nproc=1,
+        thlim=None,
         description="",
         write_density_matrix=False,
         orb_decomposition=False,
@@ -81,6 +83,7 @@ class ExchangeParams:
         self.Rcut = Rcut
         self._use_cache = use_cache
         self.nproc = nproc
+        self.thlim = thlim
         self.description = description
         self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
@@ -208,6 +211,13 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--maxthreads",
+        help="Maximum number of threads used by NumPy/BLAS.",
+        default=None,
+        type=int
+    )
+
+    parser.add_argument(
         "--use_cache",
         help="whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce memory usage. Default: False",
         action="store_true",
@@ -291,6 +301,7 @@ def parser_argument_to_dict(args) -> dict:
         "Rcut": args.rcut,
         "use_cache": args.use_cache,
         "nproc": args.np,
+        "thlim": args.maxthreads,
         "description": args.description,
         "write_density_matrix": args.write_dm,
         "orb_decomposition": args.orb_decomposition,

@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Tuple
 from dataclasses import dataclass
+from threadpoolctl import threadpool_limits
 
 from TB2J.pauli import pauli_sigma_norm, pauli_block_all
 
@@ -34,6 +35,8 @@ class GreenRuntime:
     ----------
     ctx: GreenContext
         Dataclass to construct attributes
+    thlim: int
+        Threading upper bound
     
     Attributes
     ----------
@@ -61,8 +64,10 @@ class GreenRuntime:
         Lattice positions
     Pmatrix : tuple(np.ndarray)
         Projector matrix of each magnetic site
+    thlim : int
+        Maximum number of threads to be used by NumPy/BLAS
     """
-    def __init__(self, ctx: GreenContext):
+    def __init__(self, ctx: GreenContext, thlim=None):
 
         self.efermi = ctx.efermi
         self.evals = ctx.evals
@@ -77,6 +82,7 @@ class GreenRuntime:
         self.eweights = ctx.eweights
         self.P = ctx.Pmatrix
 
+        self.thlim = thlim
         self.set_eigenvectors(ctx.evecs_path)
 
     def set_eigenvectors(self, path):
@@ -165,7 +171,7 @@ class GreenRuntime:
 
         return result
 
-    def compute_Aij(self, i, j, orb_decomposition=False):
+    def _compute_Aij(self, i, j, orb_decomposition=False):
         """
         Computes the A_ij tensor along magnetic site indices 
         i and j. It internally performs the energy integral of
@@ -229,4 +235,14 @@ class GreenRuntime:
         # Integrate
         A_ij = self.integrate(A_ij)
 
-        return A_ij, A_orb_ij 
+        return A_ij, A_orb_ij
+
+    def compute_Aij(self, i, j, orb_decomposition=False):
+        '''Computes Aij tensor with threads upper bound'''
+        with threadpool_limits(limits=self.thlim):
+            A_ij = self._compute_Aij(
+                i, j, 
+                orb_decomposition=orb_decomposition
+            )
+
+        return A_ij

@@ -905,7 +905,7 @@ class ExchangeNCL(Exchange):
          each worker from multiprocessing'''
         global _GREEN_WORKER
         ctx = self.prepare_greenfun_context()
-        _GREEN_WORKER = GreenRuntime(ctx) 
+        _GREEN_WORKER = GreenRuntime(ctx, thlim=self.thlim) 
             
     def calculate_all(self):
         """

@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
     "numpy",
     "scipy",
+    "threadpoolctl",
     "matplotlib",
     "ase>=3.19",
     "tqdm",

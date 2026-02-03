@@ -10,6 +10,7 @@ import numpy as np
 from HamiltonIO.model.occupations import GaussOccupations
 from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
+from threadpoolctl import threadpool_limits
 
 from TB2J.kpoints import ir_kpts, monkhorst_pack
 
@@ -92,6 +93,7 @@ class TBGreen:
         use_cache=False,
         cache_path=None,
         nproc=1,
+        thlim=1,
         initial_emin=-25,
     ):
         """
@@ -105,6 +107,7 @@ class TBGreen:
         :param use_cache: whether to use cache to store wavefunctions
         :param cache_path: path to store cache
         :param nproc: number of processes to use
+        :param thlim: maximum number of threads used by NumPy/BLAS
         :param emin: minimum energy relative to fermi level to consider
         """
         self.initial_emin = initial_emin
@@ -130,6 +133,7 @@ class TBGreen:
         self.nbasis = tbmodel.nbasis
         self.k_sym = k_sym
         self.nproc = nproc
+        self.thlim = thlim
         self._prepare_eigen()
 
     def prepare_kpts(
@@ -206,6 +210,11 @@ class TBGreen:
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
 
+    def _HSE_k_limited(self, kpt):
+    
+        with threadpool_limits(limits=self.thlim):
+            return self.tbmodel.HSE_k(kpt, convention=2)
+
     def _prepare_eigen(self, solve=True, saveH=False):
         """
         calculate eigen values and vectors for all kpts and save.
@@ -226,7 +235,7 @@ class TBGreen:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:
             executor = ProcessPool(nodes=self.nproc)
-            results = executor.map(self.tbmodel.HSE_k, self.kpts, [2] * len(self.kpts))
+            results = executor.map(self._HSE_k_limited, self.kpts)
             executor.close()
             executor.join()
             executor.clear()
