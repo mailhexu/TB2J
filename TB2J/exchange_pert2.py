@@ -11,6 +11,44 @@ from TB2J.io_exchange import SpinIO
 from TB2J.pauli import pauli_block_all
 
 
+class MergedEpmatOneMode:
+    def __init__(self, epmat_up, epmat_dn, imode, close_nc=True):
+        self.epc_up = EpmatOneMode(epmat_up, imode, close_nc=close_nc)
+        self.epc_dn = EpmatOneMode(epmat_dn, imode, close_nc=close_nc)
+        self.Rqdict = self.epc_up.Rqdict
+        self.Rkdict = self.epc_up.Rkdict
+
+    def get_epmat_RgRk_two_spin(self, Rq, Rk, avg=False):
+        # For collinear systems, use the SAME EPW matrix for both spins
+        # This matches the reference TB2J_spinphon implementation
+        dv_up = self.epc_up.get_epmat_RgRk(Rq, Rk, avg=avg)
+        dv_dn = self.epc_dn.get_epmat_RgRk(Rq, Rk, avg=avg)
+        nb = dv_up.shape[0]
+        # Duplicate into the target 2*nb x 2*nb matrix (e.g. 28x28)
+        dv_two_spin = np.zeros((nb * 2, nb * 2), dtype=complex)
+        dv_two_spin[::2, ::2] = dv_up  # spin-up
+        dv_two_spin[1::2, 1::2] = dv_dn  # spin-down (SAME as spin-up)
+        return dv_two_spin
+
+
+class MergedEpmatOneMode_wrapper:
+    def __init__(self, epc_up, epc_dn):
+        self.epc_up = epc_up
+        self.epc_dn = epc_dn
+        self.Rqdict = self.epc_up.Rqdict
+        self.Rkdict = self.epc_up.Rkdict
+
+    def get_epmat_RgRk_two_spin(self, Rq, Rk, avg=False):
+        dv_up = self.epc_up.get_epmat_RgRk_two_spin(Rq, Rk, avg=avg)
+        dv_dn = self.epc_dn.get_epmat_RgRk_two_spin(Rq, Rk, avg=avg)
+        nb = dv_up.shape[0] * 2
+        # Interleave spins: [up1, dn1, up2, dn2, ...]
+        dv = np.zeros((nb, nb), dtype=complex)
+        dv[::2, ::2] = dv_up
+        dv[1::2, 1::2] = dv_dn
+        return dv
+
+
 class ExchangePert2(ExchangeNCL):
     def set_epw(
         self,
@@ -36,11 +74,15 @@ class ExchangePert2(ExchangeNCL):
             )
 
         if epmat_up is not None and imode is not None:
-            self.epc_up = EpmatOneMode(epmat_up, imode, close_nc=True)
-            self.epc_dn = EpmatOneMode(epmat_dn, imode, close_nc=True)
+            self.epc = MergedEpmatOneMode(epmat_up, epmat_dn, imode, close_nc=True)
         else:
-            self.epc_up = epmode_up
-            self.epc_dn = epmode_dn
+            # Handle epmode objects if they are already interleaved or need merging
+            # For now, if provided separately, we could merge them too
+            if epmode_up is not None:
+                # Assuming epmode_up/dn are EpmatOneMode-like
+                self.epc = MergedEpmatOneMode_wrapper(epmode_up, epmode_dn)
+            else:
+                self.epc = None
         self.Ru = Ru
         self.J_only = J_only  # Flag to compute only J, skip derivatives
         self.density_method = density_method  # Method for density calculation
@@ -168,18 +210,18 @@ class ExchangePert2(ExchangeNCL):
             dtorb = None
             Pi = self.get_P_iatom(iatom)
             Pj = self.get_P_iatom(jatom)
-            for a in range(4):
+            # Only compute (0,0) and (3,3) elements like reference TB2J_spinphon
+            for a, b in ([0, 0], [3, 3]):
                 pGp = Pi @ Gij_Ixyz[a] @ Pj
                 if not self.J_only:
                     pdGp = Pi @ dGij_Ixyz[a] @ Pj
 
-                for b in range(4):
-                    AijRab = pGp @ Gji_Ixyz[b]
-                    tmp[a, b] = np.trace(AijRab) / np.pi
+                AijRab = pGp @ Gji_Ixyz[b]
+                tmp[a, b] = np.trace(AijRab) / np.pi
 
-                    if not self.J_only:
-                        dAijRab = pdGp @ Gji_Ixyz[b] + pGp @ dGji_Ixyz[b]
-                        dtmp[a, b] = np.trace(dAijRab) / np.pi
+                if not self.J_only:
+                    dAijRab = pdGp @ Gji_Ixyz[b] + pGp @ dGji_Ixyz[b]
+                    dtmp[a, b] = np.trace(dAijRab) / np.pi
 
         return tmp, dtmp, torb, dtorb
 
@@ -296,13 +338,10 @@ class ExchangePert2(ExchangeNCL):
                 # Exchange._prepare_distance checks pairing good.
 
                 Gji_block = GR[indices_neg][:, jdx][:, :, idx]
-                dGji_block = dGRji[:, jdx][:, :, idx]
 
                 # Pauli decomposition
                 Gij_Ixyz = pauli_block_all(Gij)  # (4, nR, ni, nj)
                 Gji_Ixyz = pauli_block_all(Gji_block)
-                dGij_Ixyz = pauli_block_all(dGij_block)
-                dGji_Ixyz = pauli_block_all(dGji_block)
 
                 Pi = P[i]  # (ni, ni)
                 Pj = P[j]  # (nj, nj)
@@ -448,9 +487,9 @@ class ExchangePert2(ExchangeNCL):
         (GR_full, dGRij_dict, dGRji_dict, rhoR_full, GR_arr, dGRij_arr, dGRji_arr) = (
             self.G.get_GR_and_dGRdx_from_epw(
                 self.short_Rlist,
-                [],  # Rjlist unused in new implementation
+                self.short_Rlist,  # Rjlist = Rpts for real-space dGR calculation
                 energy=e,
-                epc=self.epc_up,
+                epc=self.epc,
                 Ru=self.Ru,
                 J_only=self.J_only,
             )
@@ -617,9 +656,9 @@ class ExchangePert2(ExchangeNCL):
         4. Decompose into isotropic, anisotropic, and DMI components.
         """
         print("Green's function Calculation started.")
-        print(f"DEBUG: Contour path size: {len(self.contour.path)}")
-        print(f"DEBUG: Contour path (first 5): {self.contour.path[:5]}")
-        print(f"DEBUG: Contour weights (first 5): {self.contour.weights[:5]}")
+        # print(f"DEBUG: Contour path size: {len(self.contour.path)}")
+        # print(f"DEBUG: Contour path (first 5): {self.contour.path[:5]}")
+        # print(f"DEBUG: Contour weights (first 5): {self.contour.weights[:5]}")
 
         rhoRs = []
         # GRs = []

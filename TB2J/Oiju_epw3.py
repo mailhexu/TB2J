@@ -11,7 +11,7 @@ import os
 
 from ase.io import read
 from HamiltonIO.epw.epwparser import Epmat
-from HamiltonIO.wannier.myTB import MyTB, merge_tbmodels_spin
+from HamiltonIO.wannier.wannier_hamiltonian import WannierHam, merge_tbmodels_spin
 
 from TB2J.exchange_pert2 import ExchangePert2
 from TB2J.utils import auto_assign_basis_name
@@ -117,10 +117,10 @@ def gen_exchange_Oiju_epw3(
         atoms = read(full_posfile, format="espresso-in")
 
     if colinear:
-        tbmodel_up = MyTB.read_from_wannier_dir(
+        tbmodel_up = WannierHam.read_from_wannier_dir(
             path=path, prefix=prefix_up, atoms=atoms, nls=False
         )
-        tbmodel_dn = MyTB.read_from_wannier_dir(
+        tbmodel_dn = WannierHam.read_from_wannier_dir(
             path=path, prefix=prefix_dn, atoms=atoms, nls=False
         )
         tbmodel = merge_tbmodels_spin(tbmodel_up, tbmodel_dn)
