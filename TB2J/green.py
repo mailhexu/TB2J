@@ -7,6 +7,7 @@ from collections import defaultdict
 from shutil import rmtree
 
 import numpy as np
+from HamiltonIO.epw.epwparser import EpmatOneMode
 from HamiltonIO.model.occupations import GaussOccupations
 from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
@@ -42,8 +43,9 @@ def eigen_to_G(evals, evecs, efermi, energy):
     #    np.einsum("ij, j-> ij", evecs, 1.0 / (-evals + (energy + efermi)))
     #    @ evecs.conj().T
     # )
+    # ...ib, ...b, ...jb -> ...ij matches both (nb, nb) and (nk, nb, nb) cases
     return np.einsum(
-        "ib, b, jb-> ij",
+        "...ib, ...b, ...jb-> ...ij",
         evecs,
         1.0 / (-evals + (energy + efermi)),
         evecs.conj(),
@@ -132,6 +134,11 @@ class TBGreen:
         self.k_sym = k_sym
         self.nproc = nproc
         self.fermi_width = float(smearing_width)
+
+        # Initialize Rmap for spin-phonon coupling
+        self._Rmap = None
+        self._Rmap_rev = None
+
         self._prepare_eigen()
 
     def prepare_kpts(
@@ -418,10 +425,13 @@ class TBGreen:
 
     def get_Gk_all(self, energy):
         """Green's function G(k) for one energy for all kpoints"""
-        Gk_all = np.zeros((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
-        for ik, _ in enumerate(self.kpts):
-            Gk_all[ik] = self.get_Gk(ik, energy)
-        return Gk_all
+        if self._use_cache:
+            # If using cache, self.evecs is a memmap.
+            # We can still use it, or we might want to be careful.
+            # But eigen_to_G should handle it.
+            return eigen_to_G(self.evals, self.evecs, self.efermi, energy)
+        else:
+            return eigen_to_G(self.evals, self.evecs, self.efermi, energy)
 
     def compute_GR(self, Rpts, kpts, Gks):
         Rvecs = np.array(Rpts)
@@ -511,3 +521,307 @@ class TBGreen:
                 dGRdx[R] += dG * (phase * self.kweights[ik])
                 dGRdx2[R] += dG2 * (phase * self.kweights[ik])
         return GR, dGRdx, dGRdx2
+
+    def get_GR_and_dGRdx_from_epw(
+        self, Rpts, Rjlist, energy, epc, Ru, cutoff=3.1, J_only=False
+    ):
+        """
+        calculate G(R) and dG(R)/dx using k-space multiplication.
+        dG(k)/dx =  G(k) (dH(k)/dx) G(k).
+        dG(R)/dx = \\sum_k dG(k)/dx * e^{-ikR}
+        """
+        Rpts = [tuple(R) for R in Rpts]
+
+        # 1. Compute G(k) for all k-points
+        Gk_all = self.get_Gk_all(energy)  # (nk, nb, nb)
+
+        # 2. Compute G(R) for requested points
+        GR_array = self.compute_GR(Rpts, self.kpts, Gk_all)
+        GR = {R: G for R, G in zip(Rpts, GR_array)}
+
+        # 3. Compute rho(R=0)
+        # Note: compute_GR includes kweights, so GR[(0,0,0)] is effectively rho if integrated?
+        # But rhoR definition in original code:
+        # rhoR[R] += rhok * (phase * self.kweights[ik])
+        # And rhok includes skewness if not orthogonal.
+        # For simplicity, we stick to original logic for rhoR
+        rhoR = defaultdict(lambda: 0.0j)
+        if (0, 0, 0) in GR:
+            # This is just an approximation if non-orthogonal, but for now let's rely on compute_GR
+            # logic matching the G contribution.
+            # The original code calculates rhoR specifically for (0,0,0).
+            pass
+
+        # Re-implement rhoR specific logic to match original behavior exactly for density
+        for ik, Gk in enumerate(Gk_all):
+            if self.is_orthogonal:
+                rhok = Gk
+            else:
+                rhok = self.get_Sk(ik) @ Gk
+            # phase is 1 for R=0
+            rhoR[(0, 0, 0)] += rhok * self.kweights[ik]
+
+        dGRijdx = defaultdict(lambda: 0.0 + 0j)
+        dGRjidx = defaultdict(lambda: 0.0 + 0j)
+        dGRij_array = None
+        dGRji_array = None
+
+        if not J_only:
+            # Prepare short-range G vectors needed for Vertex function
+            # R_vertex_1 = {Ru - Rq} for Lambda_ij
+            # R_vertex_2 = {Rq - Ru} for Lambda_ji
+            R_vertex = set()
+            for Rq in epc.Rqdict:
+                Rm = tuple(np.array(Ru) - np.array(Rq))
+                R_vertex.add(Rm)
+                R_vertex.add(tuple(-np.array(Rm)))
+
+            R_vertex_list = list(R_vertex)
+            GR_vertex_array = self.compute_GR(R_vertex_list, self.kpts, Gk_all)
+            GR_vertex_map = {R: G for R, G in zip(R_vertex_list, GR_vertex_array)}
+
+            # Compute Lambda matrices in k-space
+            # Lambda_ij(k) = sum_{Rq,Rk} G(Ru-Rq) @ dV @ e^{i k (Ru-Rq+Rk)}
+            # Lambda_ji(k) = sum_{Rq,Rk} e^{i k (Ru-Rq+Rk)} * dV @ G(Rq-Ru)
+
+            Lambda_ij = np.zeros_like(Gk_all)
+            Lambda_ji = np.zeros_like(Gk_all)
+
+            # Iterate over sparse EPW matrix elements
+            # This loop is small (number of Wannier neighbors)
+            for Rq in epc.Rqdict:
+                Rm = tuple(np.array(Ru) - np.array(Rq))
+                Rm_neg = tuple(-np.array(Rm))
+
+                GRm = GR_vertex_map.get(Rm, np.zeros_like(Gk_all[0]))
+                GRm_neg = GR_vertex_map.get(Rm_neg, np.zeros_like(Gk_all[0]))
+
+                for Rk in epc.Rkdict:
+                    # if np.linalg.norm(Rk) > cutoff: continue
+                    # Note: We rely on valid dV entries in epc.Rkdict
+
+                    try:
+                        dV_T = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+                    except Exception:
+                        continue
+
+                    if np.allclose(dV_T, 0.0):
+                        continue
+
+                    Rn = tuple(np.array(Rm) + np.array(Rk))
+
+                    # Phase factor e^{i k Rn}
+                    # We use R2kfactor (usually 2pi i or similar) for forward consistency
+                    phase = np.exp(self.R2kfactor * np.dot(Rn, self.kpts.T))  # (nk,)
+
+                    # Update Lambda_ij
+                    # Term = GRm @ dV_T
+                    Term_ij = GRm @ dV_T
+                    # Lambda_ij += Term_ij * phase
+                    # Broadcasting: (nb, nb) * (nk,) -> (nk, nb, nb)
+                    # We need to broadcast Term_ij to (nk, nb, nb) then multiply
+                    Lambda_ij += Term_ij[None, :, :] * phase[:, None, None]
+
+                    # Update Lambda_ji
+                    # Term = dV_T @ GRm_neg
+                    Term_ji = dV_T @ GRm_neg
+                    Lambda_ji += Term_ji[None, :, :] * phase[:, None, None]
+
+            # Compute dG(k)
+            # dG_ij(k) = Lambda_ij(k) @ G(k)
+            dGk_ij = Lambda_ij @ Gk_all
+
+            # dG_ji(k) = G(k) @ Lambda_ji(k)
+            dGk_ji = Gk_all @ Lambda_ji
+
+            # FT to Real Space for requested Rpts
+            # compute_GR handles the sum_k dG(k) e^{-ikR}
+            dGRij_array = self.compute_GR(Rpts, self.kpts, dGk_ij)
+            dGRji_array = self.compute_GR(Rpts, self.kpts, dGk_ji)
+
+            dGRijdx = {R: G for R, G in zip(Rpts, dGRij_array)}
+            dGRjidx = {R: G for R, G in zip(Rpts, dGRji_array)}
+
+        return GR, dGRijdx, dGRjidx, rhoR, GR_array, dGRij_array, dGRji_array
+
+    def get_dGR(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, cutoff=1.1, diag=False):
+        Rpts = [tuple(R) for R in Rpts]
+        Rset = set(Rpts)
+
+        if self._Rmap is None:
+            self._Rmap = []
+            self._Rmap_rev = []
+            counter = 0
+            for Rj in Rjlist:
+                for Rq in epc.Rqdict:
+                    for Rk in epc.Rkdict:
+                        if np.linalg.norm(Rk) < cutoff:
+                            Rm = tuple(np.array(Ru) - np.array(Rq))
+                            Rn = tuple(np.array(Rm) + np.array(Rk))
+                            Rnj = tuple(np.array(Rj) - np.array(Rn))
+                            if Rm in Rset and Rnj in Rset:
+                                counter += 1
+                                self._Rmap.append((Rq, Rk, Rm, Rnj, Rj))
+
+            counter = 0
+            for Rj in Rjlist:
+                for Rq in epc.Rqdict:
+                    for Rk in epc.Rkdict:
+                        if np.linalg.norm(Rk) < cutoff:
+                            Rn = tuple(np.array(Ru) - np.array(Rq))
+                            Rm = tuple(np.array(Rn) + np.array(Rk))
+                            Rjn = tuple(np.array(Rn) - np.array(Rj))
+                            Rmi = tuple(-np.array(Rm))
+                            if Rmi in Rset and Rjn in Rset:
+                                counter += 1
+                                self._Rmap_rev.append((Rq, Rk, Rjn, Rmi, Rj))
+
+        dGRdxij = defaultdict(lambda: 0.0 + 0j)
+        dGRdxji = defaultdict(lambda: 0.0 + 0j)
+        for Rq, Rk, Rm, Rnj, Rj in self._Rmap:
+            if diag:
+                dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
+            else:
+                dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+            dG = GR[Rm] @ dV @ GR[Rnj]
+            dGRdxij[Rj] += dG
+
+        for Rq, Rk, Rjn, Rmi, Rj in self._Rmap_rev:
+            if diag:
+                dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
+            else:
+                dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+            dG = GR[Rjn] @ dV @ GR[Rmi]
+            dGRdxji[Rj] += dG
+
+        return dGRdxij, dGRdxji
+
+    def get_dGR_vectorized(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, diag=False):
+        """
+        Vectorized version of get_dGR using einsum for performance.
+        No cutoff is applied - processes all Rk vectors.
+        """
+        Rpts = [tuple(R) for R in Rpts]
+        Rset = set(Rpts)
+
+        if self._Rmap is None:
+            self._build_Rmaps(Rpts, Rset, Rjlist, epc, Ru)
+
+        nbasis = list(GR.values())[0].shape[0]
+        dGRdxij = defaultdict(lambda: np.zeros((nbasis, nbasis), dtype=complex))
+        dGRdxji = defaultdict(lambda: np.zeros((nbasis, nbasis), dtype=complex))
+
+        if len(self._Rmap) > 0:
+            Rj_groups = defaultdict(list)
+            for entry in self._Rmap:
+                Rq, Rk, Rm, Rnj, Rj = entry
+                Rj_groups[Rj].append((Rq, Rk, Rm, Rnj))
+
+            for Rj, entries in Rj_groups.items():
+                n_entries = len(entries)
+                GRm_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                GRnj_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                dV_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+
+                for idx, (Rq, Rk, Rm, Rnj) in enumerate(entries):
+                    GRm_array[idx] = GR[Rm]
+                    GRnj_array[idx] = GR[Rnj]
+                    if diag:
+                        dV = np.diag(
+                            np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False))
+                        )
+                    else:
+                        dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+                    dV_array[idx] = dV
+
+                dGRdxij[Rj] = np.einsum(
+                    "nij,njk,nkl->il", GRm_array, dV_array, GRnj_array
+                )
+
+        if len(self._Rmap_rev) > 0:
+            Rj_groups = defaultdict(list)
+            for entry in self._Rmap_rev:
+                Rq, Rk, Rjn, Rmi, Rj = entry
+                Rj_groups[Rj].append((Rq, Rk, Rjn, Rmi))
+
+            for Rj, entries in Rj_groups.items():
+                n_entries = len(entries)
+                GRjn_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                GRmi_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+                dV_array = np.zeros((n_entries, nbasis, nbasis), dtype=complex)
+
+                for idx, (Rq, Rk, Rjn, Rmi) in enumerate(entries):
+                    GRjn_array[idx] = GR[Rjn]
+                    GRmi_array[idx] = GR[Rmi]
+                    if diag:
+                        dV = np.diag(
+                            np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False))
+                        )
+                    else:
+                        dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+                    dV_array[idx] = dV
+
+                dGRdxji[Rj] = np.einsum(
+                    "nij,njk,nkl->il", GRjn_array, dV_array, GRmi_array
+                )
+
+        return dGRdxij, dGRdxji
+
+    def _build_Rmaps(self, Rpts, Rset, Rjlist, epc, Ru):
+        """Helper to build R-space mapping arrays for vectorization."""
+        self._Rmap = []
+        self._Rmap_rev = []
+
+        counter = 0
+        for Rj in Rjlist:
+            for Rq in epc.Rqdict:
+                for Rk in epc.Rkdict:
+                    Rm = tuple(np.array(Ru) - np.array(Rq))
+                    Rn = tuple(np.array(Rm) + np.array(Rk))
+                    Rnj = tuple(np.array(Rj) - np.array(Rn))
+                    if Rm in Rset and Rnj in Rset:
+                        counter += 1
+                        self._Rmap.append((Rq, Rk, Rm, Rnj, Rj))
+
+        # print(f"ij path entries: {counter}")
+
+        counter = 0
+        for Rj in Rjlist:
+            for Rq in epc.Rqdict:
+                for Rk in epc.Rkdict:
+                    Rn = tuple(np.array(Ru) - np.array(Rq))
+                    Rm = tuple(np.array(Rn) + np.array(Rk))
+                    Rjn = tuple(np.array(Rn) - np.array(Rj))
+                    Rmi = tuple(-np.array(Rm))
+                    if Rmi in Rset and Rjn in Rset:
+                        counter += 1
+                        self._Rmap_rev.append((Rq, Rk, Rjn, Rmi, Rj))
+
+        # print(f"ji path entries: {counter}")
+
+    def get_GR_and_dGRdx_from_epw_vectorized(self, Rpts, Rjlist, energy, epc, Ru):
+        """
+        Vectorized version of get_GR_and_dGRdx_from_epw without cutoff.
+        """
+        Rpts = [tuple(R) for R in Rpts]
+        GR = defaultdict(lambda: 0.0 + 0.0j)
+        rhoR = defaultdict(lambda: 0.0j)
+
+        for ik, kpt in enumerate(self.kpts):
+            Gk = self.get_Gk(ik, energy)
+            if self.is_orthogonal:
+                rhok = Gk
+            else:
+                rhok = self.get_Sk(ik) @ Gk
+            Gkp = Gk * self.kweights[ik]
+            for R in Rpts:
+                phase = np.exp(self.k2Rfactor * np.dot(R, kpt))
+                GR[R] += Gkp * phase
+                if R == (0, 0, 0):
+                    rhoR[R] += rhok * (phase * self.kweights[ik])
+
+        dGRijdx, dGRjidx = self.get_dGR_vectorized(
+            GR, Rpts, Rjlist, epc, Ru, diag=False
+        )
+
+        return GR, dGRijdx, dGRjidx, rhoR
