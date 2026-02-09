@@ -9,7 +9,7 @@ from itertools import product
 import numpy as np
 from tqdm import tqdm
 
-from TB2J.external import p_map
+from TB2J.external import p_imap
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
 
@@ -103,50 +103,6 @@ class ExchangeCL2(ExchangeCL):
         orbj = self.iorb(jatom)
         return GR[np.ix_(orbi, orbj)]
         # return GR[self.orb_slice[iatom], self.orb_slice[jatom]]
-
-    def get_A_ijR(self, Gup, Gdn, iatom, jatom):
-        """
-        ! Note: not used. In get_all_A, it is reimplemented.
-        """
-        Rij_done = set()
-        Jorb_list = dict()
-        JJ_list = dict()
-        for iR, ijpairs in self.R_ijatom_dict.items():
-            if (iatom, jatom) in ijpairs and (iR, iatom, jatom) not in Rij_done:
-                Gij_up = self.GR_atom(Gup[iR], iatom, jatom)
-                iRm = self.R_negative_index[iR]
-                if iRm is None:
-                    R_vec = self.R_vectors[iR]
-                    Rm_vec = tuple(-x for x in R_vec)
-                    raise KeyError(f"Negative R vector {Rm_vec} not found in R_vectors")
-                Gji_dn = self.GR_atom(Gdn[iRm], jatom, iatom)
-                tmp = 0.0j
-                Deltai = self.get_Delta(iatom)
-                Deltaj = self.get_Delta(jatom)
-                t = np.einsum(
-                    "ij, ji-> ij", np.matmul(Deltai, Gij_up), np.matmul(Deltaj, Gji_dn)
-                )
-
-                # if self.biquadratic:
-                #    A = np.einsum(
-                #        "ij, ji-> ij",
-                #        np.matmul(Deltai, Gij_up),
-                #        np.matmul(Deltaj, Gji_up),
-                #    )
-                #    C = np.einsum(
-                #        "ij, ji-> ij",
-                #        np.matmul(Deltai, Gij_down),
-                #        np.matmul(Deltaj, Gji_down),
-                #    )
-                tmp = np.sum(t)
-                self.Jorb_list[(iR, iatom, jatom)].append(t / (4.0 * np.pi))
-                self.JJ_list[(iR, iatom, jatom)].append(tmp / (4.0 * np.pi))
-                Rij_done.add((iR, iatom, jatom))
-                if (iRm, jatom, iatom) not in Rij_done:
-                    Jorb_list[(iRm, jatom, iatom)] = t.T / (4.0 * np.pi)
-                    JJ_list[(iRm, jatom, iatom)] = tmp / (4.0 * np.pi)
-                    Rij_done.add((iRm, jatom, iatom))
-        return Jorb_list, JJ_list
 
     def get_all_A(self, Gup, Gdn):
         """
@@ -301,25 +257,6 @@ class ExchangeCL2(ExchangeCL):
         # path = 'TB2J_results/cache'
         # if os.path.exists(path):
         #    shutil.rmtree(path)
-
-    def integrate(self, method="simpson"):
-        # if method == "trapezoidal":
-        #    integrate = trapezoidal_nonuniform
-        # elif method == "simpson":
-        #    integrate = simpson_nonuniform
-        for iR in self.R_ijatom_dict:
-            for iatom, jatom in self.R_ijatom_dict[iR]:
-                # Use R vector key consistently
-                R_vec = self.short_Rlist[iR]
-                key = (R_vec, iatom, jatom)
-                # self.Jorb[key] = integrate(
-                #    self.contour.path, self.Jorb_list[key]
-                # )
-                # self.JJ[key] = integrate(
-                #    self.contour.path, self.JJ_list[key]
-                # )
-                self.Jorb[key] = self.contour.integrate_values(self.Jorb_list[key])
-                self.JJ[key] = self.contour.integrate_values(self.JJ_list[key])
 
     def get_quantities_per_e(self, e):
         # short_Rlist now contains actual R vectors
@@ -490,27 +427,40 @@ class ExchangeCL2(ExchangeCL):
         print("Green's function Calculation started.")
 
         npole = len(self.contour.path)
+        weights = self.contour.weights
+
         if self.nproc == 1:
-            results = map(
-                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+            results = (
+                self.get_quantities_per_e(e)
+                for e in tqdm(self.contour.path, total=npole)
             )
         else:
             # pool = ProcessPool(nodes=self.nproc)
             # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_map(
+            results = p_imap(
                 self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
             )
+
         for i, result in enumerate(results):
+            w = weights[i]
             Jorb_list = result["Jorb_list"]
             JJ_list = result["JJ_list"]
-            for iR in self.R_ijatom_dict:
-                for iatom, jatom in self.R_ijatom_dict[iR]:
-                    # Use R vector key consistently across all dictionaries
-                    R_vec = self.short_Rlist[iR]
-                    key = (R_vec, iatom, jatom)
-                    self.Jorb_list[key].append(Jorb_list[key])
-                    self.JJ_list[key].append(JJ_list[key])
-        self.integrate()
+            for key, val in Jorb_list.items():
+                self.Jorb[key] += val * w
+
+            for key, val in JJ_list.items():
+                self.JJ[key] += val * w
+
+        # Apply integration factor (e.g. -pi/2 for CFR)
+        if npole > 0:
+            dummy = np.zeros(npole)
+            dummy[0] = 1.0
+            factor = self.contour.integrate_values(dummy) / weights[0]
+            for key in self.Jorb:
+                self.Jorb[key] *= factor
+            for key in self.JJ:
+                self.JJ[key] *= factor
+
         self.get_rho_atom()
 
         # Compute charge and magnetic moments from Green's function diagonals
