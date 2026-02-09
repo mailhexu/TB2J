@@ -22,6 +22,8 @@ __all__ = [
     "load",
     "save",
     "set_anisotropy",
+    "set_sia_tensor",
+    "remove_sia_tensor",
     "toggle_DMI",
     "toggle_Jani",
     "toggle_exchange",
@@ -85,7 +87,9 @@ def save(spinio, path="modified_results"):
     spinio.write_all(path=path)
 
     # Fix mb.in to use SIA from exchange.xml when SIA is present
-    if spinio.has_uniaxial_anistropy:
+    if spinio.has_uniaxial_anistropy or (
+        hasattr(spinio, "has_sia_tensor") and spinio.has_sia_tensor
+    ):
         mb_in_path = os.path.join(path, "Multibinit", "mb.in")
         if os.path.exists(mb_in_path):
             with open(mb_in_path, "r") as f:
@@ -177,6 +181,94 @@ def set_anisotropy(spinio, species, k1=None, k1dir=None):
     spinio.has_uniaxial_anistropy = True
 
 
+def set_sia_tensor(spinio, species, tensor):
+    """
+    Set full single ion anisotropy tensor for all atoms of a specified species.
+
+    Parameters
+    ----------
+    spinio : SpinIO
+        The SpinIO object to modify.
+    species : str
+        Chemical species symbol (e.g., 'Sm', 'Fe').
+    tensor : array-like
+        3x3 anisotropy tensor in eV.
+
+    Examples
+    --------
+    >>> # Set Sm anisotropy tensor
+    >>> tensor = np.diag([0.001, 0.002, 0.003])
+    >>> set_sia_tensor(spinio, species='Sm', tensor=tensor)
+    """
+    # Get symbols and find target atoms
+    symbols = spinio.atoms.get_chemical_symbols()
+
+    target_indices = [
+        i
+        for i, (sym, idx) in enumerate(zip(symbols, spinio.index_spin))
+        if sym == species and idx >= 0
+    ]
+
+    if not target_indices:
+        import warnings
+
+        warnings.warn(
+            f"No magnetic atoms found for species '{species}'. "
+            f"Either the species doesn't exist or has no magnetic atoms.",
+            UserWarning,
+        )
+        return
+
+    # Initialize sia_tensor dict if not present
+    if not hasattr(spinio, "sia_tensor") or spinio.sia_tensor is None:
+        spinio.sia_tensor = {}
+
+    tensor_array = np.array(tensor, dtype=float)
+    if tensor_array.shape != (3, 3):
+        raise ValueError("SIA tensor must be a 3x3 matrix")
+
+    # Set values for matching atoms
+    for iatom in target_indices:
+        ispin = spinio.index_spin[iatom]
+        spinio.sia_tensor[ispin] = tensor_array.copy()
+
+    # Set the flag to enable SIA tensor in output
+    spinio.has_sia_tensor = True
+
+
+def remove_sia_tensor(spinio, species=None):
+    """
+    Remove single ion anisotropy tensor.
+
+    Parameters
+    ----------
+    spinio : SpinIO
+        The SpinIO object to modify.
+    species : str, optional
+        Chemical species symbol (e.g., 'Sm', 'Fe').
+        If None, remove for all atoms.
+    """
+    if not hasattr(spinio, "sia_tensor") or spinio.sia_tensor is None:
+        return
+
+    if species is None:
+        spinio.sia_tensor = None
+        spinio.has_sia_tensor = False
+    else:
+        symbols = spinio.atoms.get_chemical_symbols()
+        target_indices = [
+            i
+            for i, (sym, idx) in enumerate(zip(symbols, spinio.index_spin))
+            if sym == species and idx >= 0
+        ]
+        for iatom in target_indices:
+            ispin = spinio.index_spin[iatom]
+            if ispin in spinio.sia_tensor:
+                del spinio.sia_tensor[ispin]
+        if not spinio.sia_tensor:
+            spinio.has_sia_tensor = False
+
+
 def toggle_DMI(spinio, enabled=None):
     """
     Enable or disable Dzyaloshinskii-Moriya interactions (DMI).
@@ -213,12 +305,10 @@ def toggle_DMI(spinio, enabled=None):
             spinio.dmi_ddict = spinio._dmi_backup
         else:
             spinio.dmi_ddict = {}
-        spinio.has_dmi = True
     elif not enabled and spinio.has_dmi:
         # Disable: backup and clear
         spinio._dmi_backup = spinio.dmi_ddict
-        spinio.dmi_ddict = {}
-        spinio.has_dmi = False
+        spinio.dmi_ddict = None
 
 
 def toggle_Jani(spinio, enabled=None):
@@ -257,12 +347,10 @@ def toggle_Jani(spinio, enabled=None):
             spinio.Jani_dict = spinio._jani_backup
         else:
             spinio.Jani_dict = {}
-        spinio.has_bilinear = bool(spinio.Jani_dict)
     elif not enabled and spinio.has_bilinear:
         # Disable: backup and clear
         spinio._jani_backup = spinio.Jani_dict
-        spinio.Jani_dict = {}
-        spinio.has_bilinear = False
+        spinio.Jani_dict = None
 
 
 def toggle_exchange(spinio, enabled=None):
@@ -301,12 +389,10 @@ def toggle_exchange(spinio, enabled=None):
             spinio.exchange_Jdict = spinio._exchange_backup
         else:
             spinio.exchange_Jdict = {}
-        spinio.has_exchange = bool(spinio.exchange_Jdict)
     elif not enabled and spinio.has_exchange:
         # Disable: backup and clear
         spinio._exchange_backup = spinio.exchange_Jdict
-        spinio.exchange_Jdict = {}
-        spinio.has_exchange = False
+        spinio.exchange_Jdict = None
 
 
 def remove_sublattice(spinio, sublattice_name):
@@ -447,6 +533,21 @@ def remove_sublattice(spinio, sublattice_name):
 
             spinio.k1 = new_k1
             spinio.k1dir = new_k1dir
+
+    if (
+        hasattr(spinio, "has_sia_tensor")
+        and spinio.has_sia_tensor
+        and spinio.sia_tensor is not None
+    ):
+        new_sia_tensor = {}
+        for old_idx, tensor in spinio.sia_tensor.items():
+            if old_idx in old_to_new_spin_index:
+                new_idx = old_to_new_spin_index[old_idx]
+                new_sia_tensor[new_idx] = tensor
+        spinio.sia_tensor = new_sia_tensor
+        # If no tensors remain, set has_sia_tensor to False
+        if not spinio.sia_tensor:
+            spinio.has_sia_tensor = False
 
     spinio._ind_atoms = {}
     for iatom, ispin in enumerate(spinio.index_spin):

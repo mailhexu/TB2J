@@ -50,7 +50,7 @@ def write_vampire_unitcell_file(cls, fname):
         counter = -1
         for key in cls.exchange_Jdict:
             R, ispin, jspin = key
-            Jtensor = cls.get_J_tensor(ispin, jspin, R)
+            Jtensor = cls.get_J_tensor(ispin, jspin, R, Jani=True, DMI=True)
             counter += 1  # starts at 0
             myfile.write(
                 f"{counter:5d} {ispin:3d} {jspin:3d} {R[0]:3d} {R[1]:3d} {R[2]:3d} "
