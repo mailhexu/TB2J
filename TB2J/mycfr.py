@@ -5,7 +5,7 @@
 Continued fraction representation.
 """
 
-from ase.units import kB as kb
+import ase.units.kB as kb
 import numpy as np
 from scipy.linalg import eig
 
