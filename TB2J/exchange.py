@@ -575,13 +575,14 @@ class ExchangeNCL(Exchange):
 
             # Store results for each R vector
             for iR, R_vec in enumerate(self.short_Rlist):
-                A_val = A_val_tensor[iR]  # Shape: (4, 4)
-                A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
+                if (R_vec, i, j) in self.distance_dict:
+                    A_val = A_val_tensor[iR]  # Shape: (4, 4)
+                    A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
 
-                # Store with R vector key for compatibility
-                A[(R_vec, mi, mj)] = A_val
-                if A_orb_val is not None:
-                    A_orb[(R_vec, mi, mj)] = A_orb_val
+                    # Store with R vector key for compatibility
+                    A[(R_vec, mi, mj)] = A_val
+                    if A_orb_val is not None:
+                        A_orb[(R_vec, mi, mj)] = A_orb_val
 
         return A, A_orb
 
