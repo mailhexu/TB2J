@@ -165,9 +165,11 @@ class GreenRuntime:
 
         return GR
 
-    def integrate(self, values):
+    def integrate(self, values, contour_method='cfr'):
         '''Integrate along energy path'''
         result = np.einsum('i...,i->...', values, self.eweights)
+        if contour_method == 'cfr':
+            result *= -np.pi / 2
 
         return result
 
