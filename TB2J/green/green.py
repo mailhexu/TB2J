@@ -276,14 +276,14 @@ class TBGreen:
             - self.efermi
         )
         # print(f"Adjusted emin relative to Fermi level: {self.adjusted_emin}")
-        # self.evals, self.evecs = self._reduce_eigens(
-        #    self.evals,
-        #    self.evecs,
-        #    emin=self.efermi + self.adjusted_emin,
-        #    emax=self.efermi + 5.1,
-        #    # emin=self.efermi -10,
-        #    # emax=self.efermi + 10,
-        # )
+        self.evals, self.evecs = self._reduce_eigens(
+            self.evals,
+            self.evecs,
+            emin=self.efermi + self.adjusted_emin,
+            emax=self.efermi + 5.1,
+            # emin=self.efermi -10,
+            # emax=self.efermi + 10,
+        )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
@@ -424,6 +424,13 @@ class TBGreen:
         # A slower version. For test.
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
+
+    def get_Gk_all(self, energy):
+        """Green's function G(k) for one energy for all kpoints"""
+        Gk_all = np.zeros((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
+        for ik, _ in enumerate(self.kpts):
+            Gk_all[ik] = self.get_Gk(ik, energy)
+        return Gk_all
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """

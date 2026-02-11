@@ -148,12 +148,11 @@ def pauli_block_all(array):
     A01 = array[..., ::2, 1::2]
     A10 = array[..., 1::2, ::2]
     A11 = array[..., 1::2, 1::2]
-    n1, n2 = array.shape[-2:]
-    n1 //= 2
-    n2 //= 2
+    n_rows = array.shape[-2] // 2
+    n_cols = array.shape[-1] // 2
 
     out_dtype = np.result_type(array.dtype, np.complex64)
-    block = np.empty((*array.shape[:-2], 4, n1, n2), dtype=out_dtype)
+    block = np.empty((*array.shape[:-2], 4, n_rows, n_cols), dtype=out_dtype)
 
     np.add(A00, A11, out=block[..., 0, :, :])
     block[..., 0, :, :] *= 0.5

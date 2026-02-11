@@ -12,7 +12,6 @@ from functools import partial
 
 from TB2J.contour import Contour
 from TB2J.exchange_params import ExchangeParams
-from TB2J.external import p_map
 from TB2J.green import TBGreen, GreenContext, GreenRuntime
 from TB2J.io_exchange import SpinIO
 from TB2J.mycfr import CFR
@@ -377,7 +376,6 @@ class ExchangeNCL(Exchange):
         self.nbasis = self.G.nbasis
         # self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.rho = self.G.get_density_matrix()
-        self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         # self.HR0 = self.tbmodel.get_H0()
@@ -661,39 +659,16 @@ class ExchangeNCL(Exchange):
         self.rho_dict = rho
         return self.rho_dict
 
-    def integrate(self, AijRs, AijRs_orb=None, method="simpson"):
-        """
-        AijRs: a list of AijR,
-        wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
-        """
-        # if method == "trapezoidal":
-        #    integrate = trapezoidal_nonuniform
-        # elif method == "simpson":
-        #    integrate = simpson_nonuniform
-        #
-
-        # self.rho = integrate(self.contour.path, rhoRs)
-        for iR in self.R_ijatom_dict:
-            R_vec = self.short_Rlist[iR]
-            for iatom, jatom in self.R_ijatom_dict[iR]:
-                f = AijRs[(R_vec, iatom, jatom)]
-                # self.A_ijR[(R_vec, iatom, jatom)] = integrate(self.contour.path, f)
-                self.A_ijR[(R_vec, iatom, jatom)] = self.contour.integrate_values(f)
-
-                if self.orb_decomposition:
-                    # self.A_ijR_orb[(R_vec, iatom, jatom)] = integrate(
-                    #    self.contour.path, AijRs_orb[(R_vec, iatom, jatom)]
-                    # )
-                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                        self.contour.integrate_values(AijRs_orb[(R_vec, iatom, jatom)])
-                    )
-
     def get_quantities_per_e(self, e):
+        # Gk_all = self.G.get_Gk_all(e)
         # mae = self.get_mae_kspace(Gk_all)
         mae = None
         # TODO: get the MAE from Gk_all
         # short_Rlist now contains actual R vectors
-        GR = self.G.get_GR(self.short_Rlist, energy=e)
+
+        # Note: Using Gk_all=None to rely on iterative accumulation in get_GR
+        # to save memory (Optimization 1)
+        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=None)
 
         # Save diagonal elements of Green's function for charge and magnetic moment calculation
         # Only if debug option is enabled
