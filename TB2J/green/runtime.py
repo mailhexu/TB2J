@@ -224,10 +224,10 @@ class GreenRuntime:
             A_orb_ij = (
                 np.einsum("...ruij,...rvji->...ruvij", X, Y) / np.pi
             )  # Shape: (nR, 4, 4, ni, nj)
-            A_orb_ij = self.integrate(A_orb_ij)
 
             # Vectorized sum over orbitals for simplified A values
             A_ij = np.sum(A_orb_ij, axis=(-2, -1))
+            A_orb_ij = self.integrate(A_orb_ij)
         else:
             A_orb_ij = None
             A_ij = (
