@@ -701,9 +701,11 @@ def plot_magnon_bands_from_TB2J(
                 f"Number of spins in spin configuration file ({magmoms.shape[0]}) does not match the system ({magnon.nspin})"
             )
     else:
-        magmoms = None
+        magmoms = magnon.magmom
 
     magnon.set_reference(Q, uz, n, magmoms)
+    print(f"{magmoms=}")
+    print(f"{magnon.magmom=}")
 
     # Get band structure data
     print(f"\nCalculating bands along path {params.kpath}...")
