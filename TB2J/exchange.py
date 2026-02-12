@@ -1,25 +1,28 @@
 import os
 import pickle
+import traceback
 from collections import defaultdict
 from itertools import product
 
 import ase.units
 import numpy as np
 from tqdm import tqdm
+from multiprocessing import Pool
+from functools import partial
 
 from TB2J.contour import Contour
 from TB2J.exchange_params import ExchangeParams
-from TB2J.external import p_imap
-from TB2J.green import TBGreen
+from TB2J.green import TBGreen, GreenContext, GreenRuntime
 from TB2J.io_exchange import SpinIO
 from TB2J.mycfr import CFR
 from TB2J.orbmap import map_orbs_matrix
-from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
+from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm, pauli_sigma_norm
 from TB2J.utils import (
     kmesh_to_R,
     symbol_number,
 )
 
+_GREEN_WORKER = None
 
 class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
@@ -399,7 +402,7 @@ class ExchangeNCL(Exchange):
 
     def _prepare_Patom(self):
         for iatom in self.ind_mag_atoms:
-            self.Pdict[iatom] = pauli_block_sigma_norm(self.get_H_atom(iatom))
+            self.Pdict[iatom] = pauli_sigma_norm(self.get_H_atom(iatom))
 
     def get_H_atom(self, iatom):
         orbs = self.iorb(iatom)
@@ -508,83 +511,6 @@ class ExchangeNCL(Exchange):
                 A_ijR_list[(R_vec, iatom, jatom)] = A
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
-
-    def get_all_A_vectorized(self, GR, orb_indices_map=None):
-        """
-        Vectorized calculation of all A matrix elements.
-        Fully vectorized version based on TB2J_optimization_prototype.ipynb.
-        Now works with properly ordered short_Rlist.
-
-        :param GR: Green's function array of shape (nR, nbasis, nbasis)
-        :param orb_indices_map: Optional dictionary mapping global orbital indices to reduced indices.
-        :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
-        """
-
-        # Get magnetic sites and their orbital indices
-        magnetic_sites = self.ind_mag_atoms
-        iorbs = [self.iorb(site) for site in magnetic_sites]
-
-        if orb_indices_map is not None:
-            # Map global indices to reduced indices
-            new_iorbs = []
-            for site_orbs in iorbs:
-                new_orbs = np.array(
-                    [orb_indices_map[orb_idx] for orb_idx in site_orbs], dtype=int
-                )
-                new_iorbs.append(new_orbs)
-            iorbs = new_iorbs
-
-        # Build the P matrices for all magnetic sites using the same method as original
-        P = [self.get_P_iatom(site) for site in magnetic_sites]
-
-        # Initialize results dictionary
-        A = {}
-        A_orb = {}
-
-        # Batch compute all A tensors following the prototype
-        for i, j in product(range(len(magnetic_sites)), repeat=2):
-            idx, jdx = iorbs[i], iorbs[j]
-            Gij = GR[:, idx][:, :, jdx]
-            Gji = GR[:, jdx][:, :, idx]
-            Gij = pauli_block_all(Gij)
-            Gji = pauli_block_all(Gji)
-            # NOTE: becareful: this assumes that short_Rlist is properly ordered so that
-            # the ith R vector's negative is at -i index.
-            Gji = np.flip(Gji, axis=0)
-            Pi = P[i]
-            Pj = P[j]
-            X = Pi @ Gij
-            Y = Pj @ Gji
-            mi, mj = (magnetic_sites[i], magnetic_sites[j])
-
-            if self.orb_decomposition:
-                # Vectorized orbital decomposition over all R vectors at once
-                # X.shape: (nR, 4, ni, nj), Y.shape: (nR, 4, nj, ni)
-                A_orb_tensor = (
-                    np.einsum("ruij,rvji->ruvij", X, Y) / np.pi
-                )  # Shape: (nR, 4, 4, ni, nj)
-                # Vectorized sum over orbitals for simplified A values
-                A_val_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # Shape: (nR, 4, 4)
-            else:
-                # Compute A_tensor for all R vectors at once
-                A_tensor = (
-                    np.einsum("...uij,...vji->...uv", X, Y) / np.pi
-                )  # Shape: (nR, 4, 4)
-                A_val_tensor = A_tensor  # Use pre-computed A_tensor directly
-                A_orb_tensor = None
-
-            # Store results for each R vector
-            for iR, R_vec in enumerate(self.short_Rlist):
-                if (R_vec, i, j) in self.distance_dict:
-                    A_val = A_val_tensor[iR]  # Shape: (4, 4)
-                    A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
-
-                    # Store with R vector key for compatibility
-                    A[(R_vec, mi, mj)] = A_val
-                    if A_orb_val is not None:
-                        A_orb[(R_vec, mi, mj)] = A_orb_val
-
-        return A, A_orb
 
     def A_to_Jtensor_orb(self):
         """
@@ -895,6 +821,74 @@ class ExchangeNCL(Exchange):
         """
         pass
 
+    def prepare_greenfun_context(self, evecs_path='Green.dat'):
+        """
+        Encapsulates minimal information to compute A_ij tensor
+        into a GreenContext object
+
+        Parameters
+        ----------
+        evecs_path : str, optional
+            File path that contains the eigenvectors of the TB
+            Hamiltonian H(k)
+
+        Returns
+        -------
+        GreenContext
+            Object containing everything to run the GreenRuntime
+            kernel. 
+        """
+        # Create tuple of orbital indices
+        iorbs = tuple(
+            np.array(self.orb_dict[i]) 
+            for i in self.ind_mag_atoms
+        )
+
+        # Create Rvectors array
+        Rvecs = np.array(self.Rlist, dtype=np.int32)
+
+        # Generate tuple of projector matrices
+        Pmatrix = tuple(pauli_sigma_norm(
+            np.take(np.take(self.HR0, idx, axis=-2), idx, axis=-1))
+            for idx in iorbs
+        )
+
+        # Save eigen vectors of TB Hamiltonian H(k)
+        evecs = np.memmap(
+            evecs_path,
+            mode='w+',
+            dtype=self.G.evecs.dtype,
+            shape=self.G.evecs.shape
+        )
+        evecs[:] = self.G.evecs
+        evecs.flush()
+        del evecs
+
+        ctx = GreenContext(
+            efermi=self.efermi,
+            evals=self.G.evals,
+            evecs_path=evecs_path,
+            atom_indices=self.ind_mag_atoms,
+            energies=self.contour.path,
+            eweights=self.contour.weights,
+            norb=self.norb,
+            iorbs=iorbs,
+            kpts=self.G.kpts,
+            k2Rfactor=self.G.k2Rfactor,
+            kweights=self.G.kweights,
+            Rvecs=Rvecs,
+            Pmatrix=Pmatrix
+        )
+
+        return ctx
+
+    def _initialize_worker(self):
+        '''Initializes global GreenRuntime object for running on
+         each worker from multiprocessing'''
+        global _GREEN_WORKER
+        ctx = self.prepare_greenfun_context()
+        _GREEN_WORKER = GreenRuntime(ctx, thlim=self.thlim) 
+            
     def calculate_all(self):
         """
         The top level.
@@ -902,43 +896,51 @@ class ExchangeNCL(Exchange):
         print("Green's function Calculation started.")
 
         self.validate()
+        self._initialize_worker()
+        exch_pairs = list(product(self.ind_mag_atoms, repeat=2))
+        npairs = len(exch_pairs)
 
-        npole = len(self.contour.path)
-        weights = self.contour.weights
+        with tqdm(total=npairs) as progress_bar:
 
-        if self.nproc > 1:
-            results = p_imap(
-                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
-            )
-        else:
-            results = (
-                self.get_quantities_per_e(e)
-                for e in tqdm(self.contour.path, total=npole)
-            )
+            def store_Aij(Atensors, iatom, jatom):
+                '''Callback function to store A tensors'''
+                A_ij, A_orb_ij = Atensors
+                for iR, AijR in enumerate(A_ij):
+                    Rvec = self.short_Rlist[iR]
+                    key = (Rvec, iatom, jatom)
+                    self.A_ijR[key] = AijR
+                    if self.orb_decomposition:
+                        self.A_ij_orb[key] = A_orb_ij[iR]
+                progress_bar.update(1)
 
-        for i, result in enumerate(results):
-            w = weights[i]
-            for key, val in result["AijR"].items():
-                self.A_ijR[key] += val * w
+            def on_error(e, iatom, jatom):
+                print(f"\n❌ worker failed for ({iatom},{jatom}): {repr(e)}", flush=True)
+                traceback.print_exc()
 
-            if self.orb_decomposition:
-                for key, val in result["AijR_orb"].items():
-                    self.A_ijR_orb[key] += val * w
+            if self.nproc > 1:
 
-        # Apply integration factor (e.g. -pi/2 for CFR)
-        if npole > 0:
-            dummy = np.zeros(npole)
-            dummy[0] = 1.0
-            factor = self.contour.integrate_values(dummy) / weights[0]
-            for key in self.A_ijR:
-                self.A_ijR[key] *= factor
-            if self.orb_decomposition:
-                for key in self.A_ijR_orb:
-                    self.A_ijR_orb[key] *= factor
+                with Pool(processes=self.nproc) as pool:
 
+                    for i, j in exch_pairs:
+                        pool.apply_async(
+                            _GREEN_WORKER.compute_Aij, 
+                            args=(i, j),
+                            kwds={'orb_decomposition': self.orb_decomposition},
+                            callback=partial(store_Aij, iatom=i, jatom=j),
+                            error_callback=partial(on_error, iatom=i, jatom=j)
+                        )
+
+                    pool.close()
+                    pool.join()
+
+            else:
+
+                for i, j in exch_pairs:
+                    Atensors = _GREEN_WORKER.compute_Aij(i, j)
+                    store_Aij(Atensors, i, j)
+
+        # Compute charge and magnetic moments from Green's function
         self.get_rho_atom()
-
-        # Compute charge and magnetic moments from Green's function diagonals
         self.compute_charge_and_magnetic_moments()
 
         self.A_to_Jtensor()

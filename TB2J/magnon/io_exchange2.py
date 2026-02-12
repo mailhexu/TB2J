@@ -352,13 +352,13 @@ class ExchangeIO(BaseMagneticStructure):
             )
 
         if name == "Jiso":
-            self._exchange_values[*array_indices, 3] = array[value_indices]
+            self._exchange_values[(*array_indices, 3)] = array[value_indices]
         elif name == "Biquad":
-            self._exchange_values[*array_indices, 4:6] = array[value_indices]
+            self._exchange_values[(*array_indices, slice(4, 6))] = array[value_indices]
         elif name == "DMI":
-            self._exchange_values[*array_indices, 6:9] = array[value_indices]
+            self._exchange_values[(*array_indices, slice(6, 9))] = array[value_indices]
         elif name == "Jani":
-            self._exchange_values[*array_indices, 9:] = array[value_indices].reshape(
+            self._exchange_values[(*array_indices, slice(9, None))] = array[value_indices].reshape(
                 array.shape[:2] + (9,)
             )
         else:
@@ -402,13 +402,13 @@ class ExchangeIO(BaseMagneticStructure):
             # anisotropic exchange tensor
             tensor += self._exchange_values[:, :, 9:].reshape(shape)
             # DMI
-            pos_indices = ([1, 2, 0], [2, 0, 1])
-            neg_indices = ([2, 0, 1], [1, 2, 0])
-            tensor[:, :, *pos_indices] += self._exchange_values[:, :, 6:9]
-            tensor[:, :, *neg_indices] -= self._exchange_values[:, :, 6:9]
+            pos_indices = (slice(None), slice(None), [1, 2, 0], [2, 0, 1])
+            neg_indices = (slice(None), slice(None), [2, 0, 1], [1, 2, 0])
+            tensor[pos_indices] += self._exchange_values[:, :, 6:9]
+            tensor[neg_indices] -= self._exchange_values[:, :, 6:9]
         # isotropic exchange
-        diag_indices = ([0, 1, 2], [0, 1, 2])
-        tensor[:, :, *diag_indices] += self._exchange_values[:, :, 3, None]
+        diag_indices = (slice(None), slice(None), [0, 1, 2], [0, 1, 2])
+        tensor[diag_indices] += self._exchange_values[:, :, 3, None]
 
         return tensor
 
