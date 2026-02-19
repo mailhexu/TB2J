@@ -1,5 +1,6 @@
 """Module for magnon density of states calculations and plotting."""
 
+import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,12 @@ import numpy as np
 from ase.dft.dos import DOS
 
 from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.magnon3 import Magnon
+from TB2J.magnon.magnon_parameters import (
+    MagnonParameters,
+    add_common_magnon_args,
+    add_dos_specific_args,
+)
 
 
 @dataclass
@@ -306,3 +313,149 @@ def plot_magnon_dos(
         print(f"DOS data saved to {data_file}")
 
     return dos
+
+
+def plot_magnon_dos_from_TB2J(params: MagnonParameters):
+    """Calculate and plot magnon DOS from TB2J results.
+
+    Parameters
+    ----------
+    params : MagnonParameters
+        Parameters for the calculation
+
+    Returns
+    -------
+    MagnonDOS
+        The calculated DOS object
+    """
+    if not Path(params.path).exists():
+        raise FileNotFoundError(f"TB2J results not found at {params.path}")
+
+    print(f"Loading exchange parameters from {params.path}...")
+    magnon = Magnon.from_TB2J_results(
+        path=params.path,
+        Jiso=params.Jiso,
+        Jani=params.Jani,
+        DMI=params.DMI,
+        SIA=params.SIA,
+    )
+
+    Q = [0, 0, 0] if params.Q is None else params.Q
+    n = [0, 0, 1] if params.n is None else params.n
+
+    if params.uz_file is not None:
+        uz_file = params.uz_file
+        if not Path(uz_file).is_absolute():
+            uz_file = str(Path(params.path) / uz_file)
+        uz = np.loadtxt(uz_file)
+        if uz.shape[1] != 3:
+            raise ValueError(
+                f"Quantization axes file should contain a nspin×3 array. Got shape {uz.shape}"
+            )
+        if uz.shape[0] != magnon.nspin:
+            raise ValueError(
+                f"Number of spins in uz file ({uz.shape[0]}) does not match the system ({magnon.nspin})"
+            )
+    else:
+        uz = np.array([[0, 0, 1]], dtype=float)
+
+    if params.spin_conf_file is not None:
+        spin_conf_file = params.spin_conf_file
+        if not Path(spin_conf_file).is_absolute():
+            spin_conf_file = str(Path(params.path) / spin_conf_file)
+        magmoms = np.loadtxt(spin_conf_file)
+        if magmoms.shape[1] != 3:
+            raise ValueError(
+                f"Spin configuration file should contain a nspin×3 array. Got shape {magmoms.shape}"
+            )
+        if magmoms.shape[0] != magnon.nspin:
+            raise ValueError(
+                f"Number of spins in spin configuration file ({magmoms.shape[0]}) does not match the system ({magnon.nspin})"
+            )
+    else:
+        magmoms = None
+
+    magnon.set_reference(Q, uz, n, magmoms)
+
+    window = None
+    if params.window is not None:
+        window = (params.window[0] / 1000, params.window[1] / 1000)
+
+    print("\nCalculating magnon DOS...")
+    dos = plot_magnon_dos(
+        magnon,
+        kmesh=params.kmesh,
+        gamma=params.gamma,
+        width=params.width,
+        window=window,
+        npts=params.npts,
+        filename=params.filename,
+        show=params.show,
+    )
+
+    print(f"\nPlot saved to {params.filename}")
+    data_file = Path(params.filename).with_suffix(".json")
+    print(f"DOS data saved to {data_file}")
+
+    return dos
+
+
+def main():
+    """Command-line interface for magnon DOS calculation."""
+    parser = argparse.ArgumentParser(
+        description="Calculate and plot magnon DOS from TB2J results"
+    )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--config",
+        type=str,
+        help="Path to TOML configuration file",
+    )
+    group.add_argument(
+        "--save-config",
+        type=str,
+        help="Save default configuration to specified TOML file",
+    )
+
+    add_common_magnon_args(parser)
+    add_dos_specific_args(parser)
+
+    args = parser.parse_args()
+
+    if args.save_config:
+        params = MagnonParameters()
+        params.to_toml(args.save_config)
+        print(f"Saved default configuration to {args.save_config}")
+        return
+
+    if args.config:
+        params = MagnonParameters.from_toml(args.config)
+    else:
+        window = None
+        if args.window is not None:
+            window = tuple(args.window)
+        params = MagnonParameters(
+            path=args.path,
+            filename=args.output,
+            Jiso=args.Jiso,
+            Jani=args.Jani,
+            SIA=getattr(args, "SIA", True),
+            DMI=args.DMI,
+            Q=args.Q,
+            uz_file=args.uz_file,
+            spin_conf_file=args.spin_conf_file,
+            n=getattr(args, "n", None),
+            show=args.show,
+            kmesh=args.kmesh,
+            gamma=args.gamma,
+            width=args.width,
+            window=window,
+            npts=args.npts,
+        )
+
+    plot_magnon_dos_from_TB2J(params)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,21 +1,38 @@
 Magnon Band Structure
 ==================
 
-TB2J provides multiple ways to calculate and visualize magnon band structures from the exchange parameters.
+TB2J provides a unified command-line tool `TB2J_magnon.py` for magnon band structure and DOS calculations.
 
-New Interface (v0.9.9.9+)
+New Interface (v0.9.12+)
 ------------------------
 
 .. include:: magnon_bands.md
    :parser: myst_parser.sphinx_
+
+Quick Start
+-----------
+
+::
+
+   # Plot magnon band structure
+   TB2J_magnon.py --bands
+
+   # Plot magnon DOS
+   TB2J_magnon.py --dos
+
+   # Plot both
+   TB2J_magnon.py --bands --dos
+
+   # Exclude specific interactions
+   TB2J_magnon.py --bands --no-Jani --no-DMI
 
 Legacy Interface
 --------------
 
 There are also older scripts within the TB2J package for magnon calculations:
 
-TB2J_magnon.py
-~~~~~~~~~~~~~
+TB2J_magnon.py (Legacy)
+~~~~~~~~~~~~~~~~~~~~~
 
 This script can be used to plot magnon band structure from the Multibinit XML format:
 
@@ -48,27 +65,3 @@ Example usage with BCC Fe:
    exchange_magnon
 
 From version v0.7.5, the information for plotting the band structure is written into a json file (magnon_band.json), along with a script for parsing and plotting (plot_magnon_from_json_file.py).
-
-TB2J_magnon_dos.py
-~~~~~~~~~~~~~~~~
-
-From version v0.7.7, there is a script to plot the magnon density of states:
-
-::
-    
-    TB2J_magnon_dos.py --help
-    usage: TB2J_magnon_dos.py [-h] [-p PATH] [-n NPOINTS] [-w WINDOW WINDOW] [-k KMESH KMESH KMESH]
-                              [-s SMEARING_WIDTH] [-g] [-Jq] [--show] [-f FIG_FILENAME] [-t TXT_FILENAME]
-
-Example usage:
-
-::
-
-    TB2J_magnon_dos.py --show -s 10 -k 25 25 25 -f magnon_dos.png --show
-
-.. figure:: magnon_band.assets/magnon_dos.png
-   :alt: magnon_dos
-
-   magnon_dos
-
-The energies and DOS are saved to a text file with two columns (energies and DOS), which can be used for custom plotting.

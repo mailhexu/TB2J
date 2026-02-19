@@ -1,11 +1,8 @@
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tomli
-import tomli_w
 from ase.dft.dos import DOS
 from ase.units import J, eV
 from scipy.spatial.transform import Rotation
@@ -14,53 +11,12 @@ from TB2J.io_exchange import SpinIO
 from TB2J.kpoints import monkhorst_pack
 from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
+from TB2J.magnon.magnon_parameters import (
+    MagnonParameters,
+    add_band_specific_args,
+    add_common_magnon_args,
+)
 from TB2J.mathutils.auto_kpath import auto_kpath
-
-
-@dataclass
-class MagnonParameters:
-    """Parameters for magnon band structure calculations"""
-
-    path: str = "TB2J_results"
-    kpath: str = None
-    npoints: int = 300
-    filename: str = "magnon_bands.png"
-    Jiso: bool = True
-    Jani: bool = False
-    DMI: bool = False
-    SIA: bool = True
-    Q: Optional[List[float]] = None
-    uz_file: Optional[str] = None
-    n: Optional[List[float]] = None
-    spin_conf_file: Optional[str] = None
-    show: bool = False
-
-    @classmethod
-    def from_toml(cls, filename: str) -> "MagnonParameters":
-        """Load parameters from a TOML file"""
-        with open(filename, "rb") as f:
-            data = tomli.load(f)
-        return cls(**data)
-
-    def to_toml(self, filename: str):
-        """Save parameters to a TOML file"""
-        # Convert to dict and remove None values
-        data = {k: v for k, v in asdict(self).items() if v is not None}
-        with open(filename, "wb") as f:
-            tomli_w.dump(data, f)
-
-    def __post_init__(self):
-        """Validate parameters after initialization"""
-        if self.Q is not None and len(self.Q) != 3:
-            raise ValueError("Q must be a list of 3 numbers")
-        if self.n is not None and len(self.n) != 3:
-            raise ValueError("n must be a list of 3 numbers")
-
-        # Convert path to absolute path if uz_file is relative to it
-        if self.uz_file and not Path(self.uz_file).is_absolute():
-            self.uz_file = str(Path(self.path) / self.uz_file)
-        if self.spin_conf_file and not Path(self.spin_conf_file).is_absolute():
-            self.spin_conf_file = str(Path(self.path) / self.spin_conf_file)
 
 
 @dataclass
@@ -70,7 +26,6 @@ class Magnon:
     """
 
     nspin: int
-    # ind_atoms: list
     magmom: np.ndarray
     Rlist: np.ndarray
     JR: np.ndarray
@@ -98,6 +53,8 @@ class Magnon:
         self._n = np.array(n, dtype=float)
         if magmoms is not None:
             self.magmom = np.array(magmoms, dtype=float)
+        self.Snorm = np.linalg.norm(self.magmom, axis=1) / 2
+        # self.Snorm=np.ones(self.nspin)
 
     def set_propagation_vector(self, Q):
         """Set propagation vector"""
@@ -149,7 +106,8 @@ class Magnon:
             Last two indices are for 3x3 tensor components
         """
         Rlist = np.array(self.Rlist)
-        JR = self.JR
+        Snorm_inv = 1 / self.Snorm
+        JR = np.einsum("rijxy, i, j-> rijxy", self.JR, Snorm_inv, Snorm_inv)
         JRprime = JR.copy()
 
         for iR, R in enumerate(Rlist):
@@ -205,10 +163,20 @@ class Magnon:
 
         Jq = -self.Jq(kpoints)
 
-        C = np.diag(np.einsum("ix,ijxy,jy->i", V, 2 * J0, V))
-        B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
+        Ssqrt = np.sqrt(self.Snorm)
+        print(f"{Ssqrt=}")
+
         A1 = np.einsum("ix,kijxy,jy->kij", U, Jq, U.conj())
         A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq, U)
+        B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
+
+        # C = \delta_ij \sum_l (S_l v_i^T J'_{il} v_l)
+        C = np.diag(np.einsum("ix,ijxy,jy, j->i", V, 2 * J0, V, self.Snorm))
+
+        # Apply the sqrt(Si Sj) ans Sl
+        A1 = np.einsum("kij, i, j-> kij", A1, Ssqrt, Ssqrt)
+        A2 = np.einsum("kij, i, j-> kij", A2, Ssqrt, Ssqrt)
+        B = np.einsum("kij, i, j-> kij", B, Ssqrt, Ssqrt)
 
         H = np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
         return H
@@ -768,7 +736,6 @@ def plot_magnon_bands_cli():
         description="Plot magnon band structure from TB2J results"
     )
 
-    # Add a mutually exclusive group for config file vs. command line arguments
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--config",
@@ -781,123 +748,20 @@ def plot_magnon_bands_cli():
         help="Save default configuration to specified TOML file",
     )
 
-    # Command line arguments (used if no config file is provided)
-    parser.add_argument(
-        "-p",
-        "--path",
-        default="TB2J_results",
-        help="Path to TB2J results directory (default: TB2J_results)",
-    )
-    parser.add_argument(
-        "-k",
-        "--kpath",
-        default=None,
-        help="k-path specification (default: auto-detected from type of cell)",
-    )
-    parser.add_argument(
-        "-n",
-        "--npoints",
-        type=int,
-        default=300,
-        help="Number of k-points along the path (default: 300)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        default="magnon_bands.png",
-        help="Output file name (default: magnon_bands.png)",
-    )
-    parser.add_argument(
-        "-j",
-        "--Jiso",
-        action="store_true",
-        default=True,
-        help="Include isotropic exchange interactions (default: True)",
-    )
-    parser.add_argument(
-        "--no-Jiso",
-        action="store_false",
-        dest="Jiso",
-        help="Exclude isotropic exchange interactions",
-    )
-    parser.add_argument(
-        "-a",
-        "--Jani",
-        action="store_true",
-        default=False,
-        help="Include anisotropic exchange interactions (default: False)",
-    )
-    parser.add_argument(
-        "--SIA",
-        action="store_true",
-        default=True,
-        help="Include single ion anisotropy (default: True)",
-    )
-    parser.add_argument(
-        "--no-SIA",
-        action="store_false",
-        dest="SIA",
-        help="Exclude single ion anisotropy",
-    )
-    parser.add_argument(
-        "-d",
-        "--DMI",
-        action="store_true",
-        default=False,
-        help="Include Dzyaloshinskii-Moriya interactions (default: False)",
-    )
-    parser.add_argument(
-        "-q",
-        "--Q",
-        nargs=3,
-        type=float,
-        metavar=("Qx", "Qy", "Qz"),
-        help="Propagation vector [Qx, Qy, Qz] (default: [0, 0, 0])",
-    )
-    parser.add_argument(
-        "-u",
-        "--uz-file",
-        type=str,
-        help="Path to file containing quantization axes for each spin (nspin×3 array)",
-    )
-    parser.add_argument(
-        "-c",
-        "--spin-conf-file",
-        type=str,
-        help="Path to file containing magnetic moments for each spin (nspin×3 array)",
-    )
-    parser.add_argument(
-        "-v",
-        "--n",
-        nargs=3,
-        type=float,
-        metavar=("nx", "ny", "nz"),
-        help="Normal vector for rotation [nx, ny, nz] (default: [0, 0, 1])",
-    )
-
-    parser.add_argument(
-        "-s",
-        "--show",
-        action="store_true",
-        default=False,
-        help="show figure on screen.",
-    )
+    add_common_magnon_args(parser)
+    add_band_specific_args(parser)
 
     args = parser.parse_args()
 
-    # Handle configuration file options
     if args.save_config:
-        # Create default parameters and save to file
         params = MagnonParameters()
         params.to_toml(args.save_config)
         print(f"Saved default configuration to {args.save_config}")
         return
 
     if args.config:
-        # Load parameters from config file
         params = MagnonParameters.from_toml(args.config)
     else:
-        # Create parameters from command line arguments
         params = MagnonParameters(
             path=args.path,
             kpath=args.kpath,
@@ -907,14 +771,18 @@ def plot_magnon_bands_cli():
             Jani=args.Jani,
             SIA=args.SIA,
             DMI=args.DMI,
-            Q=args.Q if args.Q is not None else None,
+            Q=args.Q,
             uz_file=args.uz_file,
             spin_conf_file=args.spin_conf_file,
-            n=args.n if args.n is not None else None,
+            n=getattr(args, "n", None),
             show=args.show,
         )
 
     plot_magnon_bands_from_TB2J(params)
+
+
+def main():
+    plot_magnon_bands_cli()
 
 
 class MagnonASEWrapper:
