@@ -15,6 +15,7 @@ from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_band_specific_args,
     add_common_magnon_args,
+    prepare_magnon_from_params,
 )
 from TB2J.mathutils.auto_kpath import auto_kpath
 
@@ -467,22 +468,26 @@ def test_magnon(path="TB2J_results"):
     return magnon, Jq, energies
 
 
-def create_plot_script(filename: str):
+def create_plot_script(base_name: str, output_dir: str = "."):
     """Create a Python script for plotting the saved band structure data.
 
     Parameters
     ----------
-    filename : str
-        Base filename (without extension) to use for the plot script
+    base_name : str
+        Base name (without extension) for the script and data files
+    output_dir : str
+        Directory to write the script to (default: current directory)
     """
-    script_name = f"plot_{filename}.py"
-    script = '''#!/usr/bin/env python3
+    from pathlib import Path
+
+    script_path = Path(output_dir) / f"plot_{base_name}.py"
+    script = f'''#!/usr/bin/env python3
 """Simple script to plot magnon band structure from saved data."""
 
 from TB2J.magnon.magnon_band import MagnonBand
 import matplotlib.pyplot as plt
 
-def plot_magnon_bands(input_file, output_file=None, ax=None, color='blue', show=True):
+def plot_magnon_bands(input_file="{base_name}.json", output_file="{base_name}.png", ax=None, color='blue', show=True):
     """Load and plot magnon band structure.
     
     Parameters
@@ -516,8 +521,6 @@ def plot_magnon_bands(input_file, output_file=None, ax=None, color='blue', show=
     return ax
 
 if __name__ == "__main__":
-    # Usage example
-    # Example usage
     import matplotlib.pyplot as plt
     
     # Create a figure and axis (optional)
@@ -525,20 +528,20 @@ if __name__ == "__main__":
     
     # Plot bands with custom color on given axis
     plot_magnon_bands(
-        input_file="magnon_bands.json",
-        output_file="magnon_bands.png",
+        input_file="{base_name}.json",
+        output_file="{base_name}.png",
         ax=ax,
         color='red',
         show=True
     )
 '''
 
-    with open(script_name, "w") as f:
+    with open(script_path, "w") as f:
         f.write(script)
 
     import os
 
-    os.chmod(script_name, 0o755)  # Make executable
+    os.chmod(script_path, 0o755)  # Make executable
 
 
 def save_bands_data(
@@ -577,14 +580,17 @@ def save_bands_data(
     )
     bands.save(filename)
 
-    # Create plotting script
-    base_name = filename.rsplit(".", 1)[0]
-    create_plot_script(base_name)
+    # Create plotting script in the same directory as the data file
+    from pathlib import Path
+
+    filepath = Path(filename)
+    script_name = filepath.parent / f"plot_{filepath.stem}.py"
+    create_plot_script(filepath.stem, str(filepath.parent))
 
     print(f"Band structure data saved to {filename}")
-    print(f"Created plotting script: plot_{base_name}.py")
+    print(f"Created plotting script: {script_name}")
     print("Usage: ")
-    print(f"See plot_{base_name}.py for example usage")
+    print(f"See {script_name} for example usage")
 
     return bands
 
@@ -627,51 +633,7 @@ def plot_magnon_bands_from_TB2J(
     magnon : Magnon
         The Magnon instance used for calculations
     """
-    # Load magnon calculator from TB2J results
-    print(f"Loading exchange parameters from {params.path}...")
-    magnon = Magnon.from_TB2J_results(
-        path=params.path,
-        Jiso=params.Jiso,
-        Jani=params.Jani,
-        DMI=params.DMI,
-        SIA=params.SIA,
-    )
-
-    # Set reference vectors if provided
-    Q = [0, 0, 0] if params.Q is None else params.Q
-    n = [0, 0, 1] if params.n is None else params.n
-
-    # Handle quantization axes
-    if params.uz_file is not None:
-        uz = np.loadtxt(params.uz_file)
-        if uz.shape[1] != 3:
-            raise ValueError(
-                f"Quantization axes file should contain a natom×3 array. Got shape {uz.shape}"
-            )
-        if uz.shape[0] != magnon.nspin:
-            raise ValueError(
-                f"Number of spins in uz file ({uz.shape[0]}) does not match the system ({magnon.nspin})"
-            )
-    else:
-        # Default: [0, 0, 1] for all spins
-        # uz = np.array([[0.0, 0.0, 1.0] for _ in range(magnon.nspin)])
-        uz = np.array([[0, 0, 1]], dtype=float)
-
-    print(params)
-    if params.spin_conf_file is not None:
-        magmoms = np.loadtxt(params.spin_conf_file)
-        if magmoms.shape[1] != 3:
-            raise ValueError(
-                f"Spin configuration file should contain a nspin×3 array. Got shape {magmoms.shape}"
-            )
-        if magmoms.shape[0] != magnon.nspin:
-            raise ValueError(
-                f"Number of spins in spin configuration file ({magmoms.shape[0]}) does not match the system ({magnon.nspin})"
-            )
-    else:
-        magmoms = None
-
-    magnon.set_reference(Q, uz, n, magmoms)
+    magnon = prepare_magnon_from_params(params)
 
     # Get band structure data
     print(f"\nCalculating bands along path {params.kpath}...")

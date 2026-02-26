@@ -1,0 +1,36 @@
+# Magnon band structure with custom spin configuration
+#
+# This example shows how to specify magnetic moments directly in the 
+# TOML file. Values are in μB (Bohr magneton).
+#
+# For spin quantum number S, use m = 2S μB:
+#   S = 1/2  ->  m = 1 μB
+#   S = 1    ->  m = 2 μB
+#   S = 3/2  ->  m = 3 μB
+#   S = 2    ->  m = 4 μB
+#   S = 5/2  ->  m = 5 μB
+#
+# Usage:
+#   TB2J_magnon.py --config config_spin.toml --bands
+
+# TB2J results location
+path = "TB2J_results"
+
+# Exchange interactions
+Jiso = true
+Jani = false
+DMI = false
+SIA = true
+
+# Band structure parameters
+kpath = "GMKG"
+npoints = 200
+filename = "magnon_bands_spin_conf.png"
+
+# Custom spin configuration (nspin x 3 array)
+# Example: Two Cr atoms with S=3/2 (m=3 μB) both along +z
+# Format: [[mx, my, mz], [mx, my, mz], ...]
+spin_conf = [[0.0, 0.0, 3.0], [0.0, 0.0, 3.0]]
+
+# Alternative: Load from file
+# spin_conf_file = "spin_config.txt"

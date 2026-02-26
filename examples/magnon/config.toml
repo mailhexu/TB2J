@@ -1,0 +1,24 @@
+# Magnon band structure configuration file
+# 
+# Usage:
+#   TB2J_magnon.py --config config.toml --bands
+
+# TB2J results location
+path = "TB2J_results"
+
+# Exchange interactions
+Jiso = true
+Jani = true
+DMI = true
+SIA = true
+
+# Band structure parameters
+kpath = "GMKG"
+npoints = 200
+filename = "magnon_bands.png"
+
+# DOS parameters
+kmesh = [20, 20, 20]
+gamma = true
+width = 0.001
+npts = 401

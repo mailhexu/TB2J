@@ -1,5 +1,7 @@
 Magnon Band Structure
-==================
+=====================
+
+For the theoretical background of magnon calculations, see :doc:`magnon_theory`.
 
 TB2J provides a unified command-line tool `TB2J_magnon.py` for magnon band structure and DOS calculations.
 
