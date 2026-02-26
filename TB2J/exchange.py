@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from TB2J.contour import Contour
 from TB2J.exchange_params import ExchangeParams
-from TB2J.external import p_map
+from TB2J.external import p_imap
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
 from TB2J.mycfr import CFR
@@ -378,7 +378,6 @@ class ExchangeNCL(Exchange):
         self.nbasis = self.G.nbasis
         # self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.rho = self.G.get_density_matrix()
-        self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         # self.HR0 = self.tbmodel.get_H0()
@@ -515,19 +514,30 @@ class ExchangeNCL(Exchange):
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
 
-    def get_all_A_vectorized(self, GR):
+    def get_all_A_vectorized(self, GR, orb_indices_map=None):
         """
         Vectorized calculation of all A matrix elements.
         Fully vectorized version based on TB2J_optimization_prototype.ipynb.
         Now works with properly ordered short_Rlist.
 
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
+        :param orb_indices_map: Optional dictionary mapping global orbital indices to reduced indices.
         :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
         """
 
         # Get magnetic sites and their orbital indices
         magnetic_sites = self.ind_mag_atoms
         iorbs = [self.iorb(site) for site in magnetic_sites]
+
+        if orb_indices_map is not None:
+            # Map global indices to reduced indices
+            new_iorbs = []
+            for site_orbs in iorbs:
+                new_orbs = np.array(
+                    [orb_indices_map[orb_idx] for orb_idx in site_orbs], dtype=int
+                )
+                new_iorbs.append(new_orbs)
+            iorbs = new_iorbs
 
         # Build the P matrices for all magnetic sites using the same method as original
         P = [self.get_P_iatom(site) for site in magnetic_sites]
@@ -570,13 +580,14 @@ class ExchangeNCL(Exchange):
 
             # Store results for each R vector
             for iR, R_vec in enumerate(self.short_Rlist):
-                A_val = A_val_tensor[iR]  # Shape: (4, 4)
-                A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
+                if (R_vec, i, j) in self.distance_dict:
+                    A_val = A_val_tensor[iR]  # Shape: (4, 4)
+                    A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
 
-                # Store with R vector key for compatibility
-                A[(R_vec, mi, mj)] = A_val
-                if A_orb_val is not None:
-                    A_orb[(R_vec, mi, mj)] = A_orb_val
+                    # Store with R vector key for compatibility
+                    A[(R_vec, mi, mj)] = A_val
+                    if A_orb_val is not None:
+                        A_orb[(R_vec, mi, mj)] = A_orb_val
 
         return A, A_orb
 
@@ -593,8 +604,8 @@ class ExchangeNCL(Exchange):
                 R, iatom, jatom = key
                 # Rm = tuple(-x for x in R)
                 # valm = self.A_ijR_orb[(Rm, jatom, iatom)]
-                ni = self.norb_reduced[iatom]
-                nj = self.norb_reduced[jatom]
+                ni = val.shape[2]
+                nj = val.shape[3]
 
                 is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                 ispin = self.ispin(iatom)
@@ -728,40 +739,16 @@ class ExchangeNCL(Exchange):
         self.rho_dict = rho
         return self.rho_dict
 
-    def integrate(self, AijRs, AijRs_orb=None, method="simpson"):
-        """
-        AijRs: a list of AijR,
-        wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
-        """
-        # if method == "trapezoidal":
-        #    integrate = trapezoidal_nonuniform
-        # elif method == "simpson":
-        #    integrate = simpson_nonuniform
-        #
-
-        # self.rho = integrate(self.contour.path, rhoRs)
-        for iR in self.R_ijatom_dict:
-            R_vec = self.short_Rlist[iR]
-            for iatom, jatom in self.R_ijatom_dict[iR]:
-                f = AijRs[(R_vec, iatom, jatom)]
-                # self.A_ijR[(R_vec, iatom, jatom)] = integrate(self.contour.path, f)
-                self.A_ijR[(R_vec, iatom, jatom)] = self.contour.integrate_values(f)
-
-                if self.orb_decomposition:
-                    # self.A_ijR_orb[(R_vec, iatom, jatom)] = integrate(
-                    #    self.contour.path, AijRs_orb[(R_vec, iatom, jatom)]
-                    # )
-                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                        self.contour.integrate_values(AijRs_orb[(R_vec, iatom, jatom)])
-                    )
-
     def get_quantities_per_e(self, e):
-        Gk_all = self.G.get_Gk_all(e)
+        # Gk_all = self.G.get_Gk_all(e)
         # mae = self.get_mae_kspace(Gk_all)
         mae = None
         # TODO: get the MAE from Gk_all
         # short_Rlist now contains actual R vectors
-        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
+
+        # Note: Using Gk_all=None to rely on iterative accumulation in get_GR
+        # to save memory (Optimization 1)
+        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=None)
 
         # Save diagonal elements of Green's function for charge and magnetic moment calculation
         # Only if debug option is enabled
@@ -920,47 +907,44 @@ class ExchangeNCL(Exchange):
         """
         print("Green's function Calculation started.")
 
-        AijRs = {}
-        AijRs_orb = {}
-
         self.validate()
 
         npole = len(self.contour.path)
+        weights = self.contour.weights
+
         if self.nproc > 1:
-            results = p_map(
+            results = p_imap(
                 self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
             )
         else:
-            results = map(
-                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+            results = (
+                self.get_quantities_per_e(e)
+                for e in tqdm(self.contour.path, total=npole)
             )
 
         for i, result in enumerate(results):
-            for iR in self.R_ijatom_dict:
-                R_vec = self.short_Rlist[iR]
-                for iatom, jatom in self.R_ijatom_dict[iR]:
-                    if (R_vec, iatom, jatom) in AijRs:
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
-                        if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
+            w = weights[i]
+            for key, val in result["AijR"].items():
+                self.A_ijR[key] += val * w
 
+            if self.orb_decomposition:
+                for key, val in result["AijR_orb"].items():
+                    if key in self.A_ijR_orb:
+                        self.A_ijR_orb[key] += val * w
                     else:
-                        AijRs[(R_vec, iatom, jatom)] = []
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
-                        if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)] = []
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
+                        self.A_ijR_orb[key] = val * w
 
-        # self.save_AijRs(AijRs)
-        self.integrate(AijRs, AijRs_orb)
+        # Apply integration factor (e.g. -pi/2 for CFR)
+        if npole > 0:
+            dummy = np.zeros(npole)
+            dummy[0] = 1.0
+            factor = self.contour.integrate_values(dummy) / weights[0]
+            for key in self.A_ijR:
+                self.A_ijR[key] *= factor
+            if self.orb_decomposition:
+                for key in self.A_ijR_orb:
+                    self.A_ijR_orb[key] *= factor
+
         self.get_rho_atom()
 
         # Compute charge and magnetic moments from Green's function diagonals

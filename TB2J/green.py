@@ -449,12 +449,20 @@ class TBGreen:
         :returns: real space green's function for one energy for a list of R.
         :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
         """
-        if Gk_all is None:
-            Gks = self.get_Gk_all(energy)
-        else:
-            Gks = Gk_all
+        if Gk_all is not None:
+            return self.compute_GR(Rpts, self.kpts, Gk_all)
 
-        return self.compute_GR(Rpts, self.kpts, Gks)
+        Rvecs = np.array(Rpts)
+        nR = len(Rvecs)
+        GR = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
+
+        for ik, kpt in enumerate(self.kpts):
+            Gk = self.get_Gk(ik, energy)
+            weight = self.kweights[ik]
+            phase_k = np.exp(self.k2Rfactor * np.dot(Rvecs, kpt)) * weight
+            GR += Gk[None, :, :] * phase_k[:, None, None]
+
+        return GR
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """

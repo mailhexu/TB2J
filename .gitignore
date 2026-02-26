@@ -1,5 +1,6 @@
 doc/refs/*.pdf
 
+debug/
 
 uv.lock
 
