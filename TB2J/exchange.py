@@ -599,8 +599,8 @@ class ExchangeNCL(Exchange):
                 R, iatom, jatom = key
                 # Rm = tuple(-x for x in R)
                 # valm = self.A_ijR_orb[(Rm, jatom, iatom)]
-                ni = self.norb_reduced[iatom]
-                nj = self.norb_reduced[jatom]
+                ni = val.shape[2]
+                nj = val.shape[3]
 
                 is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                 ispin = self.ispin(iatom)
@@ -923,7 +923,10 @@ class ExchangeNCL(Exchange):
 
             if self.orb_decomposition:
                 for key, val in result["AijR_orb"].items():
-                    self.A_ijR_orb[key] += val * w
+                    if key in self.A_ijR_orb:
+                        self.A_ijR_orb[key] += val * w
+                    else:
+                        self.A_ijR_orb[key] = val * w
 
         # Apply integration factor (e.g. -pi/2 for CFR)
         if npole > 0:
