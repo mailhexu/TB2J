@@ -4,6 +4,7 @@ import sys
 import numpy as np
 from numpy import array_str
 
+from TB2J.Jtensor import combine_J_tensor
 from TB2J.utils import symbol_number
 
 
@@ -213,6 +214,15 @@ def write_exchange_section(
             myfile.write(
                 f"[Testing!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
             )
+
+        Jiso_val = cls.exchange_Jdict[ll]
+        DMI_val = cls.dmi_ddict.get(ll) if cls.dmi_ddict is not None else None
+        Jani_val = cls.Jani_dict.get(ll) if cls.Jani_dict is not None else None
+        Jtensor = combine_J_tensor(Jiso=Jiso_val, D=DMI_val, Jani=Jani_val)
+        myfile.write(
+            "Combined J tensor (meV) [J = Jiso*I + DMI_antisymmetric + Jani_symmetric]:\n"
+        )
+        myfile.write(f"{array_str(Jtensor * 1e3, precision=3, suppress_small=True)}\n")
 
         if cls.NJT_ddict is not None and ll in cls.NJT_ddict:
             DMI = cls.NJT_ddict[ll] * 1e3

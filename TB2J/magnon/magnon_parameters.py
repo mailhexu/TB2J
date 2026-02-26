@@ -20,7 +20,7 @@ class MagnonParameters:
     """Common parameters for magnon band structure and DOS calculations."""
 
     path: str = "TB2J_results"
-    filename: str = None
+    filename: Optional[str] = None
 
     Jiso: bool = True
     Jani: bool = True
@@ -34,7 +34,7 @@ class MagnonParameters:
     spin_conf: Optional[List[List[float]]] = None
     show: bool = False
 
-    kpath: str = None
+    kpath: Optional[str] = None
     npoints: int = 300
 
     kmesh: List[int] = field(default_factory=lambda: [20, 20, 20])
@@ -78,11 +78,6 @@ class MagnonParameters:
                         f"spin_conf[{i}] must have 3 elements (mx, my, mz), got {len(vec)}"
                     )
 
-        if self.uz_file and not Path(self.uz_file).is_absolute():
-            self.uz_file = str(Path(self.path) / self.uz_file)
-        if self.spin_conf_file and not Path(self.spin_conf_file).is_absolute():
-            self.spin_conf_file = str(Path(self.path) / self.spin_conf_file)
-
 
 def add_common_magnon_args(parser: argparse.ArgumentParser) -> None:
     """Add common arguments for magnon band/DOS CLIs."""
@@ -97,24 +92,28 @@ def add_common_magnon_args(parser: argparse.ArgumentParser) -> None:
         "--no-Jiso",
         action="store_false",
         dest="Jiso",
+        default=True,
         help="Exclude isotropic exchange interactions",
     )
     parser.add_argument(
         "--no-Jani",
         action="store_false",
         dest="Jani",
+        default=True,
         help="Exclude anisotropic exchange interactions",
     )
     parser.add_argument(
         "--no-DMI",
         action="store_false",
         dest="DMI",
+        default=True,
         help="Exclude Dzyaloshinskii-Moriya interactions",
     )
     parser.add_argument(
         "--no-SIA",
         action="store_false",
         dest="SIA",
+        default=True,
         help="Exclude single-ion anisotropy",
     )
 
@@ -264,8 +263,6 @@ def _load_uz(params: MagnonParameters, nspin: int) -> np.ndarray:
     """
     if params.uz_file is not None:
         uz_file = params.uz_file
-        if not Path(uz_file).is_absolute():
-            uz_file = str(Path(params.path) / uz_file)
         uz = np.loadtxt(uz_file)
         if uz.shape[1] != 3:
             raise ValueError(
@@ -308,8 +305,6 @@ def _load_spin_conf(params: MagnonParameters, nspin: int) -> Optional[np.ndarray
         return magmoms
     elif params.spin_conf_file is not None:
         spin_conf_file = params.spin_conf_file
-        if not Path(spin_conf_file).is_absolute():
-            spin_conf_file = str(Path(params.path) / spin_conf_file)
         magmoms = np.loadtxt(spin_conf_file)
         if magmoms.shape[1] != 3:
             raise ValueError(
