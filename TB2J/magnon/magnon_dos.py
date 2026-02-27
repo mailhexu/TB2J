@@ -1,5 +1,6 @@
 """Module for magnon density of states calculations and plotting."""
 
+import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,12 @@ import numpy as np
 from ase.dft.dos import DOS
 
 from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.magnon_parameters import (
+    MagnonParameters,
+    add_common_magnon_args,
+    add_dos_specific_args,
+    prepare_magnon_from_params,
+)
 
 
 @dataclass
@@ -306,3 +313,102 @@ def plot_magnon_dos(
         print(f"DOS data saved to {data_file}")
 
     return dos
+
+
+def plot_magnon_dos_from_TB2J(params: MagnonParameters):
+    """Calculate and plot magnon DOS from TB2J results.
+
+    Parameters
+    ----------
+    params : MagnonParameters
+        Parameters for the calculation
+
+    Returns
+    -------
+    MagnonDOS
+        The calculated DOS object
+    """
+    magnon = prepare_magnon_from_params(params)
+
+    window = None
+    if params.window is not None:
+        window = (params.window[0] / 1000, params.window[1] / 1000)
+
+    print("\nCalculating magnon DOS...")
+    dos = plot_magnon_dos(
+        magnon,
+        kmesh=params.kmesh,
+        gamma=params.gamma,
+        width=params.width,
+        window=window,
+        npts=params.npts,
+        filename=params.filename,
+        show=params.show,
+    )
+
+    print(f"\nPlot saved to {params.filename}")
+    data_file = Path(params.filename).with_suffix(".json")
+    print(f"DOS data saved to {data_file}")
+
+    return dos
+
+
+def main():
+    """Command-line interface for magnon DOS calculation."""
+    parser = argparse.ArgumentParser(
+        description="Calculate and plot magnon DOS from TB2J results"
+    )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--config",
+        type=str,
+        help="Path to TOML configuration file",
+    )
+    group.add_argument(
+        "--save-config",
+        type=str,
+        help="Save default configuration to specified TOML file",
+    )
+
+    add_common_magnon_args(parser)
+    add_dos_specific_args(parser)
+
+    args = parser.parse_args()
+
+    if args.save_config:
+        params = MagnonParameters()
+        params.to_toml(args.save_config)
+        print(f"Saved default configuration to {args.save_config}")
+        return
+
+    if args.config:
+        params = MagnonParameters.from_toml(args.config)
+    else:
+        window = None
+        if args.window is not None:
+            window = tuple(args.window)
+        params = MagnonParameters(
+            path=args.path,
+            filename=args.output,
+            Jiso=args.Jiso,
+            Jani=args.Jani,
+            SIA=getattr(args, "SIA", True),
+            DMI=args.DMI,
+            Q=args.Q,
+            uz_file=args.uz_file,
+            spin_conf_file=args.spin_conf_file,
+            n=getattr(args, "n", None),
+            show=args.show,
+            kmesh=args.kmesh,
+            gamma=args.gamma,
+            width=args.width,
+            window=window,
+            npts=args.npts,
+        )
+
+    plot_magnon_dos_from_TB2J(params)
+
+
+if __name__ == "__main__":
+    main()
