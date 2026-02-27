@@ -99,6 +99,69 @@ class CFR:
         return self.integrate_values(gf_vals)
 
 
+class CFR2(CFR):
+    """
+    Alternative integration with the continued fraction representation.
+    Follows Ozaki, PRB 75, 035123 (2007) and Eq (c1-26).
+    It includes the 1/2*mu0 term explicitly.
+    """
+
+    def prepare_poles(self):
+        # Call parent to set up poles, residues, path
+        super().prepare_poles()
+
+        # Recompute weights for CFR2 formulation
+        # CFR2: rho = 0.5 * mu0 + (1/beta) * sum (G+ + G-) * Rp
+        # We want integrate_values to return res such that Im[-1/pi * res] = rho
+        # So res = -pi * j * rho = -pi*j * [0.5*mu0 + (1/beta)*sum]
+
+        # For the mu0 term (last element in path):
+        # mu0 = iR * G(iR), and we want contribution: -pi*j * 0.5 * mu0
+        # = -pi*j * 0.5 * iR * G(iR) = 0.5*pi*R * G(iR)
+        self.weights[-1] = 0.5 * np.pi * self.Rinf
+
+        # For the pole summation terms:
+        # Original CFR weights: 2j/beta * Rp (for each of +/- pair)
+        # CFR2 needs: -pi*j * (1/beta) * Rp for each pole
+        # But we have pairs (G+ and G-), so each gets the same weight
+        # Total contribution from pair: -pi*j * (1/beta) * Rp * (G+ + G-)
+        # So each individual weight should be: -pi*j * (1/beta) * Rp
+
+        # Recompute residues to get correct weights
+        jmat = np.arange(0, self.nz - 1)
+        b_mat = 1 / (2.0 * np.sqrt((2 * (jmat + 1) - 1) * (2 * (jmat + 1) + 1)))
+        b_mat = np.diag(b_mat, -1) + np.diag(b_mat, 1)
+        poles, eigenvectors = eig(b_mat)
+        residules = 0.25 * np.abs(eigenvectors[0, :]) ** 2 / poles**2
+
+        # Update weights for pole pairs
+        idx = 0
+        for p, r in zip(poles, residules):
+            if p > 0:
+                w = -np.pi * 1j * r / self.beta
+                self.weights[idx] = w  # G(alpha+)
+                self.weights[idx + 1] = w  # G(alpha-)
+                idx += 2
+
+    def integrate_values(self, gf_vals, imag=False):
+        # gf_vals can be:
+        # - scalar: shape (n_points,)
+        # - matrix: shape (n_points, nbasis, nbasis)
+        # weights: shape (n_points,)
+
+        # Use einsum to handle both cases
+        if gf_vals[0].ndim == 0:
+            # Scalar case
+            ret = np.sum(self.weights * gf_vals)
+        else:
+            # Matrix case: einsum over the first axis
+            ret = np.einsum("i,i...->...", self.weights, gf_vals)
+
+        if imag:
+            return np.imag(ret)
+        return ret
+
+
 def test_cfr():
     cfr = CFR(nz=100)
 
