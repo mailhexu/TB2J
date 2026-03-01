@@ -36,6 +36,7 @@ class MagnonParameters:
 
     kpath: Optional[str] = None
     npoints: int = 300
+    qpoints: Optional[dict] = None
 
     kmesh: List[int] = field(default_factory=lambda: [20, 20, 20])
     gamma: bool = True
@@ -86,6 +87,16 @@ def add_common_magnon_args(parser: argparse.ArgumentParser) -> None:
         "--path",
         default="TB2J_results",
         help="Path to TB2J results directory (default: TB2J_results)",
+    )
+
+    parser.add_argument(
+        "-Q",
+        "--qpoint",
+        type=float,
+        nargs=3,
+        metavar=("Qx", "Qy", "Qz"),
+        default=None,
+        help="Propagation vector Q in reciprocal lattice coordinates (e.g., 0.5 0 0 for X-point). Default: [0, 0, 0] (Gamma point)",
     )
 
     parser.add_argument(
@@ -152,6 +163,56 @@ def add_common_magnon_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def parse_qpoints_string(qpoints_str: str) -> dict | None:
+    """Parse qpoints string into a dictionary.
+
+    Parameters
+    ----------
+    qpoints_str : str
+        String in format 'name1:x1,y1,z1,name2:x2,y2,z2,...'
+
+    Returns
+    -------
+    dict or None
+        Dictionary mapping names to coordinate arrays, or None if input is empty
+
+    Example
+    -------
+    >>> parse_qpoints_string('G:0,0,0,X:0.5,0,0,M:0.5,0.5,0')
+    {'G': [0.0, 0.0, 0.0], 'X': [0.5, 0.0, 0.0], 'M': [0.5, 0.5, 0.0]}
+    """
+    if not qpoints_str:
+        return None
+
+    qpoints = {}
+    pairs = qpoints_str.split(",")
+
+    i = 0
+    while i < len(pairs):
+        if ":" in pairs[i]:
+            name, coords = pairs[i].split(":")
+            try:
+                coord_list = [float(coords)]
+                while len(coord_list) < 3:
+                    i += 1
+                    if i < len(pairs) and ":" not in pairs[i]:
+                        coord_list.append(float(pairs[i]))
+                    else:
+                        break
+
+                if len(coord_list) != 3:
+                    raise ValueError(
+                        f"Expected 3 coordinates for q-point '{name}', got {len(coord_list)}"
+                    )
+
+                qpoints[name.strip()] = coord_list
+            except ValueError as e:
+                raise ValueError(f"Invalid q-point format: {e}")
+        i += 1
+
+    return qpoints
+
+
 def add_band_specific_args(parser: argparse.ArgumentParser) -> None:
     """Add band-specific arguments."""
     parser.add_argument(
@@ -166,6 +227,13 @@ def add_band_specific_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=300,
         help="Number of k-points along the path (default: 300)",
+    )
+    parser.add_argument(
+        "--qpoints",
+        type=str,
+        default=None,
+        metavar="NAME:x,y,z",
+        help="Custom q-points as comma-separated name:coord pairs (e.g., 'G:0,0,0,X:0.5,0,0,M:0.5,0.5,0'). Overrides ASE default special points.",
     )
     parser.add_argument(
         "-o",
@@ -231,13 +299,15 @@ def parse_common_args(args) -> MagnonParameters:
             args.spin_conf[i : i + 3] for i in range(0, len(args.spin_conf), 3)
         ]
 
+    Q = args.qpoint if hasattr(args, "qpoint") else None
+
     return MagnonParameters(
         path=args.path,
         Jiso=getattr(args, "Jiso", True),
         Jani=getattr(args, "Jani", True),
         DMI=getattr(args, "DMI", True),
         SIA=getattr(args, "SIA", True),
-        Q=args.Q,
+        Q=Q,
         uz_file=args.uz_file,
         n=getattr(args, "n", None),
         spin_conf_file=args.spin_conf_file,

@@ -26,7 +26,7 @@ usage: TB2J_magnon.py [-h] [--bands] [--dos]
                       [-c SPIN_CONF_FILE | --spin-conf M [M ...]]
                       [-s]
                       # Band options
-                      [-k KPATH] [--npoints NPOINTS] [--band-output BAND_OUTPUT]
+                      [-k KPATH] [--npoints NPOINTS] [--qpoints QPOINTS] [--band-output BAND_OUTPUT]
                       # DOS options
                       [--kmesh nx ny nz] [--no-gamma] [--width WIDTH]
                       [--window emin emax] [--npts NPTS] [--dos-output DOS_OUTPUT]
@@ -56,6 +56,8 @@ Band structure options:
   -k KPATH, --kpath KPATH
                         k-path specification (default: auto-detected)
   --npoints NPOINTS     Number of k-points along the path (default: 300)
+  --qpoints QPOINTS     Custom q-points as name:coord pairs (e.g., "G:0,0,0,X:0.5,0,0")
+                        Overrides ASE default special points
   --band-output BAND_OUTPUT
                         Output file name for band structure (default: magnon_bands.png)
 
@@ -87,6 +89,9 @@ TB2J_magnon.py --config config.toml --bands --dos
 
 # Specify spin configuration via CLI (two antiparallel spins of 3 μB)
 TB2J_magnon.py --bands --spin-conf 0 0 3 0 0 -3
+
+# Use custom q-points (see Custom Q-Points section below)
+TB2J_magnon.py --bands --kpath GXMR --qpoints "G:0,0,0,X:0.5,0,0,M:0.5,0.5,0,R:0.5,0.5,0.5"
 ```
 
 ### Configuration File
@@ -123,6 +128,14 @@ kpath = "GXMR"
 npoints = 300
 filename = "magnon_bands.png"
 
+# Custom q-points (optional, overrides ASE defaults)
+# Uncomment to use custom q-point definitions
+# [qpoints]
+# G = [0.0, 0.0, 0.0]
+# X = [0.5, 0.0, 0.0]
+# M = [0.5, 0.5, 0.0]
+# R = [0.5, 0.5, 0.5]
+
 # DOS parameters
 kmesh = [20, 20, 20]
 gamma = true
@@ -157,6 +170,30 @@ plot_magnon_bands_from_TB2J(params)
 params.filename = "magnon_dos.png"
 params.kmesh = [30, 30, 30]
 plot_magnon_dos_from_TB2J(params)
+```
+
+#### With Custom Q-Points
+
+```python
+from TB2J.magnon.magnon_parameters import MagnonParameters
+from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+
+# Define custom q-points
+custom_qpoints = {
+    "G": [0.0, 0.0, 0.0],
+    "X": [0.5, 0.0, 0.0],
+    "M": [0.5, 0.5, 0.0],
+    "R": [0.5, 0.5, 0.5],
+}
+
+params = MagnonParameters(
+    path="TB2J_results",
+    kpath="GXMRG",
+    qpoints=custom_qpoints,  # Pass custom q-points
+    filename="magnon_bands_custom.png",
+)
+
+plot_magnon_bands_from_TB2J(params)
 ```
 
 ### Advanced Usage with Magnetic Structure
@@ -272,3 +309,148 @@ The `--spin-conf-file` should contain a nspin×3 array with magnetic moments:
 
 Each row represents the magnetic moment vector $(m_x, m_y, m_z)$ in $\mu_B$. 
 The number of rows must match the number of magnetic atoms in your system.
+
+## Custom Q-Points
+
+By default, TB2J uses ASE's built-in special k-points for standard crystal structures. 
+These are high-symmetry points (Γ, X, M, R, etc.) that ASE automatically identifies 
+based on the crystal lattice type and symmetry.
+
+However, you can specify **custom q-points** with your own names and coordinates. 
+This is useful when:
+
+1. **Non-standard high-symmetry points**: Your crystal has high-symmetry points 
+   that don't match ASE's defaults
+2. **Custom k-path**: You want to explore a specific region of the Brillouin zone
+3. **Different naming convention**: You prefer different labels (e.g., "G" vs "Γ")
+
+### Three Methods to Specify Custom Q-Points
+
+#### Method 1: Command Line
+
+Use the `--qpoints` option with format `name:x,y,z` pairs separated by commas:
+
+```bash
+TB2J_magnon.py --bands \
+    --kpath GXMRG \
+    --qpoints "G:0,0,0,X:0.5,0,0,M:0.5,0.5,0,R:0.5,0.5,0.5"
+```
+
+**Format**: Each q-point is specified as `NAME:x,y,z` where:
+- `NAME`: The label for the q-point (e.g., "G", "X", "M")
+- `x,y,z`: The three coordinates in fractional reciprocal lattice units
+
+Multiple q-points are separated by commas.
+
+#### Method 2: TOML Configuration
+
+In your TOML configuration file, add a `[qpoints]` section:
+
+```toml
+kpath = "GXMRG"
+
+[qpoints]
+G = [0.0, 0.0, 0.0]     # Gamma point
+X = [0.5, 0.0, 0.0]     # X point
+M = [0.5, 0.5, 0.0]     # M point
+R = [0.5, 0.5, 0.5]     # R point
+```
+
+The `kpath` parameter specifies the path connecting these q-points, and the 
+`[qpoints]` section defines their coordinates.
+
+#### Method 3: Python API
+
+When using the Python API, pass a dictionary to the `qpoints` parameter:
+
+```python
+from TB2J.magnon.magnon_parameters import MagnonParameters
+from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+
+# Define custom q-points as a dictionary
+custom_qpoints = {
+    "G": [0.0, 0.0, 0.0],    # Gamma point
+    "X": [0.5, 0.0, 0.0],    # X point
+    "M": [0.5, 0.5, 0.0],    # M point
+    "R": [0.5, 0.5, 0.5],    # R point
+}
+
+params = MagnonParameters(
+    path="TB2J_results",
+    kpath="GXMRG",           # Path connecting the q-points
+    qpoints=custom_qpoints,  # Your custom q-points
+    filename="magnon_bands.png",
+)
+
+plot_magnon_bands_from_TB2J(params)
+```
+
+### How It Works
+
+1. **Default Behavior**: When `qpoints` is not specified, TB2J uses ASE's 
+   `bandpath()` function with built-in special points for the crystal structure.
+
+2. **Custom Q-Points**: When you provide custom q-points, they are passed to 
+   ASE's `bandpath()` function via the `special_points` parameter, overriding 
+   the defaults.
+
+3. **K-Path**: The `kpath` parameter (e.g., "GXMRG") specifies the sequence of 
+   q-points to visit. Each letter should correspond to a name in your q-points 
+   definition.
+
+### Examples
+
+#### Example 1: Hexagonal Lattice with Custom K-Point
+
+```bash
+# For a hexagonal lattice where you want to define a specific K-point
+TB2J_magnon.py --bands \
+    --kpath GMKG \
+    --qpoints "G:0,0,0,M:0.5,0,0,K:0.333,0.333,0"
+```
+
+#### Example 2: Complete TOML Example
+
+```toml
+# config_custom.toml
+path = "TB2J_results"
+
+# Exchange interactions
+Jiso = true
+Jani = true
+DMI = true
+SIA = true
+
+# Band structure with custom q-points
+kpath = "GXMRG"
+npoints = 300
+filename = "magnon_bands_custom.png"
+
+[qpoints]
+G = [0.0, 0.0, 0.0]
+X = [0.5, 0.0, 0.0]
+M = [0.5, 0.5, 0.0]
+R = [0.5, 0.5, 0.5]
+```
+
+Then use it:
+
+```bash
+TB2J_magnon.py --config config_custom.toml --bands
+```
+
+### Important Notes
+
+1. **Coordinate System**: Q-point coordinates are in **fractional reciprocal 
+   lattice units** (not Cartesian). For example, [0.5, 0, 0] means halfway 
+   along the first reciprocal lattice vector.
+
+2. **Matching Names**: The names in your `kpath` must match the keys in your 
+   `qpoints` dictionary/TOML section. Case-sensitive.
+
+3. **Backward Compatibility**: If you don't specify custom q-points, TB2J 
+   works exactly as before, using ASE's default special points.
+
+4. **Partial Override**: You only need to define the q-points referenced in 
+   your kpath. Any additional points in ASE's defaults that aren't used won't 
+   matter.

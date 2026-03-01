@@ -361,6 +361,7 @@ class Magnon:
         Magnon
             Initialized Magnon instance
         """
+        print(f"kwargs={kwargs}")
         # Get magnetic moments for magnetic atoms
         magmoms = exc.get_magnetic_moments()
         # nspin = len(magmoms)  # Number of magnetic atoms
@@ -374,6 +375,7 @@ class Magnon:
         JR = exc.get_full_Jtensor_for_Rlist(
             order="ij33", asr=False, SIA=include_SIA, **kwargs
         )
+        print(JR)
 
         return cls(
             nspin=exc.nspin,
@@ -654,7 +656,11 @@ def plot_magnon_bands_from_TB2J(
         _, kptlist, _, _, spk = auto_kpath(magnon.cell, None, npoints=params.npoints)
         kpoints = np.concatenate(kptlist)
     else:
-        bandpath = magnon.cell.bandpath(path=params.kpath, npoints=params.npoints)
+        bandpath = magnon.cell.bandpath(
+            path=params.kpath,
+            npoints=params.npoints,
+            special_points=params.qpoints if params.qpoints else None,
+        )
         kpoints = bandpath.kpts
         spk = bandpath.special_points
         spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))

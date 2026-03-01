@@ -128,10 +128,12 @@ def main():
     if not args.bands and not args.dos:
         parser.error("Please specify at least one of --bands or --dos")
 
+    window = None
     if args.config:
         params = MagnonParameters.from_toml(args.config)
+        if params.window is not None:
+            window = params.window
     else:
-        window = None
         if args.window is not None:
             window = tuple(args.window)
         params = MagnonParameters(
@@ -159,6 +161,12 @@ def main():
             UserWarning,
             stacklevel=2,
         )
+        qpoints = None
+        if hasattr(args, "qpoints") and args.qpoints:
+            from TB2J.magnon.magnon_parameters import parse_qpoints_string
+
+            qpoints = parse_qpoints_string(args.qpoints)
+
         band_params = MagnonParameters(
             path=params.path,
             filename=args.band_output,
@@ -173,6 +181,7 @@ def main():
             show=params.show,
             kpath=args.kpath,
             npoints=args.npoints,
+            qpoints=qpoints,
         )
         plot_magnon_bands_from_TB2J(band_params)
 
