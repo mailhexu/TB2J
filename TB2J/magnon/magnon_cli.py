@@ -66,6 +66,18 @@ def add_band_specific_args_to_group(group) -> None:
         help="Number of k-points along the path (default: 300)",
     )
     group.add_argument(
+        "--qpoints",
+        type=str,
+        default=None,
+        metavar="NAME:x,y,z",
+        help=(
+            "Custom q-points as comma-separated name:coord pairs. "
+            "Format: 'G:0,0,0,X:0.5,0,0,M:0.5,0.5,0'. "
+            "Overrides ASE default special points. "
+            "Coordinates in fractional reciprocal lattice units."
+        ),
+    )
+    group.add_argument(
         "--band-output",
         default="magnon_bands.png",
         help="Output file name for band structure (default: magnon_bands.png)",

@@ -129,7 +129,7 @@ class Magnon:
             for iqpt, qpt in enumerate(kpoints):
                 # Fourier transform of exchange tensors
                 phase = 2 * np.pi * R @ qpt
-                Jq[iqpt] += np.exp(1j * phase) * JRprime[iR]
+                Jq[iqpt] += np.exp(-1j * phase) * JRprime[iR]
 
         # Jq_copy = Jq.copy()
         # Jq.swapaxes(-1, -2)  # swap xyz
@@ -163,13 +163,23 @@ class Magnon:
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 
         Jq = -self.Jq(kpoints)
+        Jmq = Jq.swapaxes(-1, -2).swapaxes(1, 2)
 
         Ssqrt = np.sqrt(self.Snorm)
-        print(f"{Ssqrt=}")
 
-        A1 = np.einsum("ix,kijxy,jy->kij", U, Jq, U.conj())
-        A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq, U)
+        # A1 = UT J(-k) U.conj()
+        A1 = np.einsum("ix,kijxy,jy->kij", U, Jmq, U.conj())
+        # A2 = [ UT J(-k) U.conj() ] .conj() = U.conj()^T J(k).conj() U
+        A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq.conj(), U)
+        # B = UT J(-k) U
         B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
+
+        # debug: check B(q) == B(-q).T
+        # Jmq = -self.Jq(-kpoints)
+        # B2 = np.einsum("jx,kjixy,iy->kij", U, Jmq, U)
+        # if not np.allclose(B, B2):
+        #    print("Warning: B and B2 are not consistent!")
+        #    print(f"Max difference: {np.max(np.abs(B - B2))}")
 
         # C = \delta_ij \sum_l (S_l v_i^T J'_{il} v_l)
         C = np.diag(np.einsum("ix,ijxy,jy, j->i", V, 2 * J0, V, self.Snorm))
@@ -642,6 +652,7 @@ def plot_magnon_bands_from_TB2J(
     kpath_labels, bands, xlist = magnon.get_magnon_bands(
         path=params.kpath,
         npoints=params.npoints,
+        special_points=params.qpoints if params.qpoints else None,
     )
 
     # Convert energies to meV
@@ -676,7 +687,7 @@ def plot_magnon_bands_from_TB2J(
 
     # Plot band structure
     print(f"Plotting bands to {params.filename}")
-    magnon_bands.plot(filename=params.filename)
+    magnon_bands.plot(filename=params.filename, show=params.show)
 
     return magnon
 
