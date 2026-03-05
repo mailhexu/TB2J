@@ -3,6 +3,7 @@ import os
 import pickle
 import sys
 import tempfile
+import time
 from collections import defaultdict
 from shutil import rmtree
 
@@ -132,7 +133,14 @@ class TBGreen:
         self.k_sym = k_sym
         self.nproc = nproc
         self.fermi_width = float(smearing_width)
+        print(
+            f"starting to prepare eigenvalues and eigenvectors for {self.nkpts} k-points..."
+        )
+        t0 = time.time()
         self._prepare_eigen()
+        print(
+            f"Finished preparing eigenvalues and eigenvectors. Time taken: {time.time() - t0:.2f} seconds"
+        )
 
     def prepare_kpts(
         self, kmesh=None, gamma=True, ibz=False, kpts=None, kweights=None, tbmodel=None
