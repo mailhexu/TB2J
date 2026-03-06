@@ -49,7 +49,6 @@ def run_abacus2J():
         nz=args.nz,
         description=args.description,
         output_path=args.output_path,
-        use_cache=args.use_cache,
         nproc=args.np,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,

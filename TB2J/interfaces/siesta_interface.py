@@ -15,6 +15,16 @@ except ImportError:
     )
 
 
+def _exchange_done(output_path):
+    """Return True if a completed exchange result already exists at *output_path*."""
+    return os.path.exists(os.path.join(output_path, "TB2J.pickle"))
+
+
+def _mae_done(output_path):
+    """Return True if a completed MAE result already exists at *output_path*."""
+    return os.path.exists(os.path.join(output_path, "MAE.dat"))
+
+
 def siesta_anisotropy(**kwargs):
     pass
 
@@ -49,7 +59,7 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
         nproc: int
             The number of processors for the calculation. Default is 1.
         use_cache: bool
-            Whether to use the cache for the calculation. Default is False.
+            Whether to use the cache for the calculation. (Always enabled.)
         output_path: str
             The output path for the calculation. Default is "TB2J_results".
         orb_decomposition: bool
@@ -71,7 +81,6 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
         Rcut=None,
         ne=None,
         nproc=1,
-        use_cache=False,
         output_path="TB2J_results",
         orb_decomposition=False,
         orth=False,
@@ -107,18 +116,23 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
  working directory: {os.getcwd()}
  fdf_fname: {fdf_fname}.
 \n"""
-        exchange = ExchangeCL2(
-            tbmodels=(tbmodel_up, tbmodel_dn),
-            atoms=tbmodel_up.atoms,
-            basis=basis,
-            efermi=0.0,
-            # magnetic_elements=exargs['magnetic_elements'],
-            # include_orbs=ex
-            **exargs,
-        )
-        exchange.run(path=output_path)
-        print("\n")
-        print(f"All calculation finished. The results are in {output_path} directory.")
+        if _exchange_done(output_path):
+            print(f"Exchange results already exist in {output_path}, skipping.")
+        else:
+            exchange = ExchangeCL2(
+                tbmodels=(tbmodel_up, tbmodel_dn),
+                atoms=tbmodel_up.atoms,
+                basis=basis,
+                efermi=0.0,
+                # magnetic_elements=exargs['magnetic_elements'],
+                # include_orbs=ex
+                **exargs,
+            )
+            exchange.run(path=output_path)
+            print("\n")
+            print(
+                f"All calculation finished. The results are in {output_path} directory."
+            )
 
     elif parser.spin.is_spinorbit or parser.spin.is_noncolinear:
         print("Reading Siesta hamiltonian: non-colinear spin.")
@@ -134,50 +148,55 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
 \n"""
         exargs["description"] = description
         if not model.split_soc:
-            exchange = ExchangeNCL(
-                tbmodels=model,
-                atoms=model.atoms,
-                basis=basis,
-                efermi=0.0,
-                # magnetic_elements=magnetic_elements,
-                # include_orbs=include_orbs,
-                output_path=output_path,
-                **exargs,
-            )
-            exchange.run(path=output_path)
-            print("\n")
-            print(
-                f"All calculation finished. The results are in {output_path} directory."
-            )
+            if _exchange_done(output_path):
+                print(f"Exchange results already exist in {output_path}, skipping.")
+            else:
+                exchange = ExchangeNCL(
+                    tbmodels=model,
+                    atoms=model.atoms,
+                    basis=basis,
+                    efermi=0.0,
+                    # magnetic_elements=magnetic_elements,
+                    # include_orbs=include_orbs,
+                    output_path=output_path,
+                    **exargs,
+                )
+                exchange.run(path=output_path)
+                print("\n")
+                print(
+                    f"All calculation finished. The results are in {output_path} directory."
+                )
         else:
-            print("Starting to calculate MAE.")
-            model.set_so_strength(0.0)
-            MAE = MAEGreen(
-                tbmodels=model,
-                atoms=model.atoms,
-                basis=basis,
-                efermi=None,
-                angles="xyz",
-                # magnetic_elements=magnetic_elements,
-                # include_orbs=include_orbs,
-                **exargs,
-            )
-            # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
-            # phis = [0, 0, 0, 0]
-            # MAE.set_angles(thetas=thetas, phis=phis)
-            # MAE.set_xyz_angles()
-            MAE.run(output_path=f"{output_path}_anisotropy", with_eigen=False)
-            # print(
-            #    f"MAE calculation finished. The results are in {output_path} directory."
-            # )
+            mae_output = f"{output_path}_anisotropy"
+            if _mae_done(mae_output):
+                print(f"MAE results already exist in {mae_output}, skipping.")
+            else:
+                print("Starting to calculate MAE.")
+                model.set_so_strength(0.0)
+                MAE = MAEGreen(
+                    tbmodels=model,
+                    atoms=model.atoms,
+                    basis=basis,
+                    efermi=None,
+                    angles="xyz",
+                    # magnetic_elements=magnetic_elements,
+                    # include_orbs=include_orbs,
+                    **exargs,
+                )
+                MAE.run(output_path=mae_output, with_eigen=False)
 
             angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
             for key, val in angle.items():
                 theta, phi = val
+                output_path_full = f"{output_path}_{key}"
+                if _exchange_done(output_path_full):
+                    print(
+                        f"Exchange results already exist in {output_path_full}, skipping."
+                    )
+                    continue
                 model.set_so_strength(1.0)
                 model.set_Hsoc_rotation_angle([theta, phi])
                 basis = dict(zip(model.orbs, list(range(model.nbasis))))
-                output_path_full = f"{output_path}_{key}"
                 exchange = ExchangeNCL(
                     tbmodels=model,
                     atoms=model.atoms,
@@ -192,11 +211,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 )
 
             merge(
-                "TB2J_results_x",
-                "TB2J_results_y",
-                "TB2J_results_z",
+                f"{output_path}_x",
+                f"{output_path}_y",
+                f"{output_path}_z",
                 main_path=None,
                 save=True,
-                write_path="TB2J_results",
+                write_path=output_path,
             )
-            print("Final TB2J_results written to TB2J_results directory.")
+            print(f"Final results written to {output_path} directory.")

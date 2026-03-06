@@ -27,7 +27,6 @@ class ExchangeCL2(ExchangeCL):
             tbmodel=self.tbmodel_up,
             kmesh=self.kmesh,
             efermi=self.efermi,
-            use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
         )
@@ -35,7 +34,6 @@ class ExchangeCL2(ExchangeCL):
             tbmodel=self.tbmodel_dn,
             kmesh=self.kmesh,
             efermi=self.efermi,
-            use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
         )
@@ -434,22 +432,32 @@ class ExchangeCL2(ExchangeCL):
                 self.get_quantities_per_e(e)
                 for e in tqdm(self.contour.path, total=npole)
             )
+            for i, result in enumerate(results):
+                w = weights[i]
+                Jorb_list = result["Jorb_list"]
+                JJ_list = result["JJ_list"]
+                for key, val in Jorb_list.items():
+                    self.Jorb[key] += val * w
+                for key, val in JJ_list.items():
+                    self.JJ[key] += val * w
         else:
-            # pool = ProcessPool(nodes=self.nproc)
-            # results = pool.map(self.get_AijR_rhoR ,self.contour.path)
-            results = p_imap(
-                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
-            )
-
-        for i, result in enumerate(results):
-            w = weights[i]
-            Jorb_list = result["Jorb_list"]
-            JJ_list = result["JJ_list"]
-            for key, val in Jorb_list.items():
-                self.Jorb[key] += val * w
-
-            for key, val in JJ_list.items():
-                self.JJ[key] += val * w
+            self.Gup.enter_parallel()
+            self.Gdn.enter_parallel()
+            try:
+                results = p_imap(
+                    self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
+                )
+                for i, result in enumerate(results):
+                    w = weights[i]
+                    Jorb_list = result["Jorb_list"]
+                    JJ_list = result["JJ_list"]
+                    for key, val in Jorb_list.items():
+                        self.Jorb[key] += val * w
+                    for key, val in JJ_list.items():
+                        self.JJ[key] += val * w
+            finally:
+                self.Gup.exit_parallel()
+                self.Gdn.exit_parallel()
 
         # Apply integration factor (e.g. -pi/2 for CFR)
         if npole > 0:

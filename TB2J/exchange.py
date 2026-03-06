@@ -362,7 +362,6 @@ class ExchangeNCL(Exchange):
             ibz=self.ibz,
             gamma=True,
             efermi=self.efermi,
-            use_cache=self._use_cache,
             nproc=self.nproc,
             initial_emin=self.emin,
             smearing_width=self.smearing,
@@ -907,19 +906,26 @@ class ExchangeNCL(Exchange):
         weights = self.contour.weights
 
         if self.nproc > 1:
-            results = p_imap(
-                self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
-            )
+            self.G.enter_parallel()
+            try:
+                results = p_imap(
+                    self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
+                )
+                for i, result in enumerate(results):
+                    w = weights[i]
+                    for key, val in result["AijR"].items():
+                        self.A_ijR[key] += val * w
+            finally:
+                self.G.exit_parallel()
         else:
             results = (
                 self.get_quantities_per_e(e)
                 for e in tqdm(self.contour.path, total=npole)
             )
-
-        for i, result in enumerate(results):
-            w = weights[i]
-            for key, val in result["AijR"].items():
-                self.A_ijR[key] += val * w
+            for i, result in enumerate(results):
+                w = weights[i]
+                for key, val in result["AijR"].items():
+                    self.A_ijR[key] += val * w
 
             if self.orb_decomposition:
                 for key, val in result["AijR_orb"].items():

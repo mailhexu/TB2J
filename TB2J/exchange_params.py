@@ -26,7 +26,6 @@ class ExchangeParams:
     exclude_orbs = []
     ne: int = 0
     Rcut: float = None
-    _use_cache: bool = False
     nproc: int = 1
     description: str = ""
     write_density_matrix: bool = False
@@ -55,7 +54,6 @@ class ExchangeParams:
         nz=100,
         ne=None,
         Rcut=None,
-        use_cache=False,
         nproc=1,
         description="",
         write_density_matrix=False,
@@ -83,7 +81,6 @@ class ExchangeParams:
         self.exclude_orbs = exclude_orbs
         self.ne = ne
         self.Rcut = Rcut
-        self._use_cache = use_cache
         self.nproc = nproc
         self.description = description
         self.write_density_matrix = write_density_matrix
@@ -218,13 +215,6 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
-        "--use_cache",
-        help="whether to use disk file for temporary storing wavefunctions and hamiltonian to reduce memory usage. Default: False",
-        action="store_true",
-        default=False,
-    )
-
-    parser.add_argument(
         "--description",
         help="add description of the calculatiion to the xml file. Essential information, like the xc functional, U values, magnetic state should be given.",
         type=str,
@@ -313,7 +303,6 @@ def parser_argument_to_dict(args) -> dict:
         "exclude_orbs": args.exclude_orbs,
         "ne": args.ne,
         "Rcut": args.rcut,
-        "use_cache": args.use_cache,
         "nproc": args.np,
         "description": args.description,
         "write_density_matrix": args.write_dm,

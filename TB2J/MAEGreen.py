@@ -9,7 +9,7 @@ from typing_extensions import DefaultDict
 
 from TB2J.anisotropy import Anisotropy
 from TB2J.exchange import ExchangeNCL
-from TB2J.external import p_map
+from TB2J.external import p_imap
 from TB2J.mathutils.fibonacci_sphere import fibonacci_semisphere
 
 # from HamiltonIO.model.rotate_spin import rotate_Matrix_from_z_to_axis, rotate_Matrix_from_z_to_sperical
@@ -17,6 +17,7 @@ from TB2J.mathutils.fibonacci_sphere import fibonacci_semisphere
 from TB2J.mathutils.rotate_spin import (
     rotate_spinor_matrix,
 )
+from TB2J.sharedmem import attach_shm, detach_shm, free_shm, to_shm
 
 
 def get_occupation(evals, kweights, nel, width=0.1):
@@ -140,6 +141,18 @@ class MAEGreen(ExchangeNCL):
         eband = np.sum(evals * occ * self.G.kweights[:, np.newaxis])
         return eband
 
+    def _setup_Hsoc_k_shm(self, Hsoc_k):
+        """Copy Hsoc_k into a shared memory block and store descriptor."""
+        self._shm_Hsoc_k, self._desc_Hsoc_k = to_shm(np.asarray(Hsoc_k), "Hsoc_k")
+        self._use_shm_Hsoc_k = True
+
+    def _teardown_Hsoc_k_shm(self):
+        """Release the shared memory block for Hsoc_k."""
+        if getattr(self, "_shm_Hsoc_k", None) is not None:
+            free_shm(self._shm_Hsoc_k)
+            self._shm_Hsoc_k = None
+        self._use_shm_Hsoc_k = False
+
     def get_perturbed(self, e, thetas, phis):
         self.tbmodel.set_so_strength(0.0)
         # maxsoc = self.tbmodel.get_max_Hsoc_abs()
@@ -149,6 +162,13 @@ class MAEGreen(ExchangeNCL):
         #          comparing to the maximum of {maxH0} eV of the spin part of the Hamiltonian.
         #          The SOC is too strong, the perturbation theory may not be valid.""")
 
+        # Reconstruct Hsoc_k from shared memory if available, otherwise use self.Hsoc_k
+        if getattr(self, "_use_shm_Hsoc_k", False):
+            Hsoc_k, _shm_Hsoc_k = attach_shm(self._desc_Hsoc_k)
+        else:
+            Hsoc_k = self.Hsoc_k
+            _shm_Hsoc_k = None
+
         # time the G0k calculation
         G0K = self.G.get_Gk_all(e)
         na = len(thetas)
@@ -157,24 +177,14 @@ class MAEGreen(ExchangeNCL):
         # dE_angle_orbitals = np.zeros((na, self.natoms, self.norb, self.norb), dtype=complex)
         dE_angle_atom_orb = DefaultDict(lambda: 0)
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
-            for ik, dHk in enumerate(self.Hsoc_k):
+            for ik, dHk in enumerate(Hsoc_k):
                 dHi = rotate_spinor_matrix(dHk, theta, phi)
                 GdH = G0K[ik] @ dHi
-                # dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
-                # diagonal of second order perturbation.
-                # dG2diag = np.diag(GdH @ GdH)
-                # dG2 = np.einsum("ij,ji->ij", GdH,   GdH)
                 dG2 = GdH * GdH.T
                 dG2sum = np.sum(dG2)
-                # print(f"dG2sum-sum: {dG2sum}")
-                # dG2sum = np.sum(dG2diag)
 
-                # dG2sum = np.trace(GdH @ GdH)
-                # print(f"dG2sum-Tr: {dG2sum}")
-                # dG1sum = np.trace(GdH)
-                # print(f"dG1sum-Tr: {dG1sum}")
+                # dG2sum = np.einsum("ij,ji->", GdH, GdH)
 
-                # dG2diag = np.diag(GdH @G0K[i].T.conj() @ dHi)
                 # dE_angle[iangle] += np.trace(GdH@GdH) * self.G.kweights[ik]
                 # dE_angle[iangle] += np.trace(GdH@G0K[ik].T.conj()@dHi ) * self.G.kweights[ik]
                 dE_angle[iangle] += dG2sum * self.G.kweights[ik]
@@ -203,6 +213,8 @@ class MAEGreen(ExchangeNCL):
                             # Store orbital-resolved data for diagonal terms
                             if iatom == jatom:
                                 dE_angle_atom_orb[(iangle, iatom)] += dE_ij_orb
+        if _shm_Hsoc_k is not None:
+            detach_shm(_shm_Hsoc_k)
         return dE_angle, dE_angle_matrix, dE_angle_atom_orb
 
     def get_perturbed_R(self, e, thetas, phis):
@@ -238,18 +250,34 @@ class MAEGreen(ExchangeNCL):
             return self.get_perturbed(e, thetas, phis)
 
         if self.nproc > 1:
-            results = p_map(func, self.contour.path, num_cpus=self.nproc)
+            # Move Hsoc_k and self.G's large arrays into shared memory so dill
+            # only serialises shm metadata (names/shapes) into each worker process.
+            self._setup_Hsoc_k_shm(self.Hsoc_k)
+            # Delete the local copy so dill does not serialise it redundantly
+            # into every worker alongside the shm descriptor.
+            del self.Hsoc_k
+            self.G.enter_parallel()
+            try:
+                results = p_imap(func, self.contour.path, num_cpus=self.nproc)
+                for weight, result in zip(self.contour.weights, results):
+                    dE_angle, dE_angle_matrix, dE_angle_atom_orb = result
+                    self.es += dE_angle * weight
+                    self.es_matrix += dE_angle_matrix * weight
+                    for key, value in dE_angle_atom_orb.items():
+                        self.es_atom_orb[key] += value * weight
+            finally:
+                self._teardown_Hsoc_k_shm()
+                self.G.exit_parallel()
         else:
+            self._use_shm_Hsoc_k = False
             npole = len(self.contour.path)
             results = map(func, tqdm.tqdm(self.contour.path, total=npole))
-        for i, result in enumerate(results):
-            dE_angle, dE_angle_matrix, dE_angle_atom_orb = result
-            self.es += dE_angle * self.contour.weights[i]
-            self.es_matrix += dE_angle_matrix * self.contour.weights[i]
-            for key, value in dE_angle_atom_orb.items():
-                self.es_atom_orb[key] += (
-                    dE_angle_atom_orb[key] * self.contour.weights[i]
-                )
+            for weight, result in zip(self.contour.weights, results):
+                dE_angle, dE_angle_matrix, dE_angle_atom_orb = result
+                self.es += dE_angle * weight
+                self.es_matrix += dE_angle_matrix * weight
+                for key, value in dE_angle_atom_orb.items():
+                    self.es_atom_orb[key] += value * weight
 
         self.es = -np.imag(self.es) / (2 * np.pi)
         self.es_matrix = -np.imag(self.es_matrix) / (2 * np.pi)

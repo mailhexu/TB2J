@@ -1,11 +1,8 @@
 import copy
-import os
 import pickle
 import sys
-import tempfile
 import time
 from collections import defaultdict
-from shutil import rmtree
 
 import numpy as np
 from HamiltonIO.model.occupations import GaussOccupations
@@ -13,6 +10,13 @@ from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
 
 from TB2J.kpoints import ir_kpts, monkhorst_pack
+from TB2J.sharedmem import (
+    attach_shm,
+    detach_shm,
+    free_shm,
+    read_shm,
+    to_shm,
+)
 
 # from TB2J.mathutils.fermi import fermi
 
@@ -90,8 +94,6 @@ class TBGreen:
         kpts=None,
         kweights=None,
         k_sym=False,
-        use_cache=False,
-        cache_path=None,
         nproc=1,
         initial_emin=-25,
         smearing_width=0.01,
@@ -104,8 +106,6 @@ class TBGreen:
         :param kpts: user defined kpoints
         :param kweights: weights for user defined kpoints
         :param k_sym: whether the kpoints are symmetrized
-        :param use_cache: whether to use cache to store wavefunctions
-        :param cache_path: path to store cache
         :param nproc: number of processes to use
         :param emin: minimum energy relative to fermi level to consider
         """
@@ -115,10 +115,8 @@ class TBGreen:
         self.R2kfactor = tbmodel.R2kfactor
         self.k2Rfactor = -tbmodel.R2kfactor
         self.efermi = efermi
-        self._use_cache = use_cache
-        self.cache_path = cache_path
-        if use_cache:
-            self._prepare_cache()
+        self._use_cache = True
+        self._prepare_cache()
         self.prepare_kpts(
             kmesh=kmesh,
             ibz=ibz,
@@ -202,21 +200,70 @@ class TBGreen:
         return find_energy_ingap(self.evals, rbound, gap)
 
     def _prepare_cache(self):
-        if self.cache_path is None:
-            if "TMPDIR" in os.environ:
-                rpath = os.environ["TMPDIR"]
-            else:
-                rpath = "/dev/shm/TB2J_cache"
-        else:
-            rpath = self.cache_path
-        if not os.path.exists(rpath):
-            os.makedirs(rpath)
-        self.cache_path = tempfile.mkdtemp(prefix="TB2J", dir=rpath)
-        print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
+        # Shared memory handles (populated in _prepare_eigen)
+        self._shm_evecs = None
+        self._shm_S = None
 
     def clean_cache(self):
-        if (self.cache_path is not None) and os.path.exists(self.cache_path):
-            rmtree(self.cache_path)
+        for attr in (
+            "_shm_evecs",
+            "_shm_S",
+            "_par_shm_evals",
+            "_par_shm_evecs",
+            "_par_shm_S",
+        ):
+            shm = getattr(self, attr, None)
+            if shm is not None:
+                try:
+                    free_shm(shm)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+    def enter_parallel(self):
+        """Move evals/evecs (and S) into shared memory so worker processes
+        can attach without copying the data through dill serialisation.
+        The large arrays are removed from the object; workers reconstruct
+        zero-copy views via the stored ShmDescriptor."""
+        if getattr(self, "_in_parallel", False):
+            return  # already in parallel mode
+        self._in_parallel = True
+
+        # evals
+        self._par_shm_evals, self._par_desc_evals = to_shm(self.evals, "evals")
+        del self.evals
+
+        # evecs are already in use_cache shm — no need to duplicate
+        self._par_shm_evecs = None
+
+        # S is already in use_cache shm (if non-orthogonal) — no need to duplicate
+        self._par_shm_S = None
+
+    def exit_parallel(self):
+        """Restore evals/evecs/S to normal numpy arrays and release shared memory."""
+        if not getattr(self, "_in_parallel", False):
+            return
+        self._in_parallel = False
+
+        arr, shm = attach_shm(self._par_desc_evals)
+        self.evals = arr.copy()
+        detach_shm(shm)
+        free_shm(self._par_shm_evals)
+        self._par_shm_evals = None
+
+        if self._par_shm_evecs is not None:
+            arr, shm = attach_shm(self._par_desc_evecs)
+            self.evecs = arr.copy()
+            detach_shm(shm)
+            free_shm(self._par_shm_evecs)
+            self._par_shm_evecs = None
+
+        if self._par_shm_S is not None:
+            arr, shm = attach_shm(self._par_desc_S)
+            self.S = arr.copy()
+            detach_shm(shm)
+            free_shm(self._par_shm_S)
+            self._par_shm_S = None
 
     def _prepare_eigen(self, solve=True, saveH=False):
         """
@@ -285,96 +332,56 @@ class TBGreen:
             # emin=self.efermi -10,
             # emax=self.efermi + 10,
         )
-        if self._use_cache:
-            evecs = self.evecs
-            self.evecs_shape = self.evecs.shape
-            self.evecs = np.memmap(
-                os.path.join(self.cache_path, "evecs.dat"),
-                mode="w+",
-                shape=self.evecs.shape,
-                dtype=complex,
-            )
-            self.evecs[:, :, :] = evecs[:, :, :]
-            del self.evecs
+        self._shm_evecs, self._desc_evecs = to_shm(self.evecs, "evecs")
+        del self.evecs
 
-            if self.is_orthogonal:
-                self.S = None
-            else:
-                S = self.S
-                self.S = np.memmap(
-                    os.path.join(self.cache_path, "S.dat"),
-                    mode="w+",
-                    shape=(nkpts, self.nbasis, self.nbasis),
-                    dtype=complex,
-                )
-                self.S[:] = S[:]
-            if not self.is_orthogonal:
-                del self.S
+        if self.is_orthogonal:
+            self.S = None
+        else:
+            self._shm_S, self._desc_S = to_shm(self.S, "S")
+            del self.S
 
     def get_evecs(self, ik):
-        if self._use_cache:
-            return np.memmap(
-                os.path.join(self.cache_path, "evecs.dat"),
-                mode="r",
-                shape=self.evecs_shape,
-                dtype=complex,
-            )[ik]
-        else:
-            return self.evecs[ik]
+        return read_shm(self._desc_evecs, ik)
 
     def get_evalue(self, ik):
+        if getattr(self, "_in_parallel", False):
+            return read_shm(self._par_desc_evals, ik)
         return self.evals[ik]
 
     def get_Hk(self, ik):
-        if self._use_cache:
-            return np.memmap(
-                os.path.join(self.cache_path, "H.dat"),
-                mode="r",
-                shape=(self.nkpts, self.nbasis, self.nbasis),
-                dtype=complex,
-            )[ik]
-        else:
-            return self.H[ik]
+        return self.H[ik] if self.H is not None else None
 
     def get_Sk(self, ik):
         if self.is_orthogonal:
             return None
-        elif self._use_cache:
-            return np.memmap(
-                os.path.join(self.cache_path, "S.dat"),
-                mode="r",
-                shape=(self.nkpts, self.nbasis, self.nbasis),
-                dtype=complex,
-            )[ik]
-        else:
-            return self.S[ik]
+        return read_shm(self._desc_S, ik)
 
     def get_density_matrix(self):
         rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         if self.is_orthogonal:
             for ik, _ in enumerate(self.kpts):
                 evecs_k = self.get_evecs(ik)
+                evals_k = self.get_evalue(ik)
                 # chekc if any of the evecs element is nan
                 rho += (
                     (
                         evecs_k
-                        * fermi(
-                            self.evals[ik], self.efermi, width=self.fermi_width, nspin=2
-                        )
+                        * fermi(evals_k, self.efermi, width=self.fermi_width, nspin=2)
                     )
                     @ evecs_k.T.conj()
                     * self.kweights[ik]
                 )
         else:
             for ik, _ in enumerate(self.kpts):
+                evecs_k = self.get_evecs(ik)
+                evals_k = self.get_evalue(ik)
                 rho += (
                     (
-                        self.get_evecs(ik)
-                        * fermi(
-                            self.evals[ik], self.efermi, width=self.fermi_width, nspin=2
-                        )
+                        evecs_k
+                        * fermi(evals_k, self.efermi, width=self.fermi_width, nspin=2)
                     )
-                    @ self.get_evecs(ik).T.conj()
+                    @ evecs_k.T.conj()
                     @ self.get_Sk(ik)
                     * self.kweights[ik]
                 )
@@ -389,7 +396,9 @@ class TBGreen:
             rhok = np.einsum(
                 "ib,b, bj-> ij",
                 evec,
-                fermi(self.evals[ik], self.efermi, width=self.fermi_width, nspin=2),
+                fermi(
+                    self.get_evalue(ik), self.efermi, width=self.fermi_width, nspin=2
+                ),
                 evec.conj().T,
             )
             for iR, R in enumerate(Rlist):
@@ -405,7 +414,7 @@ class TBGreen:
         return np.real(np.diag(self.get_density_matrix()))
 
     def get_Gk(self, ik, energy, evals=None, evecs=None):
-        """Green's function G(k) for one energy
+        r"""Green's function G(k) for one energy
         G(\epsilon)= (\epsilon I- H)^{-1}
         :param ik: indices for kpoint
         :returns: Gk
@@ -441,7 +450,7 @@ class TBGreen:
         return GR
 
     def get_GR(self, Rpts, energy, Gk_all=None):
-        """calculate real space Green's function for one energy, all R points.
+        r"""calculate real space Green's function for one energy, all R points.
         G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
         :param Rpts: R points
         :param energy: energy value
@@ -465,7 +474,7 @@ class TBGreen:
         return GR
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
-        """
+        r"""
         calculate G(R) and dG(R)/dx.
         dG(R)/dx = \sum_k G(k) (dH(R)/dx) G(k).
         """
@@ -485,7 +494,7 @@ class TBGreen:
         return GR, dGRdx
 
     def get_GR_and_dGRdx(self, Rpts, energy, dHdx):
-        """
+        r"""
         calculate G(R) and dG(R)/dx.
         dG(k)/dx =  G(k) (dH(k)/dx) G(k).
         dG(R)/dx = \sum_k dG(k)/dx * e^{-ikR}
@@ -506,7 +515,7 @@ class TBGreen:
         return GR, dGRdx
 
     def get_GR_and_dGRdx_and_dGRdx2(self, Rpts, energy, dHdx, dHdx2):
-        """
+        r"""
         calculate G(R) and dG(R)/dx.
         dG(k)/dx =  G(k) (dH(k)/dx) G(k).
         dG(R)/dx = \sum_k dG(k)/dx * e^{-ikR}

@@ -84,7 +84,6 @@ def run_wann2J():
         emin=args.emin,
         emax=args.emax,
         nz=args.nz,
-        use_cache=args.use_cache,
         nproc=args.np,
         description=args.description,
         output_path=args.output_path,

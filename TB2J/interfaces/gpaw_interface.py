@@ -16,7 +16,6 @@ def gen_exchange_gpaw(
     nz=50,
     exclude_orbs=[],
     Rcut=None,
-    use_cache=False,
     output_path="TB2J_results",
     description="",
 ):
@@ -45,7 +44,6 @@ def gen_exchange_gpaw(
             nz=nz,
             exclude_orbs=exclude_orbs,
             Rcut=Rcut,
-            use_cache=use_cache,
             output_path=output_path,
             description=description,
         )
