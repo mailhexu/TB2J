@@ -172,7 +172,7 @@ class Magnon:
         # A2 = [ UT J(-k) U.conj() ] .conj() = U.conj()^T J(k).conj() U
         A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq.conj(), U)
         # B = UT J(-k) U
-        B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
+        B = np.einsum("ix,kijxy,jy->kij", U, Jmq, U)
 
         # debug: check B(q) == B(-q).T
         # Jmq = -self.Jq(-kpoints)
