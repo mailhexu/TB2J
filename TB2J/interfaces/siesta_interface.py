@@ -116,7 +116,7 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
  working directory: {os.getcwd()}
  fdf_fname: {fdf_fname}.
 \n"""
-        if _exchange_done(output_path):
+        if _exchange_done(output_path) and False:
             print(f"Exchange results already exist in {output_path}, skipping.")
         else:
             exchange = ExchangeCL2(
@@ -148,7 +148,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
 \n"""
         exargs["description"] = description
         if not model.split_soc:
-            if _exchange_done(output_path):
+            if _exchange_done(output_path) and False:
                 print(f"Exchange results already exist in {output_path}, skipping.")
             else:
                 exchange = ExchangeNCL(
@@ -168,7 +168,7 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 )
         else:
             mae_output = f"{output_path}_anisotropy"
-            if _mae_done(mae_output):
+            if _mae_done(mae_output) and False:
                 print(f"MAE results already exist in {mae_output}, skipping.")
             else:
                 print("Starting to calculate MAE.")
