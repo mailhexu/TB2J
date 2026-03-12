@@ -155,13 +155,6 @@ class MAEGreen(ExchangeNCL):
 
     def get_perturbed(self, e, thetas, phis):
         self.tbmodel.set_so_strength(0.0)
-        # maxsoc = self.tbmodel.get_max_Hsoc_abs()
-        # maxH0 = self.tbmodel.get_max_H0_spin_abs()
-        # if maxsoc > maxH0 * 0.01:
-        #    print(f"""Warning: The SOC of the Hamiltonian has a maximum of {maxsoc} eV,
-        #          comparing to the maximum of {maxH0} eV of the spin part of the Hamiltonian.
-        #          The SOC is too strong, the perturbation theory may not be valid.""")
-
         # Reconstruct Hsoc_k from shared memory if available, otherwise use self.Hsoc_k
         if getattr(self, "_use_shm_Hsoc_k", False):
             Hsoc_k, _shm_Hsoc_k = attach_shm(self._desc_Hsoc_k)
@@ -169,29 +162,38 @@ class MAEGreen(ExchangeNCL):
             Hsoc_k = self.Hsoc_k
             _shm_Hsoc_k = None
 
-        # time the G0k calculation
+        # G0K shape: (Nk, N, N)
         G0K = self.G.get_Gk_all(e)
         na = len(thetas)
         dE_angle = np.zeros(na, dtype=complex)
         dE_angle_matrix = np.zeros((na, self.natoms, self.natoms), dtype=complex)
-        # dE_angle_orbitals = np.zeros((na, self.natoms, self.norb, self.norb), dtype=complex)
         dE_angle_atom_orb = DefaultDict(lambda: 0)
+
+        # Decompose is mostly False by default, so we can optimize for that case.
+        # If decompose is False, we use vectorized operations over K-points.
+        self.decompose = getattr(self, "decompose", False)
+
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
-            for ik, dHk in enumerate(Hsoc_k):
-                dHi = rotate_spinor_matrix(dHk, theta, phi)
-                GdH = G0K[ik] @ dHi
-                dG2 = GdH * GdH.T
-                dG2sum = np.sum(dG2)
+            # Vectorized rotation for all k-points
+            # Hsoc_k has shape (Nk, 2N, 2N)
+            # rotate_spinor_matrix works on the last two axes.
+            dHi_k = rotate_spinor_matrix(Hsoc_k, theta, phi)
 
-                # dG2sum = np.einsum("ij,ji->", GdH, GdH)
+            if not self.decompose:
+                # Optimized vectorized calculation for total energy
+                # Tr(G dH G dH) = sum_{k} weights[k] * sum_{ij} (G@dH)_{ij} * (G@dH)_{ji}
+                GdH = G0K @ dHi_k  # (Nk, 2N, 2N)
+                dE_angle[iangle] = np.einsum(
+                    "k,kij,kji->", self.G.kweights, GdH, GdH, optimize=True
+                )
+            else:
+                # If decomposition is needed, we still have to loop
+                for ik, dHi in enumerate(dHi_k):
+                    GdH = G0K[ik] @ dHi
+                    dG2 = GdH * GdH.T
+                    dG2sum = np.sum(dG2)
+                    dE_angle[iangle] += dG2sum * self.G.kweights[ik]
 
-                # dE_angle[iangle] += np.trace(GdH@GdH) * self.G.kweights[ik]
-                # dE_angle[iangle] += np.trace(GdH@G0K[ik].T.conj()@dHi ) * self.G.kweights[ik]
-                dE_angle[iangle] += dG2sum * self.G.kweights[ik]
-
-                # Calculate atom-atom matrix interactions
-                self.decompose = False
-                if self.decompose:
                     for iatom in range(self.natoms):
                         iorb = self.iorb(iatom)
                         for jatom in range(self.natoms):
@@ -213,6 +215,7 @@ class MAEGreen(ExchangeNCL):
                             # Store orbital-resolved data for diagonal terms
                             if iatom == jatom:
                                 dE_angle_atom_orb[(iangle, iatom)] += dE_ij_orb
+
         if _shm_Hsoc_k is not None:
             detach_shm(_shm_Hsoc_k)
         return dE_angle, dE_angle_matrix, dE_angle_atom_orb
