@@ -174,20 +174,20 @@ class MAEGreen(ExchangeNCL):
         self.decompose = getattr(self, "decompose", False)
 
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
-            # Vectorized rotation for all k-points
+            # Vectorized rotation for all k-points at once
             # Hsoc_k has shape (Nk, 2N, 2N)
-            # rotate_spinor_matrix works on the last two axes.
             dHi_k = rotate_spinor_matrix(Hsoc_k, theta, phi)
 
             if not self.decompose:
-                # Optimized vectorized calculation for total energy
-                # Tr(G dH G dH) = sum_{k} weights[k] * sum_{ij} (G@dH)_{ij} * (G@dH)_{ji}
-                GdH = G0K @ dHi_k  # (Nk, 2N, 2N)
+                # Optimized vectorized calculation for total energy across all K-points
+                # GdH_k shape: (Nk, 2N, 2N)
+                GdH_k = G0K @ dHi_k
+                # Tr(GdH @ GdH) summed over k with weights
                 dE_angle[iangle] = np.einsum(
-                    "k,kij,kji->", self.G.kweights, GdH, GdH, optimize=True
+                    "k,kij,kji->", self.G.kweights, GdH_k, GdH_k, optimize=True
                 )
             else:
-                # If decomposition is needed, we still have to loop
+                # Fallback to loop only if decomposition is requested
                 for ik, dHi in enumerate(dHi_k):
                     GdH = G0K[ik] @ dHi
                     dG2 = GdH * GdH.T
