@@ -28,12 +28,6 @@ def run_siesta2J():
         action="store_true",
         default=False,
     )
-    parser.add_argument(
-        "--use_gpu",
-        help="Use GPU acceleration for MAE calculation (requires JAX). Default: False",
-        action="store_true",
-        default=False,
-    )
 
     # Add common exchange arguments
     parser = add_exchange_args_to_parser(parser)
@@ -78,6 +72,8 @@ def run_siesta2J():
         orth=args.orth,
         index_magnetic_atoms=index_magnetic_atoms,
         use_gpu=args.use_gpu,
+        vectorize_energy=args.vectorize_energy,
+        e_batch_size=args.e_batch_size,
     )
 
 

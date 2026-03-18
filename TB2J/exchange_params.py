@@ -1,5 +1,4 @@
 import argparse
-from dataclasses import dataclass
 
 import ase.units
 import yaml
@@ -7,7 +6,6 @@ import yaml
 __all__ = ["ExchangeParams", "add_exchange_args_to_parser", "parser_argument_to_dict"]
 
 
-@dataclass
 class ExchangeParams:
     """
     A class to store the parameters for exchange calculation.
@@ -35,6 +33,9 @@ class ExchangeParams:
     mae_angles = None
     orth = False
     ibz = False
+    use_gpu = False
+    vectorize_energy = False
+    e_batch_size = None
     # Debug options
     debug_options = {
         "compute_charge_moments": False,  # Whether to compute charge and magnetic moments with Green's function method
@@ -66,8 +67,31 @@ class ExchangeParams:
         orth=False,
         ibz=False,
         index_magnetic_atoms=None,
+        use_gpu=None,
+        vectorize_energy=False,
+        e_batch_size=None,
         debug_options=None,
+        **kwargs,
     ):
+        # Only check for GPU if use_gpu is explicitly True or None
+        # Note: setting use_gpu=None no longer auto-detects GPU to avoid
+        # importing JAX when not needed (which allocates GPU memory)
+        if use_gpu is True:
+            from TB2J.gpu.jax_utils import _is_gpu_available
+
+            platform = _is_gpu_available()
+            if platform:
+                print(f"Using GPU ({platform}) for acceleration.")
+            else:
+                print("GPU requested but not available, falling back to CPU.")
+                use_gpu = False
+        else:
+            platform = None
+            use_gpu = False
+
+        if not use_gpu:
+            print("Using CPU for calculation.")
+
         self.efermi = efermi
         self.smearing = smearing
         self.basis = basis
@@ -93,6 +117,13 @@ class ExchangeParams:
         self.orth = orth
         self.ibz = ibz
         self.index_magnetic_atoms = index_magnetic_atoms
+        self.use_gpu = use_gpu
+        self.vectorize_energy = vectorize_energy
+        self.e_batch_size = e_batch_size
+
+        # Save other kwargs
+        for key, val in kwargs.items():
+            setattr(self, key, val)
 
         # Initialize debug options
         if debug_options is None:
@@ -279,6 +310,24 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         nargs="*",
         default=None,
     )
+    parser.add_argument(
+        "--use_gpu",
+        help="Whether to use GPU acceleration (requires JAX). Default is True if JAX/CUDA is found.",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--vectorize_energy",
+        help="Whether to vectorize over the entire energy contour on GPU. Default: False",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--e_batch_size",
+        help="Batch size for energy points on GPU. Default: None",
+        type=int,
+        default=None,
+    )
 
     return parser
 
@@ -321,4 +370,7 @@ def parser_argument_to_dict(args) -> dict:
         "output_path": args.output_path,
         "orth": args.orth,
         "index_magnetic_atoms": ind_mag_atoms,
+        "use_gpu": args.use_gpu,
+        "vectorize_energy": args.vectorize_energy,
+        "e_batch_size": args.e_batch_size,
     }

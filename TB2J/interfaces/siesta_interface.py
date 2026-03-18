@@ -4,9 +4,10 @@ import numpy as np
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+from TB2J.gpu.mae_green_gpu import MAEGreenGPU
 from TB2J.io_merge import merge
 from TB2J.MAEGreen import MAEGreen
-from TB2J.MAEGreenGPU import MAEGreenGPU
 
 try:
     from HamiltonIO.siesta import SislParser
@@ -80,6 +81,9 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, use_gpu=False, **kwargs):
         orth=False,
         ibz=False,
         description="",
+        use_gpu=False,
+        vectorize_energy=False,
+        e_batch_size=None,
     )
     exargs.update(kwargs)
     try:
@@ -136,8 +140,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
  If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
 \n"""
         exargs["description"] = description
+        exargs["use_gpu"] = use_gpu  # Pass use_gpu through exargs
         if not model.split_soc:
-            exchange = ExchangeNCL(
+            # Choose Exchange class based on use_gpu flag
+            ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
+            exchange = ExchangeClass(
                 tbmodels=model,
                 atoms=model.atoms,
                 basis=basis,
@@ -147,7 +154,15 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 output_path=output_path,
                 **exargs,
             )
-            exchange.run(path=output_path)
+            if use_gpu:
+                exchange.run(
+                    path=output_path,
+                    use_gpu=use_gpu,
+                    vectorize_energy=exargs.get("vectorize_energy", False),
+                    e_batch_size=exargs.get("e_batch_size", None),
+                )
+            else:
+                exchange.run(path=output_path)
             print("\n")
             print(
                 f"All calculation finished. The results are in {output_path} directory."
@@ -189,7 +204,9 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 model.set_Hsoc_rotation_angle([theta, phi])
                 basis = dict(zip(model.orbs, list(range(model.nbasis))))
                 output_path_full = f"{output_path}_{key}"
-                exchange = ExchangeNCL(
+                # Choose Exchange class based on use_gpu flag
+                ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
+                exchange = ExchangeClass(
                     tbmodels=model,
                     atoms=model.atoms,
                     basis=basis,
