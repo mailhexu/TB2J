@@ -324,6 +324,12 @@ def _prepare_HR_jax(tbmodel):
     return Rpts_jax, HR_jax, SR_jax, tbmodel.R2kfactor
 
 
+# Cached JIT-compiled functions (initialized on first use)
+_compute_Hk_Sk_all_jax_cached = None
+_compute_eigen_all_jax_cached = None
+_prepare_eigen_pipeline_cached = None
+
+
 def _compute_Hk_Sk_all_jax(Rpts, HR, SR, kpts, R2kfactor):
     """
     Compute H(k) and S(k) for all k-points on GPU.
@@ -350,25 +356,33 @@ def _compute_Hk_Sk_all_jax(Rpts, HR, SR, kpts, R2kfactor):
     Sk_all : jnp.ndarray or None, shape (nk, nbasis, nbasis)
         Overlap matrices for all k-points
     """
+    global _compute_Hk_Sk_all_jax_cached
     _require_jax()
     jnp = _jnp
 
-    # Compute phase for all (k, R) pairs: phase[k, R] = exp(R2kfactor * k·R)
-    k_dot_R = jnp.einsum("ki,ri->kr", kpts, Rpts)  # (nk, nR)
-    phase = jnp.exp(R2kfactor * k_dot_R)  # (nk, nR)
+    # Create JIT-compiled function on first call
+    if _compute_Hk_Sk_all_jax_cached is None:
 
-    # H(k) = sum_R H(R) * phase[k, R]
-    # Note: HR already contains the full Hamiltonian (both R and -R terms),
-    # so we don't need to add the Hermitian conjugate explicitly.
-    Hk = jnp.einsum("rij,kr->kij", HR, phase)
+        @_jax.jit
+        def _compute_Hk_Sk_impl(Rpts, HR, SR, kpts, R2kfactor):
+            # Compute phase for all (k, R) pairs: phase[k, R] = exp(R2kfactor * k·R)
+            k_dot_R = jnp.einsum("ki,ri->kr", kpts, Rpts)  # (nk, nR)
+            phase = jnp.exp(R2kfactor * k_dot_R)  # (nk, nR)
 
-    # S(k) if non-orthogonal
-    if SR is not None:
-        Sk = jnp.einsum("rij,kr->kij", SR, phase)
-    else:
-        Sk = None
+            # H(k) = sum_R H(R) * phase[k, R]
+            Hk = jnp.einsum("rij,kr->kij", HR, phase)
 
-    return Hk, Sk
+            # S(k) if non-orthogonal
+            if SR is not None:
+                Sk = jnp.einsum("rij,kr->kij", SR, phase)
+            else:
+                Sk = None
+
+            return Hk, Sk
+
+        _compute_Hk_Sk_all_jax_cached = _compute_Hk_Sk_impl
+
+    return _compute_Hk_Sk_all_jax_cached(Rpts, HR, SR, kpts, R2kfactor)
 
 
 def _eigh_standard_single(H):
@@ -404,7 +418,7 @@ def _eigh_generalized_cholesky(H, S):
     return evals, evecs
 
 
-def _compute_eigen_all_jax(Hk_all, Sk_all=None):
+def _compute_eigen_all_jax(Hk_all, Sk_all):
     """
     Compute eigenvalues and eigenvectors for all k-points on GPU.
 
@@ -422,18 +436,100 @@ def _compute_eigen_all_jax(Hk_all, Sk_all=None):
     evecs : jnp.ndarray, shape (nk, nbasis, nbasis)
         Eigenvectors for all k-points
     """
+    global _compute_eigen_all_jax_cached
     _require_jax()
 
-    if Sk_all is not None:
-        # Generalized eigenvalue problem via Cholesky decomposition
-        eigh_vmap = _jax.vmap(_eigh_generalized_cholesky)
-        evals, evecs = eigh_vmap(Hk_all, Sk_all)
-    else:
-        # Standard eigenvalue problem
-        eigh_vmap = _jax.vmap(_eigh_standard_single)
-        evals, evecs = eigh_vmap(Hk_all)
+    # Create JIT-compiled function on first call
+    if _compute_eigen_all_jax_cached is None:
 
-    return evals, evecs
+        @_jax.jit
+        def _compute_eigen_impl(Hk_all, Sk_all):
+            if Sk_all is not None:
+                # Generalized eigenvalue problem via Cholesky decomposition
+                eigh_vmap = _jax.vmap(_eigh_generalized_cholesky)
+                evals, evecs = eigh_vmap(Hk_all, Sk_all)
+            else:
+                # Standard eigenvalue problem
+                eigh_vmap = _jax.vmap(_eigh_standard_single)
+                evals, evecs = eigh_vmap(Hk_all)
+
+            return evals, evecs
+
+        _compute_eigen_all_jax_cached = _compute_eigen_impl
+
+    return _compute_eigen_all_jax_cached(Hk_all, Sk_all)
+
+
+def _prepare_eigen_pipeline_jax(Rpts, HR, SR, kpts, R2kfactor):
+    """
+    Combined JIT-compiled pipeline for eigenvalue preparation.
+    Computes H(k), S(k) and their eigenvalues/eigenvectors in one compiled function.
+
+    Parameters:
+    -----------
+    Rpts : jnp.ndarray, shape (nR, 3)
+        R vectors
+    HR : jnp.ndarray, shape (nR, nbasis, nbasis)
+        Hamiltonian matrices for each R
+    SR : jnp.ndarray or None, shape (nR, nbasis, nbasis)
+        Overlap matrices for each R
+    kpts : jnp.ndarray, shape (nk, 3)
+        k-points
+    R2kfactor : complex
+        Phase factor (typically 2πi)
+
+    Returns:
+    --------
+    evals : jnp.ndarray, shape (nk, nbasis)
+        Eigenvalues for all k-points
+    evecs : jnp.ndarray, shape (nk, nbasis, nbasis)
+        Eigenvectors for all k-points
+    Sk_all : jnp.ndarray or None
+        Overlap matrices for all k-points
+    """
+    global _prepare_eigen_pipeline_cached
+    _require_jax()
+    jnp = _jnp
+
+    if _prepare_eigen_pipeline_cached is None:
+
+        def _eigh_generalized_single(H, S):
+            """Generalized eigenvalue for single matrix using Cholesky."""
+            L = jnp.linalg.cholesky(S)
+            # Use solve_triangular for better efficiency
+            L_inv = jnp.linalg.inv(L)
+            H_prime = L_inv @ H @ L_inv.conj().T
+            evals, evecs_prime = jnp.linalg.eigh(H_prime)
+            evecs = L_inv.conj().T @ evecs_prime
+            return evals, evecs
+
+        def _eigh_standard_single_inner(H):
+            """Standard eigenvalue for single matrix."""
+            return jnp.linalg.eigh(H)
+
+        @_jax.jit
+        def _pipeline_impl(Rpts, HR, SR, kpts, R2kfactor):
+            # Step 1: Compute H(k) and S(k) for all k-points
+            k_dot_R = jnp.einsum("ki,ri->kr", kpts, Rpts)
+            phase = jnp.exp(R2kfactor * k_dot_R)
+            Hk = jnp.einsum("rij,kr->kij", HR, phase)
+
+            if SR is not None:
+                Sk = jnp.einsum("rij,kr->kij", SR, phase)
+                # Step 2: Generalized eigenvalue problem
+                eigh_vmap = _jax.vmap(_eigh_generalized_single)
+                evals, evecs = eigh_vmap(Hk, Sk)
+            else:
+                Sk = None
+                # Step 2: Standard eigenvalue problem
+                eigh_vmap = _jax.vmap(_eigh_standard_single_inner)
+                evals, evecs = eigh_vmap(Hk)
+
+            return evals, evecs, Sk
+
+        _prepare_eigen_pipeline_cached = _pipeline_impl
+
+    return _prepare_eigen_pipeline_cached(Rpts, HR, SR, kpts, R2kfactor)
 
 
 def _prepare_eigen_gpu(tbmodel, kpts):
@@ -470,13 +566,10 @@ def _prepare_eigen_gpu(tbmodel, kpts):
     )
     print(f"  Non-orthogonal: {SR_jax is not None}")
 
-    # Compute H(k) and S(k) for all k-points
-    Hk_all, Sk_all = _compute_Hk_Sk_all_jax(
+    # Use the combined pipeline for better performance
+    evals, evecs, Sk_all = _prepare_eigen_pipeline_jax(
         Rpts_jax, HR_jax, SR_jax, kpts_jax, R2kfactor
     )
-
-    # Compute eigenvalues and eigenvectors
-    evals, evecs = _compute_eigen_all_jax(Hk_all, Sk_all)
 
     # Block until computation is done
     evals.block_until_ready()
