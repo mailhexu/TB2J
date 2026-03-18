@@ -2,10 +2,12 @@
 This module calculate Oiju from electron-phonon coupling matrix and Electron Wannier function.
 """
 
+from collections import defaultdict
+
 import numpy as np
 import progressbar
+
 from .exchangeCL2 import ExchangeCL2
-from collections import defaultdict
 
 
 class OijuWannEPC(ExchangeCL2):

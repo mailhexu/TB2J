@@ -149,15 +149,15 @@ class MAEGreen(ExchangeNCL):
         #          comparing to the maximum of {maxH0} eV of the spin part of the Hamiltonian.
         #          The SOC is too strong, the perturbation theory may not be valid.""")
 
+        # time the G0k calculation
         G0K = self.G.get_Gk_all(e)
-        Hsoc_k = self.tbmodel.get_Hk_soc(self.G.kpts)
         na = len(thetas)
         dE_angle = np.zeros(na, dtype=complex)
         dE_angle_matrix = np.zeros((na, self.natoms, self.natoms), dtype=complex)
         # dE_angle_orbitals = np.zeros((na, self.natoms, self.norb, self.norb), dtype=complex)
         dE_angle_atom_orb = DefaultDict(lambda: 0)
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
-            for ik, dHk in enumerate(Hsoc_k):
+            for ik, dHk in enumerate(self.Hsoc_k):
                 dHi = rotate_spinor_matrix(dHk, theta, phi)
                 GdH = G0K[ik] @ dHi
                 # dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
@@ -180,27 +180,29 @@ class MAEGreen(ExchangeNCL):
                 dE_angle[iangle] += dG2sum * self.G.kweights[ik]
 
                 # Calculate atom-atom matrix interactions
-                for iatom in range(self.natoms):
-                    iorb = self.iorb(iatom)
-                    for jatom in range(self.natoms):
-                        jorb = self.iorb(jatom)
-                        # Calculate cross terms between atoms i and j
-                        dE_ij_orb = dG2[np.ix_(iorb, jorb)] * self.G.kweights[ik]
-                        dE_ij_orb = (
-                            dE_ij_orb[::2, ::2]
-                            + dE_ij_orb[1::2, 1::2]
-                            + dE_ij_orb[1::2, ::2]
-                            + dE_ij_orb[::2, 1::2]
-                        )
-                        dE_ij = np.sum(dE_ij_orb)
-                        # Transform to local orbital basis
-                        mmat_i = self.mmats[iatom]
-                        mmat_j = self.mmats[jatom]
-                        dE_ij_orb = mmat_i.T @ dE_ij_orb @ mmat_j
-                        dE_angle_matrix[iangle, iatom, jatom] += dE_ij
-                        # Store orbital-resolved data for diagonal terms
-                        if iatom == jatom:
-                            dE_angle_atom_orb[(iangle, iatom)] += dE_ij_orb
+                self.decompose = False
+                if self.decompose:
+                    for iatom in range(self.natoms):
+                        iorb = self.iorb(iatom)
+                        for jatom in range(self.natoms):
+                            jorb = self.iorb(jatom)
+                            # Calculate cross terms between atoms i and j
+                            dE_ij_orb = dG2[np.ix_(iorb, jorb)] * self.G.kweights[ik]
+                            dE_ij_orb = (
+                                dE_ij_orb[::2, ::2]
+                                + dE_ij_orb[1::2, 1::2]
+                                + dE_ij_orb[1::2, ::2]
+                                + dE_ij_orb[::2, 1::2]
+                            )
+                            dE_ij = np.sum(dE_ij_orb)
+                            # Transform to local orbital basis
+                            mmat_i = self.mmats[iatom]
+                            mmat_j = self.mmats[jatom]
+                            dE_ij_orb = mmat_i.T @ dE_ij_orb @ mmat_j
+                            dE_angle_matrix[iangle, iatom, jatom] += dE_ij
+                            # Store orbital-resolved data for diagonal terms
+                            if iatom == jatom:
+                                dE_angle_atom_orb[(iangle, iatom)] += dE_ij_orb
         return dE_angle, dE_angle_matrix, dE_angle_atom_orb
 
     def get_perturbed_R(self, e, thetas, phis):
@@ -230,6 +232,8 @@ class MAEGreen(ExchangeNCL):
         #        )
 
         # rewrite the for loop above to use p_map
+        self.Hsoc_k = self.tbmodel.get_Hk_soc(self.G.kpts)
+
         def func(e):
             return self.get_perturbed(e, thetas, phis)
 
