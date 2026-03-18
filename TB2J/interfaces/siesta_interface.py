@@ -6,6 +6,7 @@ from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.io_merge import merge
 from TB2J.MAEGreen import MAEGreen
+from TB2J.MAEGreenGPU import MAEGreenGPU
 
 try:
     from HamiltonIO.siesta import SislParser
@@ -19,13 +20,15 @@ def siesta_anisotropy(**kwargs):
     pass
 
 
-def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
+def gen_exchange_siesta(fdf_fname, read_H_soc=False, use_gpu=False, **kwargs):
     """
     parameters:
         fdf_fname: str
             The fdf file for the calculation.
         read_H_soc: bool
             Whether to read the SOC Hamiltonian. Default is False.
+        use_gpu: bool
+            Whether to use GPU acceleration for MAE calculation. Default is False.
 
     parameters in **kwargs:
         magnetic_elements: list of str
@@ -152,7 +155,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
         else:
             print("Starting to calculate MAE.")
             model.set_so_strength(0.0)
-            MAE = MAEGreen(
+
+            # Choose MAE class based on use_gpu flag
+            MAEClass = MAEGreenGPU if use_gpu else MAEGreen
+
+            MAE = MAEClass(
                 tbmodels=model,
                 atoms=model.atoms,
                 basis=basis,
@@ -166,7 +173,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             # phis = [0, 0, 0, 0]
             # MAE.set_angles(thetas=thetas, phis=phis)
             # MAE.set_xyz_angles()
-            MAE.run(output_path=f"{output_path}_anisotropy", with_eigen=False)
+            MAE.run(
+                output_path=f"{output_path}_anisotropy",
+                with_eigen=False,
+                use_gpu=use_gpu,
+            )
             # print(
             #    f"MAE calculation finished. The results are in {output_path} directory."
             # )

@@ -303,7 +303,7 @@ class Magnon:
             kpoints = np.linalg.solve(self.cell.T, kpoints.T).T
 
         bands = self._magnon_energies(kpoints)
-        print(f"bands shape: {bands.shape}")
+        # print(f"bands shape: {bands.shape}")
 
         if path is None and kpoints.size == 0:  # Fixed condition
             # When using auto_kpath, return xlist for segmented plotting
@@ -371,7 +371,7 @@ class Magnon:
         Magnon
             Initialized Magnon instance
         """
-        print(f"kwargs={kwargs}")
+        # print(f"kwargs={kwargs}")
         # Get magnetic moments for magnetic atoms
         magmoms = exc.get_magnetic_moments()
         # nspin = len(magmoms)  # Number of magnetic atoms
@@ -385,7 +385,7 @@ class Magnon:
         JR = exc.get_full_Jtensor_for_Rlist(
             order="ij33", asr=False, SIA=include_SIA, **kwargs
         )
-        print(JR)
+        # print(JR)
 
         return cls(
             nspin=exc.nspin,
