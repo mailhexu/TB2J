@@ -78,7 +78,7 @@ def _pauli_decompose(Gij, Gji):
 
     I_i = (M00_i + M11_i) / 2.0
     x_i = (M01_i + M10_i) / 2.0
-    y_i = (M01_i - M10_i) * (-0.5j)
+    y_i = (M01_i - M10_i) * 0.5j  # Note: positive 0.5j, matching CPU version
     z_i = (M00_i - M11_i) / 2.0
     Gij_blocks = jnp.stack([I_i, x_i, y_i, z_i], axis=1)  # (nR, 4, ni, nj)
 
@@ -90,7 +90,7 @@ def _pauli_decompose(Gij, Gji):
 
     I_j = (M00_j + M11_j) / 2.0
     x_j = (M01_j + M10_j) / 2.0
-    y_j = (M01_j - M10_j) * (-0.5j)
+    y_j = (M01_j - M10_j) * 0.5j  # Note: positive 0.5j, matching CPU version
     z_j = (M00_j - M11_j) / 2.0
     Gji_blocks = jnp.stack([I_j, x_j, y_j, z_j], axis=1)  # (nR, 4, nj, ni)
 
