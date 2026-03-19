@@ -27,13 +27,13 @@ _GREEN_WORKER = None
 class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
+        self.integration_method = params.pop("integration_method", "CFR")
         super().__init__(**params)
         self._prepare_kmesh(self._kmesh)
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        self._prepare_elist(method="CFR")
-        # self._prepare_elist(method="legendre")
+        self._prepare_elist(method=self.integration_method)
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
@@ -101,6 +101,11 @@ class Exchange(ExchangeParams):
             # smearing = kB * T => T = smearing / kB
             T_kelvin = self.smearing / ase.units.kB
             self.contour = CFR(nz=self.nz, T=T_kelvin)
+        elif method.lower() == "cfr2":
+            T_kelvin = self.smearing / ase.units.kB
+            from TB2J.mycfr import CFR2
+
+            self.contour = CFR2(nz=self.nz, T=T_kelvin)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
 
@@ -525,8 +530,8 @@ class ExchangeNCL(Exchange):
                 R, iatom, jatom = key
                 # Rm = tuple(-x for x in R)
                 # valm = self.A_ijR_orb[(Rm, jatom, iatom)]
-                ni = self.norb_reduced[iatom]
-                nj = self.norb_reduced[jatom]
+                ni = val.shape[2]
+                nj = val.shape[3]
 
                 is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                 ispin = self.ispin(iatom)
@@ -656,6 +661,7 @@ class ExchangeNCL(Exchange):
             rho[iatom] = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)]).real
             self.charges[iatom] = rho[iatom][0]
             self.spinat[iatom, :] = rho[iatom][1:]
+            print(f"DEBUG: Atom {iatom} charge: {self.charges[iatom]}")
         self.rho_dict = rho
         return self.rho_dict
 
@@ -914,7 +920,7 @@ class ExchangeNCL(Exchange):
                 progress_bar.update(1)
 
             def on_error(e, iatom, jatom):
-                print(f"\n❌ worker failed for ({iatom},{jatom}): {repr(e)}", flush=True)
+                print(f"\n\u274c worker failed for ({iatom},{jatom}): {repr(e)}", flush=True)
                 traceback.print_exc()
 
             if self.nproc > 1:

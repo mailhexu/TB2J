@@ -1,9 +1,11 @@
-import os
 import copy
-from TB2J.myTB import MyTB, merge_tbmodels_spin
-from TB2J.exchange_pert import ExchangePert
-from TB2J.utils import read_basis, auto_assign_basis_name
+import os
+
 from ase.io import read
+
+from TB2J.exchange_pert import ExchangePert
+from TB2J.myTB import MyTB, merge_tbmodels_spin
+from TB2J.utils import auto_assign_basis_name, read_basis
 
 
 class PolyTB:
