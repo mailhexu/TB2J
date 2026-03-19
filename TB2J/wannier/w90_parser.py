@@ -1,12 +1,15 @@
-from collections import defaultdict
 import math
 import re
+from collections import defaultdict
+
 import numpy as np
-from ase.io import read
 from ase.atoms import Atoms
+from ase.io import read
 from ase.units import Angstrom, Bohr
-from .w90_tb_parser import parse_tb_file
+
 from TB2J.utils import split_symbol_number
+
+from .w90_tb_parser import parse_tb_file
 
 unit_dict = {"ANG": Angstrom, "BOHR": Bohr}
 
@@ -61,13 +64,11 @@ def parse_ham(fname="wannier90_hr.dat", cutoff=None):
         n = n - 1
         H_real, H_imag = map(float, t[5:])
         val = H_real + 1j * H_imag
-        if m == n and np.linalg.norm(R) < 0.001:
-            H_mnR[R][m, n] = val / 2.0
-        elif cutoff is not None:
+        if cutoff is not None:
             if abs(val) > cutoff:
-                H_mnR[R][m, n] = val / 2.0
+                H_mnR[R][m, n] = val
         else:
-            H_mnR[R][m, n] = val / 2.0
+            H_mnR[R][m, n] = val
     return n_wann, H_mnR, R_degens
 
 
