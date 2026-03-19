@@ -66,9 +66,9 @@ def parse_ham(fname="wannier90_hr.dat", cutoff=None):
         val = H_real + 1j * H_imag
         if cutoff is not None:
             if abs(val) > cutoff:
-                H_mnR[R][m, n] = val
+                H_mnR[R][m, n] = val / 2.0
         else:
-            H_mnR[R][m, n] = val
+            H_mnR[R][m, n] = val / 2.0
     return n_wann, H_mnR, R_degens
 
 
