@@ -5,6 +5,7 @@ import numpy as np
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
 from TB2J.gpu.mae_green_gpu import MAEGreenGPU
 from TB2J.io_merge import merge
 from TB2J.MAEGreen import MAEGreen
@@ -114,7 +115,12 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, use_gpu=False, **kwargs):
  working directory: {os.getcwd()}
  fdf_fname: {fdf_fname}.
 \n"""
-        exchange = ExchangeCL2(
+        exargs["description"] = description
+        exargs["use_gpu"] = use_gpu  # Pass use_gpu through exargs
+
+        # Choose Exchange class based on use_gpu flag
+        ExchangeClass = ExchangeCL2GPU if use_gpu else ExchangeCL2
+        exchange = ExchangeClass(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
             basis=basis,
@@ -123,7 +129,15 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, use_gpu=False, **kwargs):
             # include_orbs=ex
             **exargs,
         )
-        exchange.run(path=output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=use_gpu,
+                vectorize_energy=exargs.get("vectorize_energy", False),
+                e_batch_size=exargs.get("e_batch_size", None),
+            )
+        else:
+            exchange.run(path=output_path)
         print("\n")
         print(f"All calculation finished. The results are in {output_path} directory.")
 
