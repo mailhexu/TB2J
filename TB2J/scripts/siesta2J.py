@@ -66,6 +66,7 @@ def run_siesta2J():
         output_path=args.output_path,
         use_cache=args.use_cache,
         nproc=args.np,
+        thlim=args.maxthreads,
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
         read_H_soc=args.split_soc,

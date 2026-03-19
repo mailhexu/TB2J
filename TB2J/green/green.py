@@ -12,6 +12,7 @@ from HamiltonIO.epw.epwparser import EpmatOneMode
 from HamiltonIO.model.occupations import GaussOccupations
 from HamiltonIO.model.occupations import myfermi as fermi
 from pathos.multiprocessing import ProcessPool
+from threadpoolctl import threadpool_limits
 
 from TB2J.kpoints import ir_kpts, monkhorst_pack
 
@@ -95,6 +96,7 @@ class TBGreen:
         use_cache=False,
         cache_path=None,
         nproc=1,
+        thlim=1,
         initial_emin=-25,
         smearing_width=0.01,
     ):
@@ -109,6 +111,7 @@ class TBGreen:
         :param use_cache: whether to use cache to store wavefunctions
         :param cache_path: path to store cache
         :param nproc: number of processes to use
+        :param thlim: maximum number of threads used by NumPy/BLAS
         :param emin: minimum energy relative to fermi level to consider
         """
         self.initial_emin = initial_emin
@@ -135,6 +138,7 @@ class TBGreen:
         self.k_sym = k_sym
         self.nproc = nproc
         self.fermi_width = float(smearing_width)
+        self.thlim = thlim
         print(
             f"starting to prepare eigenvalues and eigenvectors for {self.nkpts} k-points..."
         )
@@ -143,7 +147,6 @@ class TBGreen:
         # Initialize Rmap for spin-phonon coupling
         self._Rmap = None
         self._Rmap_rev = None
-
         self._prepare_eigen()
         print(
             f"Finished preparing eigenvalues and eigenvectors. Time taken: {time.time() - t0:.2f} seconds"
@@ -225,6 +228,11 @@ class TBGreen:
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
 
+    def _HSE_k_limited(self, kpt):
+    
+        with threadpool_limits(limits=self.thlim):
+            return self.tbmodel.HSE_k(kpt, convention=2)
+
     def _prepare_eigen(self, solve=True, saveH=False):
         """
         calculate eigen values and vectors for all kpts and save.
@@ -245,7 +253,7 @@ class TBGreen:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:
             executor = ProcessPool(nodes=self.nproc)
-            results = executor.map(self.tbmodel.HSE_k, self.kpts, [2] * len(self.kpts))
+            results = executor.map(self._HSE_k_limited, self.kpts)
             executor.close()
             executor.join()
             executor.clear()
@@ -442,37 +450,6 @@ class TBGreen:
             return eigen_to_G(self.evals, self.evecs, self.efermi, energy)
         else:
             return eigen_to_G(self.evals, self.evecs, self.efermi, energy)
-
-    def compute_GR(self, Rpts, kpts, Gks):
-        Rvecs = np.array(Rpts)
-        phase = np.exp(self.k2Rfactor * np.einsum("ni,mi->nm", Rvecs, kpts))
-        phase *= self.kweights[None]
-        GR = np.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
-        return GR
-
-    def get_GR(self, Rpts, energy, Gk_all=None):
-        """calculate real space Green's function for one energy, all R points.
-        G(R, epsilon) = G(k, epsilon) exp(-2\pi i R.dot. k)
-        :param Rpts: R points
-        :param energy: energy value
-        :param Gk_all: optional pre-computed Gk for all k-points
-        :returns: real space green's function for one energy for a list of R.
-        :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
-        """
-        if Gk_all is not None:
-            return self.compute_GR(Rpts, self.kpts, Gk_all)
-
-        Rvecs = np.array(Rpts)
-        nR = len(Rvecs)
-        GR = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
-
-        for ik, kpt in enumerate(self.kpts):
-            Gk = self.get_Gk(ik, energy)
-            weight = self.kweights[ik]
-            phase_k = np.exp(self.k2Rfactor * np.dot(Rvecs, kpt)) * weight
-            GR += Gk[None, :, :] * phase_k[:, None, None]
-
-        return GR
 
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """
