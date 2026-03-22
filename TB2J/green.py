@@ -389,7 +389,7 @@ class TBGreen:
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
-        if hasattr(self.tbmodel, "get_sigma"):
+        if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
             # DMFT case
             sigma = self.tbmodel.get_sigma(energy, ispin=ispin)
             # sigma has shape (n_spin, n_orb, n_orb)

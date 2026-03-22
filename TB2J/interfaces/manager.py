@@ -10,7 +10,8 @@ class Manager:
         ExchangeClass = self.select_exchange(colinear)
         exchange = ExchangeClass(tbmodels=models, atoms=atoms, basis=basis, **kwargs)
         output_path = kwargs.get("output_path", "TB2J_results")
-        exchange.run(path=output_path)
+        exchange.calculate_all()
+        exchange.write_output(path=output_path)
         print(f"All calculation finished. The results are in {output_path} directory.")
 
     def select_exchange(self, colinear, qspace=False):

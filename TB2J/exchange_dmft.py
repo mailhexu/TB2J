@@ -22,31 +22,34 @@ class ExchangeDMFTMixin:
         self.tbmodel = tbmodels
         self.backend_name = "DMFT"
 
-        # Initialize TBGreen
+        efermi = getattr(self.tbmodel, "mu", None)
+        if efermi is None:
+            efermi = self.efermi
+
         self.G = TBGreen(
             tbmodel=self.tbmodel,
             kmesh=self.kmesh,
             ibz=self.ibz,
             gamma=True,
-            efermi=self.efermi,
+            efermi=efermi,
             use_cache=self._use_cache,
             nproc=self.nproc,
             initial_emin=int(self.emin),
         )
 
-        if self.efermi is None:
-            self.efermi = self.G.efermi
-        else:
-            self.efermi = float(self.efermi)
+        self.efermi = float(self.G.efermi)
         self.norb = self.G.norb
         self.nbasis = self.G.nbasis
 
-        # DMFT specific: Get temperature from mesh
         self.dmft_mesh = self.tbmodel.mesh
-        iw0 = self.dmft_mesh[0]
-        inv_beta = (2 * 0 + 1) * np.pi / iw0.imag if iw0.imag > 0 else 1.0
-        self.temperature = 1.0 / inv_beta
-        self.beta = inv_beta
+        if self.dmft_mesh is not None:
+            iw0 = self.dmft_mesh[0]
+            inv_beta = (2 * 0 + 1) * np.pi / iw0.imag if iw0.imag > 0 else 1.0
+            self.temperature = 1.0 / inv_beta
+            self.beta = inv_beta
+        else:
+            self.temperature = None
+            self.beta = None
 
         # Initialize standard Exchange attributes
         self.rho = 0.0
@@ -58,53 +61,136 @@ class ExchangeDMFTMixin:
         if self.write_density_matrix:
             self.G.write_rho_R(self.short_Rlist)
 
-    def _prepare_elist(self, method="matsubara"):
-        if method.lower() != "matsubara":
-            raise ValueError("DMFT calculations only support Matsubara mesh.")
-        from TB2J.contour import MatsubaraContour
+        # For static-sigma DMFT, compute density matrix from eigenvalues of (H+sigma)
+        # This is more accurate than contour integration. Do this AFTER initialization
+        # so self.rho assignment replaces the initial 0.0
+        if getattr(self.tbmodel, "is_static", False):
+            self._compute_static_sigma_density()
 
-        self.contour = MatsubaraContour(self.dmft_mesh, self.beta)
+    def _compute_static_sigma_density(self):
+        """
+        Compute density matrix from eigenvalues of (H+sigma) for static-sigma DMFT.
+        This is more accurate than contour integration for density.
+        """
+        from HamiltonIO.model.occupations import myfermi as fermi
+
+        rho_up = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+        rho_dn = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+
+        sigma_static = self.tbmodel.get_sigma(0, ispin=None)
+
+        for ik in range(len(self.G.kpts)):
+            Hk_base = self.tbmodel.get_hamiltonian(self.G.kpts[ik], ispin=0)
+            Hk_up = Hk_base + sigma_static[0]
+            Hk_dn = Hk_base + sigma_static[1]
+
+            # Diagonalize
+            evals_up, evecs_up = np.linalg.eigh(Hk_up)
+            evals_dn, evecs_dn = np.linalg.eigh(Hk_dn)
+
+            # Compute density matrix contribution from this k-point
+            # nspin=2 because we're computing per-spin-channel occupancy (not spin-degenerate)
+            occ_up = fermi(evals_up, self.efermi, width=0.01, nspin=2)
+            occ_dn = fermi(evals_dn, self.efermi, width=0.01, nspin=2)
+
+            Sk = self.G.get_Sk(ik)
+            if Sk is None:
+                # Orthogonal basis
+                rho_up += (
+                    np.einsum("ib,b,jb->ij", evecs_up, occ_up, evecs_up.conj())
+                    * self.G.kweights[ik]
+                )
+                rho_dn += (
+                    np.einsum("ib,b,jb->ij", evecs_dn, occ_dn, evecs_dn.conj())
+                    * self.G.kweights[ik]
+                )
+            else:
+                # Non-orthogonal basis
+                rho_up += (
+                    np.einsum("ib,b,jb->ij", evecs_up, occ_up, evecs_up.conj())
+                    @ Sk
+                    * self.G.kweights[ik]
+                )
+                rho_dn += (
+                    np.einsum("ib,b,jb->ij", evecs_dn, occ_dn, evecs_dn.conj())
+                    @ Sk
+                    * self.G.kweights[ik]
+                )
+
+        # Store as rho with spin dimension
+        self.rho = np.array([rho_up, rho_dn])
+        total_charge = np.real(np.trace(self.rho[0]) + np.trace(self.rho[1]))
+        total_spin = np.real(np.trace(self.rho[0]) - np.trace(self.rho[1]))
+        print(
+            f"Static sigma density computed from eigenvalues. Total charge: {total_charge:.4f}, Total spin: {total_spin:.4f}"
+        )
+
+    def _prepare_elist(self, method="matsubara"):
+        self._exchange_method = method.lower()
+        if self._exchange_method == "matsubara":
+            from TB2J.contour import MatsubaraContour
+
+            self.contour = MatsubaraContour(self.dmft_mesh, self.beta)
+        else:
+            # For CFR and other contour methods, delegate to ExchangeCL
+            super()._prepare_elist(method)
 
     def integrate(self, AijRs, AijRs_orb=None, rho_list=None, method="matsubara"):
-        T = self.temperature
-        for iR in self.R_ijatom_dict:
-            R_vec = self.short_Rlist[iR]
-            for iatom, jatom in self.R_ijatom_dict[iR]:
-                f = AijRs[(R_vec, iatom, jatom)]
-                integral = np.sum(f) * T
-                self.A_ijR[(R_vec, iatom, jatom)] = integral
-                if self.orb_decomposition:
-                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                        np.sum(AijRs_orb[(R_vec, iatom, jatom)], axis=0) * T
-                    )
-        if rho_list is not None:
-            self.rho = np.sum(rho_list, axis=0) * T
+        if method.lower() == "matsubara":
+            T = self.temperature
+            for iR in self.R_ijatom_dict:
+                R_vec = self.short_Rlist[iR]
+                for iatom, jatom in self.R_ijatom_dict[iR]:
+                    f = AijRs[(R_vec, iatom, jatom)]
+                    self.A_ijR[(R_vec, iatom, jatom)] = np.sum(f) * T
+                    if self.orb_decomposition:
+                        self.A_ijR_orb[(R_vec, iatom, jatom)] = (
+                            np.sum(AijRs_orb[(R_vec, iatom, jatom)], axis=0) * T
+                        )
+            if rho_list is not None and len(rho_list) > 0:
+                self.rho = np.sum(rho_list, axis=0) * T
+        else:
+            # For CFR and other contour methods, use contour weights
+            for iR in self.R_ijatom_dict:
+                R_vec = self.short_Rlist[iR]
+                for iatom, jatom in self.R_ijatom_dict[iR]:
+                    f = AijRs[(R_vec, iatom, jatom)]
+                    self.A_ijR[(R_vec, iatom, jatom)] = self.contour.integrate_values(f)
+                    if self.orb_decomposition:
+                        self.A_ijR_orb[(R_vec, iatom, jatom)] = (
+                            self.contour.integrate_values(
+                                AijRs_orb[(R_vec, iatom, jatom)]
+                            )
+                        )
+            if rho_list is not None and len(rho_list) > 0:
+                self.rho = self.contour.integrate_values(rho_list)
 
     def get_rho_atom(self):
-        """
-        calculate charge and spin for each atom from integrated rho.
-        """
         self.charges = np.zeros(len(self.atoms), dtype=float)
         self.spinat = np.zeros((len(self.atoms), 3), dtype=float)
         for iatom in self.orb_dict:
             iorb = self.iorb(iatom)
             if getattr(self, "_is_collinear", False):
-                # rho shape is (2, nbasis, nbasis)
-                tup = np.real(np.trace(self.rho[0][np.ix_(iorb, iorb)]))
-                tdn = np.real(np.trace(self.rho[1][np.ix_(iorb, iorb)]))
+                # For eigenvalue-based density (static-sigma): rho is already the density matrix
+                # Charge = real(trace(rho)), Moment = real(trace(rho_up) - trace(rho_dn))
+                # For contour-based density: rho = -1/pi * Im(integral), need -Im(rho)/pi
+                is_eigenvalue_based = getattr(self.tbmodel, "is_static", False)
+                if is_eigenvalue_based:
+                    tup = np.real(np.trace(self.rho[0][np.ix_(iorb, iorb)]))
+                    tdn = np.real(np.trace(self.rho[1][np.ix_(iorb, iorb)]))
+                else:
+                    # rho from contour integration: rho = -1/(pi) * Im(contour_integrate(G))
+                    tup = -np.imag(np.trace(self.rho[0][np.ix_(iorb, iorb)])) / np.pi
+                    tdn = -np.imag(np.trace(self.rho[1][np.ix_(iorb, iorb)])) / np.pi
                 self.charges[iatom] = tup + tdn
                 self.spinat[iatom, 2] = tup - tdn
             else:
-                # rho shape is (nbasis, nbasis)
                 tmp = self.rho[np.ix_(iorb, iorb)]
                 from TB2J.pauli import pauli_block_all
 
-                # *2 because there is a 1/2 in the pauli_block_all function
-                rho_pauli = np.array(
-                    [np.trace(x) * 2 for x in pauli_block_all(tmp)]
-                ).real
-                self.charges[iatom] = rho_pauli[0]
-                self.spinat[iatom, :] = rho_pauli[1:]
+                rho_pauli = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)])
+                self.charges[iatom] = -np.imag(rho_pauli[0]) / np.pi
+                self.spinat[iatom, :] = -np.imag(rho_pauli[1:]) / np.pi
         return self.charges, self.spinat
 
     def calculate_all(self):
@@ -129,7 +215,9 @@ class ExchangeDMFTMixin:
             )
 
         for i, result in enumerate(results):
-            rho_list.append(result["rho_e"])
+            # Only collect rho_list for non-static-sigma calculations
+            if not getattr(self.tbmodel, "is_static", False):
+                rho_list.append(result["rho_e"])
             for iR in self.R_ijatom_dict:
                 R_vec = self.short_Rlist[iR]
                 for iatom, jatom in self.R_ijatom_dict[iR]:
@@ -150,7 +238,20 @@ class ExchangeDMFTMixin:
                                 result["AijR_orb"][(R_vec, iatom, jatom)]
                             ]
 
-        self.integrate(AijRs, AijRs_orb, rho_list=rho_list)
+        # For static-sigma, rho was already computed from eigenvalues in set_tbmodels
+        # Only integrate rho_list for non-static-sigma (Matsubara or dynamic)
+        if getattr(self.tbmodel, "is_static", False):
+            print(
+                "Using static-sigma density from eigenvalues (skipping contour integration for rho)"
+            )
+            # Don't pass rho_list to integrate - it would overwrite our computed rho
+            self.integrate(
+                AijRs, AijRs_orb, rho_list=None, method=self._exchange_method
+            )
+        else:
+            self.integrate(
+                AijRs, AijRs_orb, rho_list=rho_list, method=self._exchange_method
+            )
         self.get_rho_atom()
         self.A_to_Jtensor()
         # self.A_to_Jtensor_orb() # TODO: check if this works for DMFT
