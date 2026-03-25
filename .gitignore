@@ -6,6 +6,8 @@ uv.lock
 # vim files
 *.swp
 
+.tmp
+
 # Latex
 *.aux
 
