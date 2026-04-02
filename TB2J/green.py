@@ -176,19 +176,6 @@ class TBGreen:
         print(
             f"Finished preparing eigenvalues and eigenvectors. Time taken: {time.time() - t0:.2f} seconds"
         )
-        print(
-            f"starting to prepare eigenvalues and eigenvectors for {self.nkpts} k-points..."
-        )
-        t0 = time.time()
-
-        # Initialize Rmap for spin-phonon coupling
-        self._Rmap = None
-        self._Rmap_rev = None
-
-        self._prepare_eigen()
-        print(
-            f"Finished preparing eigenvalues and eigenvectors. Time taken: {time.time() - t0:.2f} seconds"
-        )
 
     def prepare_kpts(
         self, kmesh=None, gamma=True, ibz=False, kpts=None, kweights=None, tbmodel=None

@@ -22,7 +22,9 @@ def siesta_anisotropy(**kwargs):
     pass
 
 
-def gen_exchange_siesta(fdf_fname, read_H_soc=False, use_gpu=False, **kwargs):
+def gen_exchange_siesta(
+    fdf_fname, read_H_soc=False, use_gpu=False, skip=False, **kwargs
+):
     """
     parameters:
         fdf_fname: str
@@ -188,36 +190,42 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             # Choose MAE class based on use_gpu flag
             MAEClass = MAEGreenGPU if use_gpu else MAEGreen
 
-            MAE = MAEClass(
-                tbmodels=model,
-                atoms=model.atoms,
-                basis=basis,
-                efermi=None,
-                angles="xyz",
-                # magnetic_elements=magnetic_elements,
-                # include_orbs=include_orbs,
-                **exargs,
-            )
-            # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
-            # phis = [0, 0, 0, 0]
-            # MAE.set_angles(thetas=thetas, phis=phis)
-            # MAE.set_xyz_angles()
-            MAE.run(
-                output_path=f"{output_path}_anisotropy",
-                with_eigen=False,
-                use_gpu=use_gpu,
-            )
-            # print(
-            #    f"MAE calculation finished. The results are in {output_path} directory."
-            # )
+            mae_output_path = f"{output_path}_anisotropy"
+            if skip and os.path.exists(os.path.join(mae_output_path, "MAE.dat")):
+                print(f"Skipping MAE: {mae_output_path}/MAE.dat already exists.")
+            else:
+                MAE = MAEClass(
+                    tbmodels=model,
+                    atoms=model.atoms,
+                    basis=basis,
+                    efermi=None,
+                    angles="xyz",
+                    # magnetic_elements=magnetic_elements,
+                    # include_orbs=include_orbs,
+                    **exargs,
+                )
+                # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
+                # phis = [0, 0, 0, 0]
+                # MAE.set_angles(thetas=thetas, phis=phis)
+                # MAE.set_xyz_angles()
+                MAE.run(
+                    output_path=mae_output_path,
+                    with_eigen=False,
+                )
 
             angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
             for key, val in angle.items():
+                output_path_full = f"{output_path}_{key}"
+                pickle_path = os.path.join(output_path_full, "TB2J.pickle")
+                if skip and os.path.exists(pickle_path):
+                    print(
+                        f"Skipping exchange {key}: {output_path_full}/TB2J.pickle already exists."
+                    )
+                    continue
                 theta, phi = val
                 model.set_so_strength(1.0)
                 model.set_Hsoc_rotation_angle([theta, phi])
                 basis = dict(zip(model.orbs, list(range(model.nbasis))))
-                output_path_full = f"{output_path}_{key}"
                 # Choose Exchange class based on use_gpu flag
                 ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
                 exchange = ExchangeClass(
@@ -234,11 +242,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 )
 
             merge(
-                "TB2J_results_x",
-                "TB2J_results_y",
-                "TB2J_results_z",
+                f"{output_path}_x",
+                f"{output_path}_y",
+                f"{output_path}_z",
                 main_path=None,
                 save=True,
-                write_path="TB2J_results",
+                write_path=output_path,
             )
-            print("Final TB2J_results written to TB2J_results directory.")
+            print(f"Final TB2J_results written to {output_path} directory.")

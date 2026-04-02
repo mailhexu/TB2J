@@ -197,7 +197,6 @@ class ExchangeCL2GPU(ExchangeCL2):
             use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
-            use_gpu=True,
         )
         self.Gdn = TBGreenGPU(
             tbmodel=self.tbmodel_dn,
@@ -206,7 +205,6 @@ class ExchangeCL2GPU(ExchangeCL2):
             use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
-            use_gpu=True,
         )
 
         if self.write_density_matrix:
