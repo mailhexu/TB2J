@@ -74,8 +74,10 @@ class SpinIO(object):
         :param dmi_ddict:{(R, i,j): DMI}
         :param Jani_dict: {(R, i,j): Jani'}, Jani is a 3*3 matrix
         :param biqudratic_Jdict: {(R, i,j ): J}
-        :param k1: single ion anisotropy amplitude.o
-        :param kdir: directio of k1
+        :param k1: single ion anisotropy amplitude (eV). Together with
+            *k1dir* this is immediately converted to a 3×3 SIA tensor using
+            A = k1 * (e ⊗ e) and accumulated into *sia_tensor*.
+        :param kdir: direction of k1 (normalised internally)
         :param NJT_Jdict: exhange calculated using NJT method
         :param NJT_ddict: DMI calculated using NJT method
         :param damping: damping factor
@@ -134,33 +136,21 @@ class SpinIO(object):
             self.Jani_dict = None
 
         if k1 is not None and k1dir is not None:
-            # Convert uniaxial anisotropy to SIA tensor
+            # Convert uniaxial anisotropy to SIA tensor using convention
+            # E_{SIA} = -sum_i S_i^T A_i S_i  =>  A_i = k1 * (e x e^T)
             if sia_tensor is None:
                 sia_tensor = {}
             for i, (K, axis) in enumerate(zip(k1, k1dir)):
                 if abs(K) > 1e-10:
-                    e = np.array(axis)
+                    e = np.array(axis, dtype=float)
                     norm = np.linalg.norm(e)
                     if norm > 1e-6:
                         e = e / norm
-                        # A = K * e * e^T
                         A = K * np.outer(e, e)
                         if i in sia_tensor:
                             sia_tensor[i] += A
                         else:
                             sia_tensor[i] = A
-            # Clear k1 and k1dir as they are now integrated into sia_tensor
-            k1 = None
-            k1dir = None
-
-        if k1 is not None and k1dir is not None:
-            self.has_uniaxial_anistropy = True
-            self.k1 = k1
-            self.k1dir = k1dir
-        else:
-            self.has_uniaxial_anistropy = False
-            self.k1 = None
-            self.k1dir = None
 
         self.has_biquadratic = not (
             biquadratic_Jdict == {} or biquadratic_Jdict is None
@@ -223,6 +213,52 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     @property
     def has_bilinear(self):
         return self.Jani_dict is not None
+
+    @property
+    def has_uniaxial_anistropy(self):
+        """Backward-compatibility alias: True when a SIA tensor is present."""
+        return self.has_sia_tensor
+
+    def get_sia_energy(self, spinat=None):
+        """Compute single-ion anisotropy energy.
+
+        Convention: E_SIA = -sum_i S_i^T A_i S_i
+        where S_i is the (unit) spin vector at site i and A_i is the 3x3
+        SIA tensor for that site (indexed by *spin* index).
+
+        Parameters
+        ----------
+        spinat : array-like, shape (n_spins, 3), optional
+            Unit spin vectors indexed by *spin* index.  When *None* the
+            magnetic moments stored in ``self.spinat`` (indexed by atom
+            index) are used and automatically normalised to unit vectors.
+
+        Returns
+        -------
+        float
+            Total SIA energy in the same units as the tensor (eV).
+        """
+        if not self.has_sia_tensor or self.sia_tensor is None:
+            return 0.0
+
+        if spinat is None:
+            # Build spin-index → unit-vector mapping from self.spinat
+            spinat_by_spin = {}
+            for ispin, iatom in self._ind_atoms.items():
+                S = np.array(self.spinat[iatom], dtype=float)
+                norm = np.linalg.norm(S)
+                spinat_by_spin[ispin] = S / norm if norm > 1e-10 else S
+        else:
+            spinat_by_spin = {
+                i: np.asarray(s, dtype=float) for i, s in enumerate(spinat)
+            }
+
+        energy = 0.0
+        for ispin, A in self.sia_tensor.items():
+            if ispin in spinat_by_spin:
+                S = spinat_by_spin[ispin]
+                energy -= float(S @ A @ S)
+        return energy
 
     def _build_Rlist(self):
         Rset = set()
@@ -390,9 +426,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if Ja is not None:
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
-        if np.linalg.norm(R) < 0.001 and i == j:
-            print(f"{SIA=} , {i=}")
-            print(f"{self.has_sia_tensor=}")
 
         if (
             SIA
@@ -402,7 +435,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             and np.linalg.norm(R) < 0.001
         ):
             if i in self.sia_tensor:
-                print(f"Adding SIA tensor for {i}, with {self.sia_tensor[i]}")
                 Jtensor += self.sia_tensor[i]
 
         # if iso_only:

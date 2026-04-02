@@ -4,6 +4,19 @@ from itertools import groupby
 import numpy as np
 
 
+def _sia_tensor_to_k1_k1dir(tensor):
+    """Extract effective uniaxial k1 and k1dir from a SIA tensor.
+
+    Symmetrises the tensor and returns the eigenvalue with the largest
+    absolute value together with its eigenvector.  This gives the dominant
+    uniaxial component of the SIA tensor.
+    """
+    A = (np.array(tensor) + np.array(tensor).T) / 2.0
+    eigenvalues, eigenvectors = np.linalg.eigh(A)
+    idx = int(np.argmax(np.abs(eigenvalues)))
+    return float(eigenvalues[idx]), eigenvectors[:, idx]
+
+
 def write_tom_ucf(cls, fname):
     """
     n1 TODO: what is this
@@ -25,12 +38,11 @@ def write_tom_ucf(cls, fname):
                 damping = cls.damping[i]
                 gyro_ratio = cls.gyro_ratio[i]
                 symbol = cls.atoms.get_chemical_symbols()[i]
-                if cls.has_uniaxial_anistropy:
-                    k1 = cls.k1[id_spin]
-                    k1dir = cls.k1dir[id_spin]
+                if cls.has_sia_tensor and cls.sia_tensor and id_spin in cls.sia_tensor:
+                    k1, k1dir = _sia_tensor_to_k1_k1dir(cls.sia_tensor[id_spin])
                 else:
                     k1 = 0.0
-                    k1dir = [0.0, 0.0, 1.0]
+                    k1dir = np.array([0.0, 0.0, 1.0])
                 text = "{id_spin} {pos_x} {pos_y} {pos_z} {ms} {damping} {gyro_ratio} {symbol} {spin_x} {spin_y} {spin_z} {k1} {kx} {ky} {kz}\n".format(
                     id_spin=id_spin,
                     pos_x=pos[0],

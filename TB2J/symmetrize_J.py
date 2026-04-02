@@ -63,13 +63,10 @@ class TB2JSymmetrizer:
                     symJdict[(R, i, j)] = Javg
         self.new_exc.exchange_Jdict = symJdict
         if self.Jonly:
-            self.new_exc.has_dmi = False
             self.new_exc.dmi_ddict = None
-            self.new_exc.has_bilinear = False
             self.new_exc.Jani_dict = None
-            self.has_uniaxial_anisotropy = False
-            self.k1 = None
-            self.k1dir = None
+            self.new_exc.sia_tensor = None
+            self.new_exc.has_sia_tensor = False
 
     def output(self, path="TB2J_symmetrized"):
         if path is None:

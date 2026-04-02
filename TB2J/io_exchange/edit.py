@@ -4,11 +4,25 @@ TB2J_edit: A library for modifying TB2J results.
 This library provides a simple interface for editing TB2J exchange parameters,
 including single ion anisotropy, DMI, anisotropic exchange, and symmetry operations.
 
-Example:
+The canonical representation for single-ion anisotropy (SIA) is a full 3×3
+tensor ``A`` stored in ``spinio.sia_tensor``, with the energy convention
+``E_SIA = −∑ᵢ Sᵢᵀ Aᵢ Sᵢ``.
+
+Example — uniaxial convenience interface (k1 in eV, direction along z)::
+
     >>> from TB2J.io_exchange.edit import load, set_anisotropy, toggle_DMI, save
     >>> spinio = load('TB2J_results/TB2J.pickle')
-    >>> set_anisotropy(spinio, species='Sm', k1=5.0, k1dir=[0, 0, 1])
+    >>> set_anisotropy(spinio, species='Sm', k1=0.005, k1dir=[0, 0, 1])
     >>> toggle_DMI(spinio, enabled=False)
+    >>> save(spinio, 'modified_results')
+
+Example — full tensor interface::
+
+    >>> import numpy as np
+    >>> from TB2J.io_exchange.edit import load, set_anisotropy, save
+    >>> spinio = load('TB2J_results/TB2J.pickle')
+    >>> A = np.diag([0.001, 0.002, -0.003])   # eV, diagonal tensor
+    >>> set_anisotropy(spinio, species='Fe', tensor=A)
     >>> save(spinio, 'modified_results')
 """
 
@@ -70,15 +84,20 @@ def save(spinio, path="modified_results"):
     """
     Save modified TB2J results to disk in all supported formats.
 
-    This writes the pickle file, TXT format, Multibinit XML, and other formats.
+    Writes the pickle file, plain-text exchange file, Multibinit XML, VAMPIRE,
+    Tom_asd, and any other formats registered on the SpinIO object.
+
+    When an SIA tensor is present, the Multibinit ``mb.in`` control file is
+    patched so that ``spin_sia_add = 0``; this tells Multibinit to read the SIA
+    from the exchange XML rather than from a separate SIA file.
 
     Parameters
     ----------
     spinio : SpinIO
         The SpinIO object to save.
     path : str, optional
-        Output directory path. Default is 'modified_results'.
-        Will be created if it doesn't exist.
+        Output directory path. Default is ``'modified_results'``.
+        Will be created if it does not exist.
 
     Examples
     --------
@@ -86,10 +105,8 @@ def save(spinio, path="modified_results"):
     """
     spinio.write_all(path=path)
 
-    # Fix mb.in to use SIA from exchange.xml when SIA is present
-    if spinio.has_uniaxial_anistropy or (
-        hasattr(spinio, "has_sia_tensor") and spinio.has_sia_tensor
-    ):
+    # Fix mb.in to use SIA from exchange.xml when SIA tensor is present
+    if hasattr(spinio, "has_sia_tensor") and spinio.has_sia_tensor:
         mb_in_path = os.path.join(path, "Multibinit", "mb.in")
         if os.path.exists(mb_in_path):
             with open(mb_in_path, "r") as f:
@@ -100,12 +117,14 @@ def save(spinio, path="modified_results"):
                 f.write(content)
 
 
-def set_anisotropy(spinio, species, k1=None, k1dir=None):
+def set_anisotropy(spinio, species, k1=None, k1dir=None, tensor=None):
     """
     Set single ion anisotropy for all atoms of a specified species.
 
-    Modifies the k1 (amplitude) and/or k1dir (direction) for all magnetic
-    atoms of the given chemical species.
+    The canonical representation is the full 3x3 SIA tensor stored in
+    ``spinio.sia_tensor``.  This function accepts either a full tensor or the
+    convenience pair ``(k1, k1dir)``, which is converted using the convention
+    ``E_SIA = -S^T A S`` and ``A = k1 * (e ⊗ e)``.
 
     Parameters
     ----------
@@ -114,71 +133,47 @@ def set_anisotropy(spinio, species, k1=None, k1dir=None):
     species : str
         Chemical species symbol (e.g., 'Sm', 'Fe').
     k1 : float, optional
-        Anisotropy amplitude in eV. If None, only k1dir is modified.
+        Uniaxial anisotropy amplitude in eV.  Must be supplied together with
+        ``k1dir``; passing one without the other raises ``ValueError``.
     k1dir : array-like, optional
-        Anisotropy direction as a 3D vector [x, y, z].
-        Will be normalized automatically. If None, only k1 is modified.
+        Easy-axis direction as a 3D vector [x, y, z].  Will be normalised
+        automatically.  Must be supplied together with ``k1``.
+    tensor : array-like, optional
+        Full 3×3 anisotropy tensor in eV.  If provided it is used directly
+        and ``k1``/``k1dir`` must not be given.
 
     Notes
     -----
-    - Only magnetic atoms (those with index_spin >= 0) are modified.
-    - If k1/k1dir are None in the SpinIO object, they will be initialized.
-    - k1dir is always normalized to a unit vector.
+    - Only magnetic atoms (those with ``index_spin >= 0``) are modified.
+    - ``tensor`` is the general interface.
+    - ``k1`` and ``k1dir`` are a convenience shorthand for uniaxial input;
+      they must be provided together and build ``A = k1 * (ê ⊗ ê)``.
+    - Mixing ``tensor`` with ``k1`` or ``k1dir`` raises ``ValueError``.
 
     Examples
     --------
     >>> # Set Sm anisotropy to 5 meV along z-axis
     >>> set_anisotropy(spinio, species='Sm', k1=0.005, k1dir=[0, 0, 1])
 
-    >>> # Set only the direction for Fe
-    >>> set_anisotropy(spinio, species='Fe', k1dir=[1, 0, 0])
+    >>> # Set a full tensor directly
+    >>> set_anisotropy(spinio, species='Fe', tensor=np.diag([0.001, 0.002, 0.003]))
     """
-    # Get symbols and find target atoms
-    symbols = spinio.atoms.get_chemical_symbols()
-
-    target_indices = [
-        i
-        for i, (sym, idx) in enumerate(zip(symbols, spinio.index_spin))
-        if sym == species and idx >= 0
-    ]
-
-    if not target_indices:
-        import warnings
-
-        warnings.warn(
-            f"No magnetic atoms found for species '{species}'. "
-            f"Either the species doesn't exist or has no magnetic atoms.",
-            UserWarning,
-        )
+    if tensor is not None:
+        if k1 is not None or k1dir is not None:
+            raise ValueError("Use either tensor or k1/k1dir, not both.")
+        set_sia_tensor(spinio, species=species, tensor=tensor)
         return
 
-    # Initialize k1/k1dir if not present
-    n_spins = (
-        max(spinio.index_spin) + 1
-        if max(spinio.index_spin) >= 0
-        else len(spinio.index_spin)
-    )
-    if spinio.k1 is None:
-        spinio.k1 = [0.0] * n_spins
-    if spinio.k1dir is None:
-        spinio.k1dir = [[0.0, 0.0, 1.0]] * n_spins
+    if k1 is None or k1dir is None:
+        raise ValueError("Please provide either tensor=... or both k1 and k1dir.")
 
-    # Set values for matching atoms
-    for iatom in target_indices:
-        ispin = spinio.index_spin[iatom]
-        if k1 is not None:
-            spinio.k1[ispin] = k1  # eV
-        if k1dir is not None:
-            k1dir_array = np.array(k1dir, dtype=float)
-            norm = np.linalg.norm(k1dir_array)
-            if norm == 0:
-                raise ValueError(
-                    f"k1dir cannot be a zero vector for species '{species}'"
-                )
-            spinio.k1dir[ispin] = k1dir_array / norm
+    k1dir_arr = np.array(k1dir, dtype=float)
+    norm = np.linalg.norm(k1dir_arr)
+    if norm == 0:
+        raise ValueError(f"k1dir cannot be a zero vector for species '{species}'")
+    k1dir_arr = k1dir_arr / norm
 
-    # Set the flag to enable SIA in output
-    spinio.has_uniaxial_anistropy = True
+    set_sia_tensor(spinio, species=species, tensor=k1 * np.outer(k1dir_arr, k1dir_arr))
 
 
 def set_sia_tensor(spinio, species, tensor):
@@ -238,15 +233,25 @@ def set_sia_tensor(spinio, species, tensor):
 
 def remove_sia_tensor(spinio, species=None):
     """
-    Remove single ion anisotropy tensor.
+    Remove the single-ion anisotropy tensor.
 
     Parameters
     ----------
     spinio : SpinIO
         The SpinIO object to modify.
     species : str, optional
-        Chemical species symbol (e.g., 'Sm', 'Fe').
-        If None, remove for all atoms.
+        Chemical species symbol (e.g., ``'Sm'``).  If given, only atoms of
+        that species are cleared.  If ``None`` (default), the entire
+        ``sia_tensor`` dict is removed and ``has_sia_tensor`` is set to
+        ``False``.
+
+    Examples
+    --------
+    >>> # Remove anisotropy for Sm atoms only
+    >>> remove_sia_tensor(spinio, species='Sm')
+
+    >>> # Remove all SIA tensors
+    >>> remove_sia_tensor(spinio)
     """
     if not hasattr(spinio, "sia_tensor") or spinio.sia_tensor is None:
         return
@@ -520,19 +525,6 @@ def remove_sublattice(spinio, sublattice_name):
     if hasattr(spinio, "NJT_ddict") and spinio.NJT_ddict:
         spinio.NJT_ddict = filter_interaction(spinio.NJT_ddict)
         spinio.NJT_ddict = reindex_interaction(spinio.NJT_ddict)
-
-    if spinio.has_uniaxial_anistropy:
-        if spinio.k1 is not None:
-            new_k1 = [0.0] * current_spin_index
-            new_k1dir = [[0.0, 0.0, 1.0]] * current_spin_index
-
-            for old_idx, new_idx in old_to_new_spin_index.items():
-                if old_idx < len(spinio.k1):
-                    new_k1[new_idx] = spinio.k1[old_idx]
-                    new_k1dir[new_idx] = spinio.k1dir[old_idx]
-
-            spinio.k1 = new_k1
-            spinio.k1dir = new_k1dir
 
     if (
         hasattr(spinio, "has_sia_tensor")

@@ -1,7 +1,8 @@
+import os
 import xml.etree.cElementTree as ET
 from xml.dom import minidom
+
 from ase.units import Bohr
-import os
 
 
 def write_multibinit_inp(cls, path="TB2J_results/Multibinit"):
@@ -137,15 +138,14 @@ def write_xml(cls, fname):
                 val[2],
             )
 
-    if cls.has_uniaxial_anistropy:
-        uni = ET.SubElement(root, "spin_uniaxial_SIA_list", units="eV")
-        ET.SubElement(uni, "nterms").text = "%d" % len(cls.k1)
-        for i, k1 in enumerate(cls.k1):
-            uni_term = ET.SubElement(uni, "spin_uniaxial_SIA_term")
-            ET.SubElement(uni_term, "i").text = "%d " % (i + 1)
-            ET.SubElement(uni_term, "amplitude").text = "%.5e" % k1
-            ET.SubElement(uni_term, "direction").text = "%.5e \t %.5e \t %.5e " % tuple(
-                cls.k1dir[i]
+    if cls.has_sia_tensor and cls.sia_tensor:
+        sia = ET.SubElement(root, "spin_sia_tensor_list", units="eV")
+        ET.SubElement(sia, "nterms").text = "%d" % len(cls.sia_tensor)
+        for i, tensor in cls.sia_tensor.items():
+            sia_term = ET.SubElement(sia, "spin_sia_tensor_term")
+            ET.SubElement(sia_term, "i").text = "%d" % (i + 1)
+            ET.SubElement(sia_term, "data").text = "\t".join(
+                ["%.5e" % x for x in tensor.flatten()]
             )
 
     if cls.has_bilinear:

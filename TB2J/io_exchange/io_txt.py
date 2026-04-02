@@ -85,24 +85,6 @@ def write_atom_section(cls, myfile):
             )
         )
 
-    # write single ion anisotropy
-    if cls.k1 is not None and cls.k1dir is not None:
-        myfile.write("\n")
-        myfile.write("-" * 90 + "\n")
-        myfile.write("Single Ion Anisotropy (meV): \n")
-        myfile.write("(k1 is the anisotropy constant, k1dir is the direction vector)\n")
-        myfile.write("{:^12s} {:^12s} {:^24s}\n".format("Atom number", "k1", "k1dir"))
-        for i, s in enumerate(symnum):
-            ispin = cls.index_spin[i]
-            if ispin >= 0:
-                k1 = cls.k1[ispin] * 1e3
-                k1dir = cls.k1dir[ispin]
-                myfile.write(
-                    "{:<12s} {:12.4f} ({:7.4f}, {:7.4f}, {:7.4f})\n".format(
-                        s, k1, k1dir[0], k1dir[1], k1dir[2]
-                    )
-                )
-
     myfile.write("\n")
 
 
