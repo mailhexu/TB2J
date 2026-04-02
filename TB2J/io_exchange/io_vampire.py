@@ -4,6 +4,18 @@ import numpy as np
 from ase.units import J
 
 
+def _sia_tensor_to_k1_k1dir(tensor):
+    """Extract effective uniaxial k1 and k1dir from a SIA tensor.
+
+    Symmetrises the tensor and returns the eigenvalue with the largest
+    absolute value together with its eigenvector.
+    """
+    A = (np.array(tensor) + np.array(tensor).T) / 2.0
+    eigenvalues, eigenvectors = np.linalg.eigh(A)
+    idx = int(np.argmax(np.abs(eigenvalues)))
+    return float(eigenvalues[idx]), eigenvectors[:, idx]
+
+
 def write_vampire(cls, path="TB2J_results/Vampire"):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -93,9 +105,9 @@ material[{id}]:unit-cell-category =  {id}
                 ms = np.sqrt(np.sum(np.array(cls.spinat[i]) ** 2))
                 spin = np.array(cls.spinat[i]) / ms
                 spin_text = ",".join(map(str, spin))
-                if cls.k1 is not None:
-                    k1 = cls.k1[id_spin - 1]
-                    k1dir = ", ".join(map(str, cls.k1dir[id_spin - 1]))
+                if cls.has_sia_tensor and cls.sia_tensor and id_spin in cls.sia_tensor:
+                    k1, k1dir_arr = _sia_tensor_to_k1_k1dir(cls.sia_tensor[id_spin])
+                    k1dir = ", ".join(map(str, k1dir_arr))
                 else:
                     k1 = 0.0
                     k1dir = "0.0 , 0.0, 1.0"

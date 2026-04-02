@@ -1,0 +1,44 @@
+# Magnon band structure configuration with custom q-points
+# 
+# This example shows how to specify custom q-points that differ from
+# the ASE default special points.
+#
+# Usage:
+#   TB2J_magnon.py --config config_custom_qpoints.toml --bands
+#
+# Or in Python API:
+#   from TB2J.magnon.magnon_parameters import MagnonParameters
+#   params = MagnonParameters.from_toml("config_custom_qpoints.toml")
+#   plot_magnon_bands_from_TB2J(params)
+
+# TB2J results location
+path = "TB2J_results"
+
+# Exchange interactions
+Jiso = true
+Jani = true
+DMI = true
+SIA = true
+
+# Band structure parameters
+kpath = "GMKG"  # Path connecting the q-points
+npoints = 200
+filename = "magnon_bands.png"
+
+# Custom q-points definition
+# Format: qpoints = { name = [x, y, z], ... }
+# These override the default ASE special points for the k-path
+[qpoints]
+G = [0.0, 0.0, 0.0]
+M = [0.5, 0.5, 0.0]
+K = [0.375, 0.375, 0.0]
+
+# DOS parameters
+kmesh = [20, 20, 20]
+gamma = true
+width = 0.001
+npts = 401
+
+# Propagation vector (for magnetic order)
+# Q = [0.0, 0.0, 0.0]  # Gamma point (ferromagnetic)
+# Q = [0.5, 0.0, 0.0]  # X point (antiferromagnetic)

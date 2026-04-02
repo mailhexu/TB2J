@@ -6,6 +6,7 @@ Usage:
     TB2J_edit load -i INPUT.pickle -o OUTPUT_DIR
     TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -d "0 0 1" -o OUTPUT_DIR
     TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -s Fe 1.0 -o OUTPUT_DIR
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm --tensor "1 0 0  0 2 0  0 0 -3" -o OUTPUT_DIR
     TB2J_edit toggle-dmi -i INPUT.pickle --disable -o OUTPUT_DIR
     TB2J_edit toggle-jani -i INPUT.pickle --disable -o OUTPUT_DIR
     TB2J_edit toggle-exchange -i INPUT.pickle --disable -o OUTPUT_DIR
@@ -40,46 +41,81 @@ def cmd_set_anisotropy(args):
     print(f"Loading TB2J results from: {args.input}")
     spinio = load(args.input)
 
-    # Parse species specifications
-    # args.species is a list of lists: [['Sm', '5.0'], ['Fe', '1.0']]
-    # or with direction: [['Sm', '5.0', '0,0,1'], ['Fe', '1.0']]
-    specs = []
-    default_dir = None
-    if args.dir:
-        default_dir = [float(x) for x in args.dir.split()]
+    tensor_mode = args.tensor is not None
 
-    for spec_list in args.species:
-        if len(spec_list) < 2:
+    if tensor_mode:
+        # --tensor mode: each -s entry is just a species name (no k1 value)
+        # Parse the 9-element tensor (row-major)
+        raw = args.tensor.replace(",", " ").split()
+        if len(raw) != 9:
             print(
-                f"Error: Invalid specification {spec_list}. Expected: species k1 [dir]"
+                f"Error: --tensor requires exactly 9 values (got {len(raw)}). "
+                "Provide them as a space- or comma-separated string."
             )
             sys.exit(1)
+        scale = 1e-3 if args.mev else 1.0
+        tensor = np.array([float(v) * scale for v in raw]).reshape(3, 3)
 
-        species = spec_list[0]
-        k1_val = float(spec_list[1])
-        k1_eV = k1_val * 1e-3 if args.mev else k1_val
+        species_list = []
+        for spec_list in args.species:
+            if len(spec_list) != 1:
+                print(
+                    f"Error: In --tensor mode, -s expects only a species name "
+                    f"(got {spec_list}). Do not provide k1 values alongside --tensor."
+                )
+                sys.exit(1)
+            species_list.append(spec_list[0])
 
-        # Check if direction vector is provided
-        k1dir = default_dir
-        if len(spec_list) >= 3:
-            # Third element is the direction vector
-            dir_str = spec_list[2].replace(",", " ")
-            k1dir = [float(x) for x in dir_str.split()]
-
-        specs.append((species, k1_eV, k1dir))
-
-    print(f"Setting anisotropy for {len(specs)} species:")
-    for species, k1, k1dir in specs:
         unit = "meV" if args.mev else "eV"
-        k1_display = k1 * 1000 if args.mev else k1
-        print(f"  {species}: k1 = {k1_display:.4f} {unit}", end="")
-        if k1dir is not None:
-            print(f", k1dir = {k1dir}")
-        else:
-            print()
+        print(f"Setting anisotropy tensor ({unit}) for {len(species_list)} species:")
+        for row in tensor * (1000 if args.mev else 1):
+            print("    " + "  ".join(f"{v:.4f}" for v in row))
 
-    for species, k1, k1dir in specs:
-        set_anisotropy(spinio, species=species, k1=k1, k1dir=k1dir)
+        for species in species_list:
+            print(f"  -> {species}")
+            set_anisotropy(spinio, species=species, tensor=tensor)
+
+    else:
+        # k1 / k1dir mode
+        # args.species is a list of lists: [['Sm', '5.0'], ['Fe', '1.0']]
+        # or with direction: [['Sm', '5.0', '0,0,1'], ['Fe', '1.0']]
+        specs = []
+        default_dir = None
+        if args.dir:
+            default_dir = [float(x) for x in args.dir.split()]
+
+        for spec_list in args.species:
+            if len(spec_list) < 2:
+                print(
+                    f"Error: Invalid specification {spec_list}. "
+                    "Expected: -s species k1 [dir]  (or use --tensor for full tensor input)"
+                )
+                sys.exit(1)
+
+            species = spec_list[0]
+            k1_val = float(spec_list[1])
+            k1_eV = k1_val * 1e-3 if args.mev else k1_val
+
+            # Check if direction vector is provided inline
+            k1dir = default_dir
+            if len(spec_list) >= 3:
+                dir_str = spec_list[2].replace(",", " ")
+                k1dir = [float(x) for x in dir_str.split()]
+
+            specs.append((species, k1_eV, k1dir))
+
+        unit = "meV" if args.mev else "eV"
+        print(f"Setting anisotropy for {len(specs)} species:")
+        for species, k1, k1dir in specs:
+            k1_display = k1 * 1000 if args.mev else k1
+            print(f"  {species}: k1 = {k1_display:.4f} {unit}", end="")
+            if k1dir is not None:
+                print(f", k1dir = {k1dir}")
+            else:
+                print()
+
+        for species, k1, k1dir in specs:
+            set_anisotropy(spinio, species=species, k1=k1, k1dir=k1dir)
 
     print(f"Saving to: {args.output}")
     save(spinio, args.output)
@@ -243,12 +279,18 @@ def cmd_info(args):
     print(f"  Anisotropic exchange: {'enabled' if spinio.has_bilinear else 'disabled'}")
 
     # Anisotropy
-    if spinio.k1:
-        print("\nSingle ion anisotropy:")
+    if (
+        hasattr(spinio, "has_sia_tensor")
+        and spinio.has_sia_tensor
+        and spinio.sia_tensor
+    ):
+        print("\nSingle ion anisotropy tensor (eV):")
         for i, (sym, idx) in enumerate(zip(symbols, spinio.index_spin)):
-            if idx >= 0 and idx < len(spinio.k1):
-                if spinio.k1[idx] != 0:
-                    print(f"  {sym}{i}: k1={spinio.k1[idx]:.4f} eV")
+            if idx >= 0 and idx in spinio.sia_tensor:
+                A = spinio.sia_tensor[idx]
+                print(f"  {sym}{i}: A =")
+                for row in A:
+                    print("    " + "  ".join(f"{v:.4f}" for v in row))
     else:
         print("\nSingle ion anisotropy: None")
 
@@ -293,14 +335,35 @@ def main():
         action="append",
         nargs="+",
         required=True,
-        help="Species and k1 value: -s species k1 (can be used multiple times)",
+        metavar="SPEC",
+        help=(
+            "Species and (optionally) k1 value: -s SPECIES K1 [DIR]. "
+            "In --tensor mode, provide only the species name: -s SPECIES. "
+            "Can be used multiple times for different species."
+        ),
     )
-    parser_aniso.add_argument("-d", "--dir", help='Default direction vector as "x y z"')
+    parser_aniso.add_argument(
+        "-d",
+        "--dir",
+        help='Default easy-axis direction as "x y z" (used when no inline direction is given)',
+    )
+    parser_aniso.add_argument(
+        "-t",
+        "--tensor",
+        metavar="T",
+        default=None,
+        help=(
+            "Full 3x3 SIA tensor as 9 space- or comma-separated values in row-major "
+            'order (e.g., "1 0 0  0 2 0  0 0 -3"). '
+            "Cannot be combined with k1 values in -s. "
+            "The same tensor is applied to every species listed with -s."
+        ),
+    )
     parser_aniso.add_argument(
         "-m",
         "--mev",
         action="store_true",
-        help="Interpret k1 values in meV (default: eV)",
+        help="Interpret k1 / tensor values in meV (default: eV)",
     )
     parser_aniso.set_defaults(func=cmd_set_anisotropy)
 

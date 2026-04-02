@@ -83,6 +83,8 @@ def combine_J_tensor(Jiso=None, D=None, Jani=None, dtype=float):
     if Jiso is not None:
         Jtensor += np.eye(3, dtype=dtype) * Jiso
     if Jani is not None:
+        print("Jani reversed")
+        print(Jani)
         Jtensor += np.array(Jani, dtype=dtype)
     if D is not None:
         Jtensor += np.array(
