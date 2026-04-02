@@ -106,13 +106,10 @@ class ExchangePert2(ExchangeNCL):
                 uu, dd, ud, du = H[:ni, :ni], H[ni:, ni:], H[:ni, ni:], H[ni:, :ni]
             else:
                 uu, dd, ud, du = H[::2, ::2], H[1::2, 1::2], H[::2, 1::2], H[1::2, ::2]
-            # Standard Pauli components: m3 = (uu - dd)/2
-            # But the physics of G says Tr(uu) > Tr(dd) (Up-moment)
-            # So H_uu must be lower than H_dd.
-            # Thus P = (H_uu - H_dd)/2 should be negative.
+            # Standard Pauli components
             m1 = (ud + du) / 2.0
             m2 = (ud - du) * 0.5j
-            m3 = (dd - uu) / 2.0  # Inverted to match moment sign
+            m3 = (uu - dd) / 2.0
             ex, ey, ez = np.trace(m1).real, np.trace(m2).real, np.trace(m3).real
             evec = np.array((ex, ey, ez))
             norm = np.linalg.norm(evec)

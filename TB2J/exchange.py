@@ -371,6 +371,7 @@ class ExchangeNCL(Exchange):
             nproc=self.nproc,
             initial_emin=self.emin,
             smearing_width=self.smearing,
+            use_gpu=self.use_gpu,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi

@@ -1,11 +1,13 @@
 import os
+from collections import defaultdict
+
 import numpy as np
 from ase.atoms import Atoms
-from TB2J.utils import symbol_number
-from collections import defaultdict
 from scipy.linalg import eigh
-from TB2J.myTB import AbstractTB
+
 from TB2J.mathutils import Lowdin
+from TB2J.myTB import AbstractTB
+from TB2J.utils import symbol_number
 
 
 class SislWrapper(AbstractTB):
@@ -42,7 +44,7 @@ class SislWrapper(AbstractTB):
                 symnum = sdict[ia]
                 try:
                     orb_names = [f"{symnum}|{x.name()}|up" for x in a.orbital]
-                except:
+                except Exception:
                     orb_names = [f"{symnum}|{x.name()}|up" for x in a.orbitals]
                 self.orbs += orb_names
                 self.orb_dict[ia] += orb_names
@@ -170,12 +172,12 @@ class SislWrapper(AbstractTB):
 
     def HS_and_eigen(self, kpts, convention=2):
         nkpts = len(kpts)
-        evals = np.zeros((nkpts, self.nbasis), dtype=float)
+        evals = np.zeros((nkpts, self.nbasis), dtype=float)  # noqa: F841
         self.nkpts = nkpts
         if not self._use_cache:
-            evecs = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-            H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
-            S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
+            evecs = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)  # noqa: F841
+            H = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)  # noqa: F841
+            S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)  # noqa: F841
         else:
             self._prepare_cache()
 

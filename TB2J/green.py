@@ -97,6 +97,7 @@ class TBGreen:
         nproc=1,
         initial_emin=-25,
         smearing_width=0.01,
+        use_gpu=False,
     ):
         """
         :param tbmodel: A tight binding model
@@ -110,7 +111,33 @@ class TBGreen:
         :param cache_path: path to store cache
         :param nproc: number of processes to use
         :param emin: minimum energy relative to fermi level to consider
+        :param use_gpu: if True, use TBGreenGPU for GPU acceleration
         """
+        # Use GPU-accelerated Green's function if requested
+        if use_gpu:
+            # Import here to avoid JAX import when not using GPU
+            from TB2J.GreenGPU import TBGreenGPU
+
+            gpu_instance = TBGreenGPU(
+                tbmodel=tbmodel,
+                kmesh=kmesh,
+                ibz=ibz,
+                efermi=efermi,
+                gamma=gamma,
+                kpts=kpts,
+                kweights=kweights,
+                k_sym=k_sym,
+                use_cache=use_cache,
+                cache_path=cache_path,
+                nproc=nproc,
+                initial_emin=initial_emin,
+                smearing_width=smearing_width,
+            )
+            # Copy all attributes from GPU instance to self
+            self.__dict__.update(gpu_instance.__dict__)
+            return
+
+        # CPU initialization
         self.initial_emin = initial_emin
         self.tbmodel = tbmodel
         self.is_orthogonal = tbmodel.is_orthogonal
@@ -119,6 +146,7 @@ class TBGreen:
         self.efermi = efermi
         self._use_cache = use_cache
         self.cache_path = cache_path
+        self.use_gpu = use_gpu
         if use_cache:
             self._prepare_cache()
         self.prepare_kpts(
@@ -241,6 +269,8 @@ class TBGreen:
             self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
         else:
             self.S = None
+
+        # CPU computation using multiprocessing
         if self.nproc == 1:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:

@@ -391,8 +391,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
         if np.linalg.norm(R) < 0.001 and i == j:
-            print(f"{SIA=} , {i=}")
-            print(f"{self.has_sia_tensor=}")
+            # print(f"{SIA=} , {i=}")
+            pass
 
         if (
             SIA
@@ -504,7 +504,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         elif order == "ij33":
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
             for iR, R in enumerate(self.Rlist):
-                print(f"R={R}")
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(
                     R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )

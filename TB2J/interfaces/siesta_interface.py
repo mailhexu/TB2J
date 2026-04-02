@@ -4,6 +4,9 @@ import numpy as np
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
+from TB2J.gpu.mae_green_gpu import MAEGreenGPU
 from TB2J.io_merge import merge
 from TB2J.MAEGreen import MAEGreen
 
@@ -19,13 +22,17 @@ def siesta_anisotropy(**kwargs):
     pass
 
 
-def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
+def gen_exchange_siesta(
+    fdf_fname, read_H_soc=False, use_gpu=False, skip=False, **kwargs
+):
     """
     parameters:
         fdf_fname: str
             The fdf file for the calculation.
         read_H_soc: bool
             Whether to read the SOC Hamiltonian. Default is False.
+        use_gpu: bool
+            Whether to use GPU acceleration for MAE calculation. Default is False.
 
     parameters in **kwargs:
         magnetic_elements: list of str
@@ -77,6 +84,9 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
         orth=False,
         ibz=False,
         description="",
+        use_gpu=False,
+        vectorize_energy=False,
+        e_batch_size=None,
     )
     exargs.update(kwargs)
     try:
@@ -107,7 +117,12 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
  working directory: {os.getcwd()}
  fdf_fname: {fdf_fname}.
 \n"""
-        exchange = ExchangeCL2(
+        exargs["description"] = description
+        exargs["use_gpu"] = use_gpu  # Pass use_gpu through exargs
+
+        # Choose Exchange class based on use_gpu flag
+        ExchangeClass = ExchangeCL2GPU if use_gpu else ExchangeCL2
+        exchange = ExchangeClass(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
             basis=basis,
@@ -116,7 +131,15 @@ def gen_exchange_siesta(fdf_fname, read_H_soc=False, **kwargs):
             # include_orbs=ex
             **exargs,
         )
-        exchange.run(path=output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=use_gpu,
+                vectorize_energy=exargs.get("vectorize_energy", False),
+                e_batch_size=exargs.get("e_batch_size", None),
+            )
+        else:
+            exchange.run(path=output_path)
         print("\n")
         print(f"All calculation finished. The results are in {output_path} directory.")
 
@@ -133,8 +156,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
  If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.
 \n"""
         exargs["description"] = description
+        exargs["use_gpu"] = use_gpu  # Pass use_gpu through exargs
         if not model.split_soc:
-            exchange = ExchangeNCL(
+            # Choose Exchange class based on use_gpu flag
+            ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
+            exchange = ExchangeClass(
                 tbmodels=model,
                 atoms=model.atoms,
                 basis=basis,
@@ -144,7 +170,15 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 output_path=output_path,
                 **exargs,
             )
-            exchange.run(path=output_path)
+            if use_gpu:
+                exchange.run(
+                    path=output_path,
+                    use_gpu=use_gpu,
+                    vectorize_energy=exargs.get("vectorize_energy", False),
+                    e_batch_size=exargs.get("e_batch_size", None),
+                )
+            else:
+                exchange.run(path=output_path)
             print("\n")
             print(
                 f"All calculation finished. The results are in {output_path} directory."
@@ -152,33 +186,49 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
         else:
             print("Starting to calculate MAE.")
             model.set_so_strength(0.0)
-            MAE = MAEGreen(
-                tbmodels=model,
-                atoms=model.atoms,
-                basis=basis,
-                efermi=None,
-                angles="xyz",
-                # magnetic_elements=magnetic_elements,
-                # include_orbs=include_orbs,
-                **exargs,
-            )
-            # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
-            # phis = [0, 0, 0, 0]
-            # MAE.set_angles(thetas=thetas, phis=phis)
-            # MAE.set_xyz_angles()
-            MAE.run(output_path=f"{output_path}_anisotropy", with_eigen=False)
-            # print(
-            #    f"MAE calculation finished. The results are in {output_path} directory."
-            # )
+
+            # Choose MAE class based on use_gpu flag
+            MAEClass = MAEGreenGPU if use_gpu else MAEGreen
+
+            mae_output_path = f"{output_path}_anisotropy"
+            if skip and os.path.exists(os.path.join(mae_output_path, "MAE.dat")):
+                print(f"Skipping MAE: {mae_output_path}/MAE.dat already exists.")
+            else:
+                MAE = MAEClass(
+                    tbmodels=model,
+                    atoms=model.atoms,
+                    basis=basis,
+                    efermi=None,
+                    angles="xyz",
+                    # magnetic_elements=magnetic_elements,
+                    # include_orbs=include_orbs,
+                    **exargs,
+                )
+                # thetas = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
+                # phis = [0, 0, 0, 0]
+                # MAE.set_angles(thetas=thetas, phis=phis)
+                # MAE.set_xyz_angles()
+                MAE.run(
+                    output_path=mae_output_path,
+                    with_eigen=False,
+                )
 
             angle = {"x": (np.pi / 2, 0), "y": (np.pi / 2, np.pi / 2), "z": (0, 0)}
             for key, val in angle.items():
+                output_path_full = f"{output_path}_{key}"
+                pickle_path = os.path.join(output_path_full, "TB2J.pickle")
+                if skip and os.path.exists(pickle_path):
+                    print(
+                        f"Skipping exchange {key}: {output_path_full}/TB2J.pickle already exists."
+                    )
+                    continue
                 theta, phi = val
                 model.set_so_strength(1.0)
                 model.set_Hsoc_rotation_angle([theta, phi])
                 basis = dict(zip(model.orbs, list(range(model.nbasis))))
-                output_path_full = f"{output_path}_{key}"
-                exchange = ExchangeNCL(
+                # Choose Exchange class based on use_gpu flag
+                ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
+                exchange = ExchangeClass(
                     tbmodels=model,
                     atoms=model.atoms,
                     basis=basis,
@@ -192,11 +242,11 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 )
 
             merge(
-                "TB2J_results_x",
-                "TB2J_results_y",
-                "TB2J_results_z",
+                f"{output_path}_x",
+                f"{output_path}_y",
+                f"{output_path}_z",
                 main_path=None,
                 save=True,
-                write_path="TB2J_results",
+                write_path=output_path,
             )
-            print("Final TB2J_results written to TB2J_results directory.")
+            print(f"Final TB2J_results written to {output_path} directory.")
