@@ -3,12 +3,25 @@
 Command-line interface for TB2J_edit.
 
 Usage:
+    # Load and save
     TB2J_edit load -i INPUT.pickle -o OUTPUT_DIR
+
+    # Uniaxial anisotropy
     TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -d "0 0 1" -o OUTPUT_DIR
     TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -s Fe 1.0 -o OUTPUT_DIR
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 "0 0 1" --mev -o OUTPUT_DIR
+
+    # Tensor anisotropy (3 values = diagonal, 9 values = full)
+    TB2J_edit set-anisotropy -i INPUT.pickle -t "1 2 3" -s Sm -s Fe -o OUTPUT_DIR  # diagonal tensor (default)
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm "1 2 3" --mev -o OUTPUT_DIR      # per-species diagonal tensor
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm "1 0 0 0 2 0 0 0 3" -o OUTPUT_DIR  # full 3x3 tensor
+
+    # Toggle interactions
     TB2J_edit toggle-dmi -i INPUT.pickle --disable -o OUTPUT_DIR
     TB2J_edit toggle-jani -i INPUT.pickle --disable -o OUTPUT_DIR
     TB2J_edit toggle-exchange -i INPUT.pickle --disable -o OUTPUT_DIR
+
+    # Symmetrize
     TB2J_edit symmetrize -i INPUT.pickle -S STRUCTURE.cif -o OUTPUT_DIR
 """
 
@@ -35,14 +48,125 @@ def cmd_load(args):
 
 def cmd_set_anisotropy(args):
     """Set single ion anisotropy for one or more species."""
-    from TB2J.io_exchange.edit import load, save, set_anisotropy
+    from TB2J.io_exchange.edit import load, save
 
     print(f"Loading TB2J results from: {args.input}")
     spinio = load(args.input)
 
-    # Parse species specifications
-    # args.species is a list of lists: [['Sm', '5.0'], ['Fe', '1.0']]
-    # or with direction: [['Sm', '5.0', '0,0,1'], ['Fe', '1.0']]
+    use_tensor = bool(args.tensor)
+    if not use_tensor:
+        for spec_list in args.species:
+            if len(spec_list) >= 2:
+                val_str = spec_list[1].replace(",", " ")
+                vals = val_str.split()
+                if len(vals) in (3, 9):
+                    try:
+                        [float(x) for x in vals]
+                        use_tensor = True
+                        break
+                    except ValueError:
+                        pass
+
+    if use_tensor:
+        _set_anisotropy_tensor(args, spinio)
+    else:
+        _set_anisotropy_uniaxial(args, spinio)
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def _parse_tensor_values(tensor_str, mev=False):
+    """Parse tensor string into a 3x3 numpy array.
+
+    Parameters
+    ----------
+    tensor_str : str
+        String with 3 (diagonal) or 9 (full tensor) values, comma or space separated.
+    mev : bool
+        If True, values are in meV and will be converted to eV.
+
+    Returns
+    -------
+    np.ndarray
+        3x3 tensor in eV.
+    """
+    values_str = tensor_str.replace(",", " ")
+    values = [float(x) for x in values_str.split()]
+
+    if len(values) == 3:
+        tensor = np.diag(values)
+    elif len(values) == 9:
+        tensor = np.array(values).reshape(3, 3)
+    else:
+        raise ValueError(
+            f"Tensor must have 3 (diagonal) or 9 (full) values, got {len(values)}"
+        )
+
+    if mev:
+        tensor = tensor * 1e-3
+
+    return tensor
+
+
+def _set_anisotropy_tensor(args, spinio):
+    """Set anisotropy tensor for species."""
+    from TB2J.io_exchange.edit import set_sia_tensor
+
+    default_tensor = None
+    if args.tensor:
+        default_tensor = _parse_tensor_values(args.tensor, mev=args.mev)
+
+    specs = []
+    for spec_list in args.species:
+        if len(spec_list) < 1:
+            print(
+                f"Error: Invalid specification {spec_list}. Expected: species [tensor]"
+            )
+            sys.exit(1)
+
+        species = spec_list[0]
+        if len(spec_list) >= 2:
+            tensor_str = spec_list[1].replace(",", " ")
+            tensor_vals = [float(x) for x in tensor_str.split()]
+            if len(tensor_vals) == 3:
+                tensor = np.diag(tensor_vals)
+            elif len(tensor_vals) == 9:
+                tensor = np.array(tensor_vals).reshape(3, 3)
+            else:
+                print(
+                    f"Error: Tensor for {species} must have 3 or 9 values, got {len(tensor_vals)}"
+                )
+                sys.exit(1)
+            if args.mev:
+                tensor = tensor * 1e-3
+        else:
+            if default_tensor is None:
+                print(
+                    f"Error: No tensor specified for {species} and no default tensor provided"
+                )
+                sys.exit(1)
+            tensor = default_tensor
+
+        specs.append((species, tensor))
+
+    print(f"Setting anisotropy tensor for {len(specs)} species:")
+    for species, tensor in specs:
+        unit = "meV" if args.mev else "eV"
+        tensor_display = tensor * 1000 if args.mev else tensor
+        print(f"  {species}:")
+        for row in tensor_display:
+            print(f"    [{row[0]:.6f}, {row[1]:.6f}, {row[2]:.6f}] {unit}")
+
+    for species, tensor in specs:
+        set_sia_tensor(spinio, species=species, tensor=tensor)
+
+
+def _set_anisotropy_uniaxial(args, spinio):
+    """Set uniaxial anisotropy (k1, k1dir) for species."""
+    from TB2J.io_exchange.edit import set_anisotropy
+
     specs = []
     default_dir = None
     if args.dir:
@@ -59,10 +183,8 @@ def cmd_set_anisotropy(args):
         k1_val = float(spec_list[1])
         k1_eV = k1_val * 1e-3 if args.mev else k1_val
 
-        # Check if direction vector is provided
         k1dir = default_dir
         if len(spec_list) >= 3:
-            # Third element is the direction vector
             dir_str = spec_list[2].replace(",", " ")
             k1dir = [float(x) for x in dir_str.split()]
 
@@ -80,10 +202,6 @@ def cmd_set_anisotropy(args):
 
     for species, k1, k1dir in specs:
         set_anisotropy(spinio, species=species, k1=k1, k1dir=k1dir)
-
-    print(f"Saving to: {args.output}")
-    save(spinio, args.output)
-    print("  Done!")
 
 
 def cmd_toggle_dmi(args):
@@ -293,14 +411,19 @@ def main():
         action="append",
         nargs="+",
         required=True,
-        help="Species and k1 value: -s species k1 (can be used multiple times)",
+        help="Species and k1 value: -s species k1 [dir] (uniaxial) or -s species tensor (tensor mode)",
     )
     parser_aniso.add_argument("-d", "--dir", help='Default direction vector as "x y z"')
+    parser_aniso.add_argument(
+        "-t",
+        "--tensor",
+        help='Use tensor mode. Default tensor as "xx yy zz" (diagonal) or "xx xy xz yx yy yz zx zy zz" (full 3x3)',
+    )
     parser_aniso.add_argument(
         "-m",
         "--mev",
         action="store_true",
-        help="Interpret k1 values in meV (default: eV)",
+        help="Interpret k1/tensor values in meV (default: eV)",
     )
     parser_aniso.set_defaults(func=cmd_set_anisotropy)
 

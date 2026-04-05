@@ -185,8 +185,8 @@ class TBGreen:
             raise ValueError(
                 f"Cannot find any band in the energy range specified by emin {emin} and emax {emax}, which are relative to the Fermi energy. Please check that the Fermi energy, the emin and emax are correct. If you're using Wannier90 output, check the Wannier functions give the right band structure."
             )
-        istart, iend = ts[0], ts[-1] + 1
-        return evals[:, istart:iend], evecs[:, :, istart:iend]
+        _istart, iend = ts[0], ts[-1] + 1
+        return evals[:, :iend], evecs[:, :, :iend]
 
     def find_energy_ingap(self, rbound, gap=2.0):
         return find_energy_ingap(self.evals, rbound, gap)
@@ -267,14 +267,14 @@ class TBGreen:
             - self.efermi
         )
         # print(f"Adjusted emin relative to Fermi level: {self.adjusted_emin}")
-        # self.evals, self.evecs = self._reduce_eigens(
-        #    self.evals,
-        #    self.evecs,
-        #    emin=self.efermi + self.adjusted_emin,
-        #    emax=self.efermi + 5.1,
-        #    # emin=self.efermi -10,
-        #    # emax=self.efermi + 10,
-        # )
+        self.evals, self.evecs = self._reduce_eigens(
+            self.evals,
+            self.evecs,
+            emin=self.efermi + self.adjusted_emin,
+            emax=self.efermi + 5.1,
+            # emin=self.efermi -10,
+            # emax=self.efermi + 10,
+        )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
