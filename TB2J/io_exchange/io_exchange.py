@@ -56,6 +56,7 @@ class SpinIO(object):
         description=None,
         standardize_Jani=False,
         sia_tensor=None,
+        dJdx_orb=None,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -118,6 +119,7 @@ class SpinIO(object):
 
         self.dJdx = dJdx
         self.dJdx2 = dJdx2
+        self.dJdx_orb = dJdx_orb
 
         if dmi_ddict is not None:
             #: The dictionary of DMI. the key is the same as exchange_Jdict, the values are 3-d vectors (Dx, Dy, Dz).
