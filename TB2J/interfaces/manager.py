@@ -4,10 +4,10 @@ from TB2J.exchangeCL2 import ExchangeCL2
 
 
 class Manager:
-    def __init__(self, atoms, models, basis, colinear, **kwargs):
+    def __init__(self, atoms, models, basis, colinear, qspace=False, **kwargs):
         # computing exchange
         print("Starting to calculate exchange.")
-        ExchangeClass = self.select_exchange(colinear)
+        ExchangeClass = self.select_exchange(colinear, qspace=qspace)
         exchange = ExchangeClass(tbmodels=models, atoms=atoms, basis=basis, **kwargs)
         output_path = kwargs.get("output_path", "TB2J_results")
         exchange.run(path=output_path)

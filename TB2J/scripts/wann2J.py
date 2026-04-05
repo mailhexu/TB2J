@@ -49,10 +49,12 @@ def run_wann2J():
         default="Wannier90",
     )
 
-    # parser.add_argument("--qspace",
-    #                    action="store_true",
-    #                    help="Whether to calculate J in qspace first and transform to real space.",
-    #                    default=False)
+    parser.add_argument(
+        "--qspace",
+        action="store_true",
+        help="Whether to calculate J in qspace first and transform to real space.",
+        default=False,
+    )
 
     add_exchange_args_to_parser(parser)
 
@@ -90,7 +92,7 @@ def run_wann2J():
         output_path=args.output_path,
         exclude_orbs=args.exclude_orbs,
         wannier_type=args.wannier_type,
-        # qspace=args.qspace,
+        qspace=args.qspace,
         write_density_matrix=args.write_dm,
         orb_decomposition=args.orb_decomposition,
         index_magnetic_atoms=index_magnetic_atoms,

@@ -40,7 +40,9 @@ class WannierManager(Manager):
         description = self.description(path, prefix_up, prefix_dn, prefix_SOC, colinear)
         kwargs["description"] = description
 
-        super().__init__(atoms, tbmodels, basis, colinear=colinear, **kwargs)
+        super().__init__(
+            atoms, tbmodels, basis, colinear=colinear, qspace=qspace, **kwargs
+        )
 
     def prepare_atoms(self, path, posfile, prefix_up, prefix_SOC, colinear=True):
         fname = os.path.join(path, posfile)
