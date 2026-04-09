@@ -1,5 +1,5 @@
 from TB2J.exchange import ExchangeNCL
-from TB2J.exchange_qspace import ExchangeCLQspace
+from TB2J.exchange_qspace import ExchangeCLQspace, ExchangeNCLQspace
 from TB2J.exchangeCL2 import ExchangeCL2
 
 
@@ -20,4 +20,7 @@ class Manager:
             else:
                 return ExchangeCL2
         else:
-            return ExchangeNCL
+            if qspace:
+                return ExchangeNCLQspace
+            else:
+                return ExchangeNCL
