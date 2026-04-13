@@ -48,6 +48,11 @@ class ExchangeCL2(ExchangeCL):
         self.JJ_list = defaultdict(lambda: [])
         self.JJ = defaultdict(lambda: 0.0j)
         self.Jorb = defaultdict(lambda: 0.0j)
+        if self.bruno_correction:
+            self.Korb_list = defaultdict(lambda: [])
+            self.Xorb_list = defaultdict(lambda: [])
+            self.Korb = defaultdict(lambda: 0.0j)
+            self.Xorb = defaultdict(lambda: 0.0j)
         self.HR0_up = self.Gup.H0
         self.HR0_dn = self.Gdn.H0
         self.Delta = self.HR0_up - self.HR0_dn
@@ -106,6 +111,8 @@ class ExchangeCL2(ExchangeCL):
         Rij_done = set()
         Jorb_list = dict()
         JJ_list = dict()
+        Korb_list = dict() if self.bruno_correction else None
+        Xorb_list = dict() if self.bruno_correction else None
         for iR in self.R_ijatom_dict:
             for iatom, jatom in self.R_ijatom_dict[iR]:
                 if (iR, iatom, jatom) not in Rij_done:
@@ -123,7 +130,6 @@ class ExchangeCL2(ExchangeCL):
                         )
                     Gij_up = self.GR_atom(Gup[iR], iatom, jatom)
                     Gji_dn = self.GR_atom(Gdn[iRm], jatom, iatom)
-                    tmp = 0.0j
                     # t = self.get_Delta(iatom) @ Gij_up @ self.get_Delta(jatom) @ Gji_dn
                     t = np.einsum(
                         "ij, ji-> ij",
@@ -136,12 +142,32 @@ class ExchangeCL2(ExchangeCL):
                     Rm_vec = self.short_Rlist[iRm]
                     Jorb_list[(R_vec, iatom, jatom)] = t / (4.0 * np.pi)
                     JJ_list[(R_vec, iatom, jatom)] = tmp / (4.0 * np.pi)
+
+                    if Korb_list is not None:
+                        Delta_j = self.get_Delta(jatom)
+                        K_matrix = Gij_up @ Delta_j @ Gji_dn
+                        X_matrix = Gij_up @ Gji_dn
+                        Korb_list[(R_vec, iatom, jatom)] = K_matrix / (-2.0 * np.pi)
+                        Xorb_list[(R_vec, iatom, jatom)] = X_matrix * (2.0 / np.pi)
+
                     Rij_done.add((iR, iatom, jatom))
                     if (iRm, jatom, iatom) not in Rij_done:
                         Jorb_list[(Rm_vec, jatom, iatom)] = t.T / (4.0 * np.pi)
                         JJ_list[(Rm_vec, jatom, iatom)] = tmp / (4.0 * np.pi)
+                        if Korb_list is not None:
+                            Delta_j_rev = self.get_Delta(iatom)
+                            Gji_up = self.GR_atom(Gup[iRm], jatom, iatom)
+                            Gij_dn = self.GR_atom(Gdn[iR], iatom, jatom)
+                            K_matrix_rev = Gji_up @ Delta_j_rev @ Gij_dn
+                            X_matrix_rev = Gji_up @ Gij_dn
+                            Korb_list[(Rm_vec, jatom, iatom)] = K_matrix_rev / (
+                                -2.0 * np.pi
+                            )
+                            Xorb_list[(Rm_vec, jatom, iatom)] = X_matrix_rev * (
+                                2.0 / np.pi
+                            )
                         Rij_done.add((iRm, jatom, iatom))
-        return Jorb_list, JJ_list
+        return Jorb_list, JJ_list, Korb_list, Xorb_list
 
     def get_all_A_vectorized(self, Gup, Gdn):
         """
@@ -150,48 +176,53 @@ class ExchangeCL2(ExchangeCL):
 
         :param Gup: Green's function array for spin up, shape (nR, nbasis, nbasis)
         :param Gdn: Green's function array for spin down, shape (nR, nbasis, nbasis)
-        :returns: tuple of (Jorb_list, JJ_list) with R vector keys
+        :returns: tuple of (Jorb_list, JJ_list, Korb_list, Xorb_list) with R vector keys
+                  Korb_list and Xorb_list are None when bruno_correction is not set
         """
-        # Get magnetic sites and their orbital indices
         magnetic_sites = self.ind_mag_atoms
         iorbs = [self.iorb(site) for site in magnetic_sites]
-
-        # Build the Delta matrices for all magnetic sites
         Delta = [self.get_Delta(site) for site in magnetic_sites]
 
-        # Initialize results dictionaries
         Jorb_list = {}
         JJ_list = {}
+        Korb_list = {} if self.bruno_correction else None
+        Xorb_list = {} if self.bruno_correction else None
 
-        # Batch compute all exchange tensors following the vectorized approach
         for i, j in product(range(len(magnetic_sites)), repeat=2):
             idx, jdx = iorbs[i], iorbs[j]
 
-            # Extract Gij and Gji for all R vectors at once
-            Gij = Gup[:, idx][:, :, jdx]  # Shape: (nR, ni, nj)
-            # Since short_Rlist is properly ordered, we can flip Gji along R axis
-            # to get Gji(-R) for Gij(R)
-            Gji = np.flip(Gdn[:, jdx][:, :, idx], axis=0)  # Shape: (nR, nj, ni)
+            Gij = Gup[:, idx][:, :, jdx]  # (nR, ni, nj)
+            Gji = np.flip(Gdn[:, jdx][:, :, idx], axis=0)  # (nR, nj, ni)
 
-            # Compute exchange tensors for all R vectors at once
-            # Following collinear formula: Delta_i @ Gij @ Delta_j @ Gji
             t_tensor = np.einsum(
                 "ab,rbc,cd,rda->rac", Delta[i], Gij, Delta[j], Gji, optimize="optimal"
             ) / (4.0 * np.pi)
-            tmp_tensor = np.sum(t_tensor, axis=(1, 2))  # Shape: (nR,)
+            tmp_tensor = np.sum(t_tensor, axis=(1, 2))
+
+            if Korb_list is not None:
+                # K = Gij @ Delta_j @ Gji, shape: (nR, ni, ni)
+                K_tensor = np.einsum(
+                    "rbc,cd,rda->rba", Gij, Delta[j], Gji, optimize="optimal"
+                ) / (-2.0 * np.pi)
+                # X = Gij @ Gji, shape: (nR, ni, ni)
+                X_tensor = np.einsum("rbc,rda->rba", Gij, Gji, optimize="optimal") * (
+                    2.0 / np.pi
+                )
 
             mi, mj = (magnetic_sites[i], magnetic_sites[j])
 
-            # Store results for each R vector
             for iR, R_vec in enumerate(self.short_Rlist):
-                # Store with R vector key for compatibility
-                Jorb_list[(R_vec, mi, mj)] = t_tensor[iR]  # Shape: (ni, nj)
-                JJ_list[(R_vec, mi, mj)] = tmp_tensor[iR]  # Scalar
+                Jorb_list[(R_vec, mi, mj)] = t_tensor[iR]
+                JJ_list[(R_vec, mi, mj)] = tmp_tensor[iR]
+                if Korb_list is not None:
+                    Korb_list[(R_vec, mi, mj)] = K_tensor[iR]
+                    Xorb_list[(R_vec, mi, mj)] = X_tensor[iR]
 
-        # Filter results to only include atom pairs within cutoff distance
-        # This matches the behavior of the original get_all_A method
+        # Filter to atom pairs within cutoff distance
         filtered_Jorb_list = {}
         filtered_JJ_list = {}
+        filtered_Korb_list = {} if Korb_list is not None else None
+        filtered_Xorb_list = {} if Xorb_list is not None else None
 
         for iR, atom_pairs in self.R_ijatom_dict.items():
             R_vec = self.short_Rlist[iR]
@@ -200,8 +231,16 @@ class ExchangeCL2(ExchangeCL):
                 if key in Jorb_list:
                     filtered_Jorb_list[key] = Jorb_list[key]
                     filtered_JJ_list[key] = JJ_list[key]
+                    if filtered_Korb_list is not None:
+                        filtered_Korb_list[key] = Korb_list[key]
+                        filtered_Xorb_list[key] = Xorb_list[key]
 
-        return filtered_Jorb_list, filtered_JJ_list
+        return (
+            filtered_Jorb_list,
+            filtered_JJ_list,
+            filtered_Korb_list,
+            filtered_Xorb_list,
+        )
 
     def A_to_Jtensor(self):
         for key, val in self.JJ.items():
@@ -262,12 +301,17 @@ class ExchangeCL2(ExchangeCL):
 
         # Use vectorized method with fallback to original method
         try:
-            Jorb_list, JJ_list = self.get_all_A_vectorized(GR_up, GR_dn)
-            # Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+            Jorb_list, JJ_list, Korb_list, Xorb_list = self.get_all_A_vectorized(
+                GR_up, GR_dn
+            )
         except Exception as ex:
             print(f"Vectorized method failed: {ex}, falling back to original method")
-            Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
-        return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
+            Jorb_list, JJ_list, Korb_list, Xorb_list = self.get_all_A(GR_up, GR_dn)
+        result = dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
+        if self.bruno_correction:
+            result["Korb_list"] = Korb_list
+            result["Xorb_list"] = Xorb_list
+        return result
 
     def save_greens_function_diagonals_collinear(self, GR_up, GR_dn, energy):
         """
@@ -443,6 +487,14 @@ class ExchangeCL2(ExchangeCL):
             for key, val in JJ_list.items():
                 self.JJ[key] += val * w
 
+            if self.bruno_correction:
+                Korb_list = result["Korb_list"]
+                Xorb_list = result["Xorb_list"]
+                for key, val in Korb_list.items():
+                    self.Korb[key] += val * w
+                for key, val in Xorb_list.items():
+                    self.Xorb[key] += val * w
+
         # Apply integration factor (e.g. -pi/2 for CFR)
         if npole > 0:
             dummy = np.zeros(npole)
@@ -452,6 +504,11 @@ class ExchangeCL2(ExchangeCL):
                 self.Jorb[key] *= factor
             for key in self.JJ:
                 self.JJ[key] *= factor
+            if self.bruno_correction:
+                for key in self.Korb:
+                    self.Korb[key] *= factor
+                for key in self.Xorb:
+                    self.Xorb[key] *= factor
 
         self.get_rho_atom()
 
