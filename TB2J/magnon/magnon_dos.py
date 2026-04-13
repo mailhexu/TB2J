@@ -9,6 +9,7 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 from ase.dft.dos import DOS
+from ase.units import kB as _kB_eV  # Boltzmann constant in eV K⁻¹
 
 from TB2J.kpoints import monkhorst_pack
 from TB2J.magnon.magnon_parameters import (
@@ -17,6 +18,9 @@ from TB2J.magnon.magnon_parameters import (
     add_dos_specific_args,
     prepare_magnon_from_params,
 )
+
+# Energies in MagnonDOS are in meV, so convert kB accordingly.
+_KB_MEV_PER_K = _kB_eV * 1000  # meV K⁻¹
 
 
 @dataclass
@@ -111,6 +115,119 @@ class MagnonDOS:
             plt.show()
 
         return ax
+
+    # ------------------------------------------------------------------
+    # Statistical mechanics helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def bose_einstein(energies, temperature):
+        """Bose-Einstein occupation number n(E) = 1 / (exp(E / kB T) − 1).
+
+        Parameters
+        ----------
+        energies : float or array-like
+            Energies in **meV**.  Values ≤ 0 return ``np.inf`` (divergent
+            occupation at and below zero energy).
+        temperature : float
+            Temperature in **K**.  Must be strictly positive.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            Bose-Einstein occupation number(s).  The return type mirrors the
+            input: a scalar ``energies`` argument gives a scalar result.
+
+        Raises
+        ------
+        ValueError
+            If ``temperature`` ≤ 0.
+
+        Notes
+        -----
+        ``numpy.expm1`` is used to evaluate exp(x) − 1 with full precision
+        for small arguments (high-temperature / low-energy Rayleigh–Jeans
+        regime where E ≪ kB T).
+
+        Examples
+        --------
+        >>> MagnonDOS.bose_einstein(10.0, 300)   # 10 meV at 300 K
+        >>> MagnonDOS.bose_einstein(np.array([5., 10., 20.]), 300)
+        """
+        if temperature <= 0:
+            raise ValueError(
+                f"Temperature must be strictly positive, got {temperature} K."
+            )
+
+        scalar_input = np.ndim(energies) == 0
+        energies = np.atleast_1d(np.asarray(energies, dtype=float))
+
+        kBT = _KB_MEV_PER_K * temperature
+        occ = np.full_like(energies, np.inf)
+        mask = energies > 0
+        x = energies[mask] / kBT
+        # Clamp to avoid overflow in expm1.  For x > 700, n(E) < 1e-304 ≈ 0.
+        x = np.minimum(x, 700.0)
+        occ[mask] = 1.0 / np.expm1(x)
+
+        return float(occ[0]) if scalar_input else occ
+
+    def thermal_average_energy(self, temperature):
+        """Thermal average magnon energy including zero-point contribution.
+
+        Computes
+
+        .. math::
+
+            \\langle E \\rangle(T) =
+              \\frac{\\int_0^{E_\\max} E \\, g(E) \\, [n(E,T) + \\tfrac{1}{2}] \\, dE}
+                   {\\int_0^{E_\\max} g(E) \\, dE}
+
+        where :math:`g(E)` is the magnon DOS,
+        :math:`n(E,T) = 1/(e^{E/k_BT}-1)` is the Bose-Einstein occupation,
+        and the :math:`1/2` term is the zero-point energy of each quantum
+        harmonic oscillator mode.  At T → 0 the result approaches the
+        zero-point average :math:`\\langle E \\rangle_0 = \\int E g(E) dE / (2 \\int g(E) dE)`.
+
+        The integration runs over the positive-energy portion of the stored
+        DOS grid (E > 0 only, i.e., from 0 to the top of the magnon band).
+
+        Parameters
+        ----------
+        temperature : float
+            Temperature in **K**.  Must be strictly positive.
+
+        Returns
+        -------
+        float
+            Thermal average energy in **meV**.
+
+        Notes
+        -----
+        Trapezoidal integration is used over the existing energy grid.  The
+        accuracy therefore depends on the resolution (``npts``) chosen when
+        the DOS was calculated.
+
+        Examples
+        --------
+        >>> dos = MagnonDOS(energies=E_arr, dos=dos_arr)
+        >>> dos.thermal_average_energy(300)   # average energy at 300 K in meV
+        """
+        mask = self.energies > 0
+        E = self.energies[mask]
+        D = self.dos[mask]
+
+        if len(E) == 0:
+            return 0.0
+
+        occ = self.bose_einstein(E, temperature)
+        numerator = np.trapezoid(E * D * (occ + 0.5), E)
+        denominator = np.trapezoid(D, E)
+
+        if denominator == 0.0:
+            return 0.0
+
+        return float(numerator / denominator)
 
 
 class MagnonDOSCalculator:

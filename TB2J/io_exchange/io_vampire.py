@@ -52,7 +52,8 @@ def write_vampire_unitcell_file(cls, fname):
                 myfile.write(text)
         myfile.write("# Interactions\n")
 
-        nexch = len(cls.exchange_Jdict.items())
+        exchange_Jdict = cls.exchange_Jdict if cls.exchange_Jdict is not None else {}
+        nexch = len(exchange_Jdict)
         myfile.write(
             "{num_interactions} {type_exchange}\n".format(
                 num_interactions=nexch, type_exchange="tensorial"
@@ -60,7 +61,7 @@ def write_vampire_unitcell_file(cls, fname):
         )
 
         counter = -1
-        for key in cls.exchange_Jdict:
+        for key in exchange_Jdict:
             R, ispin, jspin = key
             Jtensor = cls.get_J_tensor(ispin, jspin, R, Jani=True, DMI=True)
             counter += 1  # starts at 0

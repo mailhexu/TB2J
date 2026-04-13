@@ -664,6 +664,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         by_species=False,
         **kwargs,
     ):
+        if not self.has_exchange:
+            return
         if ax is None:
             fig, ax = plt.subplots()
         if by_species:

@@ -117,6 +117,9 @@ def write_exchange_section(
 
     # l = [x for x in cls.exchange_Jlist if abs(x.J) > cutoff]
     keys = cls.exchange_Jdict
+    if keys is None:
+        myfile.write("(Exchange disabled)\n")
+        return
     if order == "amplitude":
         l = sorted(keys, key=lambda x: abs(cls.exchange_Jdict[x]), reverse=True)
     elif order == "distance":
