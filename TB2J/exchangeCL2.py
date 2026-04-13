@@ -517,6 +517,139 @@ class ExchangeCL2(ExchangeCL):
 
         self.A_to_Jtensor()
 
+        if self.bruno_correction == "fft":
+            self._bruno_fft_roundtrip()
+            self._build_bruno_Jdict(source="fft")
+        elif self.bruno_correction == "local":
+            self._bruno_local_approximation()
+            self._build_bruno_Jdict(source="local")
+
+    def _bruno_fft_roundtrip(self):
+        """Option B: FFT K,X to q-space, apply Bruno formula, iFFT back to R-space."""
+        from ase.dft.kpoints import monkhorst_pack
+
+        nmag = len(self.ind_mag_atoms)
+        nR = len(self.Rlist)
+        qpts = monkhorst_pack(self.kmesh)
+        nqpt = len(qpts)
+
+        JR = np.zeros((nR, nmag, nmag))
+        KR = np.zeros((nR, nmag, nmag))
+        XR = np.zeros((nR, nmag, nmag))
+
+        mag_idx = {atom: i for i, atom in enumerate(self.ind_mag_atoms)}
+
+        for iR_full, R_vec in enumerate(self.Rlist):
+            for iatom in self.ind_mag_atoms:
+                for jatom in self.ind_mag_atoms:
+                    i = mag_idx[iatom]
+                    j = mag_idx[jatom]
+                    key = (R_vec, iatom, jatom)
+                    if key in self.JJ:
+                        JR[iR_full, i, j] = np.imag(self.JJ[key])
+                    if key in self.Korb:
+                        KR[iR_full, i, j] = np.imag(np.trace(self.Korb[key]))
+                    if key in self.Xorb:
+                        XR[iR_full, i, j] = np.imag(np.trace(self.Xorb[key]))
+
+        # FFT R -> q: forward transform with exp(+2πi·q·R)
+        Jq = np.zeros((nqpt, nmag, nmag), dtype=complex)
+        Kq = np.zeros_like(Jq)
+        Xq = np.zeros_like(Jq)
+        for iq, q in enumerate(qpts):
+            for iR, R in enumerate(self.Rlist):
+                phase = np.exp(2.0j * np.pi * (np.array(R) @ q))
+                Jq[iq] += JR[iR] * phase
+                Kq[iq] += KR[iR] * phase
+                Xq[iq] += XR[iR] * phase
+
+        # Bruno correction per q-point
+        M = np.diag(self.spinat[self.ind_mag_atoms, 2])
+        Jnorm_q = np.zeros((nqpt, nmag, nmag), dtype=float)
+        for iq in range(nqpt):
+            Jnorm_q[iq] = np.real(Jq[iq]) + 0.5 * (
+                (M - np.real(Kq[iq].T))
+                @ np.linalg.inv(np.real(Xq[iq]))
+                @ (M - np.real(Kq[iq]))
+            )
+
+        # iFFT q -> R
+        self.Jnorm_R = np.zeros((nR, nmag, nmag))
+        for iR, R in enumerate(self.Rlist):
+            for iq, q in enumerate(qpts):
+                phase = np.exp(-2.0j * np.pi * (np.array(R) @ q))
+                self.Jnorm_R[iR] += np.real(Jnorm_q[iq] * phase) / nqpt
+
+    def _bruno_local_approximation(self):
+        """Option C: Apply Bruno correction per R-vector using local approximation."""
+        self._bruno_Jnorm = {}
+
+        for iR, R_vec in enumerate(self.short_Rlist):
+            for i, iatom in enumerate(self.ind_mag_atoms):
+                for j, jatom in enumerate(self.ind_mag_atoms):
+                    key = (R_vec, iatom, jatom)
+                    if key not in self.Korb or key not in self.Xorb:
+                        continue
+                    # Skip self-interaction
+                    if R_vec == (0, 0, 0) and iatom == jatom:
+                        continue
+
+                    K_full = self.Korb[key]
+                    X_full = self.Xorb[key]
+
+                    # M projected to orbital space of atom i
+                    ni = K_full.shape[0]
+                    M_i = self.spinat[iatom, 2]
+                    M_mat = M_i * np.eye(ni)
+
+                    if R_vec == (0, 0, 0):
+                        B = M_mat - K_full.T
+                    else:
+                        B = -K_full.T
+
+                    try:
+                        correction = 0.5 * B.T @ np.linalg.solve(X_full, B)
+                    except np.linalg.LinAlgError:
+                        correction = np.zeros_like(K_full)
+
+                    J_val = self.JJ.get(key, 0.0j)
+                    self._bruno_Jnorm[key] = np.imag(J_val) + np.sum(correction)
+
+    def _build_bruno_Jdict(self, source):
+        """Populate exchange_Jdict_bruno from Bruno-corrected J values."""
+        self.exchange_Jdict_bruno = {}
+
+        if source == "fft":
+            for iR, R in enumerate(self.Rlist):
+                R = tuple(R)
+                for i, iatom in enumerate(self.ind_mag_atoms):
+                    for j, jatom in enumerate(self.ind_mag_atoms):
+                        ispin = self.ispin(iatom)
+                        jspin = self.ispin(jatom)
+                        keyspin = (R, ispin, jspin)
+                        if keyspin not in self.distance_dict:
+                            continue
+                        is_nonself = not (R == (0, 0, 0) and iatom == jatom)
+                        if is_nonself:
+                            val = self.Jnorm_R[iR, i, j]
+                            Jij = val / np.sign(
+                                np.dot(self.spinat[iatom], self.spinat[jatom])
+                            )
+                            self.exchange_Jdict_bruno[keyspin] = Jij
+        elif source == "local":
+            for key, val in self._bruno_Jnorm.items():
+                R_vec, iatom, jatom = key
+                R = tuple(R_vec) if not isinstance(R_vec, tuple) else R_vec
+                ispin = self.ispin(iatom)
+                jspin = self.ispin(jatom)
+                keyspin = (R, ispin, jspin)
+                if keyspin not in self.distance_dict:
+                    continue
+                is_nonself = not (R == (0, 0, 0) and iatom == jatom)
+                if is_nonself:
+                    Jij = val / np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
+                    self.exchange_Jdict_bruno[keyspin] = Jij
+
     def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
