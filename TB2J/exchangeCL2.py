@@ -2,7 +2,6 @@
 Exchange from Green's function
 """
 
-import os
 from collections import defaultdict
 from itertools import product
 
@@ -39,13 +38,6 @@ class ExchangeCL2(ExchangeCL):
             nproc=self.nproc,
             smearing_width=self.smearing,
         )
-        if self.write_density_matrix:
-            self.Gup.write_rho_R(
-                Rlist=self.Rlist, fname=os.path.join(self.output_path, "rho_up.pickle")
-            )
-            self.Gdn.write_rho_R(
-                Rlist=self.Rlist, fname=os.path.join(self.output_path, "rho_dn.pickle")
-            )
         self.norb = self.Gup.norb
         self.nbasis = self.Gup.nbasis + self.Gdn.nbasis
         # self.rho_up_list = []
@@ -486,5 +478,6 @@ class ExchangeCL2(ExchangeCL):
             Jani_dict=None,
             biquadratic_Jdict=None,
             description=self.description,
+            exchange_Jdict_bruno=getattr(self, "exchange_Jdict_bruno", None),
         )
         output.write_all(path=path)

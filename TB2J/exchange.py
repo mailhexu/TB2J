@@ -39,6 +39,7 @@ class Exchange(ExchangeParams):
         # self._prepare_NijR()
         self._is_collinear = True
         self.has_elistc = False
+        self.exchange_Jdict_bruno = None
 
         # Store overlap matrix before cleaning tbmodels
         if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "SR"):
@@ -364,7 +365,7 @@ class ExchangeNCL(Exchange):
         self.G = TBGreen(
             tbmodel=self.tbmodel,
             kmesh=self.kmesh,
-            ibz=self.ibz,
+            ibz=False,
             gamma=True,
             efermi=self.efermi,
             use_cache=self._use_cache,
@@ -388,8 +389,6 @@ class ExchangeNCL(Exchange):
         self.HR0 = self.G.H0
         self._is_collinear = False
         self.Pdict = {}
-        if self.write_density_matrix:
-            self.G.write_rho_R()
 
     def get_MAE(self, thetas, phis):
         """
@@ -975,8 +974,8 @@ class ExchangeNCL(Exchange):
             charges=self.charges,
             spinat=self.spinat,
             index_spin=self.index_spin,
-            colinear=False,
             orbital_names=self.orbital_names,
+            colinear=False,
             distance_dict=self.distance_dict,
             exchange_Jdict=self.exchange_Jdict,
             Jiso_orb=self.Jiso_orb,
@@ -987,6 +986,7 @@ class ExchangeNCL(Exchange):
             biquadratic_Jdict=self.B,
             debug_dict=self.debug_dict,
             description=self.description,
+            exchange_Jdict_bruno=getattr(self, "exchange_Jdict_bruno", None),
         )
         output.write_all(path=path)
         # with open("TB2J_results/J_orb.pickle", 'wb') as myfile:
@@ -1024,5 +1024,6 @@ class ExchangeCL(ExchangeNCL):
             dmi_ddict=None,
             biquadratic_Jdict=self.B,
             description=self.description,
+            exchange_Jdict_bruno=getattr(self, "exchange_Jdict_bruno", None),
         )
         output.write_all(path=path)

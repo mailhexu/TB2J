@@ -175,6 +175,10 @@ def write_exchange_section(
         Jiso = cls.exchange_Jdict[ll] * 1e3
         myfile.write(f"J_iso: {Jiso:7.4f} \n")
 
+        if cls.exchange_Jdict_bruno is not None and ll in cls.exchange_Jdict_bruno:
+            Jiso_bruno = cls.exchange_Jdict_bruno[ll] * 1e3
+            myfile.write(f"J_iso(Bruno): {Jiso_bruno:7.4f} \n")
+
         write_experimental = False
 
         if cls.has_biquadratic and write_experimental:

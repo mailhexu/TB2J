@@ -21,7 +21,7 @@ class ExchangeParams:
     include_orbs = {}
     _kmesh = [4, 4, 4]
     emin: float = -15
-    emax: float = 0.05
+    emax: float = 0.0
     nz: int = 100
     exclude_orbs = []
     ne: int = 0
@@ -29,12 +29,10 @@ class ExchangeParams:
     _use_cache: bool = False
     nproc: int = 1
     description: str = ""
-    write_density_matrix: bool = False
     orb_decomposition: bool = False
     output_path: str = "TB2J_results"
-    mae_angles = None
     orth = False
-    ibz = False
+    bruno_correction: bool = False
     # Debug options
     debug_options = {
         "compute_charge_moments": False,  # Whether to compute charge and magnetic moments with Green's function method
@@ -58,15 +56,13 @@ class ExchangeParams:
         use_cache=False,
         nproc=1,
         description="",
-        write_density_matrix=False,
         orb_decomposition=False,
         output_path="TB2J_results",
         exclude_orbs=[],
-        mae_angles=None,
         orth=False,
-        ibz=False,
         index_magnetic_atoms=None,
         debug_options=None,
+        bruno_correction=False,
     ):
         self.efermi = efermi
         self.smearing = smearing
@@ -86,13 +82,11 @@ class ExchangeParams:
         self._use_cache = use_cache
         self.nproc = nproc
         self.description = description
-        self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
         self.output_path = output_path
-        self.mae_angles = mae_angles
         self.orth = orth
-        self.ibz = ibz
         self.index_magnetic_atoms = index_magnetic_atoms
+        self.bruno_correction = bruno_correction
 
         # Initialize debug options
         if debug_options is None:
@@ -245,13 +239,6 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         default="TB2J_results",
     )
     parser.add_argument(
-        "--write_dm",
-        help="whether to write density matrix",
-        action="store_true",
-        default=False,
-    )
-
-    parser.add_argument(
         "--orth",
         help="whether to use lowdin orthogonalization before diagonalization (for testing only)",
         action="store_true",
@@ -259,25 +246,18 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
-        "--ibz",
-        help=" use irreducible k-points in the Brillouin zone. (Note: only for computing total MAE).",
-        action="store_true",
-        default=False,
-    )
-
-    parser.add_argument(
-        "--mae_angles",
-        help="angles for computing MAE, default is 0 0 0",
-        type=float,
-        nargs="*",
-        default=[0.0, 0.0, 0.0],
-    )
-    parser.add_argument(
         "--index_magnetic_atoms",
         help="index of magnetic atoms in the unit cell, default is None. If specified, this will be used to determine the atoms to be considered as magnetic atoms, instead of determined from magnetic elements. Note that the index starts from 1 ",
         type=int,
         nargs="*",
         default=None,
+    )
+
+    parser.add_argument(
+        "--bruno_correction",
+        help="Apply Bruno's renormalization correction to exchange parameters (auto-enables qspace mode). Collinear only.",
+        action="store_true",
+        default=False,
     )
 
     return parser
@@ -316,9 +296,9 @@ def parser_argument_to_dict(args) -> dict:
         "use_cache": args.use_cache,
         "nproc": args.np,
         "description": args.description,
-        "write_density_matrix": args.write_dm,
         "orb_decomposition": args.orb_decomposition,
         "output_path": args.output_path,
         "orth": args.orth,
         "index_magnetic_atoms": ind_mag_atoms,
+        "bruno_correction": args.bruno_correction,
     }

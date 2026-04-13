@@ -57,6 +57,7 @@ class SpinIO(object):
         standardize_Jani=False,
         sia_tensor=None,
         dJdx_orb=None,
+        exchange_Jdict_bruno=None,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -113,6 +114,8 @@ class SpinIO(object):
             self.exchange_Jdict = None
 
         self.Jiso_orb = Jiso_orb
+
+        self.exchange_Jdict_bruno = exchange_Jdict_bruno
 
         self.DMI_orb = DMI_orb
         self.Jani_orb = Jani_orb
@@ -569,6 +572,19 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         obj._build_Rlist()
         return obj
 
+    def _write_bruno_variant(self, path="TB2J_results"):
+        """Write output files with Bruno-corrected J values to separate directories."""
+        original_Jdict = self.exchange_Jdict
+        self.exchange_Jdict = self.exchange_Jdict_bruno
+        try:
+            self.write_multibinit(
+                path=os.path.join(path, "Multibinit_with_bruno_correction")
+            )
+            self.write_vampire(path=os.path.join(path, "Vampire_with_bruno_correction"))
+            self.write_espins(path=os.path.join(path, "ESPInS_with_bruno_correction"))
+        finally:
+            self.exchange_Jdict = original_Jdict
+
     def write_all(self, path="TB2J_results"):
         self.write_pickle(path=path)
         self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
@@ -583,6 +599,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_tom_format(path=os.path.join(path, "TomASD"))
         self.write_vampire(path=os.path.join(path, "Vampire"))
         self.write_espins(path=os.path.join(path, "ESPInS"))
+
+        if self.exchange_Jdict_bruno is not None:
+            self._write_bruno_variant(path=path)
 
         self.plot_all(savefile=os.path.join(path, "JvsR.pdf"))
         # self.write_Jq(kmesh=[9, 9, 9], path=path)

@@ -93,9 +93,9 @@ def run_wann2J():
         exclude_orbs=args.exclude_orbs,
         wannier_type=args.wannier_type,
         qspace=args.qspace,
-        write_density_matrix=args.write_dm,
         orb_decomposition=args.orb_decomposition,
         index_magnetic_atoms=index_magnetic_atoms,
+        bruno_correction=args.bruno_correction,
     )
 
 

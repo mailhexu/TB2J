@@ -206,14 +206,35 @@ class ExchangeCLQspace(ExchangeCL2):
             R = tuple(R)
             for i, iatom in enumerate(self.ind_mag_atoms):
                 for j, jatom in enumerate(self.ind_mag_atoms):
-                    val = self.JR[iR, i, j]
                     ispin = self.ispin(iatom)
                     jspin = self.ispin(jatom)
                     keyspin = (R, ispin, jspin)
+                    if keyspin not in self.distance_dict:
+                        continue
+                    val = self.JR[iR, i, j]
                     is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                     Jij = val / np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
                     if is_nonself:
                         self.exchange_Jdict[keyspin] = Jij
+
+        if self.bruno_correction:
+            self.exchange_Jdict_bruno = {}
+            for iR, R in enumerate(self.Rlist):
+                R = tuple(R)
+                for i, iatom in enumerate(self.ind_mag_atoms):
+                    for j, jatom in enumerate(self.ind_mag_atoms):
+                        ispin = self.ispin(iatom)
+                        jspin = self.ispin(jatom)
+                        keyspin = (R, ispin, jspin)
+                        if keyspin not in self.distance_dict:
+                            continue
+                        val = self.Jnorm_R[iR, i, j]
+                        is_nonself = not (R == (0, 0, 0) and iatom == jatom)
+                        Jij = val / np.sign(
+                            np.dot(self.spinat[iatom], self.spinat[jatom])
+                        )
+                        if is_nonself:
+                            self.exchange_Jdict_bruno[keyspin] = Jij
 
     def calculate_all(self):
         self._prepare()

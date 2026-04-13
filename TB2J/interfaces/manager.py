@@ -5,6 +5,14 @@ from TB2J.exchangeCL2 import ExchangeCL2
 
 class Manager:
     def __init__(self, atoms, models, basis, colinear, qspace=False, **kwargs):
+        bruno_correction = kwargs.get("bruno_correction", False)
+        if bruno_correction:
+            if not colinear:
+                raise NotImplementedError(
+                    "Bruno's correction is not yet implemented for non-collinear calculations."
+                )
+            qspace = True
+
         # computing exchange
         print("Starting to calculate exchange.")
         ExchangeClass = self.select_exchange(colinear, qspace=qspace)

@@ -22,6 +22,7 @@ class WannierManager(Manager):
         basis_fname=None,
         qspace=False,
         wannier_type="wannier90",
+        bruno_correction=False,
         **kwargs,
     ):
         # atoms
@@ -41,7 +42,13 @@ class WannierManager(Manager):
         kwargs["description"] = description
 
         super().__init__(
-            atoms, tbmodels, basis, colinear=colinear, qspace=qspace, **kwargs
+            atoms,
+            tbmodels,
+            basis,
+            colinear=colinear,
+            qspace=qspace,
+            bruno_correction=bruno_correction,
+            **kwargs,
         )
 
     def prepare_atoms(self, path, posfile, prefix_up, prefix_SOC, colinear=True):
