@@ -22,7 +22,7 @@ class WannierManager(Manager):
         basis_fname=None,
         qspace=False,
         wannier_type="wannier90",
-        bruno_correction=False,
+        bruno_correction="",
         **kwargs,
     ):
         # atoms

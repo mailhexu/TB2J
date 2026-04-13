@@ -32,7 +32,7 @@ class ExchangeParams:
     orb_decomposition: bool = False
     output_path: str = "TB2J_results"
     orth = False
-    bruno_correction: bool = False
+    bruno_correction: str = ""
     # Debug options
     debug_options = {
         "compute_charge_moments": False,  # Whether to compute charge and magnetic moments with Green's function method
@@ -62,7 +62,7 @@ class ExchangeParams:
         orth=False,
         index_magnetic_atoms=None,
         debug_options=None,
-        bruno_correction=False,
+        bruno_correction="",
     ):
         self.efermi = efermi
         self.smearing = smearing
@@ -86,6 +86,13 @@ class ExchangeParams:
         self.output_path = output_path
         self.orth = orth
         self.index_magnetic_atoms = index_magnetic_atoms
+        # Backward compatibility: bool → str conversion
+        if isinstance(bruno_correction, bool):
+            bruno_correction = "fft" if bruno_correction else ""
+        if bruno_correction not in ("", "fft", "local"):
+            raise ValueError(
+                f"bruno_correction must be '', 'fft', or 'local', got '{bruno_correction}'"
+            )
         self.bruno_correction = bruno_correction
 
         # Initialize debug options
@@ -255,9 +262,11 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
 
     parser.add_argument(
         "--bruno_correction",
-        help="Apply Bruno's renormalization correction to exchange parameters (auto-enables qspace mode). Collinear only.",
-        action="store_true",
-        default=False,
+        nargs="?",
+        const="fft",
+        default="",
+        choices=["fft", "local"],
+        help="Apply Bruno's renormalization correction. 'fft' (default): exact via FFT round-trip. 'local': fast local approximation. Collinear only.",
     )
 
     return parser

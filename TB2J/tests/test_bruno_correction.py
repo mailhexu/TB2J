@@ -38,13 +38,13 @@ from TB2J.exchange_params import (
 class TestExchangeParamsBruno:
     def test_bruno_correction_defaults_to_false(self):
         params = ExchangeParams(efermi=-5.0, magnetic_elements=["Fe"])
-        assert params.bruno_correction is False
+        assert params.bruno_correction == ""
 
     def test_bruno_correction_can_be_set_true(self):
         params = ExchangeParams(
             efermi=-5.0, magnetic_elements=["Fe"], bruno_correction=True
         )
-        assert params.bruno_correction is True
+        assert params.bruno_correction == "fft"
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +57,13 @@ class TestCLIArgBruno:
         parser = argparse.ArgumentParser()
         add_exchange_args_to_parser(parser)
         args = parser.parse_args([])
-        assert args.bruno_correction is False
+        assert args.bruno_correction == ""
 
     def test_bruno_correction_flag_present(self):
         parser = argparse.ArgumentParser()
         add_exchange_args_to_parser(parser)
         args = parser.parse_args(["--bruno_correction"])
-        assert args.bruno_correction is True
+        assert args.bruno_correction == "fft"
 
     def test_parser_argument_to_dict_includes_bruno(self):
         parser = argparse.ArgumentParser()
@@ -71,7 +71,7 @@ class TestCLIArgBruno:
         args = parser.parse_args(["--bruno_correction"])
         d = parser_argument_to_dict(args)
         assert "bruno_correction" in d
-        assert d["bruno_correction"] is True
+        assert d["bruno_correction"] == "fft"
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +80,10 @@ class TestCLIArgBruno:
 
 
 class TestManagerBruno:
-    @patch("TB2J.interfaces.manager.ExchangeCLQspace")
-    def test_bruno_auto_enables_qspace(self, mock_cls):
-        """When bruno_correction=True and colinear=True, Manager should
-        select ExchangeCLQspace (qspace) automatically."""
+    @patch("TB2J.interfaces.manager.ExchangeCL2")
+    def test_bruno_uses_realspace_by_default(self, mock_cls):
+        """When bruno_correction=True and qspace=False, Manager should
+        select ExchangeCL2 (real-space Bruno)."""
         mock_instance = MagicMock()
         mock_cls.return_value = mock_instance
 
