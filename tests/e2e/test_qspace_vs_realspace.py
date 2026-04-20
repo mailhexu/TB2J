@@ -6,7 +6,7 @@ resulting exchange_Jdict values match within numerical tolerance.
 
 Run from the repository root:
 
-    pytest tests/tests/test_qspace_vs_realspace.py -v
+    pytest tests/e2e/test_qspace_vs_realspace.py -v
 
 """
 
@@ -23,9 +23,11 @@ from TB2J.exchange_qspace import ExchangeCLQspace
 from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.utils import auto_assign_basis_name
 
+pytestmark = pytest.mark.e2e
+
 ROOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 DATA_DIR = os.path.abspath(
-    os.path.join(ROOT_DIR, "tests", "data", "inputs", "2_SrMnO3_wannier", "data")
+    os.path.join(ROOT_DIR, "data", "inputs", "2_SrMnO3_wannier", "data")
 )
 
 

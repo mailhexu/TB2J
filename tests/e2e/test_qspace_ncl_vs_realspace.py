@@ -6,7 +6,7 @@ resulting exchange_Jdict, Jani, and DMI values match within numerical tolerance.
 
 Run from the repository root:
 
-    pytest tests/tests/test_qspace_ncl_vs_realspace.py -v
+    pytest tests/e2e/test_qspace_ncl_vs_realspace.py -v
 
 """
 
@@ -24,9 +24,11 @@ from TB2J.exchange import ExchangeNCL
 from TB2J.exchange_qspace import ExchangeNCLQspace
 from TB2J.utils import auto_assign_basis_name
 
+pytestmark = [pytest.mark.e2e, pytest.mark.slow]
+
 ROOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 DATA_DIR = os.path.abspath(
-    os.path.join(ROOT_DIR, "tests", "data", "inputs", "3_CrI3_wannier_SOC", "data", "z")
+    os.path.join(ROOT_DIR, "data", "inputs", "3_CrI3_wannier_SOC", "data", "z")
 )
 
 

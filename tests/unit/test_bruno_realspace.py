@@ -7,7 +7,7 @@ Covers:
 
 Run from the TB2J repository root:
 
-    pytest TB2J/tests/test_bruno_realspace.py -v
+    pytest tests/unit/test_bruno_realspace.py -v
 
 """
 
@@ -20,6 +20,8 @@ import pytest
 
 from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.utils import kmesh_to_R
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

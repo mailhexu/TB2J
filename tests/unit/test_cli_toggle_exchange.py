@@ -1,6 +1,10 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from TB2J.scripts.TB2J_edit import cmd_toggle_exchange
+
+pytestmark = pytest.mark.unit
 
 
 def test_cmd_toggle_exchange():

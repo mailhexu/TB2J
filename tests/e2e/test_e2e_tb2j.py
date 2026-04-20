@@ -9,7 +9,7 @@ Run from the repository root after initializing the test data
 submodule:
 
     ./tests/init_test_data.sh
-    pytest tests/tests/test_e2e_tb2j.py -q
+    pytest tests/e2e/test_e2e_tb2j.py -q
 
 """
 
@@ -23,6 +23,8 @@ from typing import Iterable, List
 
 import pytest
 import tomli
+
+pytestmark = pytest.mark.e2e
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 TESTS_DATA_DIR = ROOT_DIR / "tests" / "data"
@@ -113,25 +115,20 @@ def _run_e2e_case(case_dir: Path) -> None:
     # Parse metadata for reference files, if present
     with metadata.open("rb") as f:
         meta = tomli.load(f)
-    reference_files = meta.get("reference_files", [])
 
-    # Scenario-specific harness tweaks
-    if case_dir.name == "4_CrI3_wannier_SOC_indmagatoms":
-        # This scenario only runs the z-direction Wannier calculation;
-        # compare against the corresponding TB2J_results_z references.
-        reference_files = ["refs/TB2J_results_z"]
-    elif case_dir.name == "5_CrI3_SIESTA_collinear":
-        pytest.xfail(
-            "Siesta-based E2E currently fails due to HamiltonIO "
-            "returning a Hamiltonian with spin=None."
-        )
+    if meta.get("xfail", False):
+        pytest.xfail(meta.get("xfail_reason", ""))
+
+    if meta.get("reference_override"):
+        reference_files = [meta["reference_override"]]
+    else:
+        reference_files = meta.get("reference_files", [])
 
     # Ensure result directory exists
     result_dir.mkdir(exist_ok=True)
 
     # Run the TB2J workflow
-    if case_dir.name == "1_template":
-        # Keep the simple shell-based runner for the dummy template
+    if meta.get("use_only_runner", False):
         if not runner_sh.is_file():
             pytest.fail(f"No runner script found in {runner_dir}")
         proc = _run_subprocess(["bash", str(runner_sh.name)], cwd=runner_dir)
@@ -309,16 +306,13 @@ def _run_e2e_case(case_dir: Path) -> None:
     # use the shell-based check for the simple template case; all
     # other scenarios rely on file comparisons below.
     check_sh = check_dir / "check.sh"
-    if case_dir.name == "1_template" and check_sh.is_file():
+    if meta.get("use_only_runner", False) and check_sh.is_file():
         check_proc = _run_subprocess(["bash", str(check_sh.name)], cwd=check_dir)
         assert (
             check_proc.returncode == 0
         ), f"Check failed for {case_dir.name} with code {check_proc.returncode}"
 
-    # For non-template cases, only compare exchange.out against the
-    # references. This avoids brittle comparisons of plots or pickle
-    # files while still checking the main numerical output.
-    if reference_files and case_dir.name != "1_template":
+    if reference_files and not meta.get("use_only_runner", False):
         for ref_entry in reference_files:
             ref_root = case_dir / ref_entry
             if ref_root.is_dir():

@@ -10,7 +10,7 @@ Covers:
 
 Run from the repository root:
 
-    pytest TB2J/tests/test_bruno_correction.py -v
+    pytest tests/unit/test_bruno_correction.py -v
 
 """
 
