@@ -1,100 +1,28 @@
-# Test Data Submodule Setup
+# TB2J Test Suite
 
-This directory contains scripts for managing the test data submodule for TB2J.
-
-## Scripts Overview
-
-### `setup_test_submodule.sh` (Run Once Locally)
-**Purpose**: Adds the test data repository as a git submodule for the first time.
-
-**When to use**: 
-- Run this script once locally when you want to add the test data submodule to your repository
-- Should be run by a maintainer/developer who has write access to the repository
-
-**Usage:**
-```bash
-./setup_test_submodule.sh
-```
-
-**What it does:**
-- Checks that the submodule doesn't already exist
-- Runs `git submodule add https://github.com/mailhexu/TB2J_test_data.git tests/data`
-- Creates the `.gitmodules` file and registers the submodule
-
-**After running this script:**
-```bash
-git add .gitmodules tests/data
-git commit -m "Add test data submodule"
-git push
-```
-
-### `tests/init_test_data.sh` (Automatic in CI)
-**Purpose**: Initializes existing submodules in CI/CD environments.
-
-**When to use**: 
-- Automatically run by GitHub Actions after checkout
-- Can be run locally if you clone a repo that already has submodules defined
-
-**Usage:**
-```bash
-./tests/init_test_data.sh
-```
-
-**What it does:**
-- Checks if `.gitmodules` exists
-- Runs `git submodule update --init --recursive` to initialize all submodules
-- Verifies that the test data is properly checked out
-
-## Workflow
-
-1. **First-time setup** (maintainer runs locally):
-   ```bash
-   ./setup_test_submodule.sh
-   git add .gitmodules tests/data
-   git commit -m "Add test data submodule"
-   git push
-   ```
-
-2. **CI/CD automatic initialization** (runs in GitHub Actions):
-   ```bash
-   git checkout --recurse-submodules  # Done by GitHub Actions
-   ./tests/init_test_data.sh          # Safety check and verification
-   ```
-
-3. **Developers cloning the repo**:
-   ```bash
-   git clone --recurse-submodules https://github.com/mailhexu/TB2J.git
-   # OR after regular clone:
-   ./tests/init_test_data.sh
-   ```
-
-## Do You Need Both Scripts?
-
-**Yes**, but they serve different purposes:
-
-- **`setup_test_submodule.sh`**: One-time setup (like installation)
-- **`init_test_data.sh`**: Runtime initialization (like starting a service)
+This directory contains the TB2J test suite, organized into unit and end-to-end (E2E) tiers, plus a git submodule for test data.
 
 ## Directory Structure
 
-After setup, your directory structure should look like:
 ```
-TB2J/
-├── setup_test_submodule.sh    # One-time submodule setup script (root level)
-└── tests/
-    ├── data/                  # Git submodule containing test data
-    ├── init_test_data.sh      # CI initialization script
-    ├── setup_test_data.sh     # Original test data setup script
-    └── README.md              # This file
+tests/
+├── unit/                  # Fast unit tests (no external data needed)
+│   ├── test_bruno_correction.py
+│   ├── test_bruno_realspace.py
+│   ├── test_cli_remove_sublattice.py
+│   └── test_cli_toggle_exchange.py
+├── e2e/                   # End-to-end tests (need test data submodule)
+│   ├── test_e2e_tb2j.py
+│   ├── test_qspace_vs_realspace.py
+│   └── test_qspace_ncl_vs_realspace.py
+├── data/                  # Git submodule (TB2J_test_data)
+├── init_test_data.sh      # CI: initialize submodule
+├── update_test_data.sh    # Update submodule to latest
+├── conftest.py            # Shared pytest fixtures
+└── README.md              # This file
 ```
 
-The scripts are organized as:
-- **Root level**: `setup_test_submodule.sh` - for initial repository setup
-- **tests/ directory**: `init_test_data.sh` - for runtime/CI initialization
-
-## Running tests with pytest
-
-Once dependencies and test data are available, you can run pytest-based tests.
+## Running Tests
 
 ### Prerequisites
 
@@ -105,22 +33,54 @@ Once dependencies and test data are available, you can run pytest-based tests.
    python -m pip install .
    python -m pip install pytest
    ```
-2. Ensure the test data submodule is initialized:
+2. For E2E tests, initialize the test data submodule:
    ```bash
-   # If you did not clone with --recurse-submodules
    ./tests/init_test_data.sh
    ```
 
-### Running tests
+### Quick Commands
 
-- To run all available tests from the repository root:
-  ```bash
-  pytest
-  ```
+```bash
+# All tests
+pytest
 
-- To run a lightweight smoke test that does not depend on external DFT data (only core numerical libraries):
-  ```bash
-  pytest TB2J/interfaces/abacus/test_density_matrix.py -q
-  ```
+# Unit tests only (fast, no data needed)
+pytest tests/unit/ -v
+pytest -m unit -v
 
-Some test and example scripts in `TB2J/interfaces/abacus` and other modules expect DFT-derived inputs (e.g. ABACUS examples) to be present under `tests/data` or the appropriate example directories. Make sure the test-data submodule has been fully initialized before running tests that rely on these datasets.
+# E2E tests only (needs submodule)
+pytest tests/e2e/ -v
+pytest -m e2e -v
+
+# Skip E2E tests
+pytest -m "not e2e" -v
+```
+
+## Test Data Submodule
+
+Test data lives in a separate repository: `https://github.com/mailhexu/TB2J_test_data.git`
+
+### First-time setup (maintainer):
+```bash
+git submodule add https://github.com/mailhexu/TB2J_test_data.git tests/data
+git add .gitmodules tests/data
+git commit -m "Add test data submodule"
+```
+
+### Developer clone:
+```bash
+git clone --recurse-submodules https://github.com/mailhexu/TB2J.git
+# OR after regular clone:
+./tests/init_test_data.sh
+```
+
+### Update test data:
+```bash
+./tests/update_test_data.sh
+git add tests/data
+git commit -m "Update tests/data submodule"
+```
+
+## Adding New E2E Tests
+
+See `tests/data/README_add_test.md` for instructions on adding new test scenarios using the `create_new_test.py` utility.
