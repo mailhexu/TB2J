@@ -1,5 +1,4 @@
 from collections import defaultdict
-from functools import lru_cache
 
 import numpy as np
 from HamiltonIO.epw.epwparser import EpmatOneMode
@@ -84,19 +83,29 @@ class ExchangePert2(ExchangeNCL):
             else:
                 self.epc = None
         self.Ru = Ru
-        self.J_only = J_only  # Flag to compute only J, skip derivatives
-        self.density_method = density_method  # Method for density calculation
+        self.J_only = J_only
+        self.density_method = density_method
+
+        self._compute_dHdxR0_from_epw()
 
         self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.dA2_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.dA_ijR_orb = {}
 
-        # Detect basis format once based on index contiguity
         orbs = self.iorb(self.ind_mag_atoms[0])
         if len(orbs) > 1 and orbs[-1] - orbs[0] != len(orbs) - 1:
             self.basis_is_separated = True
         else:
             self.basis_is_separated = False
+
+    def _compute_dHdxR0_from_epw(self):
+        R0 = (0, 0, 0)
+        self._dHdxR0_dict = {}
+        if R0 in self.epc.Rkdict:
+            for Rq in self.epc.Rqdict:
+                self._dHdxR0_dict[Rq] = self.epc.get_epmat_RgRk_two_spin(
+                    Rq, R0, avg=False
+                )
 
     def _prepare_Patom(self):
         for iatom in self.ind_mag_atoms:
@@ -124,20 +133,19 @@ class ExchangePert2(ExchangeNCL):
             else:
                 self.Pdict[iatom] = m3
 
-    @lru_cache()
-    def get_dP_iatom(self, iatom):
+    # @lru_cache()
+    def get_dP_iatom(self, iatom, R=(0, 0, 0)):
         orbs = self.iorb(iatom)
-        H = self.dHdxR0[np.ix_(orbs, orbs)]
+        Rq = tuple(np.array(self.Ru) - np.array(R))
+        if Rq not in self._dHdxR0_dict:
+            ni = len(orbs) // 2
+            return np.zeros((ni, ni), dtype=complex)
+        H = self._dHdxR0_dict[Rq][np.ix_(orbs, orbs)]
         ni = H.shape[0] // 2
-        # Try separated
-        H_u_sep, H_d_sep = H[:ni, :ni], H[ni:, ni:]
-        # Try interleaved
-        H_u_int, H_d_int = H[::2, ::2], H[1::2, 1::2]
-
-        if np.max(np.abs(H_u_sep - H_d_sep)) > np.max(np.abs(H_u_int - H_d_int)):
-            return (H_u_sep - H_d_sep) / 2.0
+        if self.basis_is_separated:
+            return (H[:ni, :ni] - H[ni:, ni:]) / 2.0
         else:
-            return (H_u_int - H_d_int) / 2.0
+            return (H[::2, ::2] - H[1::2, 1::2]) / 2.0
 
     def get_A_ijR(self, G, dG, dGrev, R, iatom, jatom):
         """
@@ -225,7 +233,7 @@ class ExchangePert2(ExchangeNCL):
 
         return tmp, dtmp, torb, dtorb
 
-    def get_all_A_vectorized(self, GR, dGRij, dGRji):
+    def get_all_A_vectorized(self, GR, dGRij, dGRji, change_onsite=False):
         """
         Vectorized calculation of A and dA/dx for all R and atom pairs.
 
@@ -245,6 +253,7 @@ class ExchangePert2(ExchangeNCL):
         magnetic_sites = self.ind_mag_atoms
         iorbs = [self.iorb(site) for site in magnetic_sites]
         P = [self.get_P_iatom(site) for site in magnetic_sites]
+        dP = [self.get_dP_iatom(site) for site in magnetic_sites]
 
         # We need dP/dx too?
         # get_A_ijR used get_P_iatom which is constant for finite difference?
@@ -391,9 +400,12 @@ class ExchangePert2(ExchangeNCL):
                 # P[i,k] * G[r,u,k,j] -> X[r,u,i,j]
                 X = np.einsum("ik, rukj -> ruij", Pi, Gij_Ixyz)
 
+                dPX = np.einsum("ik, rukj -> ruij", dP[i], Gij_Ixyz)
+
                 # Y = Pj @ Gji
                 # P[j,k] * G[r,u,k,i] -> Y[r,u,j,i]
                 Y = np.einsum("jk, ruki -> ruji", Pj, Gji_Ixyz)
+                dPY = np.einsum("jk, ruki -> ruji", dP[j], Gji_Ixyz)
 
                 A_val = np.einsum("ruij, rvji -> ruv", X, Y) / np.pi
 
@@ -424,6 +436,16 @@ class ExchangePert2(ExchangeNCL):
                             np.einsum("raij, rbji -> rabij", dX, Y)
                             + np.einsum("raij, rbji -> rabij", X, dY)
                         ) / np.pi
+                        if change_onsite:
+                            # print("Applying onsite changes to dA/dx")
+                            dAdx_orb_val += (
+                                np.einsum(
+                                    "raij, rbji -> rabij", dPX, Y
+                                )  # onsite changes Pi
+                                + np.einsum(
+                                    "raij, rbji -> rabij", X, dPY
+                                )  # onsite changes Pj
+                            ) / np.pi
                     else:
                         dAdx_orb_val = np.zeros_like(A_orb_val)
 
@@ -437,6 +459,16 @@ class ExchangePert2(ExchangeNCL):
                             np.einsum("raij, rbji -> rab", dX, Y)
                             + np.einsum("raij, rbji -> rab", X, dY)
                         ) / np.pi
+                        if change_onsite:
+                            # print("Applying onsite changes to dA/dx")
+                            dAdx_val += (
+                                np.einsum(
+                                    "raij, rbji -> rab", dPX, Y
+                                )  # onsite changes Pi
+                                + np.einsum(
+                                    "raij, rbji -> rab", X, dPY
+                                )  # onsite changes Pj
+                            ) / np.pi
                     else:
                         dAdx_val = np.zeros_like(A_val)
                     A_orb_val = None
@@ -496,13 +528,20 @@ class ExchangePert2(ExchangeNCL):
         )
 
         # Use vectorized calculation
+        # AijR, dAdx_ijR, A_orb_ijR, dAdx_orb_ijR = self.get_all_A_vectorized(
+        #        GR_arr, dGRij_arr, dGRji_arr
+        #    )
+
         try:
             AijR, dAdx_ijR, A_orb_ijR, dAdx_orb_ijR = self.get_all_A_vectorized(
                 GR_arr, dGRij_arr, dGRji_arr
             )
-        except Exception:
+        except Exception as exc:
             # Fallback to loop if vectorization fails (e.g. shape mismatch)
             # print(f"Vectorization failed: {exc}, falling back to loop.")
+            print("Vectorization failed, falling back to loop.")
+            print("exception:", exc)
+
             AijR, dAdx_ijR, A_orb_ijR, dAdx_orb_ijR = self.get_all_A(
                 GR_full, dGRij_dict, dGRji_dict
             )
