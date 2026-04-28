@@ -100,6 +100,24 @@ class Contour:
         plt.show()
 
 
+class MatsubaraContour:
+    def __init__(self, path, beta):
+        self.path = path
+        self.beta = beta
+        self.T = 1.0 / beta
+
+    @property
+    def weights(self):
+        return np.full(self.path.shape, self.T)
+
+    def integrate_values(self, values):
+        return np.sum(values, axis=0) * self.T
+
+    @property
+    def npoints(self):
+        return len(self.path)
+
+
 def test():
     ct = Contour(emin=-16, emax=0)
     # ct.build_path_semicircle(npoints=100)

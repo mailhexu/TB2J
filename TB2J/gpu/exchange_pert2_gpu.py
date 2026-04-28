@@ -1,231 +1,293 @@
 """
 ExchangePert2GPU: GPU-accelerated version of ExchangePert2 using JAX.
+
+Processes one energy point at a time to avoid GPU memory overflow,
+following the same pattern as ExchangeNCLGPU and ExchangeCL2GPU.
 """
 
 from collections import defaultdict
+from itertools import product
 
 import numpy as np
+from tqdm import tqdm
 
 from TB2J.exchange_pert2 import ExchangePert2
 from TB2J.gpu.jax_utils import (
-    _compute_dGR_jax,
-    _compute_GR_jax,
-    _eigen_to_G_jax,
-    _pauli_block_all_jax,
-    _pauli_block_all_sep_jax,
+    _compute_A_orb_single_e,
+    _compute_A_single_e,
+    _compute_A_single_e_no_dA,
+    _compute_dGR_single_e,
+    _compute_GR_single_e,
+    _eigen_to_G_single_e,
+    _pauli_block_interleaved,
+    _pauli_block_separated,
     _require_jax,
     jax_to_numpy,
     numpy_to_jax,
 )
-from TB2J.gpu.jax_utils import (
-    _jnp as jnp,
-)
 
-
-def _compute_AdA_tensor_jax(X, Y, dX, dY):
-    """
-    JAX version: Compute A and dA/dx tensors for all E, R vectors and components.
-    X, Y, dX, dY: (ne, nR, 4, ni, nj)
-    """
-    _require_jax()
-
-    # A[e, r, a, b] = sum_ij (X[e, r, a, i, j] * Y[e, r, b, j, i]) / pi
-    A = jnp.einsum("era_ij, erb_ji -> erab", X, Y) / jnp.pi
-
-    if dX is not None and dY is not None:
-        # dA[e, r, a, b] = sum_ij (dX[e, r, a, i, j] * Y[e, r, b, j, i] + X[e, r, a, i, j] * dY[e, r, b, j, i]) / pi
-        dAdx = (
-            jnp.einsum("era_ij, erb_ji -> erab", dX, Y)
-            + jnp.einsum("era_ij, erb_ji -> erab", X, dY)
-        ) / jnp.pi
-    else:
-        dAdx = jnp.zeros_like(A)
-
-    return A, dAdx
-
-
-def _compute_AdA_tensor_orb_jax(X, Y, dX, dY):
-    """
-    JAX version: Compute A and dA/dx tensors with orbital decomposition for all E, R.
-    """
-    _require_jax()
-
-    # A_orb[e, r, a, b, i, j] = X[e, r, a, i, j] * Y[e, r, b, j, i] / pi
-    A_orb = jnp.einsum("era_ij, erb_ji -> erabij", X, Y) / jnp.pi
-
-    if dX is not None and dY is not None:
-        dAdx_orb = (
-            jnp.einsum("era_ij, erb_ji -> erabij", dX, Y)
-            + jnp.einsum("era_ij, erb_ji -> erabij", X, dY)
-        ) / jnp.pi
-    else:
-        dAdx_orb = jnp.zeros_like(A_orb)
-
-    A = jnp.sum(A_orb, axis=(-2, -1))
-    dAdx = jnp.sum(dAdx_orb, axis=(-2, -1))
-
-    return A, dAdx, A_orb, dAdx_orb
+_require_jax()
+import jax.numpy as jnp  # noqa: E402
 
 
 class ExchangePert2GPU(ExchangePert2):
     """
     GPU-accelerated version of ExchangePert2 using JAX.
+
+    Processes one energy point at a time to keep GPU memory usage bounded,
+    following the pattern of ExchangeNCLGPU and ExchangeCL2GPU.
     """
 
     def __init__(self, *args, **kwargs):
         """Initialize ExchangePert2GPU."""
         _require_jax()
         super().__init__(*args, **kwargs)
+        self._evals_jax = None
+        self._evecs_jax = None
+        self._kpts_jax = None
+        self._kweights_jax = None
+        self._Rpts_jax = None
 
-    def get_all_A_vectorized_gpu(self, GR, dGRij, dGRji):
-        """
-        GPU-accelerated vectorized calculation of A and dA/dx for multiple energy points.
-        GR, dGRij, dGRji: (ne, nR, nb, nb)
-        """
-        magnetic_sites = self.ind_mag_atoms
-        iorbs = [self.iorb(site) for site in magnetic_sites]
-        P = [numpy_to_jax(self.get_P_iatom(site)) for site in magnetic_sites]
-
-        # Convert arrays to JAX
-        GR_jax = numpy_to_jax(GR)
-        dGRij_jax = numpy_to_jax(dGRij)
-        dGRji_jax = numpy_to_jax(dGRji)
-        weights_jax = numpy_to_jax(self.contour.weights)
-
-        nA = len(magnetic_sites)
-        nR = GR.shape[1]
-
-        indices_neg = jnp.array([self.R_negative_index[k] for k in range(nR)])
-
-        # Loop over atom pairs (small loop, okay for CPU)
-        for i in range(nA):
-            for j in range(nA):
-                idx, jdx = iorbs[i], iorbs[j]
-
-                # Extract matrices on GPU
-                Gij = GR_jax[:, :, idx][:, :, :, jdx]
-                Gji_block = GR_jax[:, indices_neg][:, :, jdx][:, :, :, idx]
-                dGij_block = dGRij_jax[:, :, idx][:, :, :, jdx]
-                dGji_block = dGRji_jax[:, :, jdx][:, :, :, idx]
-
-                # Pauli decomposition on GPU
-                if self.basis_is_separated:
-                    Gij_Ixyz = _pauli_block_all_sep_jax(Gij)
-                    Gji_Ixyz = _pauli_block_all_sep_jax(Gji_block)
-                    dGij_Ixyz = _pauli_block_all_sep_jax(dGij_block)
-                    dGji_Ixyz = _pauli_block_all_sep_jax(dGji_block)
-                else:
-                    Gij_Ixyz = _pauli_block_all_jax(Gij)
-                    Gji_Ixyz = _pauli_block_all_jax(Gji_block)
-                    dGij_Ixyz = _pauli_block_all_jax(dGij_block)
-                    dGji_Ixyz = _pauli_block_all_jax(dGji_block)
-
-                # Transpose to (ne, nR, 4, ni, nj)
-                Gij_Ixyz = jnp.transpose(Gij_Ixyz, (1, 2, 0, 3, 4))
-                Gji_Ixyz = jnp.transpose(Gji_Ixyz, (1, 2, 0, 3, 4))
-                dGij_Ixyz = jnp.transpose(dGij_Ixyz, (1, 2, 0, 3, 4))
-                dGji_Ixyz = jnp.transpose(dGji_Ixyz, (1, 2, 0, 3, 4))
-
-                Pi, Pj = P[i], P[j]
-                X = jnp.einsum("ik, eru_kj -> eru_ij", Pi, Gij_Ixyz)
-                Y = jnp.einsum("jk, eru_ki -> eru_ji", Pj, Gji_Ixyz)
-                dX = jnp.einsum("ik, eru_kj -> eru_ij", Pi, dGij_Ixyz)
-                dY = jnp.einsum("jk, eru_ki -> eru_ji", Pj, dGji_Ixyz)
-
-                if self.orb_decomposition:
-                    A_val, dAdx_val, A_orb_val, dAdx_orb_val = (
-                        _compute_AdA_tensor_orb_jax(X, Y, dX, dY)
-                    )
-                    A_integrated_jax = jnp.einsum("e, erab -> rab", weights_jax, A_val)
-                    dAdx_integrated_jax = jnp.einsum(
-                        "e, erab -> rab", weights_jax, dAdx_val
-                    )
-                    A_orb_integrated_jax = jnp.einsum(
-                        "e, erab_ij -> rab_ij", weights_jax, A_orb_val
-                    )
-                    dAdx_orb_integrated_jax = jnp.einsum(
-                        "e, erab_ij -> rab_ij", weights_jax, dAdx_orb_val
-                    )
-
-                    A_integrated = jax_to_numpy(A_integrated_jax)
-                    dAdx_integrated = jax_to_numpy(dAdx_integrated_jax)
-                    A_orb_integrated = jax_to_numpy(A_orb_integrated_jax)
-                    dAdx_orb_integrated = jax_to_numpy(dAdx_orb_integrated_jax)
-                else:
-                    A_val, dAdx_val = _compute_AdA_tensor_jax(X, Y, dX, dY)
-                    A_integrated_jax = jnp.einsum("e, erab -> rab", weights_jax, A_val)
-                    dAdx_integrated_jax = jnp.einsum(
-                        "e, erab -> rab", weights_jax, dAdx_val
-                    )
-
-                    A_integrated = jax_to_numpy(A_integrated_jax)
-                    dAdx_integrated = jax_to_numpy(dAdx_integrated_jax)
-                    A_orb_integrated, dAdx_orb_integrated = None, None
-
-                mi, mj = magnetic_sites[i], magnetic_sites[j]
-                for iR, R_vec in enumerate(self.short_Rlist):
-                    if (R_vec, i, j) in self.distance_dict:
-                        self.A_ijR[(R_vec, mi, mj)] += A_integrated[iR]
-                        self.dA_ijR[(R_vec, mi, mj)] += dAdx_integrated[iR]
-                        if self.orb_decomposition:
-                            if (R_vec, mi, mj) not in self.A_ijR_orb:
-                                self.A_ijR_orb[(R_vec, mi, mj)] = A_orb_integrated[iR]
-                                self.dA_ijR_orb[(R_vec, mi, mj)] = dAdx_orb_integrated[
-                                    iR
-                                ]
-                            else:
-                                self.A_ijR_orb[(R_vec, mi, mj)] += A_orb_integrated[iR]
-                                self.dA_ijR_orb[(R_vec, mi, mj)] += dAdx_orb_integrated[
-                                    iR
-                                ]
+    def _prepare_jax_arrays(self):
+        """Prepare JAX arrays for GPU computation (called once)."""
+        if self._evals_jax is None:
+            self._evals_jax = numpy_to_jax(self.G.evals)
+            self._evecs_jax = numpy_to_jax(self.G.evecs)
+            self._kpts_jax = numpy_to_jax(self.G.kpts)
+            self._kweights_jax = numpy_to_jax(self.G.kweights)
+            self._Rpts_jax = numpy_to_jax(self.short_Rlist)
+            print(
+                f"Prepared JAX arrays: evals {self._evals_jax.shape}, "
+                f"evecs {self._evecs_jax.shape}, "
+                f"kpts {self._kpts_jax.shape}, Rpts {self._Rpts_jax.shape}"
+            )
 
     def _prepare_dGR_jax(self, Rpts, Rset, Rjlist, epc, Ru):
-        """Prepare indices and matrices for dGR calculation."""
+        """Prepare indices and dV matrices for dGR calculation (called once)."""
         if self.G._Rmap is None:
             self.G._build_Rmaps(Rpts, Rset, Rjlist, epc, Ru)
         R2idx = {R: i for i, R in enumerate(Rpts)}
+
         Rmap_idx = []
         dV_list = []
         for Rq, Rk, Rm, Rnj, Rj in self.G._Rmap:
             Rmap_idx.append((R2idx[Rm], R2idx[Rnj], R2idx[Rj]))
             dV_list.append(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T)
+
         Rmap_rev_idx = []
         dV_rev_list = []
         for Rq, Rk, Rjn, Rmi, Rj in self.G._Rmap_rev:
             Rmap_rev_idx.append((R2idx[Rjn], R2idx[Rmi], R2idx[Rj]))
             dV_rev_list.append(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T)
-        return Rmap_idx, numpy_to_jax(dV_list), Rmap_rev_idx, numpy_to_jax(dV_rev_list)
+
+        self._Rmap_indices_Rm = jnp.array([e[0] for e in Rmap_idx])
+        self._Rmap_indices_Rnj = jnp.array([e[1] for e in Rmap_idx])
+        self._Rmap_indices_Rj = jnp.array([e[2] for e in Rmap_idx])
+        self._dV_jax = jnp.array(dV_list)
+        self._unique_Rj_ij = jnp.unique(self._Rmap_indices_Rj)
+
+        self._Rmap_rev_indices_Rm = jnp.array([e[0] for e in Rmap_rev_idx])
+        self._Rmap_rev_indices_Rnj = jnp.array([e[1] for e in Rmap_rev_idx])
+        self._Rmap_rev_indices_Rj = jnp.array([e[2] for e in Rmap_rev_idx])
+        self._dV_rev_jax = jnp.array(dV_rev_list)
+        self._unique_Rj_ji = jnp.unique(self._Rmap_rev_indices_Rj)
+
+    def _compute_per_energy_gpu(self, e):
+        """
+        Compute all quantities for a single energy point on GPU.
+
+        Returns dict with A and dA for all atom pairs and R vectors.
+        """
+        evals = self._evals_jax
+        evecs = self._evecs_jax
+        efermi = self.G.efermi
+        kweights = self._kweights_jax
+
+        Gk_all = _eigen_to_G_single_e(evals, evecs, efermi, e)
+
+        if not self.G.is_orthogonal:
+            Sk_all = self.G.S if not self.G._use_cache else self.G.get_Sk(slice(None))
+            Sk_jax = numpy_to_jax(Sk_all)
+            rhok_all = jnp.einsum("kij,kjl->kil", Sk_jax, Gk_all)
+        else:
+            rhok_all = Gk_all
+
+        rhoR0 = jnp.einsum("kij,k->ij", rhok_all, kweights)
+
+        GR = _compute_GR_single_e(
+            self._Rpts_jax, self._kpts_jax, Gk_all, kweights, self.G.k2Rfactor
+        )
+
+        dGRij = _compute_dGR_single_e(
+            GR,
+            self._Rmap_indices_Rm,
+            self._Rmap_indices_Rnj,
+            self._Rmap_indices_Rj,
+            self._dV_jax,
+            self._unique_Rj_ij,
+        )
+        dGRji = _compute_dGR_single_e(
+            GR,
+            self._Rmap_rev_indices_Rm,
+            self._Rmap_rev_indices_Rnj,
+            self._Rmap_rev_indices_Rj,
+            self._dV_rev_jax,
+            self._unique_Rj_ji,
+        )
+
+        nR = GR.shape[0]
+        nb = GR.shape[1]
+
+        dGRij_full = jnp.zeros((nR, nb, nb), dtype=GR.dtype)
+        dGRji_full = jnp.zeros((nR, nb, nb), dtype=GR.dtype)
+        dGRij_full = dGRij_full.at[self._unique_Rj_ij].set(dGRij)
+        dGRji_full = dGRji_full.at[self._unique_Rj_ji].set(dGRji)
+
+        magnetic_sites = self.ind_mag_atoms
+        nA = len(magnetic_sites)
+        iorbs = [self.iorb(site) for site in magnetic_sites]
+        P = [numpy_to_jax(self.get_P_iatom(site)) for site in magnetic_sites]
+
+        indices_neg = jnp.array([self.R_negative_index[k] for k in range(nR)])
+        pauli_fn = (
+            _pauli_block_separated
+            if self.basis_is_separated
+            else _pauli_block_interleaved
+        )
+
+        A_results = {}
+        dA_results = {}
+        A_orb_results = {}
+        dA_orb_results = {}
+
+        for i, j in product(range(nA), repeat=2):
+            idx, jdx = iorbs[i], iorbs[j]
+
+            Gij = GR[:, idx][:, :, jdx]
+            Gji_block = GR[indices_neg][:, jdx][:, :, idx]
+            dGij_block = dGRij_full[:, idx][:, :, jdx]
+            dGji_block = dGRji_full[:, jdx][:, :, idx]
+
+            Gij_blocks = pauli_fn(Gij)
+            Gji_blocks = pauli_fn(Gji_block)
+            dGij_blocks = pauli_fn(dGij_block)
+            dGji_blocks = pauli_fn(dGji_block)
+
+            Pi, Pj = P[i], P[j]
+
+            if self.orb_decomposition:
+                A_val, dAdx_val, A_orb_val, dAdx_orb_val = _compute_A_orb_single_e(
+                    Gij_blocks,
+                    Gji_blocks,
+                    dGij_blocks,
+                    dGji_blocks,
+                    Pi,
+                    Pj,
+                    self.J_only,
+                )
+                A_orb_np = jax_to_numpy(A_orb_val)
+                dA_orb_np = jax_to_numpy(dAdx_orb_val)
+            elif self.J_only:
+                A_val = _compute_A_single_e_no_dA(Gij_blocks, Gji_blocks, Pi, Pj)
+                A_val.block_until_ready()
+                dAdx_val = jnp.zeros_like(A_val)
+                A_orb_np = None
+                dA_orb_np = None
+            else:
+                A_val, dAdx_val = _compute_A_single_e(
+                    Gij_blocks,
+                    Gji_blocks,
+                    dGij_blocks,
+                    dGji_blocks,
+                    Pi,
+                    Pj,
+                    self.J_only,
+                )
+                A_orb_np = None
+                dA_orb_np = None
+
+            A_val.block_until_ready()
+
+            A_np = jax_to_numpy(A_val)
+            dAdx_np = jax_to_numpy(dAdx_val)
+
+            mi, mj = magnetic_sites[i], magnetic_sites[j]
+            for iR, R_vec in enumerate(self.short_Rlist):
+                if (R_vec, i, j) in self.distance_dict:
+                    A_results[(R_vec, mi, mj)] = A_np[iR]
+                    dA_results[(R_vec, mi, mj)] = dAdx_np[iR]
+                    if self.orb_decomposition:
+                        A_orb_results[(R_vec, mi, mj)] = A_orb_np[iR]
+                        dA_orb_results[(R_vec, mi, mj)] = dA_orb_np[iR]
+
+        return {
+            "A": A_results,
+            "dA": dA_results,
+            "A_orb": A_orb_results,
+            "dA_orb": dA_orb_results,
+            "rho": jax_to_numpy(rhoR0),
+        }
 
     def calculate_all(self, use_gpu=True, vectorize_energy=True, e_batch_size=None):
-        """Calculate exchange parameters with optional memory management."""
+        """Calculate exchange parameters, processing one energy at a time."""
+        print(
+            "Green's function Calculation started (ExchangePert2GPU, energy-by-energy)."
+        )
         self.validate()
-        npole = len(self.contour.path)
 
-        # Pre-initialize target dictionaries
-        self.A_ijR = defaultdict(lambda: 0.0)
-        self.dA_ijR = defaultdict(lambda: 0.0)
+        self._prepare_jax_arrays()
+
+        Rpts = [tuple(R) for R in self.short_Rlist]
+        Rset = set(Rpts)
+        self._prepare_dGR_jax(Rpts, Rset, self.short_Rlist, self.epc, self.Ru)
+
+        npole = len(self.contour.path)
+        weights = self.contour.weights
+
+        self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
+        self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = {}
         self.dA_ijR_orb = {}
 
-        if not vectorize_energy:
-            print("Computing ExchangePert2 energy-by-energy on GPU...")
-            for ie in range(npole):
-                self._calculate_batch([ie], [self.contour.path[ie]])
+        compute_rho_gf = not (
+            hasattr(self, "density_method") and self.density_method == "eigenvector"
+        )
+        if compute_rho_gf:
+            self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         else:
-            print("Computing ExchangePert2 with vectorized GPU parallelization...")
-            if e_batch_size is None or e_batch_size >= npole:
-                batches = [(range(npole), self.contour.path)]
-            else:
-                batches = []
-                for i in range(0, npole, e_batch_size):
-                    idx = range(i, min(i + e_batch_size, npole))
-                    batches.append((idx, self.contour.path[list(idx)]))
+            self.rho = self.G.get_density_matrix()
 
-            for batch_idx, batch_path in batches:
-                self._calculate_batch(batch_idx, batch_path)
+        for ie, e in enumerate(
+            tqdm(self.contour.path, total=npole, desc="Energy integration")
+        ):
+            result = self._compute_per_energy_gpu(e)
+            w = weights[ie]
 
-        # Apply final integration factor
-        weights = self.contour.weights
+            if compute_rho_gf:
+                self.rho += result["rho"] * w
+
+            for key, val in result["A"].items():
+                self.A_ijR[key] += val * w
+            for key, val in result["dA"].items():
+                self.dA_ijR[key] += val * w
+
+            if self.orb_decomposition:
+                for key, val in result["A_orb"].items():
+                    if key in self.A_ijR_orb:
+                        self.A_ijR_orb[key] += val * w
+                        self.dA_ijR_orb[key] += result["dA_orb"][key] * w
+                    else:
+                        self.A_ijR_orb[key] = val * w
+                        self.dA_ijR_orb[key] = result["dA_orb"][key] * w
+
+        if compute_rho_gf:
+            self.rho = -1.0 / np.pi * self.rho
+            if (
+                hasattr(self, "integration_method")
+                and self.integration_method.lower() == "cfr"
+            ):
+                self.rho = self.rho + 0.5j * np.eye(self.nbasis)
+
         if npole > 0:
             dummy = np.zeros(npole)
             dummy[0] = 1.0
@@ -242,63 +304,6 @@ class ExchangePert2GPU(ExchangePert2):
         self.A_to_Jtensor()
         self.A_to_Jtensor_orb()
 
-    def _calculate_batch(self, batch_indices, batch_path):
-        """Internal helper to calculate a batch of energy points."""
-        evals_jax = numpy_to_jax(self.G.evals)
-        evecs_jax = numpy_to_jax(self.G.evecs)
-        energy_jax = numpy_to_jax(batch_path)
-
-        # 1. Compute G(k, e)
-        Gk_all = _eigen_to_G_jax(
-            evals_jax[None, ...],
-            evecs_jax[None, ...],
-            self.G.efermi,
-            energy_jax[:, None, None],
-        )
-
-        # 2. Density matrix (integrated)
-        kweights_jax = numpy_to_jax(self.G.kweights)
-        if self.G.is_orthogonal:
-            rhok_all = Gk_all
-        else:
-            Sk_all = self.G.S if not self.G._use_cache else self.G.get_Sk(slice(None))
-            Sk_jax = numpy_to_jax(Sk_all)
-            rhok_all = jnp.einsum("kij, ekjl -> ekil", Sk_jax, Gk_all)
-
-        rhoR0_all = jnp.einsum("ekij, k -> eij", rhok_all, kweights_jax)
-        batch_weights = self.contour.weights[list(batch_indices)]
-        self.rho += jax_to_numpy(
-            jnp.einsum("e, eij -> ij", numpy_to_jax(batch_weights), rhoR0_all)
-        )
-
-        # 3. Compute G(R, e)
-        Rpts_jax = numpy_to_jax(self.short_Rlist)
-        kpts_jax = numpy_to_jax(self.G.kpts)
-        k2Rfactor = self.G.k2Rfactor
-        GR_all = _compute_GR_jax(Rpts_jax, kpts_jax, Gk_all, kweights_jax, k2Rfactor)
-
-        # 4. Compute dG(R, e)
-        Rpts = [tuple(R) for R in self.short_Rlist]
-        Rset = set(Rpts)
-        Rmap_idx, dV_jax, Rmap_rev_idx, dV_rev_jax = self._prepare_dGR_jax(
-            Rpts, Rset, self.short_Rlist, self.epc, self.Ru
-        )
-
-        dGRij_all, unique_Rj_ij = _compute_dGR_jax(GR_all, Rmap_idx, dV_jax)
-        dGRji_all, unique_Rj_ji = _compute_dGR_jax(GR_all, Rmap_rev_idx, dV_rev_jax)
-
-        dGRij_full = jnp.zeros_like(GR_all)
-        dGRji_full = jnp.zeros_like(GR_all)
-        dGRij_full = dGRij_full.at[:, unique_Rj_ij].set(dGRij_all)
-        dGRji_full = dGRji_full.at[:, unique_Rj_ji].set(dGRji_all)
-
-        # 5. Compute A tensor on GPU
-        # Temporarily swap weights for vectorized summation in get_all_A...
-        orig_weights = self.contour.weights
-        self.contour.weights = batch_weights
-        self.get_all_A_vectorized_gpu(GR_all, dGRij_full, dGRji_full)
-        self.contour.weights = orig_weights
-
     def run(
         self,
         path="TB2J_results",
@@ -306,7 +311,7 @@ class ExchangePert2GPU(ExchangePert2):
         vectorize_energy=True,
         e_batch_size=None,
     ):
-        """Run calculations with memory options."""
+        """Run calculations."""
         self.calculate_all(
             use_gpu=use_gpu,
             vectorize_energy=vectorize_energy,

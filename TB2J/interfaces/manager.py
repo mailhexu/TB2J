@@ -13,10 +13,8 @@ class Manager:
         ExchangeClass = self.select_exchange(colinear, use_gpu=use_gpu)
 
         output_path = kwargs.get("output_path", "TB2J_results")
-
         exchange = ExchangeClass(tbmodels=models, atoms=atoms, basis=basis, **kwargs)
 
-        # For GPU classes, pass additional parameters to run()
         if use_gpu:
             exchange.run(
                 path=output_path,
@@ -25,7 +23,8 @@ class Manager:
                 e_batch_size=kwargs.get("e_batch_size", None),
             )
         else:
-            exchange.run(path=output_path)
+            exchange.calculate_all()
+            exchange.write_output(path=output_path)
         print(f"All calculation finished. The results are in {output_path} directory.")
 
     def select_exchange(self, colinear, qspace=False, use_gpu=False):

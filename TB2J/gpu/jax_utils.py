@@ -577,3 +577,216 @@ def _prepare_eigen_gpu(tbmodel, kpts):
     # Convert back to numpy
     Sk_np = np.array(Sk_all) if Sk_all is not None else None
     return np.array(evals), np.array(evecs), Sk_np
+
+
+# =====================================================================
+# Shared JIT-compiled kernels used by multiple GPU exchange classes
+# Note: These require JAX to be initialized. Call _require_jax() before
+# importing these, or they will be initialized on first use below.
+# =====================================================================
+
+_check_jax()
+
+
+@_jit
+def _eigen_to_G_single_e(evals, evecs, efermi, energy):
+    """
+    Green's function from eigenvalues/eigenvectors for a single energy.
+
+    evals: (nk, nb), evecs: (nk, nb, nb), energy: scalar
+    Returns: (nk, nb, nb)
+    """
+    denominator = 1.0 / (-evals + (energy + efermi))
+    return _jnp.einsum(
+        "kib,kb,kjb->kij",
+        evecs,
+        denominator,
+        _jnp.conj(evecs),
+        optimize="optimal",
+    )
+
+
+@_jit
+def _compute_GR_single_e(Rpts, kpts, Gks, kweights, k2Rfactor):
+    """
+    Fourier transform from G(k) to G(R) for a single energy.
+
+    Gks: (nk, nb, nb) -> Returns: (nR, nb, nb)
+    """
+    phase = _jnp.exp(k2Rfactor * _jnp.einsum("ni,mi->nm", Rpts, kpts))
+    phase *= kweights[None, :]
+    return _jnp.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
+
+
+@_jit
+def _pauli_block_interleaved(M):
+    """
+    Pauli decomposition for interleaved basis [up1,dn1,up2,dn2,...].
+    M: (..., ni, nj) -> Returns: (..., 4, ni, nj) with [I, x, y, z]
+    """
+    M00 = M[..., ::2, ::2]
+    M01 = M[..., ::2, 1::2]
+    M10 = M[..., 1::2, ::2]
+    M11 = M[..., 1::2, 1::2]
+
+    I_comp = (M00 + M11) / 2.0
+    x_comp = (M01 + M10) / 2.0
+    y_comp = (M01 - M10) * (-1j / 2.0)
+    z_comp = (M00 - M11) / 2.0
+
+    return _jnp.stack([I_comp, x_comp, y_comp, z_comp], axis=-3)
+
+
+@_jit
+def _pauli_block_separated(M):
+    """
+    Pauli decomposition for separated basis [up1..upn,dn1..dnn].
+    M: (..., ni, nj) -> Returns: (..., 4, ni, nj) with [I, x, y, z]
+    """
+    n = M.shape[-1] // 2
+    M00 = M[..., :n, :n]
+    M01 = M[..., :n, n:]
+    M10 = M[..., n:, :n]
+    M11 = M[..., n:, n:]
+
+    I_comp = (M00 + M11) / 2.0
+    x_comp = (M01 + M10) / 2.0
+    y_comp = (M01 - M10) * (-1j / 2.0)
+    z_comp = (M00 - M11) / 2.0
+
+    return _jnp.stack([I_comp, x_comp, y_comp, z_comp], axis=-3)
+
+
+@_jit
+def _compute_A_tensor(Gij_blocks, Gji_blocks, Pi, Pj):
+    """
+    Compute A tensor for all R vectors and Pauli components.
+    Gij_blocks: (nR, 4, ni, nj), Gji_blocks: (nR, 4, nj, ni)
+    Pi, Pj: projection matrices
+    Returns: (nR, 4, 4) A tensor
+    """
+    X = _jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = _jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    return _jnp.einsum("ruij,rvji->ruv", X, Y) / _jnp.pi
+
+
+@_jit
+def _compute_A_tensor_orb(Gij_blocks, Gji_blocks, Pi, Pj):
+    """
+    Compute A tensor with orbital decomposition for all R.
+    Returns: A (nR, 4, 4), A_orb (nR, 4, 4, ni, nj)
+    """
+    X = _jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = _jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    A_orb = _jnp.einsum("ruij,rvji->ruvij", X, Y) / _jnp.pi
+    A = _jnp.sum(A_orb, axis=(-2, -1))
+    return A, A_orb
+
+
+@_jit
+def _compute_A_single_e(
+    Gij_blocks, Gji_blocks, dGij_blocks, dGji_blocks, Pi, Pj, J_only
+):
+    """
+    Compute A and dA/dx for a single energy point, all R vectors.
+    Returns: A (nR, 4, 4), dAdx (nR, 4, 4)
+    """
+    X = _jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = _jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    A = _jnp.einsum("ruij,rvji->ruv", X, Y) / _jnp.pi
+
+    dX = _jnp.einsum("ik,rukj->ruij", Pi, dGij_blocks)
+    dY = _jnp.einsum("jk,rvki->rvji", Pj, dGji_blocks)
+    dAdx = (
+        _jnp.einsum("ruij,rvji->ruv", dX, Y) + _jnp.einsum("ruij,rvji->ruv", X, dY)
+    ) / _jnp.pi
+
+    return A, dAdx
+
+
+@_jit
+def _compute_A_single_e_no_dA(Gij_blocks, Gji_blocks, Pi, Pj):
+    """
+    Compute A (without derivative) for a single energy point.
+    Returns: A (nR, 4, 4)
+    """
+    X = _jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = _jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    return _jnp.einsum("ruij,rvji->ruv", X, Y) / _jnp.pi
+
+
+@_jit
+def _compute_A_orb_single_e(
+    Gij_blocks, Gji_blocks, dGij_blocks, dGji_blocks, Pi, Pj, J_only
+):
+    """
+    Compute A and dA/dx with orbital decomposition for single energy.
+    Returns: A, dAdx (nR, 4, 4), A_orb, dAdx_orb (nR, 4, 4, ni, nj)
+    """
+    X = _jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = _jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+
+    A_orb = _jnp.einsum("ruij,rvji->ruvij", X, Y) / _jnp.pi
+    A = _jnp.sum(A_orb, axis=(-2, -1))
+
+    dX = _jnp.einsum("ik,rukj->ruij", Pi, dGij_blocks)
+    dY = _jnp.einsum("jk,rvki->rvji", Pj, dGji_blocks)
+    dAdx_orb = (
+        _jnp.einsum("ruij,rvji->ruvij", dX, Y) + _jnp.einsum("ruij,rvji->ruvij", X, dY)
+    ) / _jnp.pi
+    dAdx = _jnp.sum(dAdx_orb, axis=(-2, -1))
+
+    return A, dAdx, A_orb, dAdx_orb
+
+
+@_jit
+def _compute_dGR_single_e(
+    GR, Rmap_indices_Rm, Rmap_indices_Rnj, Rmap_indices_Rj, dV_all, unique_Rj
+):
+    """
+    Compute dG(R)/dx for a single energy point.
+
+    GR: (nR, nb, nb) -> Returns: (nRj_target, nb, nb)
+    """
+    GRm = GR[Rmap_indices_Rm]
+    GRnj = GR[Rmap_indices_Rnj]
+
+    dG_map = _jnp.einsum("mij,mjk,mkl->mil", GRm, dV_all, GRnj)
+
+    nRj = len(unique_Rj)
+    nb = GR.shape[-1]
+
+    dG_flat = dG_map.reshape(-1, nb * nb)
+    segment_ids = _jnp.searchsorted(unique_Rj, Rmap_indices_Rj)
+
+    integrated_flat = _jnp.zeros((nRj, nb * nb), dtype=GR.dtype)
+    integrated_flat = integrated_flat.at[segment_ids].add(dG_flat)
+
+    return integrated_flat.reshape(nRj, nb, nb)
+
+
+@_jit
+def _pauli_decompose_pair(Gij, Gji):
+    """
+    Pauli decomposition for a pair of matrices (interleaved basis).
+    Gij: (nR, ni, nj), Gji: (nR, nj, ni)
+    Returns: Gij_blocks (nR, 4, ni, nj), Gji_blocks (nR, 4, nj, ni) flipped for -R
+    """
+    Gij_blocks = _pauli_block_interleaved(Gij)
+    Gji_blocks = _pauli_block_interleaved(Gji)
+    Gji_blocks = _jnp.flip(Gji_blocks, axis=0)
+    return Gij_blocks, Gji_blocks
+
+
+@_jit
+def _compute_collinear_A_batch(Gij_up, Gji_dn, Delta_i, Delta_j):
+    """
+    Compute collinear exchange A tensor for all R vectors.
+
+    Returns: (nR, ni, ni) orbital-resolved A tensor, (nR,) total A values
+    """
+    X = _jnp.einsum("ab,rbj->raj", Delta_i, Gij_up)
+    Y = _jnp.einsum("jk,rki->rji", Delta_j, Gji_dn)
+    t = _jnp.einsum("raj,rji->rai", X, Y)
+    A_total = _jnp.sum(t, axis=(1, 2))
+    return t, A_total
