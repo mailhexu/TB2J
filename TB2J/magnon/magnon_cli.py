@@ -27,6 +27,52 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Plot magnon density of states",
     )
+    parser.add_argument(
+        "--animate",
+        type=str,
+        help="Load an exported magnon eigenstate file and build/render an animation scene",
+    )
+    parser.add_argument(
+        "--export-format",
+        nargs="+",
+        choices=["json", "netcdf"],
+        default=["json"],
+        help="Data export format(s) for band/DOS calculations",
+    )
+    parser.add_argument(
+        "--export-prefix",
+        type=str,
+        default=None,
+        help="Prefix for exported magnon data files",
+    )
+    parser.add_argument(
+        "--save-wavefunctions",
+        action="store_true",
+        help="Include wavefunctions in exported magnon data",
+    )
+    parser.add_argument(
+        "--scene-output",
+        type=str,
+        default=None,
+        help="Output JSON file for Three.js scene data",
+    )
+    parser.add_argument(
+        "--k-index", type=int, default=0, help="Animation k-point index"
+    )
+    parser.add_argument(
+        "--band-index", type=int, default=0, help="Animation band index"
+    )
+    parser.add_argument(
+        "--amplitude", type=float, default=1.0, help="Animation amplitude"
+    )
+    parser.add_argument(
+        "--frames", type=int, default=40, help="Number of animation frames"
+    )
+    parser.add_argument(
+        "--streamlit",
+        action="store_true",
+        help="Render animation scene with Streamlit instead of only writing scene JSON",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -137,6 +183,26 @@ def main():
         print(f"Saved default configuration to {args.save_config}")
         return
 
+    if args.animate:
+        from TB2J.magnon.streamlit_viewer import build_scene_from_file, render_scene
+
+        scene = build_scene_from_file(
+            args.animate,
+            kpoint_index=args.k_index,
+            band_index=args.band_index,
+            amplitude=args.amplitude,
+            nframes=args.frames,
+        )
+        if args.scene_output:
+            import json
+
+            with open(args.scene_output, "w") as f:
+                json.dump(scene, f, indent=2)
+            print(f"Scene data saved to {args.scene_output}")
+        if args.streamlit:
+            render_scene(scene)
+        return
+
     if not args.bands and not args.dos:
         parser.error("Please specify at least one of --bands or --dos")
 
@@ -156,6 +222,9 @@ def main():
             DMI=args.DMI,
             spin_conf_file=args.spin_conf_file,
             show=args.show,
+            export_formats=args.export_format,
+            export_prefix=args.export_prefix,
+            save_wavefunctions=args.save_wavefunctions,
         )
 
     if args.bands:
@@ -194,6 +263,9 @@ def main():
             kpath=args.kpath,
             npoints=args.npoints,
             qpoints=qpoints,
+            export_formats=params.export_formats,
+            export_prefix=params.export_prefix,
+            save_wavefunctions=params.save_wavefunctions,
         )
         plot_magnon_bands_from_TB2J(band_params)
 
@@ -215,6 +287,9 @@ def main():
             width=args.width,
             window=window,
             npts=args.npts,
+            export_formats=params.export_formats,
+            export_prefix=params.export_prefix,
+            save_wavefunctions=params.save_wavefunctions,
         )
         plot_magnon_dos_from_TB2J(dos_params)
 

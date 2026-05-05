@@ -44,6 +44,10 @@ class MagnonParameters:
     window: Optional[Tuple[float, float]] = None
     npts: int = 401
 
+    export_formats: List[str] = field(default_factory=lambda: ["json"])
+    export_prefix: Optional[str] = None
+    save_wavefunctions: bool = False
+
     @classmethod
     def from_toml(cls, filename: str) -> "MagnonParameters":
         """Load parameters from a TOML file."""

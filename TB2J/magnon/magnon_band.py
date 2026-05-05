@@ -7,6 +7,8 @@ from typing import List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 
+from TB2J.magnon.eigenstates import MagnonEigenstateData
+
 
 @dataclass
 class MagnonBand:
@@ -138,20 +140,27 @@ class MagnonBand:
         if not filename.endswith(".json"):
             filename = filename + ".json"
 
-        data = {
-            "kpoints": self.kpoints.tolist(),
-            "energies": self.energies.tolist(),
-            "kpath_labels": [(int(i), str(l)) for i, l in self.kpath_labels],
-            "special_points": {k: v.tolist() for k, v in self.special_points.items()},
-            "xcoords": self.xcoords.tolist()
+        xcoords = (
+            self.xcoords.tolist()
             if isinstance(self.xcoords, np.ndarray)
             else [x.tolist() for x in self.xcoords]
             if self.xcoords is not None
-            else None,
-        }
-
-        with open(filename, "w") as f:
-            json.dump(data, f, indent=2)
+            else None
+        )
+        data = MagnonEigenstateData(
+            calculation_type="band",
+            kpoints=self.kpoints,
+            energies=self.energies / 1000.0,
+            metadata={"units": {"energies": "eV", "plot_energies": "meV"}},
+            plot={
+                "kind": "band",
+                "energies_mev": self.energies,
+                "kpath_labels": [(int(i), str(l)) for i, l in self.kpath_labels],
+                "special_points": self.special_points,
+                "xcoords": xcoords,
+            },
+        )
+        data.save_json(filename)
 
     @classmethod
     def load(cls, filename: str) -> "MagnonBand":
@@ -169,6 +178,17 @@ class MagnonBand:
         """
         with open(filename) as f:
             data = json.load(f)
+
+        if data.get("schema_name") == "tb2j.magnon.eigenstates":
+            eig = MagnonEigenstateData.from_dict(data)
+            plot = eig.plot or {}
+            data = {
+                "kpoints": eig.kpoints,
+                "energies": np.array(plot.get("energies_mev", eig.energies * 1000.0)),
+                "kpath_labels": plot.get("kpath_labels", []),
+                "special_points": plot.get("special_points", {}),
+                "xcoords": plot.get("xcoords"),
+            }
 
         # Convert lists back to numpy arrays
         data["kpoints"] = np.array(data["kpoints"])

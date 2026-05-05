@@ -11,6 +11,7 @@ import numpy as np
 from ase.dft.dos import DOS
 
 from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.eigenstates import MagnonEigenstateData
 from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_common_magnon_args,
@@ -36,18 +37,21 @@ class MagnonDOS:
         filename : str
             Output filename (should end in .json)
         """
-        # Convert numpy arrays to lists for JSON serialization
-        data = {
-            "energies": self.energies.tolist(),
-            "dos": self.dos.tolist(),
-        }
-        if self.weights is not None:
-            data["weights"] = self.weights.tolist()
-        if self.kpoints is not None:
-            data["kpoints"] = self.kpoints.tolist()
-
-        with open(filename, "w") as f:
-            json.dump(data, f)
+        kpoints = self.kpoints if self.kpoints is not None else np.zeros((0, 3))
+        energies = np.zeros((len(kpoints), 0))
+        data = MagnonEigenstateData(
+            calculation_type="dos",
+            kpoints=kpoints,
+            energies=energies,
+            weights=self.weights,
+            metadata={"units": {"energies": "eV", "dos_energies": "meV"}},
+            plot={
+                "kind": "dos",
+                "dos": self.dos,
+                "dos_energies_mev": self.energies,
+            },
+        )
+        data.save_json(filename)
 
     @classmethod
     def load(cls, filename: str) -> "MagnonDOS":
@@ -65,6 +69,16 @@ class MagnonDOS:
         """
         with open(filename) as f:
             data = json.load(f)
+
+        if data.get("schema_name") == "tb2j.magnon.eigenstates":
+            eig = MagnonEigenstateData.from_dict(data)
+            plot = eig.plot or {}
+            return cls(
+                energies=np.array(plot["dos_energies_mev"]),
+                dos=np.array(plot["dos"]),
+                weights=eig.weights,
+                kpoints=eig.kpoints,
+            )
 
         # Convert lists back to numpy arrays
         data["energies"] = np.array(data["energies"])
@@ -268,6 +282,9 @@ def plot_magnon_dos(
     filename=None,
     save_data=True,
     show=True,
+    export_formats=None,
+    export_prefix=None,
+    save_wavefunctions=False,
 ):
     """Convenience function to calculate and plot magnon DOS.
 
@@ -305,12 +322,41 @@ def plot_magnon_dos(
     dos.plot(filename=filename, show=show)
 
     # Save data if requested
-    if save_data:
-        data_file = (
-            Path(filename).with_suffix(".json") if filename else Path("magnon_dos.json")
-        )
+    export_formats = ["json"] if export_formats is None else export_formats
+    if save_data and "json" in export_formats:
+        if export_prefix is not None:
+            data_file = Path(export_prefix + ".json")
+        else:
+            data_file = (
+                Path(filename).with_suffix(".json")
+                if filename
+                else Path("magnon_dos.json")
+            )
         dos.save(data_file)
         print(f"DOS data saved to {data_file}")
+
+    if "netcdf" in export_formats or save_wavefunctions:
+        if export_prefix is not None:
+            prefix = export_prefix
+        elif filename:
+            prefix = str(Path(filename).with_suffix(""))
+        else:
+            prefix = "magnon_dos"
+        eigenstates = magnon.get_magnon_eigenstates(
+            calculator.kpts,
+            calculation_type="dos",
+            include_wavefunctions=save_wavefunctions,
+            weights=calculator.weights,
+            plot={
+                "kind": "dos",
+                "dos": dos.dos,
+                "dos_energies_mev": dos.energies,
+            },
+        )
+        if "json" in export_formats and save_wavefunctions:
+            eigenstates.save_json(prefix + ".json")
+        if "netcdf" in export_formats:
+            eigenstates.save_netcdf(prefix + ".nc")
 
     return dos
 
@@ -344,6 +390,9 @@ def plot_magnon_dos_from_TB2J(params: MagnonParameters):
         npts=params.npts,
         filename=params.filename,
         show=params.show,
+        export_formats=params.export_formats,
+        export_prefix=params.export_prefix,
+        save_wavefunctions=params.save_wavefunctions,
     )
 
     print(f"\nPlot saved to {params.filename}")

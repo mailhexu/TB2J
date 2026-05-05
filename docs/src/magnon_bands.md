@@ -92,6 +92,15 @@ TB2J_magnon.py --bands --spin-conf 0 0 3 0 0 -3
 
 # Use custom q-points (see Custom Q-Points section below)
 TB2J_magnon.py --bands --kpath GXMR --qpoints "G:0,0,0,X:0.5,0,0,M:0.5,0.5,0,R:0.5,0.5,0.5"
+
+# Export full band eigenstate data to JSON and NetCDF4, including wavefunctions
+TB2J_magnon.py --bands --export-format json netcdf --export-prefix magnon_bands --save-wavefunctions
+
+# Export DOS mesh data to NetCDF4
+TB2J_magnon.py --dos --export-format netcdf --export-prefix magnon_dos
+
+# Build a Three.js scene JSON for a selected mode
+TB2J_magnon.py --animate magnon_bands.json --k-index 0 --band-index 0 --scene-output mode_scene.json
 ```
 
 ### Configuration File
@@ -234,6 +243,37 @@ When plotting band structure, the following files are created:
 When plotting DOS, the following files are created:
 - `magnon_dos.png` (or specified output): The DOS plot
 - `magnon_dos.json`: DOS data (energies, DOS values)
+
+### Full Eigenstate Schema
+
+Band and DOS JSON files use the versioned `tb2j.magnon.eigenstates` schema. The schema stores:
+
+- `schema_name` and `schema_version`
+- `calculation_type` (`band` or `dos`)
+- `metadata` with units and conventions
+- `kpoints` in fractional reciprocal coordinates
+- `energies` in eV
+- optional `weights`
+- optional `wavefunctions`
+- `plot` payloads for band or DOS plotting data
+
+Wavefunctions are disabled by default. Use `--save-wavefunctions` or `save_wavefunctions=True` to include them.
+
+JSON complex arrays use split real/imaginary arrays. NetCDF4 complex arrays use an extra final `complex` dimension of size 2, where index 0 is real and index 1 is imaginary.
+
+### Streamlit and Three.js Animation
+
+The animation workflow uses exported eigenstate files with wavefunctions:
+
+```bash
+TB2J_magnon.py --bands --export-format json --export-prefix magnon_bands --save-wavefunctions
+TB2J_magnon.py --animate magnon_bands.json --k-index 0 --band-index 0 --scene-output mode_scene.json
+TB2J_magnon.py --animate magnon_bands.json --k-index 0 --band-index 0 --streamlit
+```
+
+The scene schema is `tb2j.magnon.threejs_scene`. It stores selected mode metadata, site positions, reference spins, rotation amplitudes, frames, and display hints for a Three.js renderer.
+
+Optional animation dependencies can be installed with the `magnon` extra when available from the package metadata.
 
 ## Spin Configuration
 

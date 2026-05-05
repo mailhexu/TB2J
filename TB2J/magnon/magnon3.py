@@ -9,6 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from TB2J.io_exchange import SpinIO
 from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.eigenstates import MagnonEigenstateData
 from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
 from TB2J.magnon.magnon_parameters import (
@@ -35,6 +36,11 @@ class Magnon:
     _uz: np.ndarray
     _n: np.ndarray
     pbc: tuple = (True, True, True)
+    positions: Optional[np.ndarray] = None
+    symbols: Optional[list] = None
+    atom_positions: Optional[np.ndarray] = None
+    atom_symbols: Optional[list] = None
+    magnetic_atom_indices: Optional[list] = None
 
     def set_reference(self, Q, uz, n, magmoms=None):
         """
@@ -192,8 +198,8 @@ class Magnon:
         H = np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
         return H
 
-    def _magnon_energies(self, kpoints, u=None):
-        """Calculate magnon energies"""
+    def _diagonalize_magnon_hamiltonian(self, kpoints, include_wavefunctions=False):
+        """Diagonalize magnon Hamiltonian and optionally return positive modes."""
         H = self.Hq(kpoints)
         n = H.shape[-1] // 2
         I = np.eye(n)
@@ -215,9 +221,79 @@ class Magnon:
 
         g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
         KH = K.swapaxes(-1, -2).conj()
-        # Why only n:?
-        return np.linalg.eigvalsh(KH @ g @ K)[:, n:] + min_eig
-        # return np.linalg.eigvalsh(KH @ g @ K)[:, :] + min_eig
+        eig_matrix = KH @ g @ K
+        if include_wavefunctions:
+            eigvals, eigvecs = np.linalg.eigh(eig_matrix)
+            return eigvals[:, n:] + min_eig, eigvecs[:, :, n:].swapaxes(1, 2)
+        return np.linalg.eigvalsh(eig_matrix)[:, n:] + min_eig, None
+
+    def _magnon_energies(self, kpoints, u=None):
+        """Calculate magnon energies"""
+        energies, _ = self._diagonalize_magnon_hamiltonian(kpoints)
+        return energies
+
+    def get_magnon_eigenstates(
+        self,
+        kpoints,
+        calculation_type="generic",
+        include_wavefunctions=False,
+        weights=None,
+        metadata=None,
+        plot=None,
+    ):
+        """Return magnon energies and optional wavefunctions at k-points.
+
+        Parameters
+        ----------
+        kpoints : array_like
+            K-points with shape ``(nkpt, 3)`` in fractional reciprocal coordinates.
+        calculation_type : str, optional
+            Label for the calculation context, such as ``"band"`` or ``"dos"``.
+        include_wavefunctions : bool, optional
+            Whether to include positive-mode eigenvectors. Disabled by default.
+        weights : array_like, optional
+            K-point weights for mesh calculations.
+        metadata : dict, optional
+            Additional metadata to merge into the result.
+        plot : dict, optional
+            Plot-specific payload, such as band labels or DOS grids.
+        """
+        kpoints = np.asarray(kpoints, dtype=float)
+        energies, wavefunctions = self._diagonalize_magnon_hamiltonian(
+            kpoints,
+            include_wavefunctions=include_wavefunctions,
+        )
+        result_metadata = {
+            "nspin": self.nspin,
+            "units": {"energies": "eV"},
+            "kpoint_convention": "fractional_reciprocal",
+            "wavefunction_convention": "cholesky_metric_positive_modes",
+            "spin_rotation_normalization": "boson_1",
+            "spin_rotation_added_phase": 0.0,
+            "cell": np.asarray(self.cell, dtype=float),
+            "magmoms": self.magmom,
+        }
+        if self.positions is not None:
+            result_metadata["positions"] = self.positions
+        if self.symbols is not None:
+            result_metadata["symbols"] = self.symbols
+        if self.atom_positions is not None:
+            result_metadata["atom_positions"] = self.atom_positions
+        if self.atom_symbols is not None:
+            result_metadata["atom_symbols"] = self.atom_symbols
+        if self.magnetic_atom_indices is not None:
+            result_metadata["magnetic_atom_indices"] = self.magnetic_atom_indices
+        if metadata is not None:
+            result_metadata.update(metadata)
+        return MagnonEigenstateData(
+            calculation_type=calculation_type,
+            kpoints=kpoints,
+            energies=energies,
+            wavefunctions=wavefunctions,
+            weights=weights,
+            metadata=result_metadata,
+            plot=plot,
+        )
 
     def get_magnon_bands(
         self,
@@ -378,6 +454,10 @@ class Magnon:
 
         cell = exc.atoms.get_cell()
         pbc = exc.atoms.get_pbc()
+        ind_atoms = [exc.ind_atoms[i] for i in range(exc.nspin)]
+        positions = exc.atoms.get_positions()[ind_atoms]
+        atom_symbols = exc.atoms.get_chemical_symbols()
+        symbols = [atom_symbols[i] for i in ind_atoms]
 
         # Extract SIA from kwargs, default True if not present
         include_SIA = kwargs.pop("SIA", True)
@@ -397,6 +477,11 @@ class Magnon:
             _uz=np.array([[0.0, 0.0, 1.0]]),  # Default quantization axis
             _n=np.array([0.0, 0.0, 1.0]),  # Default rotation axis
             pbc=pbc,
+            positions=positions,
+            symbols=symbols,
+            atom_positions=exc.atoms.get_positions(),
+            atom_symbols=atom_symbols,
+            magnetic_atom_indices=ind_atoms,
         )
 
     @classmethod
@@ -659,8 +744,8 @@ def plot_magnon_bands_from_TB2J(
     bands_meV = bands * 1000
 
     # Save band structure data and create plot
-    data_file = params.filename.rsplit(".", 1)[0] + ".json"
-    print(f"\nSaving band structure data to {data_file}")
+    export_prefix = params.export_prefix or params.filename.rsplit(".", 1)[0]
+    data_file = export_prefix + ".json"
 
     # Get k-points and special points
     if params.kpath is None:
@@ -676,14 +761,40 @@ def plot_magnon_bands_from_TB2J(
         spk = bandpath.special_points
         spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
 
-    magnon_bands = save_bands_data(
-        kpoints=kpoints,
+    magnon_bands = MagnonBand(
         energies=bands_meV,
+        kpoints=kpoints,
         kpath_labels=kpath_labels,
         special_points=spk,
         xcoords=xlist,
-        filename=data_file,
     )
+    if "json" in params.export_formats:
+        print(f"\nSaving band structure data to {data_file}")
+        save_bands_data(
+            kpoints=kpoints,
+            energies=bands_meV,
+            kpath_labels=kpath_labels,
+            special_points=spk,
+            xcoords=xlist,
+            filename=data_file,
+        )
+    if "netcdf" in params.export_formats or params.save_wavefunctions:
+        eigenstates = magnon.get_magnon_eigenstates(
+            kpoints,
+            calculation_type="band",
+            include_wavefunctions=params.save_wavefunctions,
+            plot={
+                "kind": "band",
+                "energies_mev": bands_meV,
+                "kpath_labels": kpath_labels,
+                "special_points": spk,
+                "xcoords": xlist,
+            },
+        )
+        if "json" in params.export_formats and params.save_wavefunctions:
+            eigenstates.save_json(export_prefix + ".json")
+        if "netcdf" in params.export_formats:
+            eigenstates.save_netcdf(export_prefix + ".nc")
 
     # Plot band structure
     print(f"Plotting bands to {params.filename}")

@@ -51,7 +51,8 @@ dependencies = [
 [project.optional-dependencies]
 siesta = ["sisl>=0.9.0", "netcdf4"]
 lawaf = ["lawaf>=0.2.3"]
-all = ["sisl>=0.9.0", "netcdf4", "lawaf>=0.2.3"]
+magnon = ["netcdf4", "streamlit"]
+all = ["sisl>=0.9.0", "netcdf4", "lawaf>=0.2.3", "streamlit"]
 
 [project.urls]
 Homepage = "https://github.com/mailhexu/TB2J"
