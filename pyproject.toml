@@ -75,6 +75,7 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "TB2J_edit.py" = "TB2J.scripts.TB2J_edit:main"
 "TB2J_plot_exchange.py" = "TB2J.scripts.TB2J_plot_exchange:main"
 "dmft2J.py" = "TB2J.scripts.dmft2J:run_dmft2J"
+"tbupy2J.py" = "TB2J.scripts.tbupy2J:main"
 
 
 [tool.setuptools]
