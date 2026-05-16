@@ -78,6 +78,7 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "tbupy2J.py" = "TB2J.scripts.tbupy2J:main"
 "gpaw_projector2J.py" = "TB2J.scripts.gpaw_projector2J:run_gpaw_projector2J"
 "vasp_projector2J.py" = "TB2J.scripts.vasp_projector2J:run_vasp_projector2J"
+"abinit_projector2J.py" = "TB2J.scripts.abinit_projector2J:run_abinit_projector2J"
 
 
 [tool.setuptools]

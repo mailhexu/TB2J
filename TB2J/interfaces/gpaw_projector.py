@@ -334,7 +334,8 @@ def compute_paw_projected_charges_moments(data):
     density_by_spin = np.zeros((data.nspin, nsite), dtype=float)
     for spin in range(data.nspin):
         rho = np.einsum(
-            "kb,kbp,kbq->pq",
+            "k,kb,kbp,kbq->pq",
+            data.weights,
             data.occupations[spin],
             data.coefficients[spin].conj(),
             data.coefficients[spin],
@@ -364,7 +365,8 @@ def compute_projected_charges_moments(data):
     density_by_spin = np.zeros((data.nspin, nsite), dtype=float)
     for spin in range(data.nspin):
         rho = np.einsum(
-            "kb,kbp,kbq->pq",
+            "k,kb,kbp,kbq->pq",
+            data.weights,
             data.occupations[spin],
             data.coefficients[spin].conj(),
             data.coefficients[spin],
@@ -391,6 +393,7 @@ def compute_projector_exchange_jdict(
     nz=30,
     smearing_eV=0.05,
     sites=None,
+    local_operators=None,
 ):
     """Compute TB2J-style isotropic exchange dictionary from projector trace."""
     if Rpts is None:
@@ -406,7 +409,16 @@ def compute_projector_exchange_jdict(
         (tuple(int(x) for x in R), i, j): [] for R in Rpts for i in sites for j in sites
     }
     for energy in contour.path:
-        trace = projector_exchange_trace(green, Rpts, energy=energy, sites=sites)
+        if local_operators is not None:
+            trace = projector_exchange_trace(
+                green,
+                Rpts,
+                energy=energy,
+                local_operators=local_operators,
+                sites=sites,
+            )
+        else:
+            trace = projector_exchange_trace(green, Rpts, energy=energy, sites=sites)
         for key in values:
             values[key].append(trace["trace"][key])
 
@@ -432,6 +444,7 @@ def write_projector_exchange_out(
     charges=None,
     spinat=None,
     Rcut=None,
+    local_operators=None,
 ):
     """Write TB2J exchange.out from projector Green data."""
     atoms = Atoms(
@@ -446,7 +459,12 @@ def write_projector_exchange_out(
         index_magnetic_atoms=index_magnetic_atoms,
     )
     exchange_Jdict = compute_projector_exchange_jdict(
-        data, Rpts=Rpts, nz=nz, smearing_eV=smearing_eV, sites=sites
+        data,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        sites=sites,
+        local_operators=local_operators,
     )
     if charges is not None or spinat is not None:
         if charges is None or spinat is None:

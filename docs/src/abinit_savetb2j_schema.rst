@@ -19,6 +19,23 @@ Version 1 supports collinear PAW data only:
 Noncollinear, spin-orbit, spinor, norm-conserving, and IBZ-only exports are not
 part of version 1 unless a later schema version explicitly extends the contract.
 
+User Workflow
+-------------
+
+Set ``savetb2j 1`` in a supported ABINIT ground-state PAW input.  ABINIT writes
+one NetCDF file whose name is the dataset output prefix followed by
+``_SAVETB2J.nc``.  The file can be passed directly to TB2J:
+
+.. code-block:: bash
+
+   abinit_projector2J.py --input run_SAVETB2J.nc \
+       --output_path TB2J_results_abinit --elements Fe --Rmax 1 --nz 30 \
+       --smearing 0.05
+
+TB2J uses ``operator_components/delta_total`` by default.  In version 1 this is
+the exchange-ready spin-up minus spin-down PAW onsite operator in the native
+ABINIT PAW projector basis.
+
 Root Attributes
 ---------------
 

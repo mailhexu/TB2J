@@ -195,6 +195,7 @@ class ProjectorGreenData:
     hij_source: str | None = None
     hij_projection: str | None = None
     operator_components: dict[str, np.ndarray] | None = None
+    operator_component_metadata: dict[str, dict] | None = None
     coefficient_source: str | None = None
     coefficient_projector: str | None = None
     channel_interpretation: str | None = None
@@ -246,6 +247,11 @@ class ProjectorGreenData:
             self.operator_components = {
                 str(name): np.asarray(value, dtype=complex)
                 for name, value in self.operator_components.items()
+            }
+        if self.operator_component_metadata is not None:
+            self.operator_component_metadata = {
+                str(name): dict(value)
+                for name, value in self.operator_component_metadata.items()
             }
 
         defaults = {

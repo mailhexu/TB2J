@@ -59,11 +59,11 @@ Hamiltonian matrix.  Pseudo-partial-wave or all-electron partial-wave variants
 should export their final local operator matrices and identify the corresponding
 ``operator_basis`` explicitly.
 
-ABINIT PAW exports produced by the planned ``savetb2j`` input variable use a
+ABINIT PAW exports produced by the ``savetb2j`` input variable use a
 source-specific NetCDF contract documented in
-``docs/src/abinit_savetb2j_schema.rst``.  TB2J loaders should normalize that
-schema into ``ProjectorGreenData`` only after validating the full-BZ flag,
-projector basis metadata, and local-operator basis metadata.
+``docs/src/abinit_savetb2j_schema.rst``.  TB2J normalizes that schema into
+``ProjectorGreenData`` only after validating the full-BZ flag, projector basis
+metadata, and local-operator basis metadata.
 
 NetCDF Layout
 -------------
@@ -151,6 +151,31 @@ For cubic SrMnO3 with Mn as the only magnetic site:
 The CLI reads the NetCDF file, reconstructs ``G(R,E)`` at the continued-fraction
 energy points, contracts the controlled projector trace, and writes the standard
 TB2J text output ``exchange.out``.
+
+ABINIT PAW Export
+-----------------
+
+ABINIT writes TB2J projector data when a ground-state input sets
+``savetb2j 1``.  The output file name is the ABINIT dataset output prefix with
+``_SAVETB2J.nc`` appended.  Version 1 is intentionally narrow: it supports only
+collinear PAW calculations with ``usepaw=1``, ``nsppol=2``, ``nspinor=1``, and
+an explicit full-Brillouin-zone k-point list via ``kptopt=0``.  Symmetry-reduced
+IBZ exports, noncollinear spinors, spin-orbit workflows, and norm-conserving
+pseudopotentials are not part of this schema version.
+
+After ABINIT produces the file, run:
+
+.. code-block:: bash
+
+   abinit_projector2J.py --input run_SAVETB2J.nc \
+       --output_path TB2J_results_abinit --elements Fe --Rmax 1 --nz 30 \
+       --smearing 0.05
+
+The ABINIT interface uses the exported ``delta_total`` operator component by
+default.  That component is the spin-up minus spin-down onsite PAW operator in
+the ABINIT native PAW projector basis.  Advanced users may select another
+component with ``--operator_component`` only when the file marks that component
+as complete and exchange-ready.
 
 Projector Hamiltonian ``H_ij``
 -----------------------------
