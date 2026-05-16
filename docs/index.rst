@@ -29,6 +29,8 @@ Welcome to TB2J's documentation!
    src/applications.rst
    src/magnon_theory.md
    src/magnon_band.rst
+   src/projector_green.rst
+   src/abinit_savetb2j_schema.rst
    src/edit.md
    src/extend.rst
    src/roadmap.md
@@ -44,4 +46,3 @@ Indices and tables
 ==================
 
 * :ref:`genindex`
-
