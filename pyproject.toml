@@ -76,6 +76,8 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "TB2J_plot_exchange.py" = "TB2J.scripts.TB2J_plot_exchange:main"
 "dmft2J.py" = "TB2J.scripts.dmft2J:run_dmft2J"
 "tbupy2J.py" = "TB2J.scripts.tbupy2J:main"
+"gpaw_projector2J.py" = "TB2J.scripts.gpaw_projector2J:run_gpaw_projector2J"
+"vasp_projector2J.py" = "TB2J.scripts.vasp_projector2J:run_vasp_projector2J"
 
 
 [tool.setuptools]
