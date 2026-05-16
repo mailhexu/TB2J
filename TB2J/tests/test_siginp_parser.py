@@ -124,7 +124,9 @@ class TestDataParsing:
 
         # Check first frequency
         expected_freq = np.pi / beta  # First Matsubara frequency
-        assert parser.mesh[0] == pytest.approx(expected_freq, rel=1e-4)
+        assert parser.mesh[0] == pytest.approx(1j * expected_freq, rel=1e-4)
+        assert np.allclose(parser.mesh.real, 0.0)
+        assert np.all(parser.mesh.imag > 0.0)
 
     def test_column_count_validation(self, tmp_path):
         """Test that wrong column count raises error."""

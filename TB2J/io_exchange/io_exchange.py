@@ -577,7 +577,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_pickle(path=path)
         self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
         self.write_txt(path=path)
-        if self.Jiso_orb:
+        if self.Jiso_orb or self.DMI_orb or self.Jani_orb or self.dJdx_orb:
             self.write_txt(
                 path=path,
                 fname="exchange_orb_decomposition.out",

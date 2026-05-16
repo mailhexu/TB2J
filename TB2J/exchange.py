@@ -398,6 +398,9 @@ class ExchangeNCL(Exchange):
         if self.write_density_matrix:
             self.G.write_rho_R()
 
+    def finalize(self):
+        self.G.clean_cache()
+
     def get_MAE(self, thetas, phis):
         """
         Calculate the magnetic anisotropy energy.

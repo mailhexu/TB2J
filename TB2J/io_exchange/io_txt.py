@@ -274,6 +274,17 @@ def write_exchange_section(
                         )
                         myfile.write("\n")
 
+            if cls.dJdx_orb and ll in cls.dJdx_orb:
+                myfile.write(
+                    "Orbital contributions to dJ/dx (meV/displacement unit):\n"
+                )
+                myfile.write(
+                    np.array_str(
+                        cls.dJdx_orb[ll] * 1e3, precision=3, suppress_small=True
+                    )
+                )
+                myfile.write("\n")
+
 
 def to_str(arr):
     return " ".join([f"{x:8.5f}" for x in arr])

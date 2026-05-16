@@ -515,10 +515,10 @@ class SigInpParser(DMFTParser):
         mesh = mesh[:count]
         sigma_diag = sigma_diag[:count]
 
-        # Validate Matsubara frequency mesh
+        # Validate Matsubara frequency mesh as positive real omega_n values from file.
         self._validate_matsubara_mesh(mesh)
 
-        return sigma_diag, mesh
+        return sigma_diag, 1j * mesh
 
     def _validate_matsubara_mesh(self, mesh: np.ndarray, tolerance: float = 1e-4):
         """
@@ -1322,21 +1322,10 @@ class DMFTstaticManager:
         if magnetic_elements is not None:
             exchange_kwargs.setdefault("magnetic_elements", magnetic_elements)
 
-        # Use TBModelDMFT + ExchangeCLDMFT for correct sigma embedding
-        from TB2J.dmft_model import TBModelDMFT
-        from TB2J.exchange_dmft import ExchangeCLDMFT
+        from TB2J.exchangeCL2 import ExchangeCL2
 
-        dmft_model = TBModelDMFT(
-            static_model=ham_ref,
-            dmft_parser=parser,
-            basis=basis,
-            atoms=atoms,
-            magnetic_elements=magnetic_elements,
-            use_static_sigma=True,
-        )
-
-        exchange = ExchangeCLDMFT(
-            tbmodels=dmft_model,
+        exchange = ExchangeCL2(
+            tbmodels=(ham_up, ham_dn),
             atoms=atoms,
             basis=basis,
             output_path=output_path,

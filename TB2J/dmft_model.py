@@ -66,6 +66,17 @@ class TBModelDMFT:
         else:
             # Dynamic mode: full Σ(iωₙ) on Matsubara mesh
             sigma_raw, self.mesh = dmft_parser.read_self_energy()
+            if hasattr(dmft_parser, "get_static_sigma"):
+                sigma_static, _ = dmft_parser.get_static_sigma()
+                if sigma_raw.ndim == 4 and sigma_static.shape == (
+                    sigma_raw.shape[0],
+                    sigma_raw.shape[2],
+                    sigma_raw.shape[3],
+                ):
+                    # sig.inp dynamic columns are residual values relative to
+                    # the static header correction.  The Dyson self-energy is
+                    # Σ(iω)-Vdc = residual + (Σ∞ - Vdc).
+                    sigma_raw = sigma_raw + sigma_static[:, None, :, :]
             self.n_spin = sigma_raw.shape[0] if sigma_raw.ndim == 4 else 1
             self.n_freq = (
                 sigma_raw.shape[1] if sigma_raw.ndim == 4 else sigma_raw.shape[0]
