@@ -34,6 +34,14 @@ def main():
         type=str,
         default=None,
     )
+    parser.add_argument(
+        "--collinear-tol",
+        "--collinear_tol",
+        dest="collinear_tol",
+        type=float,
+        default=1e-2,
+        help="Tolerance for treating weakly canted spin pairs as collinear during tensor reconstruction. Increase this for nearly collinear systems.",
+    )
 
     args = parser.parse_args()
     # merge(*(args.directories), args.type.strip().lower(), path=args.output_path)
@@ -41,7 +49,12 @@ def main():
     # merge2(args.directories, args.type.strip().lower(), path=args.output_path)
     print_license()
     print("Merging the TB2J results from the following directories: ", args.directories)
-    merge(*args.directories, main_path=args.main_path, write_path=args.output_path)
+    merge(
+        *args.directories,
+        main_path=args.main_path,
+        write_path=args.output_path,
+        collinear_tol=args.collinear_tol,
+    )
     print("Merging completed. The results are saved in:", args.output_path)
 
 

@@ -182,10 +182,12 @@ class ProjectorGreenData:
     positions: np.ndarray | None = None
     atomic_numbers: np.ndarray | None = None
     occupations: np.ndarray | None = None
+    band_mask: np.ndarray | None = None
     projector_l: np.ndarray | None = None
     projector_m: np.ndarray | None = None
     projector_radial: np.ndarray | None = None
     overlap_metric: np.ndarray | None = None
+    overlap_k: np.ndarray | None = None
     population_metric_matrix: np.ndarray | None = None
     site_nproj: np.ndarray | None = None
     site_projector_indices: np.ndarray | None = None
@@ -205,6 +207,7 @@ class ProjectorGreenData:
     metadata: dict = field(default_factory=dict)
     schema_name: str = SCHEMA_NAME
     schema_version: str = SCHEMA_VERSION
+    efermi_spin: np.ndarray | None = None
 
     def __post_init__(self):
         self.kpoints = np.asarray(self.kpoints, dtype=float)
@@ -214,6 +217,11 @@ class ProjectorGreenData:
         self.projector_site = np.asarray(self.projector_site, dtype=int)
         self.projector_atom = np.asarray(self.projector_atom, dtype=int)
         self.efermi = float(self.efermi)
+        if self.efermi_spin is not None:
+            self.efermi_spin = np.asarray(self.efermi_spin, dtype=float)
+            if self.efermi_spin.shape == ():
+                self.efermi_spin = self.efermi_spin.reshape(1)
+            self.efermi = float(np.mean(self.efermi_spin))
 
         if self.cell is not None:
             self.cell = np.asarray(self.cell, dtype=float)
@@ -223,6 +231,8 @@ class ProjectorGreenData:
             self.atomic_numbers = np.asarray(self.atomic_numbers, dtype=int)
         if self.occupations is not None:
             self.occupations = np.asarray(self.occupations, dtype=float)
+        if self.band_mask is not None:
+            self.band_mask = np.asarray(self.band_mask, dtype=bool)
         if self.projector_l is not None:
             self.projector_l = np.asarray(self.projector_l, dtype=int)
         if self.projector_m is not None:
@@ -231,6 +241,8 @@ class ProjectorGreenData:
             self.projector_radial = np.asarray(self.projector_radial, dtype=int)
         if self.overlap_metric is not None:
             self.overlap_metric = np.asarray(self.overlap_metric, dtype=complex)
+        if self.overlap_k is not None:
+            self.overlap_k = np.asarray(self.overlap_k, dtype=complex)
         if self.population_metric_matrix is not None:
             self.population_metric_matrix = np.asarray(
                 self.population_metric_matrix, dtype=complex
@@ -269,6 +281,10 @@ class ProjectorGreenData:
         self.metadata = {**defaults, **self.metadata}
         self._sync_metadata_fields()
         self.validate()
+
+    @property
+    def has_spin_resolved_fermi(self):
+        return self.efermi_spin is not None
 
     def _sync_metadata_fields(self):
         for name in (
@@ -314,6 +330,8 @@ class ProjectorGreenData:
         if self.eigenvalues.ndim != 3:
             raise ValueError("eigenvalues must have shape (nspin, nkpt, nband)")
         nspin, nkpt, nband = self.eigenvalues.shape
+        if self.efermi_spin is not None and self.efermi_spin.shape != (nspin,):
+            raise ValueError("efermi_spin must have shape (nspin,)")
         if nkpt != self.kpoints.shape[0]:
             raise ValueError("eigenvalues and kpoints have inconsistent nkpt")
         if self.coefficients.ndim != 4:
@@ -331,6 +349,12 @@ class ProjectorGreenData:
             nband,
         ):
             raise ValueError("occupations must match eigenvalues shape")
+        if self.band_mask is not None and self.band_mask.shape != (
+            nspin,
+            nkpt,
+            nband,
+        ):
+            raise ValueError("band_mask must match eigenvalues shape")
         if self.cell is not None and self.cell.shape != (3, 3):
             raise ValueError("cell must have shape (3, 3)")
         if self.positions is not None:
@@ -348,6 +372,12 @@ class ProjectorGreenData:
             nproj,
         ):
             raise ValueError("overlap_metric must have shape (nproj, nproj)")
+        if self.overlap_k is not None and self.overlap_k.shape != (
+            nkpt,
+            nproj,
+            nproj,
+        ):
+            raise ValueError("overlap_k must have shape (nkpt, nproj, nproj)")
         if self.population_metric_matrix is not None and (
             self.population_metric_matrix.shape != (nproj, nproj)
         ):
@@ -485,6 +515,10 @@ class ProjectorGreenData:
 
             bands = nc.createGroup("bands")
             bands.efermi = self.efermi
+            if self.efermi_spin is not None:
+                bands.createVariable("efermi_spin", "f8", ("nspin",))[:] = (
+                    self.efermi_spin
+                )
             bands.createVariable("eigenvalues", "f8", ("nspin", "nkpt", "nband"))[:] = (
                 self.eigenvalues
             )
@@ -528,6 +562,14 @@ class ProjectorGreenData:
                 metric.definition = (
                     self.overlap_metric_definition or "projector overlap metric"
                 )
+            if self.overlap_k is not None:
+                overlap_k = projectors.createVariable(
+                    "overlap_k", "f8", ("nkpt", "nproj", "nproj", "complex")
+                )
+                overlap_k[:] = encode_complex(self.overlap_k)
+                overlap_k.definition = (
+                    self.overlap_metric_definition or "k-dependent projector overlap"
+                )
             if self.population_metric_matrix is not None:
                 metric = projectors.createVariable(
                     "population_metric_matrix", "f8", ("nproj", "nproj", "complex")
@@ -547,8 +589,10 @@ class ProjectorGreenData:
                     "site_projector_indices", "i4", ("nsite", "nproj_site_max")
                 )[:] = self.site_projector_indices
 
-            if self.hij is not None:
+            if self.hij is not None or self.operator_components is not None:
                 operators = nc.createGroup("operators")
+
+            if self.hij is not None:
                 if "nsite" not in nc.dimensions:
                     nc.createDimension("nsite", self.hij.shape[1])
                 if "nproj_site_max" not in nc.dimensions:
@@ -573,6 +617,30 @@ class ProjectorGreenData:
                     hij.projection = self.hij_projection
                 if self.operator_basis is not None:
                     hij.operator_basis = self.operator_basis
+
+            if self.operator_components is not None:
+                if "nsite" not in nc.dimensions:
+                    nc.createDimension(
+                        "nsite", next(iter(self.operator_components.values())).shape[0]
+                    )
+                if "nproj_site_max" not in nc.dimensions:
+                    nc.createDimension(
+                        "nproj_site_max",
+                        next(iter(self.operator_components.values())).shape[1],
+                    )
+                components = operators.createGroup("operator_components")
+                for name, component in self.operator_components.items():
+                    variable = components.createVariable(
+                        name,
+                        "f8",
+                        ("nsite", "nproj_site_max", "nproj_site_max", "complex"),
+                    )
+                    variable[:] = encode_complex(component)
+                    if self.operator_component_metadata is not None:
+                        for key, value in self.operator_component_metadata.get(
+                            name, {}
+                        ).items():
+                            setattr(variable, key, value)
 
     @staticmethod
     def _write_optional_projector_array(group, name, value):
@@ -610,6 +678,9 @@ class ProjectorGreenData:
             occupations = None
             if "occupations" in bands.variables:
                 occupations = bands.variables["occupations"][:]
+            efermi_spin = None
+            if "efermi_spin" in bands.variables:
+                efermi_spin = bands.variables["efermi_spin"][:]
             projector_l = cls._optional_var(projectors, "projector_l")
             projector_m = cls._optional_var(projectors, "projector_m")
             projector_radial = cls._optional_var(projectors, "projector_radial")
@@ -630,6 +701,7 @@ class ProjectorGreenData:
                 projectors, "population_metric", metadata.get("population_metric")
             )
             overlap_metric = None
+            overlap_k = None
             population_metric_matrix = None
             overlap_metric_definition = metadata.get("overlap_metric_definition")
             if "overlap_metric" in projectors.variables:
@@ -637,6 +709,12 @@ class ProjectorGreenData:
                 overlap_metric = decode_complex(overlap_var[:])
                 overlap_metric_definition = getattr(
                     overlap_var, "definition", overlap_metric_definition
+                )
+            if "overlap_k" in projectors.variables:
+                overlap_k_var = projectors.variables["overlap_k"]
+                overlap_k = decode_complex(overlap_k_var[:])
+                overlap_metric_definition = getattr(
+                    overlap_k_var, "definition", overlap_metric_definition
                 )
             if "population_metric_matrix" in projectors.variables:
                 population_metric_matrix = decode_complex(
@@ -647,6 +725,8 @@ class ProjectorGreenData:
                 projectors, "site_projector_indices"
             )
             hij = hij_definition = hij_units = hij_source = hij_projection = None
+            operator_components = None
+            operator_component_metadata = None
             operator_basis = metadata.get("operator_basis")
             operators = nc.groups.get("operators")
             if operators is not None and "hij" in operators.variables:
@@ -657,22 +737,34 @@ class ProjectorGreenData:
                 hij_source = getattr(hij_var, "source", None)
                 hij_projection = getattr(hij_var, "projection", None)
                 operator_basis = getattr(hij_var, "operator_basis", operator_basis)
+            if operators is not None and "operator_components" in operators.groups:
+                components_group = operators.groups["operator_components"]
+                operator_components = {}
+                operator_component_metadata = {}
+                for name, variable in components_group.variables.items():
+                    operator_components[name] = decode_complex(variable[:])
+                    operator_component_metadata[name] = {
+                        key: getattr(variable, key) for key in variable.ncattrs()
+                    }
             return cls(
                 kpoints=kgrp.variables["kpoints"][:],
                 weights=kgrp.variables["weights"][:],
                 eigenvalues=bands.variables["eigenvalues"][:],
                 coefficients=decode_complex(projectors.variables["coefficients"][:]),
                 efermi=getattr(bands, "efermi"),
+                efermi_spin=efermi_spin,
                 projector_site=projectors.variables["projector_site"][:],
                 projector_atom=projectors.variables["projector_atom"][:],
                 cell=cell,
                 positions=positions,
                 atomic_numbers=atomic_numbers,
                 occupations=occupations,
+                band_mask=None,
                 projector_l=projector_l,
                 projector_m=projector_m,
                 projector_radial=projector_radial,
                 overlap_metric=overlap_metric,
+                overlap_k=overlap_k,
                 population_metric_matrix=population_metric_matrix,
                 site_nproj=site_nproj,
                 site_projector_indices=site_projector_indices,
@@ -681,6 +773,8 @@ class ProjectorGreenData:
                 hij_units=hij_units,
                 hij_source=hij_source,
                 hij_projection=hij_projection,
+                operator_components=operator_components,
+                operator_component_metadata=operator_component_metadata,
                 coefficient_source=coefficient_source,
                 coefficient_projector=coefficient_projector,
                 channel_interpretation=channel_interpretation,
@@ -696,6 +790,84 @@ class ProjectorGreenData:
             return group.variables[name][:]
         return None
 
+    @classmethod
+    def load_nc_pao_netcdf(cls, filename):
+        """Load a minimal norm-conserving PAO NetCDF fixture.
+
+        This adapter is intentionally narrow: it maps root-level spectral arrays
+        from a simple NC PAO file into the canonical ProjectorGreenData model.
+        """
+        try:
+            from netCDF4 import Dataset
+        except ImportError as exc:
+            raise ImportError("netCDF4 is required for NC PAO NetCDF import") from exc
+
+        with Dataset(filename) as nc:
+            metadata = json.loads(getattr(nc, "metadata_json", "{}"))
+            metadata.setdefault("coefficient_projector", "nc_pao")
+            metadata.setdefault("channel_interpretation", "norm_conserving_pao")
+
+            overlap_k = None
+            overlap_metric_definition = metadata.get(
+                "overlap_metric_definition", "k-dependent NC PAO overlap"
+            )
+            if "overlap_k" in nc.variables:
+                overlap_var = nc.variables["overlap_k"]
+                overlap_k = decode_complex(overlap_var[:])
+                overlap_metric_definition = getattr(
+                    overlap_var, "definition", overlap_metric_definition
+                )
+
+            return cls(
+                kpoints=nc.variables["kpoints"][:],
+                weights=nc.variables["weights"][:],
+                eigenvalues=nc.variables["eigenvalues"][:],
+                coefficients=decode_complex(nc.variables["coefficients"][:]),
+                efermi=float(getattr(nc, "efermi")),
+                projector_site=nc.variables["projector_site"][:],
+                projector_atom=nc.variables["projector_atom"][:],
+                cell=nc.variables["cell"][:] if "cell" in nc.variables else None,
+                positions=(
+                    nc.variables["positions"][:]
+                    if "positions" in nc.variables
+                    else None
+                ),
+                atomic_numbers=(
+                    nc.variables["atomic_numbers"][:]
+                    if "atomic_numbers" in nc.variables
+                    else None
+                ),
+                projector_l=(
+                    nc.variables["projector_l"][:]
+                    if "projector_l" in nc.variables
+                    else None
+                ),
+                projector_m=(
+                    nc.variables["projector_m"][:]
+                    if "projector_m" in nc.variables
+                    else None
+                ),
+                projector_radial=(
+                    nc.variables["projector_radial"][:]
+                    if "projector_radial" in nc.variables
+                    else None
+                ),
+                overlap_k=overlap_k,
+                coefficient_source=getattr(
+                    nc, "coefficient_source", metadata.get("coefficient_source")
+                ),
+                coefficient_projector=getattr(
+                    nc, "coefficient_projector", metadata.get("coefficient_projector")
+                ),
+                channel_interpretation=getattr(
+                    nc,
+                    "channel_interpretation",
+                    metadata.get("channel_interpretation"),
+                ),
+                overlap_metric_definition=overlap_metric_definition,
+                metadata=metadata,
+            )
+
 
 class ProjectorGreen:
     """Runtime projector-space Green-function backend."""
@@ -705,23 +877,70 @@ class ProjectorGreen:
         self.kpts = data.kpoints
         self.kweights = data.weights
         self.efermi = data.efermi
+        self.efermi_spin = data.efermi_spin
         self.nbasis = data.nproj
         self.norb = data.nproj
         self.k2Rfactor = -2.0j * np.pi
         self.is_orthogonal = True
+        self.overlap_condition_threshold = float(
+            data.metadata.get("overlap_condition_threshold", 1.0e12)
+        )
         self.adjusted_emin = float(np.min(data.eigenvalues) - data.efermi)
+
+    def _fermi(self, ispin):
+        if self.efermi_spin is not None:
+            return float(self.efermi_spin[int(ispin)])
+        return self.efermi
 
     def get_Gk(self, ik, energy, ispin=0):
         evals = self.data.eigenvalues[ispin, ik]
         coeff = self.data.coefficients[ispin, ik]
-        inv_denom = 1.0 / (energy + self.efermi - evals)
-        return np.einsum("np,nq,n->pq", coeff.conj(), coeff, inv_denom)
+        if self.data.band_mask is not None:
+            mask = self.data.band_mask[ispin, ik]
+            evals = evals[mask]
+            coeff = coeff[mask]
+        inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
+        Gk = np.einsum("np,nq,n->pq", coeff.conj(), coeff, inv_denom)
+        return self._contravariant_Gk(Gk, ik)
 
     def get_Gk_all(self, energy, ispin=0):
+        if self.data.band_mask is not None:
+            return np.asarray(
+                [self.get_Gk(ik, energy, ispin=ispin) for ik in range(self.data.nkpt)],
+                dtype=complex,
+            )
         evals = self.data.eigenvalues[ispin]
         coeff = self.data.coefficients[ispin]
-        inv_denom = 1.0 / (energy + self.efermi - evals)
-        return np.einsum("knp,knq,kn->kpq", coeff.conj(), coeff, inv_denom)
+        inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
+        Gk_all = np.einsum("knp,knq,kn->kpq", coeff.conj(), coeff, inv_denom)
+        if self.data.overlap_k is None:
+            return Gk_all
+        return np.asarray(
+            [self._contravariant_Gk(Gk, ik) for ik, Gk in enumerate(Gk_all)],
+            dtype=complex,
+        )
+
+    def get_Sk(self, ik):
+        """Return the projector overlap for one k point."""
+        if self.data.overlap_k is not None:
+            return self.data.overlap_k[ik]
+        if self.data.overlap_metric is not None:
+            return self.data.overlap_metric
+        return np.eye(self.nbasis, dtype=complex)
+
+    def _contravariant_Gk(self, Gk, ik):
+        if self.data.overlap_k is None:
+            return Gk
+        Sk = self.get_Sk(ik)
+        condition = np.linalg.cond(Sk)
+        if not np.isfinite(condition) or condition > self.overlap_condition_threshold:
+            raise ValueError(
+                "overlap_k is singular or ill-conditioned at k-point "
+                f"{ik}: condition={condition:.3e}, "
+                f"threshold={self.overlap_condition_threshold:.3e}"
+            )
+        Sinv = np.linalg.inv(Sk)
+        return Sinv @ Gk @ Sinv
 
     def compute_GR(self, Rpts, kpts, Gks):
         Rvecs = np.asarray(Rpts, dtype=float)

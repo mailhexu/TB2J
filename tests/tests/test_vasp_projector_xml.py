@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from TB2J.interfaces import vasp_projector_xml as vasp_xml
 from TB2J.interfaces.vasp_projector_xml import (
     compare_green_to_vasp_outcar_populations,
     gen_exchange_vasp_projector_xml,
@@ -34,6 +35,7 @@ def _write_fixture(
     nonfinite_weights=False,
     fractional_projector_site=False,
     include_efermi=True,
+    efermi_spin=None,
 ):
     coefficients = np.zeros((2, 2, 2, 2), dtype=complex)
     coefficients[:, :, 0, 0] = 1.0
@@ -50,6 +52,12 @@ def _write_fixture(
         weights_text = "0.5 0.5"
     projector_site_text = "0.2 0" if fractional_projector_site else "0 0"
     efermi_attr = ' efermi="0.0"' if include_efermi else ""
+    efermi_spin_text = ""
+    if efermi_spin is not None:
+        efermi_spin_text = (
+            f'    <array name="efermi_spin" dims="nspin">'
+            f"{_numbers(efermi_spin)}</array>\n"
+        )
     isym_text = "" if isym is None else f'    <item name="isym">{isym}</item>\n'
 
     text = f"""<?xml version="1.0"?>
@@ -81,6 +89,7 @@ def _write_fixture(
     <array name="weights" dims="nkpt">{weights_text}</array>
   </kpoints>
   <bands{efermi_attr}>
+{efermi_spin_text.rstrip()}
     <array name="eigenvalues" dims="nspin nkpt nband">
       0.0 2.0 0.5 2.5 0.2 2.2 0.7 2.7
     </array>
@@ -126,6 +135,26 @@ def test_vasp_projector_xml_loads_spectral_fixture(tmp_path):
     green = ProjectorGreen(data)
     gk = green.get_Gk(ik=0, energy=1.0 + 0.5j, ispin=0)
     expected = np.diag([1.0 / (1.0 + 0.5j), 1.0 / (-1.0 + 0.5j)])
+    np.testing.assert_allclose(gk, expected)
+
+
+def test_vasp_projector_xml_loads_spin_resolved_fermi(tmp_path):
+    filename = tmp_path / "vasp_projector_spin_fermi.xml"
+    _write_fixture(filename, efermi_spin=[0.0, 0.4])
+
+    data = load_vasp_projector_xml(filename)
+
+    np.testing.assert_allclose(data.efermi_spin, [0.0, 0.4])
+    assert data.efermi == pytest.approx(0.2)
+
+    green = ProjectorGreen(data)
+    gk = green.get_Gk(ik=0, energy=1.0 + 0.5j, ispin=1)
+    expected = np.diag(
+        [
+            1.0 / (1.0 + 0.5j + 0.4 - 0.2),
+            1.0 / (1.0 + 0.5j + 0.4 - 2.2),
+        ]
+    )
     np.testing.assert_allclose(gk, expected)
 
 
@@ -448,6 +477,92 @@ def test_vasp_projector_xml_uses_delta_total_component_for_exchange(tmp_path):
     )
     assert exchange_out.exists()
     assert ((0, 0, 0), 0, 0) in exchange_Jdict
+
+
+def test_vasp_projector_xml_selects_named_operator_component(tmp_path, monkeypatch):
+    filename = tmp_path / "tb2j_projector.xml"
+    coefficients = _complex_numbers(np.ones((2, 1, 1, 1), dtype=complex))
+    filename.write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<tb2j_projector_green schema_name="tb2j.projector_green.xml"
+    schema_version="0.1" source_code="vasp">
+  <dimensions>
+    <dim name="nspin" value="2"/>
+    <dim name="nkpt" value="1"/>
+    <dim name="nband" value="1"/>
+    <dim name="nproj" value="1"/>
+    <dim name="natom" value="1"/>
+    <dim name="nsite" value="1"/>
+    <dim name="nproj_site_max" value="1"/>
+  </dimensions>
+  <structure>
+    <array name="cell" dims="three three">1 0 0 0 1 0 0 0 1</array>
+    <array name="positions" dims="natom three">0 0 0</array>
+    <array name="atomic_numbers" dims="natom" dtype="int">26</array>
+  </structure>
+  <kpoints bz="full" convention="fractional_reciprocal">
+    <array name="kpoints" dims="nkpt three">0 0 0</array>
+    <array name="weights" dims="nkpt">1</array>
+  </kpoints>
+  <bands efermi="0.0">
+    <array name="eigenvalues" dims="nspin nkpt nband">-1 -0.8</array>
+    <array name="occupations" dims="nspin nkpt nband">1 1</array>
+  </bands>
+  <projectors coefficient_source="vasp.LPRJ_COVL"
+      coefficient_projector="vasp_locproj"
+      channel_interpretation="vasp_locproj_function">
+    <array name="coefficients" dims="nspin nkpt nband nproj"
+        dtype="complex128" complex="interleaved">{coefficients}</array>
+    <array name="projector_site" dims="nproj" dtype="int">0</array>
+    <array name="projector_atom" dims="nproj" dtype="int">0</array>
+    <array name="site_nproj" dims="nsite" dtype="int">1</array>
+    <array name="site_projector_indices" dims="nsite nproj_site_max" dtype="int">0</array>
+  </projectors>
+  <operators operator_basis="mft_site_operator_basis" delta_units="eV">
+    <array name="mft_site_operator" dims="nsite nproj_site_max nproj_site_max"
+        completeness="complete">2.5</array>
+  </operators>
+</tb2j_projector_green>
+"""
+    )
+    captured = {}
+
+    def fake_write(data, **kwargs):
+        captured.update(kwargs)
+        return tmp_path / "exchange.out", {}
+
+    monkeypatch.setattr(vasp_xml, "write_projector_exchange_out", fake_write)
+
+    data = load_vasp_projector_xml(filename)
+    exchange_out, _ = gen_exchange_vasp_projector_xml(
+        filename,
+        output_path=tmp_path / "TB2J_results_vasp_xml",
+        Rmax=0,
+        population_source="none",
+        operator_component="mft_site_operator",
+    )
+
+    assert exchange_out == tmp_path / "exchange.out"
+    assert data.has_operator_component("mft_site_operator")
+    assert (
+        data.operator_component_metadata["mft_site_operator"]["completeness"]
+        == "complete"
+    )
+    np.testing.assert_allclose(captured["local_operators"][0], [[2.5]])
+    assert "operator component mft_site_operator" in captured["description"]
+
+
+def test_vasp_projector_xml_rejects_missing_operator_component(tmp_path):
+    filename = tmp_path / "tb2j_projector.xml"
+    _write_fixture(filename)
+
+    with pytest.raises(ValueError, match="operator component is unavailable: missing"):
+        gen_exchange_vasp_projector_xml(
+            filename,
+            Rmax=0,
+            population_source="none",
+            operator_component="missing",
+        )
 
 
 def test_vasp_projector_xml_exchange_writes_qtot_populations(tmp_path):

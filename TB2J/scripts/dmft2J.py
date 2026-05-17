@@ -284,14 +284,30 @@ Examples:
         from TB2J.exchange_dmft import ExchangeCLDMFT, ExchangeDMFTNCL
         from TB2J.exchange_params import parser_argument_to_dict
 
-        if args.nspin == 1:
-            ExchangeClass = ExchangeCLDMFT
-            logger.info("Using collinear exchange calculator (ExchangeCLDMFT)")
-        else:
-            ExchangeClass = ExchangeDMFTNCL
-            logger.info("Using non-collinear exchange calculator (ExchangeDMFTNCL)")
-
         params = parser_argument_to_dict(args)
+        use_gpu = params.get("use_gpu", False)
+
+        if use_gpu:
+            try:
+                from TB2J.gpu.exchange_dmft_gpu import (
+                    ExchangeCLDMFTGPU,
+                    ExchangeDMFTNCLGPU,
+                )
+            except ImportError:
+                print("ERROR: JAX not available. Cannot use GPU. Install jax[jpu].")
+                sys.exit(1)
+
+        if args.nspin == 1:
+            ExchangeClass = ExchangeCLDMFTGPU if use_gpu else ExchangeCLDMFT
+            logger.info(
+                f"Using {'GPU' if use_gpu else 'CPU'} collinear exchange calculator ({ExchangeClass.__name__})"
+            )
+        else:
+            ExchangeClass = ExchangeDMFTNCLGPU if use_gpu else ExchangeDMFTNCL
+            logger.info(
+                f"Using {'GPU' if use_gpu else 'CPU'} non-collinear exchange calculator ({ExchangeClass.__name__})"
+            )
+
         params.pop("description", None)
         params.pop("dmft_file", None)
         params.pop("parser_type", None)
@@ -321,7 +337,15 @@ Examples:
         logger.info(
             f"Calculating exchange parameters with {params.get('kmesh', 'default')} k-mesh..."
         )
-        exchange.run(path=args.output_path)
+        if use_gpu:
+            exchange.run(
+                path=args.output_path,
+                use_gpu=True,
+                vectorize_energy=params.get("vectorize_energy", False),
+                e_batch_size=params.get("e_batch_size", None),
+            )
+        else:
+            exchange.run(path=args.output_path)
 
         print("\n" + "=" * 60)
         print("DMFT exchange calculation completed successfully!")

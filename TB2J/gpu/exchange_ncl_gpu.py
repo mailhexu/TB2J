@@ -9,17 +9,54 @@ from tqdm import tqdm
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.gpu.jax_utils import (
-    _compute_A_tensor,
-    _compute_A_tensor_orb,
     _compute_GR_single_e,
     _eigen_to_G_single_e,
-    _pauli_decompose_pair,
+    _pauli_block_interleaved,
     _require_jax,
     jax_to_numpy,
     numpy_to_jax,
 )
 
 _require_jax()
+import jax.numpy as jnp  # noqa: E402
+from jax import jit  # noqa: E402
+
+
+@jit
+def _pauli_decompose_pair(Gij, Gji):
+    """
+    Pauli decomposition for a pair of matrices (interleaved basis), with -R flip.
+    Gij: (nR, ni, nj), Gji: (nR, nj, ni)
+    Returns: Gij_blocks (nR, 4, ni, nj), Gji_blocks (nR, 4, nj, ni)
+    """
+    Gij_blocks = _pauli_block_interleaved(Gij)
+    Gji_blocks = _pauli_block_interleaved(Gji)
+    Gji_blocks = jnp.flip(Gji_blocks, axis=0)
+    return Gij_blocks, Gji_blocks
+
+
+@jit
+def _compute_A_tensor(Gij_blocks, Gji_blocks, Pi, Pj):
+    """
+    Compute A tensor for all R vectors and Pauli components.
+    Returns: (nR, 4, 4) A tensor
+    """
+    X = jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    return jnp.einsum("ruij,rvji->ruv", X, Y) / jnp.pi
+
+
+@jit
+def _compute_A_tensor_orb(Gij_blocks, Gji_blocks, Pi, Pj):
+    """
+    Compute A tensor with orbital decomposition for all R.
+    Returns: A (nR, 4, 4), A_orb (nR, 4, 4, ni, nj)
+    """
+    X = jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    A_orb = jnp.einsum("ruij,rvji->ruvij", X, Y) / jnp.pi
+    A = jnp.sum(A_orb, axis=(-2, -1))
+    return A, A_orb
 
 
 class ExchangeNCLGPU(ExchangeNCL):

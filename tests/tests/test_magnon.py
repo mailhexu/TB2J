@@ -297,6 +297,18 @@ class TestMagnonCLI:
         assert args.amplitude == 0.5
         assert args.frames == 12
 
+    def test_legacy_tb2j_magnon_streamlit_option(self):
+        """Legacy TB2J_magnon.py should expose Streamlit viewer launch options."""
+        from TB2J.scripts.TB2J_magnon import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(
+            ["--streamlit", "magnon_bands.json", "--streamlit-port", "8502"]
+        )
+
+        assert args.streamlit == "magnon_bands.json"
+        assert args.streamlit_port == 8502
+
 
 class TestMagnonEigenstates:
     """Test public magnon eigenstate API and data model."""
@@ -513,6 +525,7 @@ class TestMagnonEigenstates:
     def test_threejs_scene_schema_and_save(self, temp_output_dir):
         """Spin rotation data should export a Three.js-ready scene schema."""
         from TB2J.magnon.eigenstates import SpinRotationData
+        from TB2J.magnon.streamlit_viewer import scene_to_html
 
         rotation = SpinRotationData(
             kpoint_index=0,
@@ -533,6 +546,9 @@ class TestMagnonEigenstates:
         assert scene["display"]["atoms"] is True
         assert "structure" in scene
         assert len(scene["frames"]) == 3
+        html = scene_to_html(scene)
+        assert "OrbitControls" in html
+        assert '"three"' in html
 
         filename = Path(temp_output_dir) / "scene.json"
         rotation.save_threejs_scene(filename)
@@ -580,6 +596,7 @@ class TestMagnonEigenstates:
         from TB2J.magnon.eigenstates import MagnonEigenstateData
         from TB2J.magnon.streamlit_viewer import (
             band_dataframe,
+            band_label_ticks,
             selected_band_from_event,
         )
 
@@ -596,6 +613,20 @@ class TestMagnonEigenstates:
         df = band_dataframe(data)
         assert list(df.columns) == ["k_index", "band_index", "x", "energy_mev"]
         assert len(df) == 4
+
+        labeled_data = MagnonEigenstateData(
+            calculation_type="band",
+            kpoints=np.zeros((2, 3)),
+            energies=np.array([[0.1, 0.2], [0.3, 0.4]]),
+            plot={
+                "energies_mev": [[100.0, 200.0], [300.0, 400.0]],
+                "xcoords": [0.0, 1.0],
+                "kpath_labels": [[0, r"$\Gamma$"], [1, "K"]],
+            },
+        )
+        ticks, label_expr = band_label_ticks(labeled_data)
+        assert ticks == [(0.0, "Γ"), (1.0, "K")]
+        assert "datum.value" in label_expr
 
         class Event:
             selection = {"band_pick": [{"k_index": 1, "band_index": 0}]}

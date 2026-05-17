@@ -110,6 +110,34 @@ def _collect_kpoint_data(calc):
     return bz_kpoints, weights, eigenvalues, occupations, coefficients
 
 
+def _collect_fermi_levels(calc):
+    if hasattr(calc, "get_fermi_levels"):
+        try:
+            levels = getattr(calc, "get_fermi_levels")()
+        except (ValueError, TypeError, AttributeError):
+            levels = None
+        if levels is not None:
+            levels = np.asarray(levels, dtype=float)
+            if levels.ndim == 0:
+                levels = levels.reshape(1)
+            if levels.size:
+                return levels * Ha
+
+    if hasattr(calc, "wfs") and hasattr(calc.wfs, "fermi_levels"):
+        levels = getattr(calc.wfs, "fermi_levels")
+        if levels is not None:
+            levels = np.asarray(levels, dtype=float)
+            if levels.ndim == 0:
+                levels = levels.reshape(1)
+            if levels.size:
+                return levels * Ha
+
+    if hasattr(calc, "get_fermi_level"):
+        return np.array([float(getattr(calc, "get_fermi_level")())], dtype=float)
+
+    raise AttributeError("Unable to read Fermi level from GPAW calculator")
+
+
 def _source_kpoint(wfs, spin, ibz_index):
     if hasattr(wfs, "kpt_qs"):
         return wfs.kpt_qs[ibz_index][spin]
@@ -167,6 +195,17 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
     kpoints, weights, eigenvalues, occupations, coefficients = _collect_kpoint_data(
         calc
     )
+    nspin = calc.wfs.nspins
+    fermi_levels = _collect_fermi_levels(calc)
+    fermi_spin = None
+    if fermi_levels.shape[0] == nspin and nspin > 1:
+        fermi_spin = fermi_levels
+    elif fermi_levels.shape[0] != 1:
+        raise ValueError(
+            "unexpected number of GPAW fermi levels: "
+            f"{int(fermi_levels.shape[0])}; expected 1 or nspin"
+        )
+    efermi = float(np.mean(fermi_levels))
     projector_metadata = _setup_projector_metadata(calc.wfs.setups)
     hij = _collect_hij(calc, projector_metadata["site_nproj"])
     metadata = {} if metadata is None else dict(metadata)
@@ -195,7 +234,8 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
         weights=weights,
         eigenvalues=eigenvalues,
         coefficients=coefficients,
-        efermi=calc.get_fermi_level(),
+        efermi=efermi,
+        efermi_spin=fermi_spin,
         projector_site=projector_metadata["projector_site"],
         projector_atom=projector_metadata["projector_atom"],
         cell=atoms.cell.array,
@@ -375,7 +415,10 @@ def compute_projected_charges_moments(data):
         for site, nproj in enumerate(data.site_nproj):
             indices = data.site_projector_indices[site, :nproj]
             block = rho[np.ix_(indices, indices)]
-            if data.overlap_metric is not None:
+            if data.population_metric_matrix is not None:
+                metric = data.population_metric_matrix[np.ix_(indices, indices)]
+                density_by_spin[spin, site] = float(np.real(np.trace(block @ metric)))
+            elif data.overlap_metric is not None:
                 metric = data.overlap_metric[np.ix_(indices, indices)]
                 density_by_spin[spin, site] = float(np.real(np.trace(block @ metric)))
             else:
@@ -385,6 +428,27 @@ def compute_projected_charges_moments(data):
     if data.nspin >= 2:
         spinat[:, 2] = density_by_spin[0] - density_by_spin[1]
     return charges, spinat, density_by_spin
+
+
+def component_local_operators(data, component_name, sites, source_label="projector"):
+    """Return exchange-ready site-local blocks from an operator component."""
+    if component_name is None:
+        component_name = "delta_total"
+    if not data.has_operator_component(component_name):
+        raise ValueError(
+            f"{source_label} operator component is unavailable: {component_name}"
+        )
+    metadata = (data.operator_component_metadata or {}).get(component_name, {})
+    completeness = metadata.get("completeness")
+    if completeness not in {None, "complete", "zero_by_symmetry"}:
+        raise ValueError(
+            f"{source_label} operator component is not exchange-ready: "
+            f"{component_name} completeness={completeness!r}"
+        )
+    return {
+        int(site): data.get_operator_component(component_name, site=site)
+        for site in sites
+    }
 
 
 def compute_projector_exchange_jdict(
@@ -531,6 +595,7 @@ def gen_exchange_projector_netcdf(
     smearing_eV=0.05,
     magnetic_elements=None,
     index_magnetic_atoms=None,
+    operator_component=None,
 ):
     """Python interface for projector-NetCDF exchange calculation."""
     data = ProjectorGreenData.load_netcdf(filename)
@@ -540,6 +605,22 @@ def gen_exchange_projector_netcdf(
     Rpts = _R_grid_for_cutoff(
         data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
     )
+    local_operators = None
+    description = None
+    if operator_component is not None:
+        component_name = operator_component
+        local_operators = component_local_operators(
+            data,
+            component_name,
+            sites or list(range(len(data.site_nproj))),
+            "GPAW NetCDF",
+        )
+        description = (
+            "Projector Green workflow using GPAW PAW projections and operator "
+            f"component {component_name} in basis {data.operator_basis}. Values are "
+            "from the controlled projector exchange-like trace, not yet a "
+            "production PAW MFT benchmark.\n"
+        )
     return write_projector_exchange_out(
         data,
         path=output_path,
@@ -549,4 +630,6 @@ def gen_exchange_projector_netcdf(
         magnetic_elements=magnetic_elements,
         index_magnetic_atoms=index_magnetic_atoms,
         Rcut=Rcut,
+        local_operators=local_operators,
+        description=description,
     )

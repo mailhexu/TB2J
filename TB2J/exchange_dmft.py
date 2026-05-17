@@ -42,7 +42,10 @@ class ExchangeDMFTMixin:
         self.nbasis = self.G.nbasis
 
         self.dmft_mesh = self.tbmodel.mesh
+        if isinstance(self.dmft_mesh, tuple) and len(self.dmft_mesh) == 2:
+            self.dmft_mesh = self.dmft_mesh[1]
         if self.dmft_mesh is not None:
+            self.dmft_mesh = np.asarray(self.dmft_mesh)
             iw0 = self.dmft_mesh[0]
             inv_beta = (2 * 0 + 1) * np.pi / iw0.imag if iw0.imag > 0 else 1.0
             self.temperature = 1.0 / inv_beta
@@ -130,6 +133,11 @@ class ExchangeDMFTMixin:
         if self._exchange_method == "matsubara":
             from TB2J.contour import MatsubaraContour
 
+            if self.dmft_mesh is None:
+                raise ValueError(
+                    "Matsubara DMFT exchange requires a dynamic self-energy mesh. "
+                    "Use method='cfr' for static-sigma mode."
+                )
             self.contour = MatsubaraContour(self.dmft_mesh, self.beta)
         else:
             # For CFR and other contour methods, delegate to ExchangeCL
@@ -142,13 +150,25 @@ class ExchangeDMFTMixin:
                 R_vec = self.short_Rlist[iR]
                 for iatom, jatom in self.R_ijatom_dict[iR]:
                     f = AijRs[(R_vec, iatom, jatom)]
-                    self.A_ijR[(R_vec, iatom, jatom)] = np.sum(f) * T
+                    self.A_ijR[(R_vec, iatom, jatom)] = (
+                        -2.0 * np.pi * T * np.real(np.sum(f))
+                    )
                     if self.orb_decomposition:
                         self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                            np.sum(AijRs_orb[(R_vec, iatom, jatom)], axis=0) * T
+                            -2.0
+                            * np.pi
+                            * T
+                            * np.real(np.sum(AijRs_orb[(R_vec, iatom, jatom)], axis=0))
                         )
             if rho_list is not None and len(rho_list) > 0:
-                self.rho = np.sum(rho_list, axis=0) * T
+                rho_sum = np.sum(rho_list, axis=0)
+                eye = np.eye(self.nbasis, dtype=complex)
+                if getattr(self, "_is_collinear", False):
+                    self.rho = np.empty_like(rho_sum)
+                    self.rho[0] = 0.5 * eye + 2.0 * T * np.real(rho_sum[0])
+                    self.rho[1] = 0.5 * eye + 2.0 * T * np.real(rho_sum[1])
+                else:
+                    self.rho = 0.5 * eye + 2.0 * T * np.real(rho_sum)
         else:
             # For CFR and other contour methods, use contour weights
             for iR in self.R_ijatom_dict:
@@ -174,8 +194,10 @@ class ExchangeDMFTMixin:
                 # For eigenvalue-based density (static-sigma): rho is already the density matrix
                 # Charge = real(trace(rho)), Moment = real(trace(rho_up) - trace(rho_dn))
                 # For contour-based density: rho = -1/pi * Im(integral), need -Im(rho)/pi
-                is_eigenvalue_based = getattr(self.tbmodel, "is_static", False)
-                if is_eigenvalue_based:
+                is_density_matrix_based = getattr(self.tbmodel, "is_static", False) or (
+                    getattr(self, "_exchange_method", "").lower() == "matsubara"
+                )
+                if is_density_matrix_based:
                     tup = np.real(np.trace(self.rho[0][np.ix_(iorb, iorb)]))
                     tdn = np.real(np.trace(self.rho[1][np.ix_(iorb, iorb)]))
                 else:
@@ -189,8 +211,12 @@ class ExchangeDMFTMixin:
                 from TB2J.pauli import pauli_block_all
 
                 rho_pauli = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)])
-                self.charges[iatom] = -np.imag(rho_pauli[0]) / np.pi
-                self.spinat[iatom, :] = -np.imag(rho_pauli[1:]) / np.pi
+                if getattr(self, "_exchange_method", "").lower() == "matsubara":
+                    self.charges[iatom] = np.real(rho_pauli[0])
+                    self.spinat[iatom, :] = np.real(rho_pauli[1:])
+                else:
+                    self.charges[iatom] = -np.imag(rho_pauli[0]) / np.pi
+                    self.spinat[iatom, :] = -np.imag(rho_pauli[1:]) / np.pi
         return self.charges, self.spinat
 
     def calculate_all(self):
@@ -329,9 +355,8 @@ class ExchangeDMFTMixin:
                 )
                 tmp = np.sum(t)
                 R_vec = self.short_Rlist[iR]
-                # Pre-factor 1/4 from formula
-                Jorb_list[(R_vec, iatom, jatom)] = t / 4.0
-                JJ_list[(R_vec, iatom, jatom)] = tmp / 4.0
+                Jorb_list[(R_vec, iatom, jatom)] = t / (4.0 * np.pi)
+                JJ_list[(R_vec, iatom, jatom)] = tmp / (4.0 * np.pi)
         return JJ_list, Jorb_list
 
     def get_all_A_vectorized_collinear(self, Gup, Gdn):
@@ -349,17 +374,14 @@ class ExchangeDMFTMixin:
             Gij = Gup[:, idx][:, :, jdx]
             Gji = np.flip(Gdn[:, jdx][:, :, idx], axis=0)
 
-            t_tensor = (
-                np.einsum(
-                    "ab,rbc,cd,rda->rac",
-                    Delta[i],
-                    Gij,
-                    Delta[j],
-                    Gji,
-                    optimize="optimal",
-                )
-                / 4.0
-            )
+            t_tensor = np.einsum(
+                "ab,rbc,cd,rda->rac",
+                Delta[i],
+                Gij,
+                Delta[j],
+                Gji,
+                optimize="optimal",
+            ) / (4.0 * np.pi)
             tmp_tensor = np.sum(t_tensor, axis=(1, 2))
 
             mi, mj = (magnetic_sites[i], magnetic_sites[j])
@@ -431,10 +453,16 @@ class ExchangeDMFTMixin:
                     sign = np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
                     if sign == 0:
                         sign = 1.0
-                    Jij = np.imag(val) / sign
+                    if getattr(self, "_exchange_method", "").lower() == "matsubara":
+                        Jij = np.real(val) / sign
+                    else:
+                        Jij = np.imag(val) / sign
                     self.exchange_Jdict[keyspin] = Jij
                     if self.orb_decomposition:
-                        Jorbij = np.imag(self.A_ijR_orb[key]) / sign
+                        if getattr(self, "_exchange_method", "").lower() == "matsubara":
+                            Jorbij = np.real(self.A_ijR_orb[key]) / sign
+                        else:
+                            Jorbij = np.imag(self.A_ijR_orb[key]) / sign
                         self.Jiso_orb[keyspin] = self.simplify_orbital_contributions(
                             Jorbij, iatom, jatom
                         )

@@ -145,6 +145,7 @@ def make_nc_pao_exchange_data():
         kpoints=np.array([[0.0, 0.0, 0.0]]),
         weights=np.array([1.0]),
         eigenvalues=np.array([[[0.0, 2.0]], [[0.2, 2.2]]]),
+        occupations=np.array([[[1.0, 0.0]], [[0.0, 1.0]]]),
         coefficients=coefficients,
         efermi=0.5,
         projector_site=np.array([0, 0]),
@@ -221,6 +222,9 @@ def write_abinit_nc_pao_fixture(filename, data, overlap_definition=True):
         bands.createVariable("eigenvalues", "f8", ("nspin", "nkpt", "nband"))[:] = (
             data.eigenvalues
         )
+        bands.createVariable("occupations", "f8", ("nspin", "nkpt", "nband"))[:] = (
+            data.occupations
+        )
         projectors = nc.createGroup("projectors")
         projectors.coefficient_projector = "nc_pao"
         projectors.channel_interpretation = "norm_conserving_pao"
@@ -255,7 +259,11 @@ def write_abinit_nc_pao_fixture(filename, data, overlap_definition=True):
 
 
 def write_abinit_nc_pao_hs_v2_fixture(
-    filename, data, overlap_exchange_ready=1, full_bz=False
+    filename,
+    data,
+    overlap_exchange_ready=1,
+    full_bz=False,
+    abinit_structure_units=False,
 ):
     netcdf4 = pytest.importorskip("netCDF4")
     hartree = 27.211386245988
@@ -284,18 +292,33 @@ def write_abinit_nc_pao_hs_v2_fixture(
         nc.createVariable("l_quantum", "i4", ("nproj",))[:] = np.array([0, 0])
         nc.createVariable("m_quantum", "i4", ("nproj",))[:] = np.array([0, 0])
         nc.createVariable("n_quantum", "i4", ("nproj",))[:] = np.array([1, 2])
-        nc.createVariable("atom_positions", "f8", ("natom", "three"))[:] = (
-            data.positions
+        atom_positions = nc.createVariable("atom_positions", "f8", ("natom", "three"))
+        primitive_vectors = nc.createVariable(
+            "primitive_vectors", "f8", ("three", "three")
         )
+        if abinit_structure_units:
+            from ase.units import Bohr
+
+            atom_positions[:] = np.linalg.solve(data.cell.T, data.positions.T).T
+            atom_positions.units = "dimensionless"
+            atom_positions.mnemonics = "Reduced atomic positions"
+            primitive_vectors[:] = data.cell / Bohr
+            primitive_vectors.units = "dimensionless"
+            primitive_vectors.mnemonics = "Primitive cell vectors (bohr)"
+        else:
+            atom_positions[:] = data.positions
+            primitive_vectors[:] = data.cell
         nc.createVariable("atom_types", "i4", ("natom",))[:] = np.ones(
             len(data.atomic_numbers), dtype=int
         )
         nc.createVariable("atomic_numbers", "f8", ("ntypat",))[:] = data.atomic_numbers
-        nc.createVariable("primitive_vectors", "f8", ("three", "three"))[:] = data.cell
         nc.createVariable("kpoints_ibz", "f8", ("nkpt_ibz", "three"))[:] = data.kpoints
         nc.createVariable("kweights_ibz", "f8", ("nkpt_ibz",))[:] = data.weights
         nc.createVariable("eigenvalues", "f8", ("nsppol", "nkpt_ibz", "nband"))[:] = (
             data.eigenvalues / hartree
+        )
+        nc.createVariable("occupations", "f8", ("nsppol", "nkpt_ibz", "nband"))[:] = (
+            data.occupations
         )
         coeff = data.coefficients
         nc.createVariable(
@@ -403,6 +426,30 @@ def test_projector_green_reconstructs_gk_with_spin_resolved_fermi():
 
     np.testing.assert_allclose(gk_up, expected_up)
     np.testing.assert_allclose(gk_dn, expected_dn)
+
+
+def test_projector_green_uses_band_mask_in_spectral_sum():
+    data = make_bcc_fe_projector_data()
+    data.band_mask = np.array(
+        [
+            [[True, False], [False, True]],
+            [[True, True], [True, False]],
+        ]
+    )
+    green = ProjectorGreen(data)
+    energy = 1.0 + 0.5j
+
+    gk0 = green.get_Gk(ik=0, energy=energy, ispin=0)
+    gk1 = green.get_Gk(ik=1, energy=energy, ispin=0)
+
+    np.testing.assert_allclose(
+        gk0,
+        np.diag([1.0 / (energy - data.eigenvalues[0, 0, 0]), 0.0]),
+    )
+    np.testing.assert_allclose(
+        gk1,
+        np.diag([0.0, 1.0 / (energy - data.eigenvalues[0, 1, 1])]),
+    )
 
 
 def test_projector_green_reconstructs_gk_with_k_dependent_overlap():
@@ -673,6 +720,19 @@ def test_abinit_nc_pao_hs_v2_loader_decodes_split_schema(tmp_path):
     )
 
 
+def test_abinit_nc_pao_hs_v2_loader_converts_abinit_structure_units(tmp_path):
+    from TB2J.interfaces.abinit_savetb2j import load_abinit_nc_pao_savetb2j
+
+    source = make_nc_pao_exchange_data()
+    filename = tmp_path / "abinit_nc_pao_hs_v2_abinit_units.nc"
+    write_abinit_nc_pao_hs_v2_fixture(filename, source, abinit_structure_units=True)
+
+    loaded = load_abinit_nc_pao_savetb2j(filename)
+
+    np.testing.assert_allclose(loaded.cell, source.cell)
+    np.testing.assert_allclose(loaded.positions, source.positions, atol=1e-12)
+
+
 def test_abinit_nc_pao_hs_v2_loader_prefers_full_bz_coefficients(tmp_path):
     from TB2J.interfaces.abinit_savetb2j import load_abinit_nc_pao_savetb2j
 
@@ -686,6 +746,242 @@ def test_abinit_nc_pao_hs_v2_loader_prefers_full_bz_coefficients(tmp_path):
     np.testing.assert_allclose(loaded.kpoints, source.kpoints)
     np.testing.assert_allclose(loaded.coefficients, source.coefficients)
     np.testing.assert_allclose(loaded.overlap_k, source.overlap_k)
+
+
+def test_abinit_nc_pao_shell_populations_group_by_site_radial_and_l(tmp_path):
+    from TB2J.interfaces.abinit_savetb2j import (
+        compute_nc_pao_shell_populations,
+        load_abinit_nc_pao_savetb2j,
+    )
+
+    source = make_nc_pao_exchange_data()
+    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
+    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
+    data = load_abinit_nc_pao_savetb2j(filename)
+
+    shells = compute_nc_pao_shell_populations(data)
+
+    assert [(s["site"], s["n_quantum"], s["l_quantum"]) for s in shells] == [
+        (0, 1, 0),
+        (0, 2, 0),
+    ]
+    np.testing.assert_allclose([s["charge"] for s in shells], [1.0, 1.0])
+    np.testing.assert_allclose([s["moment_z"] for s in shells], [1.0, -1.0])
+
+
+def test_abinit_nc_pao_shell_populations_require_shell_metadata():
+    from TB2J.interfaces.abinit_savetb2j import compute_nc_pao_shell_populations
+
+    data = make_nc_pao_exchange_data()
+
+    with pytest.raises(ValueError, match="shell diagnostics require"):
+        compute_nc_pao_shell_populations(data)
+
+
+def test_abinit_nc_pao_shell_threshold_masks_local_operator(tmp_path):
+    from TB2J.interfaces.abinit_savetb2j import (
+        compute_nc_pao_shell_populations,
+        load_abinit_nc_pao_savetb2j,
+        mask_local_operators_by_shell_selection,
+        select_nc_pao_shells,
+    )
+
+    source = make_nc_pao_exchange_data()
+    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    source.occupations = np.array([[[1.0, 0.0]], [[0.0, 0.005]]])
+    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
+    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
+    data = load_abinit_nc_pao_savetb2j(filename)
+    local_operators = {0: np.ones((2, 2), dtype=complex)}
+
+    shells = select_nc_pao_shells(
+        compute_nc_pao_shell_populations(data), charge_threshold=0.01
+    )
+    masked = mask_local_operators_by_shell_selection(data, local_operators, shells)
+
+    assert [shell["selected"] for shell in shells] == [True, False]
+    np.testing.assert_allclose(masked[0], [[1.0, 0.0], [0.0, 0.0]])
+
+
+def test_abinit_nc_pao_shell_moment_threshold_masks_nonmagnetic_shell(tmp_path):
+    from TB2J.interfaces.abinit_savetb2j import (
+        compute_nc_pao_shell_populations,
+        load_abinit_nc_pao_savetb2j,
+        mask_local_operators_by_shell_selection,
+        select_nc_pao_shells,
+    )
+
+    source = make_nc_pao_exchange_data()
+    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    source.occupations = np.array([[[1.0, 1.0]], [[1.0, 0.0]]])
+    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
+    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
+    data = load_abinit_nc_pao_savetb2j(filename)
+    local_operators = {0: np.ones((2, 2), dtype=complex)}
+
+    shells = select_nc_pao_shells(
+        compute_nc_pao_shell_populations(data),
+        charge_threshold=0.01,
+        moment_threshold=0.01,
+    )
+    masked = mask_local_operators_by_shell_selection(data, local_operators, shells)
+
+    np.testing.assert_allclose([shell["moment_norm"] for shell in shells], [0.0, 1.0])
+    assert [shell["selected"] for shell in shells] == [False, True]
+    np.testing.assert_allclose(masked[0], [[0.0, 0.0], [0.0, 1.0]])
+
+
+def test_abinit_nc_pao_diagnostics_report_summarizes_selection(tmp_path):
+    from TB2J.interfaces.abinit_savetb2j import (
+        compute_nc_pao_shell_populations,
+        gen_exchange_abinit_nc_pao,
+        load_abinit_nc_pao_savetb2j,
+        select_nc_pao_shells,
+    )
+
+    source = make_nc_pao_exchange_data()
+    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
+    report_path = tmp_path / "report.md"
+    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
+
+    data = load_abinit_nc_pao_savetb2j(filename)
+    shells = select_nc_pao_shells(
+        compute_nc_pao_shell_populations(data), charge_threshold=0.01
+    )
+    assert all(shell["selected"] for shell in shells)
+
+    gen_exchange_abinit_nc_pao(
+        filename,
+        output_path=tmp_path / "TB2J_results",
+        Rmax=0,
+        nz=2,
+        report_path=report_path,
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "excluded_shell_count: 0" in report
+    assert "all shells are selected by the current threshold" in report
+
+    disabled_report_path = tmp_path / "disabled_report.md"
+    gen_exchange_abinit_nc_pao(
+        filename,
+        output_path=tmp_path / "TB2J_results_disabled_filter",
+        Rmax=0,
+        nz=2,
+        shell_charge_threshold=None,
+        shell_moment_threshold=None,
+        report_path=disabled_report_path,
+    )
+
+    disabled_report = disabled_report_path.read_text(encoding="utf-8")
+    assert "shell_filtering: disabled" in disabled_report
+    assert "shell filtering is disabled" in disabled_report
+
+
+def test_abinit_nc_pao_report_handles_disabled_filter_without_shell_metadata(tmp_path):
+    from TB2J.interfaces.abinit_savetb2j import gen_exchange_abinit_nc_pao
+
+    filename = tmp_path / "abinit_nc_pao_savetb2j.nc"
+    report_path = tmp_path / "report.md"
+    write_abinit_nc_pao_fixture(filename, make_nc_pao_exchange_data())
+
+    gen_exchange_abinit_nc_pao(
+        filename,
+        output_path=tmp_path / "TB2J_results",
+        Rmax=0,
+        nz=2,
+        shell_charge_threshold=None,
+        shell_moment_threshold=None,
+        report_path=report_path,
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "shell diagnostics unavailable" in report
+    assert "shell_filtering: disabled" in report
+
+
+def test_abinit_nc_pao_band_mask_from_absolute_and_relative_cutoff():
+    from TB2J.interfaces.abinit_savetb2j import build_nc_pao_band_mask
+
+    data = make_nc_pao_exchange_data()
+    data.occupations = np.array([[[1.0, 0.0]], [[1.0, 0.0]]])
+
+    absolute, absolute_meta = build_nc_pao_band_mask(data, emax_eV=2.05)
+    relative, relative_meta = build_nc_pao_band_mask(
+        data, emax_relative_to_fermi_eV=1.6
+    )
+
+    np.testing.assert_array_equal(
+        absolute,
+        np.array([[[True, True]], [[True, False]]]),
+    )
+    np.testing.assert_array_equal(
+        relative,
+        np.array([[[True, True]], [[True, False]]]),
+    )
+    assert absolute_meta["included_band_count_min"] == 1
+    assert absolute_meta["included_band_count_max"] == 2
+    assert relative_meta["emax_relative_to_fermi_eV"] == 1.6
+
+
+def test_abinit_nc_pao_band_mask_rejects_excluded_occupied_band():
+    from TB2J.interfaces.abinit_savetb2j import build_nc_pao_band_mask
+
+    data = make_nc_pao_exchange_data()
+
+    with pytest.raises(ValueError, match="excludes occupied bands"):
+        build_nc_pao_band_mask(data, emax_eV=2.05)
+
+
+def test_abinit_nc_pao_relative_band_mask_uses_spin_fermi():
+    from TB2J.interfaces.abinit_savetb2j import build_nc_pao_band_mask
+
+    data = make_nc_pao_exchange_data()
+    data.occupations = np.array([[[1.0, 0.0]], [[1.0, 0.0]]])
+    data.efermi_spin = np.array([0.5, 1.0])
+
+    mask, metadata = build_nc_pao_band_mask(data, emax_relative_to_fermi_eV=1.3)
+
+    np.testing.assert_array_equal(
+        mask,
+        np.array([[[True, False]], [[True, True]]]),
+    )
+    assert metadata["cutoff_eV"] == [[[1.8]], [[2.3]]]
+
+
+def test_abinit_nc_pao_band_mask_from_fixed_empty_count():
+    from TB2J.interfaces.abinit_savetb2j import build_nc_pao_band_mask
+
+    data = make_nc_pao_exchange_data()
+    data.eigenvalues = np.array(
+        [
+            [[-1.0, 0.0, 2.0, 1.0]],
+            [[-1.0, 0.2, 3.0, 1.5]],
+        ]
+    )
+    data.occupations = np.array([[[1.0, 1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0, 0.0]]])
+    data.coefficients = np.zeros((2, 1, 4, 2), dtype=complex)
+
+    mask, metadata = build_nc_pao_band_mask(data, n_empty=1)
+
+    np.testing.assert_array_equal(
+        mask,
+        np.array([[[True, True, False, True]], [[True, True, False, False]]]),
+    )
+    assert metadata["n_empty"] == 1
+    assert metadata["included_unoccupied_min"] == 1
+    assert metadata["included_unoccupied_max"] == 1
+
+
+def test_abinit_nc_pao_band_mask_rejects_conflicting_window_options():
+    from TB2J.interfaces.abinit_savetb2j import build_nc_pao_band_mask
+
+    data = make_nc_pao_exchange_data()
+
+    with pytest.raises(ValueError, match="Specify only one"):
+        build_nc_pao_band_mask(data, emax_eV=1.0, n_empty=1)
 
 
 def test_abinit_nc_pao_hs_v2_full_bz_exchange_smoke(tmp_path):
@@ -770,14 +1066,23 @@ def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
     assert jdict
 
 
-def test_abinit_nc_pao_exchange_rejects_projector_population(tmp_path):
+def test_abinit_nc_pao_exchange_projector_population_uses_dual_metric(tmp_path):
     from TB2J.interfaces.abinit_savetb2j import gen_exchange_abinit_nc_pao
 
     filename = tmp_path / "abinit_nc_pao_savetb2j.nc"
     write_abinit_nc_pao_fixture(filename, make_nc_pao_exchange_data())
 
-    with pytest.raises(ValueError, match="population_mode='none'"):
-        gen_exchange_abinit_nc_pao(filename, population_mode="projector")
+    exchange_out, _ = gen_exchange_abinit_nc_pao(
+        filename,
+        output_path=tmp_path / "TB2J_results_projector_population",
+        Rmax=0,
+        nz=2,
+        population_mode="projector",
+    )
+
+    text = exchange_out.read_text(encoding="utf-8")
+    assert "Fe1" in text
+    assert "0.0000    0.0000" not in text
 
 
 def test_abinit_nc_pao_exchange_rejects_ibz_schema_v2(tmp_path):
@@ -809,6 +1114,9 @@ def test_abinit_nc_pao_cli_writes_exchange_out(tmp_path, monkeypatch):
             "0",
             "--nz",
             "2",
+            "--no_shell_filter",
+            "--emax",
+            "2.5",
         ],
     )
 
@@ -1047,6 +1355,7 @@ def test_bundled_nio_nc_pao_exchange_smoke(tmp_path):
         output_path=tmp_path / "TB2J_results",
         Rmax=0,
         nz=2,
+        operator_component="spectral_spin_split",
     )
     assert exchange_out.is_file()
     assert jdict
@@ -1109,7 +1418,11 @@ def test_real_abinit_nc_pao_fixture_exchange_smoke(tmp_path):
 
     try:
         exchange_out, jdict = gen_exchange_abinit_nc_pao(
-            _NC_PAO_FIXTURE, output_path=tmp_path / "TB2J_results", Rmax=0, nz=2
+            _NC_PAO_FIXTURE,
+            output_path=tmp_path / "TB2J_results",
+            Rmax=0,
+            nz=2,
+            operator_component="spectral_spin_split",
         )
     except ValueError as exc:
         if "overlap metadata is not exchange-ready" in str(

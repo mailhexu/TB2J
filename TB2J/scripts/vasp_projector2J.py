@@ -79,6 +79,14 @@ def run_vasp_projector2J():
             "with native CDIJ operators"
         ),
     )
+    parser.add_argument(
+        "--operator_component",
+        default=None,
+        help=(
+            "operator component to use for exchange instead of the default "
+            "delta_total/hij path, for example mft_site_operator"
+        ),
+    )
     args = parser.parse_args()
     indices = None
     if args.index_magnetic_atoms is not None:
@@ -96,6 +104,7 @@ def run_vasp_projector2J():
         population_source=args.population_source,
         allow_symmetry_expanded=args.allow_symmetry_expanded,
         allow_basis_mismatch=args.allow_basis_mismatch,
+        operator_component=args.operator_component,
     )
     print(f"Wrote {exchange_out}")
 

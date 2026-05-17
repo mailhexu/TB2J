@@ -51,48 +51,50 @@ class SpinIO_merge(SpinIO):
         super(SpinIO_merge, self).__init__(*args, **kwargs)
         self.projv = None
 
-    def _set_projection_vectors(self):
+    def _set_projection_vectors(self, collinear_tol=1e-2):
         norm = np.linalg.norm(self.spinat, axis=-1).reshape(-1, 1)
         spinat = self.spinat / norm
         idx = [self.ind_atoms[i] for i in self.index_spin if i >= 0]
         projv = {}
         for i, j in combinations_with_replacement(range(self.nspin), 2):
             a, b = spinat[idx][[i, j]]
-            projv[i, j] = get_projections(a, b)
+            projv[i, j] = get_projections(a, b, tol=collinear_tol)
             projv[j, i] = projv[i, j]
 
         self.projv = projv
 
     @classmethod
-    def load_pickle(cls, path="TB2J_results", fname="TB2J.pickle"):
+    def load_pickle(cls, path="TB2J_results", fname="TB2J.pickle", collinear_tol=1e-2):
         obj = super(SpinIO_merge, cls).load_pickle(path=path, fname=fname)
-        obj._set_projection_vectors()
+        obj._set_projection_vectors(collinear_tol=collinear_tol)
 
         return obj
 
 
-def read_pickle(path):
+def read_pickle(path, collinear_tol=1e-2):
     p1 = os.path.join(path, "TB2J_results", "TB2J.pickle")
     p2 = os.path.join(path, "TB2J.pickle")
     if os.path.exists(p1) and os.path.exists(p2):
         print(f" WARNING!: Both file {p1} and {p2} exist. Use default {p1}.")
     if os.path.exists(p1):
-        ret = SpinIO_merge.load_pickle(os.path.join(path, "TB2J_results"))
+        ret = SpinIO_merge.load_pickle(
+            os.path.join(path, "TB2J_results"), collinear_tol=collinear_tol
+        )
     elif os.path.exists(p2):
-        ret = SpinIO_merge.load_pickle(path)
+        ret = SpinIO_merge.load_pickle(path, collinear_tol=collinear_tol)
     else:
         raise FileNotFoundError(f"Cannot find either file {p1} or {p2}")
     return ret
 
 
 class Merger:
-    def __init__(self, *paths, main_path=None):
-        self.dat = [read_pickle(path) for path in paths]
+    def __init__(self, *paths, main_path=None, collinear_tol=1e-2):
+        self.dat = [read_pickle(path, collinear_tol=collinear_tol) for path in paths]
 
         if main_path is None:
             self.main_dat = copy.deepcopy(self.dat[-1])
         else:
-            self.main_dat = read_pickle(main_path)
+            self.main_dat = read_pickle(main_path, collinear_tol=collinear_tol)
             self.dat.append(copy.deepcopy(self.main_dat))
 
         self._set_projv()
@@ -222,8 +224,10 @@ class Merger:
             self.main_dat.exchange_Jdict = Jdict
 
 
-def merge(*paths, main_path=None, save=True, write_path="TB2J_results"):
-    m = Merger(*paths, main_path=main_path)
+def merge(
+    *paths, main_path=None, save=True, write_path="TB2J_results", collinear_tol=1e-2
+):
+    m = Merger(*paths, main_path=main_path, collinear_tol=collinear_tol)
     m.merge_Jiso()
     m.merge_DMI()
     m.merge_Jani()

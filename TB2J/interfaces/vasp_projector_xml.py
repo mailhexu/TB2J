@@ -12,6 +12,7 @@ from ase.units import kB
 
 from TB2J.interfaces.gpaw_projector import (
     _R_grid_for_cutoff,
+    component_local_operators,
     write_projector_exchange_out,
 )
 from TB2J.mycfr import CFR2
@@ -134,6 +135,48 @@ def _has_lprj_cdij_basis_mismatch(data):
         data.coefficient_source == "vasp.LPRJ_COVL"
         and data.operator_basis == "vasp_cdij_paw_hamiltonian"
     )
+
+
+def _array_metadata(element):
+    metadata = dict(element.attrib)
+    metadata.pop("name", None)
+    metadata.pop("dims", None)
+    metadata.pop("shape", None)
+    metadata.pop("dtype", None)
+    metadata.pop("complex", None)
+    return metadata
+
+
+def _parse_operator_components(operators, dimensions):
+    if operators is None:
+        return None, None
+    operator_components = {}
+    operator_component_metadata = {}
+    for element in operators.findall("array"):
+        name = element.get("name")
+        if not name or name == "hij":
+            continue
+        shape = _shape_from_attr(element, dimensions)
+        if len(shape) != 3 or shape[1] != shape[2]:
+            continue
+        value = _array(operators, name, dimensions, required=False)
+        if value is None:
+            continue
+        operator_components[name] = value
+        metadata = {
+            "units": operators.get("delta_units"),
+            "source": operators.get("delta_source"),
+            "projection": operators.get("delta_projection"),
+            "definition": operators.get("delta_definition"),
+            "operator_basis": operators.get("operator_basis"),
+        }
+        metadata.update(_array_metadata(element))
+        operator_component_metadata[name] = {
+            key: val for key, val in metadata.items() if val is not None
+        }
+    if not operator_components:
+        return None, None
+    return operator_components, operator_component_metadata
 
 
 def _structure_positions(structure, dimensions, metadata):
@@ -312,7 +355,7 @@ def load_vasp_projector_xml(filename):
     )
     operators = root.find("operators")
     hij = hij_definition = hij_units = hij_source = hij_projection = None
-    operator_components = None
+    operator_components = operator_component_metadata = None
     operator_basis = metadata.get("operator_basis")
     if operators is not None:
         hij = _array(operators, "hij", dimensions, required=False)
@@ -322,22 +365,10 @@ def load_vasp_projector_xml(filename):
             hij_source = operators.get("hij_source")
             hij_projection = operators.get("hij_projection")
             operator_basis = operators.get("operator_basis", operator_basis)
-        component_names = (
-            "delta_total",
-            "delta_xc",
-            "delta_u",
-            "delta_xc_smooth",
-            "delta_u_paw_aug",
+        operator_components, operator_component_metadata = _parse_operator_components(
+            operators, dimensions
         )
-        operator_components = {
-            name: value
-            for name in component_names
-            if (value := _array(operators, name, dimensions, required=False))
-            is not None
-        }
-        if not operator_components:
-            operator_components = None
-        elif hij_definition is None:
+        if operator_components is not None and hij_definition is None:
             hij_definition = operators.get(
                 "delta_definition",
                 "spin-splitting matrix in VASP LOCPROJ trial-function basis",
@@ -357,6 +388,7 @@ def load_vasp_projector_xml(filename):
         occupations=_array(bands, "occupations", dimensions, required=False),
         coefficients=_array(projectors, "coefficients", dimensions),
         efermi=float(bands.get("efermi")),
+        efermi_spin=_array(bands, "efermi_spin", dimensions, required=False),
         projector_site=_array(projectors, "projector_site", dimensions, dtype=int),
         projector_atom=_array(projectors, "projector_atom", dimensions, dtype=int),
         cell=_array(structure, "cell", dimensions, required=False),
@@ -387,6 +419,7 @@ def load_vasp_projector_xml(filename):
         hij_source=hij_source,
         hij_projection=hij_projection,
         operator_components=operator_components,
+        operator_component_metadata=operator_component_metadata,
         coefficient_source=_optional_text_attr(projectors, "coefficient_source"),
         coefficient_projector=_optional_text_attr(projectors, "coefficient_projector"),
         channel_interpretation=_optional_text_attr(
@@ -417,6 +450,7 @@ def gen_exchange_vasp_projector_xml(
     population_moment_atol=0.05,
     allow_symmetry_expanded=False,
     allow_basis_mismatch=False,
+    operator_component=None,
 ):
     """Generate controlled projector exchange output from VASP XML."""
     data = load_vasp_projector_xml(filename)
@@ -435,7 +469,7 @@ def gen_exchange_vasp_projector_xml(
             "into the LOCPROJ basis. Rerun VASP so the XML uses vasp.W_CPROJ, or "
             "set allow_basis_mismatch=True only for diagnostic output."
         )
-    data.validate(exchange_ready=True)
+    data.validate(exchange_ready=operator_component is None)
     explicit_outcar = outcar_filename is not None
     if outcar_filename is None:
         candidate = Path(filename).with_name("OUTCAR")
@@ -507,11 +541,23 @@ def gen_exchange_vasp_projector_xml(
     Rpts = _R_grid_for_cutoff(
         data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
     )
+    local_operators = None
+    operator_text = f"onsite operator basis {data.operator_basis}"
+    if operator_component is not None:
+        local_operators = component_local_operators(
+            data,
+            operator_component,
+            sites or list(range(len(data.site_nproj))),
+            "VASP XML",
+        )
+        operator_text = (
+            f"operator component {operator_component} in basis {data.operator_basis}"
+        )
     description = (
         "Projector Green workflow using VASP XML projections "
-        f"({data.coefficient_source}) and onsite operator basis "
-        f"{data.operator_basis}. Values are from the controlled projector "
-        "exchange-like trace, not yet a production PAW MFT benchmark. "
+        f"({data.coefficient_source}) and {operator_text}. Values are from the "
+        "controlled projector exchange-like trace, not yet a production PAW MFT "
+        "benchmark. "
         f"{population_text}\n"
     )
     return write_projector_exchange_out(
@@ -527,4 +573,5 @@ def gen_exchange_vasp_projector_xml(
         charges=charges,
         spinat=spinat,
         Rcut=Rcut,
+        local_operators=local_operators,
     )

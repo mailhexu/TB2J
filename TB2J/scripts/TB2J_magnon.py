@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import os
+import subprocess
+import sys
 
 from TB2J.plot import plot_magnon_band, write_eigen
 from TB2J.versioninfo import print_license
@@ -9,8 +12,7 @@ The script to plot the magnon band structure.
 """
 
 
-def plot_magnon():
-    print_license()
+def create_parser():
     parser = argparse.ArgumentParser(
         description="TB2J_magnon: Plot magnon band structure from the TB2J magnetic interaction parameters"
     )
@@ -71,7 +73,57 @@ def plot_magnon():
         default=False,
     )
 
+    parser.add_argument(
+        "--streamlit",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="EIGENSTATES_JSON",
+        help=(
+            "Launch the Streamlit magnon viewer. Optionally provide an exported "
+            "magnon eigenstate JSON/NetCDF file to prefill in the viewer."
+        ),
+    )
+    parser.add_argument(
+        "--streamlit-port",
+        type=int,
+        default=8501,
+        help="Port for the Streamlit magnon viewer (default: 8501).",
+    )
+
+    return parser
+
+
+def launch_streamlit_viewer(filename=None, port=8501):
+    """Launch the Streamlit magnon viewer for an exported eigenstate file."""
+    import TB2J.magnon.streamlit_viewer as streamlit_viewer
+
+    env = os.environ.copy()
+    if filename:
+        env["TB2J_MAGNON_VIEWER_FILE"] = filename
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            streamlit_viewer.__file__,
+            "--server.port",
+            str(port),
+        ],
+        check=True,
+        env=env,
+    )
+
+
+def plot_magnon():
+    print_license()
+    parser = create_parser()
+
     args = parser.parse_args()
+    if args.streamlit is not None:
+        launch_streamlit_viewer(args.streamlit, port=args.streamlit_port)
+        return
     if args.Jq:
         if args.figfname is None:
             args.figfname = "Eigen_Jq.pdf"

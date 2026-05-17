@@ -39,10 +39,33 @@ def band_dataframe(eigenstates):
     return pd.DataFrame(rows)
 
 
-def band_chart(df):
+def band_label_ticks(eigenstates):
+    """Return x-axis tick positions and labels for a band path."""
+    plot = eigenstates.plot or {}
+    labels = plot.get("kpath_labels") or []
+    if not labels:
+        return [], None
+    xcoords = plot.get("xcoords")
+    if xcoords is None:
+        xvalues = list(range(len(eigenstates.kpoints)))
+    elif xcoords and isinstance(xcoords[0], list):
+        xvalues = [x for segment in xcoords for x in segment]
+    else:
+        xvalues = xcoords
+
+    ticks = []
+    for index, label in labels:
+        index = int(index)
+        if 0 <= index < len(xvalues):
+            ticks.append((float(xvalues[index]), _clean_kpath_label(label)))
+    return ticks, _altair_label_expr(ticks)
+
+
+def band_chart(df, label_ticks=None):
     """Return an Altair band chart with point selection enabled."""
     try:
         import altair as alt
+        import pandas as pd
     except ImportError as exc:
         raise ImportError("altair is required for the Streamlit band chart") from exc
 
@@ -53,11 +76,22 @@ def band_chart(df):
         on="click",
         clear=False,
     )
+    x_axis = alt.Axis(title="k-path")
+    if label_ticks:
+        tick_values = [tick[0] for tick in label_ticks]
+        label_expr = _altair_label_expr(label_ticks)
+        x_axis = alt.Axis(
+            values=tick_values,
+            labelExpr=label_expr,
+            labelAngle=0,
+            title="k-path",
+        )
+
     lines = (
         alt.Chart(df)
         .mark_line(color="#1f77b4", opacity=0.6)
         .encode(
-            x=alt.X("x:Q", title="k-path"),
+            x=alt.X("x:Q", axis=x_axis),
             y=alt.Y("energy_mev:Q", title="Energy (meV)"),
             detail="band_index:N",
         )
@@ -66,14 +100,50 @@ def band_chart(df):
         alt.Chart(df)
         .mark_circle(size=45)
         .encode(
-            x="x:Q",
+            x=alt.X("x:Q", axis=x_axis),
             y="energy_mev:Q",
             color=alt.condition(selector, alt.value("#d62728"), alt.value("#1f77b4")),
             tooltip=["k_index:Q", "band_index:Q", "energy_mev:Q"],
         )
         .add_params(selector)
     )
-    return (lines + points).properties(height=320)
+    chart = lines + points
+    if label_ticks:
+        label_df = pd.DataFrame(
+            {
+                "x": [tick[0] for tick in label_ticks],
+                "label": [tick[1] for tick in label_ticks],
+            }
+        )
+        rules = (
+            alt.Chart(label_df)
+            .mark_rule(color="#888888", strokeDash=[3, 3])
+            .encode(x="x:Q")
+        )
+        texts = (
+            alt.Chart(label_df)
+            .mark_text(align="center", baseline="top", dy=6, fontSize=13)
+            .encode(x="x:Q", y=alt.value(0), text="label:N")
+        )
+        chart = chart + rules + texts
+    return chart.properties(height=320)
+
+
+def _clean_kpath_label(label):
+    label = str(label)
+    if label in {"G", "Gamma", "$\\Gamma$", r"$\Gamma$"}:
+        return "Γ"
+    return label.replace("$", "").replace("\\Gamma", "Γ")
+
+
+def _altair_label_expr(ticks):
+    if not ticks:
+        return None
+    expr = "''"
+    for value, label in reversed(ticks):
+        label = label.replace("'", "\\'")
+        expr = f"abs(datum.value - {value:.16g}) < 1e-8 ? '{label}' : {expr}"
+    return expr
 
 
 def selected_band_from_event(event, fallback=(0, 0)):
@@ -127,8 +197,12 @@ def scene_to_html(scene, height=850):
   <div id="tb2j-magnon-viewer-3d" style="width: 100%; height: 68%;"></div>
   <canvas id="tb2j-magnon-viewer-xy" style="width: 100%; height: 32%; border: 1px solid #dddddd; background: #ffffff;"></canvas>
 </div>
+<script type="importmap">
+{{"imports": {{"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}}}
+</script>
 <script type="module">
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import * as THREE from 'three';
+import {{ OrbitControls }} from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 
 const sceneData = {scene_json};
 const root = document.getElementById('tb2j-magnon-viewer-3d');
@@ -144,6 +218,8 @@ scene.background = new THREE.Color(0xffffff);
 const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1000);
 camera.position.set(3, 3, 3);
 camera.lookAt(0, 0, 0);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
 scene.add(new THREE.AmbientLight(0xffffff, 0.9));
 
 const material = new THREE.LineBasicMaterial({{color: 0x1f77b4}});
@@ -234,6 +310,8 @@ if (!box.isEmpty()) {{
   camera.far = Math.max(size * 10.0, 100.0);
   camera.updateProjectionMatrix();
   camera.lookAt(center);
+  controls.target.copy(center);
+  controls.update();
 }}
 
 let iframe = 0;
@@ -265,6 +343,7 @@ function animate() {{
   }}
   drawXYView(frame, iframe);
   iframe += 1;
+  controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }}
@@ -400,8 +479,9 @@ def main():
             eigenstates = MagnonEigenstateData.load(filename)
             df = band_dataframe(eigenstates)
             st.subheader("Band structure")
+            label_ticks, _ = band_label_ticks(eigenstates)
             event = st.altair_chart(
-                band_chart(df),
+                band_chart(df, label_ticks=label_ticks),
                 use_container_width=True,
                 on_select="rerun",
             )

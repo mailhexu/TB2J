@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.gpu.jax_utils import (
-    _compute_collinear_A_batch,
     _compute_GR_single_e,
     _eigen_to_G_single_e,
     _require_jax,
@@ -20,6 +19,21 @@ from TB2J.gpu.jax_utils import (
 
 _require_jax()
 import jax.numpy as jnp  # noqa: E402
+from jax import jit  # noqa: E402
+
+
+@jit
+def _compute_collinear_A_batch(Gij_up, Gji_dn, Delta_i, Delta_j):
+    """
+    Compute collinear exchange A tensor for all R vectors.
+
+    Returns: (nR, ni, ni) orbital-resolved A tensor, (nR,) total A values
+    """
+    X = jnp.einsum("ab,rbj->raj", Delta_i, Gij_up)
+    Y = jnp.einsum("jk,rki->rji", Delta_j, Gji_dn)
+    t = jnp.einsum("raj,rji->rai", X, Y)
+    A_total = jnp.sum(t, axis=(1, 2))
+    return t, A_total
 
 
 class ExchangeCL2GPU(ExchangeCL2):

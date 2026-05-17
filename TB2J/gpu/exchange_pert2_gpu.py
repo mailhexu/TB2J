@@ -13,10 +13,6 @@ from tqdm import tqdm
 
 from TB2J.exchange_pert2 import ExchangePert2
 from TB2J.gpu.jax_utils import (
-    _compute_A_orb_single_e,
-    _compute_A_single_e,
-    _compute_A_single_e_no_dA,
-    _compute_dGR_single_e,
     _compute_GR_single_e,
     _eigen_to_G_single_e,
     _pauli_block_interleaved,
@@ -28,6 +24,79 @@ from TB2J.gpu.jax_utils import (
 
 _require_jax()
 import jax.numpy as jnp  # noqa: E402
+from jax import jit  # noqa: E402
+
+
+@jit
+def _compute_dGR_single_e(
+    GR, Rmap_indices_Rm, Rmap_indices_Rnj, Rmap_indices_Rj, dV_all, unique_Rj
+):
+    """
+    Compute dG(R)/dx for a single energy point.
+    GR: (nR, nb, nb) -> Returns: (nRj_target, nb, nb)
+    """
+    GRm = GR[Rmap_indices_Rm]
+    GRnj = GR[Rmap_indices_Rnj]
+    dG_map = jnp.einsum("mij,mjk,mkl->mil", GRm, dV_all, GRnj)
+
+    nRj = len(unique_Rj)
+    nb = GR.shape[-1]
+    dG_flat = dG_map.reshape(-1, nb * nb)
+    segment_ids = jnp.searchsorted(unique_Rj, Rmap_indices_Rj)
+    integrated_flat = jnp.zeros((nRj, nb * nb), dtype=GR.dtype)
+    integrated_flat = integrated_flat.at[segment_ids].add(dG_flat)
+    return integrated_flat.reshape(nRj, nb, nb)
+
+
+@jit
+def _compute_A_single_e(
+    Gij_blocks, Gji_blocks, dGij_blocks, dGji_blocks, Pi, Pj, J_only
+):
+    """
+    Compute A and dA/dx for a single energy point, all R vectors.
+    Returns: A (nR, 4, 4), dAdx (nR, 4, 4)
+    """
+    X = jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    A = jnp.einsum("ruij,rvji->ruv", X, Y) / jnp.pi
+    dX = jnp.einsum("ik,rukj->ruij", Pi, dGij_blocks)
+    dY = jnp.einsum("jk,rvki->rvji", Pj, dGji_blocks)
+    dAdx = (
+        jnp.einsum("ruij,rvji->ruv", dX, Y) + jnp.einsum("ruij,rvji->ruv", X, dY)
+    ) / jnp.pi
+    return A, dAdx
+
+
+@jit
+def _compute_A_single_e_no_dA(Gij_blocks, Gji_blocks, Pi, Pj):
+    """
+    Compute A (without derivative) for a single energy point.
+    Returns: A (nR, 4, 4)
+    """
+    X = jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    return jnp.einsum("ruij,rvji->ruv", X, Y) / jnp.pi
+
+
+@jit
+def _compute_A_orb_single_e(
+    Gij_blocks, Gji_blocks, dGij_blocks, dGji_blocks, Pi, Pj, J_only
+):
+    """
+    Compute A and dA/dx with orbital decomposition for single energy.
+    Returns: A, dAdx (nR, 4, 4), A_orb, dAdx_orb (nR, 4, 4, ni, nj)
+    """
+    X = jnp.einsum("ik,rukj->ruij", Pi, Gij_blocks)
+    Y = jnp.einsum("jk,rvki->rvji", Pj, Gji_blocks)
+    A_orb = jnp.einsum("ruij,rvji->ruvij", X, Y) / jnp.pi
+    A = jnp.sum(A_orb, axis=(-2, -1))
+    dX = jnp.einsum("ik,rukj->ruij", Pi, dGij_blocks)
+    dY = jnp.einsum("jk,rvki->rvji", Pj, dGji_blocks)
+    dAdx_orb = (
+        jnp.einsum("ruij,rvji->ruvij", dX, Y) + jnp.einsum("ruij,rvji->ruvij", X, dY)
+    ) / jnp.pi
+    dAdx = jnp.sum(dAdx_orb, axis=(-2, -1))
+    return A, dAdx, A_orb, dAdx_orb
 
 
 class ExchangePert2GPU(ExchangePert2):

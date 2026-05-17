@@ -6,8 +6,11 @@ import numpy as np
 import pytest
 
 from TB2J.interfaces.abinit_savetb2j import (
+    compute_projector_shell_populations,
     gen_exchange_abinit_projector,
     load_abinit_savetb2j,
+    mask_local_operators_by_shell_selection,
+    select_nc_pao_shells,
 )
 from TB2J.interfaces.gpaw_projector import compute_projected_charges_moments
 from TB2J.scripts.abinit_projector2J import run_abinit_projector2J
@@ -143,6 +146,8 @@ def test_load_abinit_savetb2j_normalizes_projector_green_data(tmp_path):
     assert data.hij.shape == (2, 1, 2, 2)
     np.testing.assert_allclose(data.coefficients[0, 0, 0, 0], 1.0 + 0.25j)
     np.testing.assert_allclose(data.atomic_numbers, [26])
+    assert data.population_metric_matrix is None
+    assert "smooth pseudo-density" in data.population_metric
     np.testing.assert_array_equal(data.site_projector_indices, [[0, 1]])
     np.testing.assert_allclose(
         data.operator_components["delta_total"], data.hij[0] - data.hij[1]
@@ -180,14 +185,69 @@ def test_abinit_projected_population_uses_kpoint_weights(tmp_path):
     data.coefficients[:] = 0.0
     data.coefficients[0, 0, 0, 0] = 1.0
     data.coefficients[0, 1, 0, 0] = 3.0
-    data.overlap_metric[:] = 0.0
-    data.overlap_metric[0, 0] = 2.0
+    data.population_metric_matrix = np.zeros_like(data.overlap_metric)
+    data.population_metric_matrix[0, 0] = 2.0
 
     charges, spinat, density_by_spin = compute_projected_charges_moments(data)
 
     np.testing.assert_allclose(density_by_spin[:, 0], [10.0, 0.0])
     np.testing.assert_allclose(charges, [10.0])
     np.testing.assert_allclose(spinat[:, 2], [10.0])
+
+
+def test_abinit_paw_shell_moment_filter_masks_local_operator(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+
+    data = load_abinit_savetb2j(filename)
+    data.projector_radial = np.array([0, 1])
+    data.population_metric_matrix = np.eye(2, dtype=complex)
+    data.occupations[:] = 0.0
+    data.occupations[:, :, 0] = 1.0
+    data.coefficients[:] = 0.0
+    data.coefficients[0, :, 0, 0] = 1.0
+    data.coefficients[1, :, 0, 1] = 0.05
+    local_operators = {0: np.ones((2, 2), dtype=complex)}
+
+    shells = select_nc_pao_shells(
+        compute_projector_shell_populations(data),
+        charge_threshold=0.0,
+        moment_threshold=0.01,
+    )
+    masked = mask_local_operators_by_shell_selection(data, local_operators, shells)
+
+    np.testing.assert_allclose(
+        [shell["moment_norm"] for shell in shells], [1.0, 0.0025]
+    )
+    assert [shell["selected"] for shell in shells] == [True, False]
+    np.testing.assert_allclose(masked[0], [[1.0, 0.0], [0.0, 0.0]])
+
+
+def test_abinit_paw_shell_filter_rejects_incomplete_population_metric(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+
+    with pytest.raises(ValueError, match="PAW-complete population_metric_matrix"):
+        gen_exchange_abinit_projector(
+            filename,
+            output_path=tmp_path / "TB2J_results_shell_filter",
+            shell_moment_threshold=0.01,
+        )
+
+
+def test_abinit_exchange_rejects_projector_population_without_complete_metric(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+
+    with pytest.raises(ValueError, match="PAW-complete population metric"):
+        gen_exchange_abinit_projector(
+            filename,
+            output_path=tmp_path / "TB2J_results_projector_population",
+            population_mode="projector",
+        )
 
 
 def test_load_abinit_savetb2j_rejects_missing_full_bz(tmp_path):

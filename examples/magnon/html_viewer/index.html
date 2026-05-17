@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TB2J Magnon Viewer</title>
+    <style>
+      :root {
+        color: #202124;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #f6f7fb;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(320px, 38vw) 1fr;
+        gap: 16px;
+        height: 100vh;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      aside,
+      section {
+        background: #ffffff;
+        border: 1px solid #d9dde7;
+        border-radius: 14px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+        overflow: hidden;
+      }
+      aside {
+        padding: 16px;
+        overflow-y: auto;
+      }
+      h1 {
+        margin: 0 0 14px;
+        font-size: 1.35rem;
+      }
+      label {
+        display: block;
+        margin-top: 12px;
+        font-size: 0.9rem;
+        font-weight: 650;
+      }
+      input,
+      button {
+        box-sizing: border-box;
+        margin-top: 6px;
+        width: 100%;
+      }
+      input[type="number"],
+      input[type="range"] {
+        accent-color: #1f77b4;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      #bandCanvas {
+        display: block;
+        width: 100%;
+        height: 320px;
+        margin-top: 10px;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        background: #ffffff;
+      }
+      #status {
+        color: #555555;
+        font-size: 0.9rem;
+        min-height: 1.2em;
+      }
+      #viewer {
+        display: grid;
+        grid-template-rows: 68% 32%;
+        height: 100%;
+      }
+      #viewer3d,
+      #viewerxy {
+        width: 100%;
+        height: 100%;
+      }
+      #viewerxy {
+        border-top: 1px solid #d9dde7;
+      }
+      @media (max-width: 900px) {
+        main {
+          grid-template-columns: 1fr;
+          height: auto;
+        }
+        section {
+          height: 760px;
+        }
+      }
+    </style>
+    <script type="importmap">
+      {"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+    </script>
+  </head>
+  <body>
+    <main>
+      <aside>
+        <h1>TB2J Magnon Viewer</h1>
+        <p id="status">Load an exported TB2J magnon eigenstate JSON file.</p>
+        <label>Eigenstate JSON file
+          <input id="fileInput" type="file" accept=".json,application/json" />
+        </label>
+        <button id="loadExampleButton">Load bundled CrI3 example</button>
+        <div class="row">
+          <label>nx <input id="nx" type="number" min="1" value="2" /></label>
+          <label>ny <input id="ny" type="number" min="1" value="2" /></label>
+          <label>nz <input id="nz" type="number" min="1" value="1" /></label>
+        </div>
+        <label>Amplitude <input id="amplitude" type="range" min="0" max="2" step="0.05" value="1" /></label>
+        <label>Frames <input id="frames" type="number" min="4" max="200" value="40" /></label>
+        <div class="row">
+          <label>k-index <input id="kIndex" type="number" min="0" value="0" /></label>
+          <label>band <input id="bandIndex" type="number" min="0" value="0" /></label>
+          <label>&nbsp;<button id="applyButton">Apply</button></label>
+        </div>
+        <canvas id="bandCanvas"></canvas>
+      </aside>
+      <section id="viewer">
+        <div id="viewer3d"></div>
+        <canvas id="viewerxy"></canvas>
+      </section>
+    </main>
+    <script type="module" src="./viewer.js?v=4"></script>
+  </body>
+</html>

@@ -102,7 +102,7 @@ class Contour:
 
 class MatsubaraContour:
     def __init__(self, path, beta):
-        self.path = path
+        self.path = np.asarray(path)
         self.beta = beta
         self.T = 1.0 / beta
 
@@ -116,6 +116,9 @@ class MatsubaraContour:
     @property
     def npoints(self):
         return len(self.path)
+
+    def __eq__(self, other):
+        return np.array_equal(self.path, np.asarray(other))
 
 
 def test():

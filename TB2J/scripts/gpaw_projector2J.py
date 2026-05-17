@@ -49,6 +49,14 @@ def run_gpaw_projector2J():
         default=None,
         help="1-based magnetic atom indices to include",
     )
+    parser.add_argument(
+        "--operator_component",
+        default=None,
+        help=(
+            "operator component to use for exchange instead of the default "
+            "delta_total/hij path, for example mft_site_operator"
+        ),
+    )
     args = parser.parse_args()
     indices = None
     if args.index_magnetic_atoms is not None:
@@ -61,6 +69,7 @@ def run_gpaw_projector2J():
         smearing_eV=args.smearing,
         magnetic_elements=args.elements,
         index_magnetic_atoms=indices,
+        operator_component=args.operator_component,
     )
     print(f"Wrote {exchange_out}")
 

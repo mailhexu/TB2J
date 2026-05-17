@@ -70,7 +70,22 @@ def run_abinit_projector2J():
         "--population_mode",
         choices=("none", "projector"),
         default="none",
-        help="source for exchange.out atom charge/moment fields",
+        help=(
+            "source for exchange.out atom charge/moment fields; ABINIT savetb2j "
+            "v1 supports only 'none' because PAW-complete populations are not exported"
+        ),
+    )
+    parser.add_argument(
+        "--shell_charge_threshold",
+        type=float,
+        default=None,
+        help="exclude local-operator PAW projector shells with projected charge below this value",
+    )
+    parser.add_argument(
+        "--shell_moment_threshold",
+        type=float,
+        default=None,
+        help="exclude local-operator PAW projector shells with projected moment norm below this value",
     )
     args = parser.parse_args()
     indices = None
@@ -87,6 +102,8 @@ def run_abinit_projector2J():
         index_magnetic_atoms=indices,
         operator_component=args.operator_component,
         population_mode=args.population_mode,
+        shell_charge_threshold=args.shell_charge_threshold,
+        shell_moment_threshold=args.shell_moment_threshold,
     )
     print(f"Wrote {exchange_out}")
 

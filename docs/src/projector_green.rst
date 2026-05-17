@@ -20,6 +20,7 @@ A valid projector Green dataset contains:
 * eigenvalues, ``eigenvalues[nspin, nkpt, nband]``;
 * projector coefficients, ``coefficients[nspin, nkpt, nband, nproj]``;
 * Fermi energy, ``efermi``;
+* optional spin-resolved Fermi energies, ``efermi_spin[nspin]``;
 * projector-to-site and projector-to-atom maps;
 * optional structure data: cell, positions, and atomic numbers;
 * optional occupations with the same shape as eigenvalues.
@@ -36,7 +37,11 @@ TB2J reconstructs
 
    G^{pq}_{\sigma}(k,E)=\sum_n
    \frac{C^p_{n k \sigma} C^{q *}_{n k \sigma}}
-   {E + E_F - \epsilon_{n k \sigma}}.
+   {E + E_{F,\sigma} - \epsilon_{n k \sigma}}.
+
+When ``efermi_spin`` is absent, TB2J uses the scalar ``efermi`` for every spin
+channel.  When ``efermi_spin`` is present, it must have shape ``(nspin,)`` and
+``efermi`` is kept as the mean scalar fallback for legacy consumers.
 
 The real-space transform uses the TB2J phase convention
 ``exp(-2*pi*i*k.R)`` and the stored full-BZ k-point weights.
@@ -76,7 +81,8 @@ Version 1 files use these groups:
 
 * ``/structure``: optional cell, positions, and atomic numbers;
 * ``/kpoints``: full-BZ k-points and weights;
-* ``/bands``: eigenvalues, occupations, and Fermi energy;
+* ``/bands``: eigenvalues, occupations, scalar Fermi energy, and optional
+  spin-resolved Fermi energies;
 * ``/projectors``: coefficients, projector metadata, and optional
   ``overlap_metric``;
 * ``/operators``: optional site-local operators such as ``hij``.
@@ -127,7 +133,9 @@ converged GPAW calculator and writes the TB2J projector Green NetCDF file:
 The exporter stores full-BZ projector coefficients ``P_ni(k)``, eigenvalues,
 occupations, native GPAW ``dH_asp`` as ``hij``, PAW onsite ``dO_ii`` as
 ``overlap_metric``, and GPAW PAW population matrices ``N0_p`` in metadata for
-``w_charge``/``w_magmom`` reporting.
+``w_charge``/``w_magmom`` reporting.  If GPAW reports one Fermi level per spin,
+the exporter stores those values as ``efermi_spin`` and stores their mean in the
+scalar ``efermi`` fallback.
 
 CLI Use
 -------
@@ -176,6 +184,59 @@ default.  That component is the spin-up minus spin-down onsite PAW operator in
 the ABINIT native PAW projector basis.  Advanced users may select another
 component with ``--operator_component`` only when the file marks that component
 as complete and exchange-ready.
+
+ABINIT NC PAO Export (Experimental)
+-----------------------------------
+
+ABINIT's norm-conserving PAO path currently writes an experimental NetCDF schema
+identified by ``schema_name = abinit.nc_pao_hs`` and ``schema_version = 2``.  It
+is separate from the PAW ``savetb2j`` schema above.  The file records PAO basis
+metadata, IBZ and optional full-BZ k-point maps, eigenvalues, optional
+``occupations``, PAO overlap matrices, diagnostic PAO Hamiltonian matrices, and
+TB2J-oriented spectral/operator arrays:
+
+* ``coefficients_ibz_real`` and ``coefficients_ibz_imag`` store
+  ``coefficients_ibz(nproj, nband, nkpt_ibz, nsppol)`` with convention
+  ``C_ni(k)=<phi_i|psi_nk>``;
+* ``overlap_ibz_*`` and ``overlap_bz_*`` store the PAO metric ``S(k)``;
+* ``delta_xc_*`` stores the smooth ``vxc_up - vxc_down`` PAO matrix;
+* ``delta_u_*`` stores the NC DFT+U spin-splitting matrix when available;
+* ``delta_total_*`` stores ``delta_xc + delta_u`` in the same PAO basis.
+
+The TB2J reader requires files whose overlap metadata are marked exchange-ready.
+For current validated files, ``overlap_exchange_ready = 1`` means the stored
+``S(k)`` matrices are available on the full Brillouin-zone mesh and can be used
+for the nonorthogonal Green-function transform below.  Files without that flag
+are rejected for exchange calculations.
+
+The intended validation inputs are scalar norm-conserving, collinear
+``nsppol=2`` calculations with ``nspinor=1``, no SOC, and PAOs available from the
+pseudopotential data.  Use ``abinit_nc_pao2J.py`` for exchange calculations from
+validated schema-v2 files.  The CLI can apply PAO shell filtering with
+``--shell_charge_threshold`` and ``--shell_moment_threshold`` and can restrict the
+spectral sum with ``--emax``, ``--emax_relative_to_fermi``, or a fixed number of
+empty bands via ``--n_empty``.
+
+TB2J has the metric-aware Green-function operation needed by this path.  When
+``ProjectorGreenData.overlap_k`` is present, ``ProjectorGreen`` first builds the
+covariant spectral Green function from coefficients and then applies
+
+.. math::
+
+   g(k,E)=S^{-1}(k)G_{cov}(k,E)S^{-1}(k)
+
+before the real-space Fourier transform.  Synthetic tests and optional
+real-fixture tests cover this behavior; set ``ABINIT_NC_PAO_FIXTURE`` to a real
+ABINIT NC PAO NetCDF file to enable the latter.
+
+Current limitations:
+
+* no real ABINIT NC PAO fixture is committed, so repository tests rely on
+  synthetic fixtures unless ``ABINIT_NC_PAO_FIXTURE`` is set externally;
+* unsupported cases remain SOC, noncollinear spinors, ultrasoft pseudopotentials,
+  PAW through the NC PAO path, and files whose overlap is not validated for
+  exchange;
+* diagnostic PAO ``H(k)`` arrays are not the primary TB2J exchange representation.
 
 Projector Hamiltonian ``H_ij``
 -----------------------------
