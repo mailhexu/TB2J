@@ -440,7 +440,17 @@ def component_local_operators(data, component_name, sites, source_label="project
         )
     metadata = (data.operator_component_metadata or {}).get(component_name, {})
     completeness = metadata.get("completeness")
-    if completeness not in {None, "complete", "zero_by_symmetry"}:
+    exchange_ready = str(metadata.get("exchange_ready", "")).lower()
+    if exchange_ready in {"false", "0", "no"}:
+        raise ValueError(
+            f"{source_label} operator component is not exchange-ready: "
+            f"{component_name} exchange_ready={metadata.get('exchange_ready')!r}"
+        )
+    if completeness not in {
+        None,
+        "complete",
+        "zero_by_symmetry",
+    } and exchange_ready not in {"true", "1", "yes"}:
         raise ValueError(
             f"{source_label} operator component is not exchange-ready: "
             f"{component_name} completeness={completeness!r}"

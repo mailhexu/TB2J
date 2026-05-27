@@ -7,12 +7,15 @@ import pytest
 
 from TB2J.interfaces.abinit_savetb2j import (
     compute_projector_shell_populations,
+    gen_exchange_abinit_nc_pao,
     gen_exchange_abinit_projector,
+    load_abinit_nc_pao_savetb2j,
     load_abinit_savetb2j,
     mask_local_operators_by_shell_selection,
     select_nc_pao_shells,
 )
 from TB2J.interfaces.gpaw_projector import compute_projected_charges_moments
+from TB2J.scripts.abinit_nc_pao2J import run_abinit_nc_pao2J
 from TB2J.scripts.abinit_projector2J import run_abinit_projector2J
 
 FIXTURE_DIR = (
@@ -108,6 +111,14 @@ def write_minimal_abinit_savetb2j_fixture(path):
             ("dijxc", "paw_ij%dijxc"),
             ("dijU", "paw_ij%dijU"),
             ("dijso", "paw_ij%dijso"),
+            ("smooth_xc", "pawdijhat(vxc)"),
+            ("paw_xc_onsite", "paw_ij%dijxc"),
+            ("paw_u_onsite", "paw_ij%dijU"),
+            ("delta_paw_smooth_xc", "smooth_xc+paw_xc_onsite"),
+            (
+                "delta_paw_smooth_xc_u",
+                "smooth_xc+paw_xc_onsite+paw_u_onsite",
+            ),
         ]:
             component = components.createVariable(
                 name, "f8", ("nsite", "nproj_site_max", "nproj_site_max", "complex")
@@ -115,13 +126,127 @@ def write_minimal_abinit_savetb2j_fixture(path):
             component[:] = 0.0
             if name == "delta_total":
                 component[:] = hij[0, :, :, :, :] - hij[1, :, :, :, :]
+            elif name == "smooth_xc":
+                component[0, 0, 0, :] = [0.2, 0.0]
+            elif name == "paw_xc_onsite":
+                component[0, 0, 0, :] = [0.3, 0.0]
+            elif name == "paw_u_onsite":
+                component[0, 0, 0, :] = [0.4, 0.0]
+            elif name == "delta_paw_smooth_xc":
+                component[0, 0, 0, :] = [0.5, 0.0]
+            elif name == "delta_paw_smooth_xc_u":
+                component[0, 0, 0, :] = [0.9, 0.0]
             component.source = source
             component.units = "eV"
             component.operator_basis = "abinit_native_paw_projector"
-            component.spin_treatment = "spin_difference"
-            component.completeness = (
-                "complete" if name == "delta_total" else "not_present"
+            component.spin_treatment = (
+                "up_minus_down"
+                if name.startswith(("smooth", "paw_", "delta_paw"))
+                else "spin_difference"
             )
+            component.completeness = {
+                "delta_total": "complete",
+                "smooth_xc": "smooth_site_window",
+                "paw_xc_onsite": "paw_onsite_xc",
+                "paw_u_onsite": "paw_onsite_u",
+                "delta_paw_smooth_xc": "smooth_plus_paw_onsite_xc",
+                "delta_paw_smooth_xc_u": "smooth_plus_paw_onsite_xc_u",
+            }.get(name, "not_present")
+            if name == "delta_paw_smooth_xc":
+                component.smooth_xc_included = "true"
+                component.paw_ae_minus_ps_included = "true"
+                component.hubbard_included = "false"
+                component.exchange_ready = "true"
+            elif name == "delta_paw_smooth_xc_u":
+                component.smooth_xc_included = "true"
+                component.paw_ae_minus_ps_included = "true"
+                component.hubbard_included = "true"
+                component.exchange_ready = "true"
+            elif name in {"smooth_xc", "paw_xc_onsite", "paw_u_onsite"}:
+                component.exchange_ready = "false"
+
+
+def write_minimal_nc_spherical_fixture(
+    path, include_projection=True, include_operator=True, natom=1
+):
+    netcdf4 = pytest.importorskip("netCDF4")
+
+    with netcdf4.Dataset(path, "w") as nc:
+        nc.createDimension("three", 3)
+        nc.createDimension("natom", natom)
+        nc.createDimension("ntypat", 1)
+        nc.createDimension("nproj", natom)
+        nc.createDimension("nkpt", 1)
+        nc.createDimension("nsppol", 2)
+        nc.createDimension("nband", 1)
+        nc.schema_name = "abinit.savetb2j.nc_spherical_window"
+        nc.schema_version = "1.0"
+        nc.abinit_version = "synthetic"
+        nc.basis_type = "spherical_window"
+        nc.basis_radial = "fermi_step_constant_inside"
+        nc.basis_angular = "real_spherical_harmonics"
+        nc.radius_source = "ratsph"
+        nc.operator_basis = "abinit_nc_spherical_window"
+        nc.metric_required = 1
+        nc.full_bz = 1
+        nc.spin_treatment = "up_minus_down"
+        nc.basis_lmax = 0
+        nc.soft_cutoff_width_bohr = 0.1
+        nc.fermi_energy_hartree = 0.0
+
+        nc.createVariable("typat", "i4", ("natom",))[:] = np.ones(natom, dtype=int)
+        nc.createVariable("znucl", "f8", ("ntypat",))[:] = [26]
+        xred = np.zeros((3, natom), dtype=float)
+        if natom > 1:
+            xred[0, :] = np.linspace(0.0, 0.5, natom)
+        nc.createVariable("xred", "f8", ("three", "natom"))[:] = xred
+        nc.createVariable("rprimd", "f8", ("three", "three"))[:] = np.eye(3)
+        nc.createVariable("ratsph", "f8", ("ntypat",))[:] = [2.0]
+        nc.createVariable("soft_cutoff_width", "f8")[:] = 0.1
+        nc.createVariable("projector_site", "i4", ("nproj",))[:] = np.arange(
+            1, natom + 1
+        )
+        nc.createVariable("projector_l", "i4", ("nproj",))[:] = np.zeros(
+            natom, dtype=int
+        )
+        nc.createVariable("projector_m", "i4", ("nproj",))[:] = np.zeros(
+            natom, dtype=int
+        )
+        nc.createVariable("kpoints", "f8", ("three", "nkpt"))[:] = [[0.0], [0.0], [0.0]]
+        nc.createVariable("kweights", "f8", ("nkpt",))[:] = [1.0]
+        nc.createVariable("eigenvalues", "f8", ("nband", "nkpt", "nsppol"))[:] = 0.0
+        nc.createVariable("occupations", "f8", ("nband", "nkpt", "nsppol"))[:] = 1.0
+
+        if not include_projection:
+            nc.has_coefficients = 0
+            nc.has_overlap_k = 0
+            return
+
+        nc.has_coefficients = 1
+        nc.has_overlap_k = 1
+        nc.createVariable(
+            "coefficients_real", "f8", ("nproj", "nband", "nkpt", "nsppol")
+        )[:] = 1.0
+        nc.createVariable(
+            "coefficients_imag", "f8", ("nproj", "nband", "nkpt", "nsppol")
+        )[:] = 0.0
+        nc.createVariable("overlap_k_real", "f8", ("nproj", "nproj", "nkpt"))[:] = (
+            np.eye(natom)[:, :, None]
+        )
+        nc.createVariable("overlap_k_imag", "f8", ("nproj", "nproj", "nkpt"))[:] = 0.0
+        if include_operator:
+            nc.createVariable("delta_xc_spherical_real", "f8", ("nproj", "nproj"))[
+                :
+            ] = np.eye(natom) * 0.05
+            nc.createVariable("delta_xc_spherical_imag", "f8", ("nproj", "nproj"))[
+                :
+            ] = 0.0
+            nc.createVariable("delta_spherical_xc_u_real", "f8", ("nproj", "nproj"))[
+                :
+            ] = np.eye(natom) * 0.1
+            nc.createVariable("delta_spherical_xc_u_imag", "f8", ("nproj", "nproj"))[
+                :
+            ] = 0.0
 
 
 def test_load_abinit_savetb2j_normalizes_projector_green_data(tmp_path):
@@ -154,6 +279,156 @@ def test_load_abinit_savetb2j_normalizes_projector_green_data(tmp_path):
     )
     assert data.operator_component_metadata["delta_total"]["completeness"] == "complete"
     assert data.operator_component_metadata["dijU"]["source"] == "paw_ij%dijU"
+    assert (
+        data.operator_component_metadata["delta_paw_smooth_xc"]["exchange_ready"]
+        == "true"
+    )
+    np.testing.assert_allclose(
+        data.operator_components["delta_paw_smooth_xc"][0, 0, 0], 0.5 + 0.0j
+    )
+    assert (
+        data.operator_component_metadata["delta_paw_smooth_xc_u"]["hubbard_included"]
+        == "true"
+    )
+    np.testing.assert_allclose(
+        data.operator_components["delta_paw_smooth_xc_u"][0, 0, 0], 0.9 + 0.0j
+    )
+
+
+def test_load_abinit_nc_spherical_requires_projection_arrays(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_nc_spherical_metadata_only.nc"
+    write_minimal_nc_spherical_fixture(filename, include_projection=False)
+
+    with pytest.raises(ValueError, match="coefficients"):
+        load_abinit_nc_pao_savetb2j(filename)
+
+
+def test_load_abinit_nc_spherical_window_fixture(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_nc_spherical.nc"
+    write_minimal_nc_spherical_fixture(filename, include_projection=True)
+
+    data = load_abinit_nc_pao_savetb2j(filename)
+
+    assert data.metadata["abinit_schema_name"] == "abinit.savetb2j.nc_spherical_window"
+    assert data.operator_basis == "abinit_nc_spherical_window"
+    assert data.coefficient_projector == "nc_spherical_window"
+    assert data.coefficients.shape == (2, 1, 1, 1)
+    assert data.overlap_k.shape == (1, 1, 1)
+    assert data.has_operator_component("delta_spherical_xc_u")
+    assert data.has_operator_component("delta_total")
+
+
+def test_load_abinit_nc_spherical_multi_atom_structure(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_nc_spherical_multi_atom.nc"
+    write_minimal_nc_spherical_fixture(filename, include_projection=True, natom=4)
+
+    data = load_abinit_nc_pao_savetb2j(filename)
+
+    assert data.positions.shape == (4, 3)
+    assert data.coefficients.shape == (2, 1, 1, 4)
+    assert data.overlap_k.shape == (1, 4, 4)
+    assert data.operator_components["delta_total"].shape == (4, 1, 1)
+
+
+def test_load_abinit_nc_spherical_projection_only_fixture(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_nc_spherical_projection_only.nc"
+    write_minimal_nc_spherical_fixture(
+        filename, include_projection=True, include_operator=False
+    )
+
+    data = load_abinit_nc_pao_savetb2j(filename)
+
+    assert data.coefficients.shape == (2, 1, 1, 1)
+    assert data.overlap_k.shape == (1, 1, 1)
+    assert not data.has_operator_component("delta_total")
+
+
+def test_gen_exchange_abinit_nc_pao_accepts_spherical_window(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_nc_spherical.nc"
+    output_path = tmp_path / "TB2J_results_nc_spherical"
+    write_minimal_nc_spherical_fixture(filename, include_projection=True, natom=2)
+
+    exchange_out, exchange = gen_exchange_abinit_nc_pao(
+        filename,
+        output_path=output_path,
+        Rmax=0,
+        nz=4,
+        population_mode="projector",
+        shell_charge_threshold=None,
+        shell_moment_threshold=None,
+    )
+
+    assert exchange_out == output_path / "exchange.out"
+    assert exchange_out.exists()
+    assert exchange
+    text = exchange_out.read_text(encoding="utf-8")
+    assert "norm-conserving" in text
+    assert "delta_total" in text
+    assert "abinit.savetb2j.nc_spherical_window" in text
+
+
+def test_gen_exchange_abinit_nc_pao_rejects_spherical_diagnostic_component(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_nc_spherical.nc"
+    write_minimal_nc_spherical_fixture(filename, include_projection=True)
+
+    with pytest.raises(ValueError, match="exchange_ready='false'"):
+        gen_exchange_abinit_nc_pao(
+            filename,
+            output_path=tmp_path / "unused",
+            Rmax=0,
+            nz=4,
+            operator_component="delta_xc_spherical",
+            population_mode="none",
+            shell_charge_threshold=None,
+            shell_moment_threshold=None,
+        )
+
+
+def test_abinit_savetb2j_smooth_component_exchange_ready_policy(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+
+    data = load_abinit_savetb2j(filename)
+
+    with pytest.raises(ValueError, match="exchange_ready='false'"):
+        gen_exchange_abinit_projector(
+            filename,
+            output_path=tmp_path / "TB2J_results_smooth_only",
+            operator_component="smooth_xc",
+        )
+    exchange_out, _ = gen_exchange_abinit_projector(
+        filename,
+        output_path=tmp_path / "TB2J_results_projector_population",
+        operator_component="delta_paw_smooth_xc",
+        population_mode="projector",
+    )
+    assert exchange_out.exists()
+    assert data.has_operator_component("delta_paw_smooth_xc")
+
+
+def test_gen_exchange_abinit_projector_green_population(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+
+    exchange_out, _ = gen_exchange_abinit_projector(
+        filename,
+        output_path=tmp_path / "TB2J_results_green_population",
+        operator_component="delta_paw_smooth_xc",
+        population_mode="green",
+        nz=8,
+    )
+
+    text = exchange_out.read_text()
+    assert "charge" in text.lower()
+    assert "mag" in text.lower()
 
 
 def test_load_abinit_savetb2j_generated_abinit_fixture():
@@ -237,17 +512,19 @@ def test_abinit_paw_shell_filter_rejects_incomplete_population_metric(tmp_path):
         )
 
 
-def test_abinit_exchange_rejects_projector_population_without_complete_metric(tmp_path):
+def test_abinit_exchange_projector_population_uses_sij_metric(tmp_path):
     pytest.importorskip("netCDF4")
     filename = tmp_path / "abinit_savetb2j.nc"
     write_minimal_abinit_savetb2j_fixture(filename)
 
-    with pytest.raises(ValueError, match="PAW-complete population metric"):
-        gen_exchange_abinit_projector(
-            filename,
-            output_path=tmp_path / "TB2J_results_projector_population",
-            population_mode="projector",
-        )
+    exchange_out, _ = gen_exchange_abinit_projector(
+        filename,
+        output_path=tmp_path / "TB2J_results_projector_population",
+        population_mode="projector",
+    )
+
+    text = exchange_out.read_text()
+    assert "not PAW-complete AE charges" in text
 
 
 def test_load_abinit_savetb2j_rejects_missing_full_bz(tmp_path):
@@ -429,3 +706,16 @@ def test_abinit_projector2j_cli_help_documents_workflow(monkeypatch, capsys):
     assert "delta_total" in help_text
     assert "--operator_component" in help_text
     assert "--population_mode" in help_text
+
+
+def test_abinit_nc_pao2j_cli_help_documents_spherical_window(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["abinit_nc_pao2J.py", "--help"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_abinit_nc_pao2J()
+
+    assert excinfo.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "NC spherical-window" in help_text
+    assert "delta_spherical_xc_u" in help_text
+    assert "delta_total" in help_text

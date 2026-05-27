@@ -35,6 +35,10 @@ ABINIT_NC_PAO_HS_SCHEMA_VERSION = "2"
 ABINIT_NC_PAO_OPERATOR_BASIS = "abinit_nc_pao"
 ABINIT_NC_PAO_HS_OPERATOR_BASIS = "norm_conserving_pao"
 ABINIT_NC_PAO_COEFFICIENT_SOURCE = "abinit.nc_pao"
+ABINIT_NC_SPHERICAL_SCHEMA_NAME = "abinit.savetb2j.nc_spherical_window"
+ABINIT_NC_SPHERICAL_SCHEMA_VERSION = "1.0"
+ABINIT_NC_SPHERICAL_OPERATOR_BASIS = "abinit_nc_spherical_window"
+ABINIT_NC_SPHERICAL_COEFFICIENT_SOURCE = "abinit.nc_spherical_window"
 HARTREE_TO_EV = 27.211386245988
 ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT = "spectral_spin_split"
 ABINIT_NC_PAO_ACTIVE_SHELL_OPERATOR_COMPONENT = "spectral_spin_split_active_shell"
@@ -621,13 +625,26 @@ def _component_metadata(variable):
     metadata = {}
     for name in ("source", "units", "operator_basis", "spin_treatment", "completeness"):
         metadata[name] = _require_attr(variable, name, f"component {variable.name}")
+    for name in (
+        "site_window",
+        "smooth_xc_included",
+        "paw_ae_minus_ps_included",
+        "hubbard_included",
+        "exchange_ready",
+    ):
+        if hasattr(variable, name):
+            metadata[name] = getattr(variable, name)
     if metadata["operator_basis"] != ABINIT_OPERATOR_BASIS:
         raise ValueError(
             f"ABINIT savetb2j component {variable.name} operator_basis mismatch"
         )
     if metadata["units"] != "eV":
         raise ValueError(f"ABINIT savetb2j component {variable.name} units must be eV")
-    if metadata["spin_treatment"] not in {"spin_difference", "spin_resolved"}:
+    if metadata["spin_treatment"] not in {
+        "spin_difference",
+        "spin_resolved",
+        "up_minus_down",
+    }:
         raise ValueError(
             f"ABINIT savetb2j component {variable.name} has unsupported spin_treatment"
         )
@@ -635,6 +652,11 @@ def _component_metadata(variable):
         "complete",
         "not_present",
         "zero_by_symmetry",
+        "smooth_site_window",
+        "paw_onsite_xc",
+        "paw_onsite_u",
+        "smooth_plus_paw_onsite_xc",
+        "smooth_plus_paw_onsite_xc_u",
     }:
         raise ValueError(
             f"ABINIT savetb2j component {variable.name} has unsupported completeness"
@@ -667,7 +689,7 @@ def _operator_data(operators):
     for name, variable in components_group.variables.items():
         values = _decode_complex_var(components_group, name, "operator_components")
         metadata = _component_metadata(variable)
-        if metadata["spin_treatment"] != "spin_difference":
+        if metadata["spin_treatment"] not in {"spin_difference", "up_minus_down"}:
             raise ValueError(
                 "ABINIT savetb2j v1 loader only normalizes spin_difference components"
             )
@@ -971,7 +993,171 @@ def _load_abinit_nc_pao_hs_v2(nc):
         operator_basis=ABINIT_NC_PAO_HS_OPERATOR_BASIS,
         metadata=metadata,
     )
-    data.validate(exchange_ready=True)
+    data.validate(exchange_ready=data.has_operator_component("delta_total"))
+    return data
+
+
+def _load_abinit_nc_spherical_window(nc):
+    """Load ABINIT's NC spherical-window savetb2j schema."""
+    schema_version = str(_require_attr(nc, "schema_version", "NC spherical root"))
+    if schema_version != ABINIT_NC_SPHERICAL_SCHEMA_VERSION:
+        raise ValueError("unsupported ABINIT NC spherical-window schema_version")
+    if str(_require_attr(nc, "basis_type", "NC spherical root")) != "spherical_window":
+        raise ValueError("ABINIT NC spherical-window basis_type mismatch")
+    if (
+        str(_require_attr(nc, "operator_basis", "NC spherical root"))
+        != ABINIT_NC_SPHERICAL_OPERATOR_BASIS
+    ):
+        raise ValueError("ABINIT NC spherical-window operator_basis mismatch")
+    if int(_require_attr(nc, "metric_required", "NC spherical root")) != 1:
+        raise ValueError("ABINIT NC spherical-window requires metric_required=1")
+    if int(_require_attr(nc, "full_bz", "NC spherical root")) != 1:
+        raise ValueError("ABINIT NC spherical-window full_bz metadata must be true")
+
+    for name in ("nproj", "nkpt", "nsppol", "nband", "natom", "ntypat"):
+        if name not in nc.dimensions:
+            raise ValueError(
+                f"ABINIT NC spherical-window missing required dimension: {name}"
+            )
+    if len(nc.dimensions["nsppol"]) != 2:
+        raise ValueError("ABINIT NC spherical-window requires nsppol=2")
+
+    coefficients = _decode_split_complex_var_ordered(
+        nc,
+        "coefficients",
+        "NC spherical-window",
+        ("nsppol", "nkpt", "nband", "nproj"),
+    )
+    overlap_k = _decode_split_complex_var(nc, "overlap_k", "NC spherical-window")
+    nproj = len(nc.dimensions["nproj"])
+    nkpt = len(nc.dimensions["nkpt"])
+    if overlap_k.shape == (nproj, nproj, nkpt):
+        overlap_k = np.transpose(overlap_k, (2, 0, 1))
+    site_index = _require_var(nc, "projector_site", "NC spherical-window")[:].astype(
+        int
+    )
+    if np.min(site_index) >= 1:
+        site_index = site_index - 1
+    if np.any(site_index < 0):
+        raise ValueError("ABINIT NC spherical-window projector_site must be positive")
+    site_nproj, site_projector_indices = build_site_projector_indices(site_index)
+
+    typat = _require_var(nc, "typat", "NC spherical-window")[:].astype(int)
+    znucl = _require_var(nc, "znucl", "NC spherical-window")[:]
+    atomic_numbers = znucl[typat - 1].astype(int)
+    cell = (
+        np.asarray(
+            _array_in_dimension_order(
+                _require_var(nc, "rprimd", "NC spherical-window"), ("three", "three")
+            ),
+            dtype=float,
+        )
+        * Bohr
+    )
+    xred = np.asarray(
+        _array_in_dimension_order(
+            _require_var(nc, "xred", "NC spherical-window"), ("natom", "three")
+        ),
+        dtype=float,
+    )
+    positions = xred @ cell
+    weights = _require_var(nc, "kweights", "NC spherical-window")[:]
+    if not np.isclose(np.sum(weights), 1.0):
+        weights = weights / np.sum(weights)
+    eigenvalues = (
+        _array_in_dimension_order(
+            _require_var(nc, "eigenvalues", "NC spherical-window"),
+            ("nsppol", "nkpt", "nband"),
+        )
+        * HARTREE_TO_EV
+    )
+    occupations = _optional_var(nc, "occupations")
+    if occupations is not None:
+        occupations = _array_in_dimension_order(
+            nc.variables["occupations"], ("nsppol", "nkpt", "nband")
+        )
+
+    component_sources = {}
+    delta_xc = _decode_split_complex_var(
+        nc, "delta_xc_spherical", "NC spherical-window", required=False
+    )
+    delta_u = _decode_split_complex_var(
+        nc, "delta_u_spherical", "NC spherical-window", required=False
+    )
+    delta_total = _decode_split_complex_var(
+        nc, "delta_spherical_xc_u", "NC spherical-window", required=False
+    )
+    if delta_xc is not None:
+        component_sources["delta_xc_spherical"] = delta_xc
+    if delta_u is not None:
+        component_sources["delta_u_spherical"] = delta_u
+    if delta_total is not None:
+        component_sources["delta_spherical_xc_u"] = delta_total
+        component_sources["delta_total"] = delta_total
+
+    operator_components = {}
+    operator_component_metadata = {}
+    for name, matrix in component_sources.items():
+        component = pack_site_hij(
+            matrix[None, :, :] * HARTREE_TO_EV, site_projector_indices, site_nproj
+        )[0]
+        operator_components[name] = component
+        operator_component_metadata[name] = {
+            "source": "abinit.savetb2j.nc_spherical_window",
+            "units": "eV",
+            "operator_basis": ABINIT_NC_SPHERICAL_OPERATOR_BASIS,
+            "spin_treatment": "up_minus_down",
+            "completeness": "xc_plus_u"
+            if name in {"delta_spherical_xc_u", "delta_total"}
+            else "diagnostic",
+            "exchange_ready": "true"
+            if name in {"delta_spherical_xc_u", "delta_total"}
+            else "false",
+        }
+
+    efermi = float(_nc_pao_hs_attr(nc, "fermi_energy_hartree", 0.0)) * HARTREE_TO_EV
+    metadata = {
+        "abinit_schema_name": ABINIT_NC_SPHERICAL_SCHEMA_NAME,
+        "abinit_schema_version": schema_version,
+        "storage_level": "spectral",
+        "kpoint_set": "full_bz",
+        "coefficient_source": ABINIT_NC_SPHERICAL_COEFFICIENT_SOURCE,
+        "operator_basis": ABINIT_NC_SPHERICAL_OPERATOR_BASIS,
+        "basis_lmax": _nc_pao_hs_attr(nc, "basis_lmax", None),
+        "soft_cutoff_width_bohr": _nc_pao_hs_attr(nc, "soft_cutoff_width_bohr", None),
+    }
+
+    data = ProjectorGreenData(
+        kpoints=_array_in_dimension_order(
+            _require_var(nc, "kpoints", "NC spherical-window"), ("nkpt", "three")
+        ),
+        weights=weights,
+        eigenvalues=eigenvalues,
+        occupations=occupations,
+        coefficients=coefficients,
+        efermi=efermi,
+        projector_site=site_index,
+        projector_atom=site_index,
+        cell=cell,
+        positions=positions,
+        atomic_numbers=atomic_numbers,
+        projector_l=_optional_var(nc, "projector_l"),
+        projector_m=_optional_var(nc, "projector_m"),
+        projector_radial=np.zeros(coefficients.shape[-1], dtype=int),
+        overlap_k=overlap_k,
+        site_nproj=site_nproj,
+        site_projector_indices=site_projector_indices,
+        operator_components=operator_components,
+        operator_component_metadata=operator_component_metadata,
+        coefficient_source=ABINIT_NC_SPHERICAL_COEFFICIENT_SOURCE,
+        coefficient_projector="nc_spherical_window",
+        channel_interpretation="real_spherical_harmonic_window",
+        overlap_metric_definition="k-dependent NC spherical-window overlap_k",
+        population_metric="unavailable: k-dependent spherical-window overlap_k is not a population metric",
+        operator_basis=ABINIT_NC_SPHERICAL_OPERATOR_BASIS,
+        metadata=metadata,
+    )
+    data.validate(exchange_ready=data.has_operator_component("delta_total"))
     return data
 
 
@@ -984,6 +1170,8 @@ def load_abinit_nc_pao_savetb2j(filename):
 
     with Dataset(Path(filename)) as nc:
         schema_name = getattr(nc, "schema_name", None)
+        if schema_name == ABINIT_NC_SPHERICAL_SCHEMA_NAME:
+            return _load_abinit_nc_spherical_window(nc)
         if schema_name == ABINIT_NC_PAO_HS_SCHEMA_NAME:
             return _load_abinit_nc_pao_hs_v2(nc)
         _validate_required_dimensions(nc)
@@ -1175,14 +1363,8 @@ def gen_exchange_abinit_projector(
 ):
     """Generate projector exchange output from an ABINIT ``savetb2j`` file."""
     data = load_abinit_savetb2j(filename)
-    if population_mode == "projector" and data.population_metric_matrix is None:
-        raise ValueError(
-            "ABINIT savetb2j v1 does not export a PAW-complete population metric. "
-            "The exported overlap_metric is only the nonlocal sij correction; "
-            "smooth pseudo-density/local PAW charge information is missing. "
-            "Use population_mode='none' until ABINIT exports PAW-consistent "
-            "charge and magnetic moment diagnostics."
-        )
+    if population_mode not in {"none", "projector", "green"}:
+        raise ValueError(f"unsupported population_mode: {population_mode}")
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
@@ -1214,11 +1396,25 @@ def gen_exchange_abinit_projector(
         f"{operator_component or 'delta_total'} in basis {data.operator_basis}. "
         f"Shell charge threshold: {shell_charge_threshold}. "
         f"Shell moment threshold: {shell_moment_threshold}. "
+        f"Population mode: {population_mode}; projector populations use the "
+        "exported nonlocal PAW sij metric and are not PAW-complete AE charges. "
         "Values are from the controlled projector exchange-like trace. "
         f"ABINIT version: {data.metadata.get('abinit_version', 'unknown')}; "
         f"schema: {data.metadata.get('abinit_schema_name')} "
         f"{data.metadata.get('abinit_schema_version')}.\n"
     )
+    charges = None
+    spinat = None
+    output_population_mode = population_mode
+    if population_mode == "green":
+        density = projector_charge_moments_from_green(
+            ProjectorGreen(data), CFR(nz=nz, T=smearing_eV / kB), sites=sites
+        )
+        charges = np.zeros(len(data.atomic_numbers), dtype=float)
+        spinat = np.zeros((len(data.atomic_numbers), 3), dtype=float)
+        charges[: len(density["charges"])] = density["charges"]
+        spinat[: density["spinat"].shape[0]] = density["spinat"]
+        output_population_mode = "none"
     return write_projector_exchange_out(
         data,
         path=output_path,
@@ -1228,7 +1424,9 @@ def gen_exchange_abinit_projector(
         magnetic_elements=magnetic_elements,
         index_magnetic_atoms=index_magnetic_atoms,
         description=description,
-        population_mode=population_mode,
+        population_mode=output_population_mode,
+        charges=charges,
+        spinat=spinat,
         Rcut=Rcut,
         local_operators=local_operators,
     )

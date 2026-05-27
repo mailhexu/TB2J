@@ -42,10 +42,31 @@ def _is_gpu_available():
             devices = _jax.devices()
             for d in devices:
                 if d.platform != "cpu":
-                    return d.platform
+                    if _check_jax_runtime(d):
+                        return d.platform
         except Exception:
             return None
     return None
+
+
+def _check_jax_runtime(device=None):
+    """Verify that JAX can execute a small operation on the selected device."""
+    if not _check_jax():
+        return False
+    try:
+        if device is None:
+            devices = [d for d in _jax.devices() if d.platform != "cpu"]
+            device = devices[0] if devices else None
+        if device is None:
+            return False
+        with _jax.default_device(device):
+            int_x = _jnp.array([(0, 0, 0), (1, 0, 0)])
+            float_x = _jnp.array([1.0])
+        _jnp.sum(float_x).block_until_ready()
+        _jnp.sum(int_x).block_until_ready()
+        return True
+    except Exception:
+        return False
 
 
 def _require_jax():
@@ -54,6 +75,16 @@ def _require_jax():
         raise ImportError(
             "JAX is required for GPU accelerated version of TB2J but is not installed. "
             "Install it with: pip install jax jaxlib"
+        )
+
+
+def _require_jax_runtime():
+    """Raise RuntimeError if JAX cannot execute on an accelerator."""
+    if not _check_jax_runtime():
+        raise RuntimeError(
+            "JAX found an accelerator but failed to initialize its runtime. "
+            "This is usually a CUDA/cuDNN/JAX installation issue. "
+            "Run without --use_gpu to use the CPU path, or fix the JAX GPU stack."
         )
 
 

@@ -14,7 +14,9 @@ def run_abinit_projector2J():
     parser = argparse.ArgumentParser(
         description=(
             "Calculate TB2J-style exchange parameters from an ABINIT savetb2j "
-            "PAW projector NetCDF file. The default operator component is delta_total."
+            "PAW projector NetCDF file. The default operator component is delta_total; "
+            "new PAW smooth-XC files may use delta_paw_smooth_xc or "
+            "delta_paw_smooth_xc_u."
         ),
         epilog=(
             "Typical workflow: run ABINIT with savetb2j 1, then pass the generated "
@@ -64,15 +66,20 @@ def run_abinit_projector2J():
     parser.add_argument(
         "--operator_component",
         default="delta_total",
-        help="ABINIT operator component to use for exchange; default: delta_total",
+        help=(
+            "ABINIT operator component to use for exchange. Use delta_paw_smooth_xc "
+            "for smooth XC plus onsite PAW XC, or delta_paw_smooth_xc_u when PAW+U "
+            "is active and exported. Default: delta_total"
+        ),
     )
     parser.add_argument(
         "--population_mode",
-        choices=("none", "projector"),
-        default="none",
+        choices=("none", "green", "projector"),
+        default="projector",
         help=(
-            "source for exchange.out atom charge/moment fields; ABINIT savetb2j "
-            "v1 supports only 'none' because PAW-complete populations are not exported"
+            "source for exchange.out atom charge/moment fields. projector uses "
+            "the exported nonlocal PAW sij metric as a projector-space diagnostic; "
+            "green uses contour integration; none writes zeros. Default: projector"
         ),
     )
     parser.add_argument(

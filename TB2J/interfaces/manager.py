@@ -11,6 +11,8 @@ class Manager:
         print("Starting to calculate exchange.")
         use_gpu = kwargs.get("use_gpu", False)
         ExchangeClass = self.select_exchange(colinear, use_gpu=use_gpu)
+        use_gpu = use_gpu and ExchangeClass in (ExchangeCL2GPU, ExchangeNCLGPU)
+        kwargs["use_gpu"] = use_gpu
 
         output_path = kwargs.get("output_path", "TB2J_results")
         exchange = ExchangeClass(tbmodels=models, atoms=atoms, basis=basis, **kwargs)
@@ -28,6 +30,16 @@ class Manager:
         print(f"All calculation finished. The results are in {output_path} directory.")
 
     def select_exchange(self, colinear, qspace=False, use_gpu=False):
+        if use_gpu:
+            from TB2J.gpu.jax_utils import _is_gpu_available
+
+            platform = _is_gpu_available()
+            if platform is None:
+                print(
+                    "GPU requested, but JAX accelerator runtime is not usable. "
+                    "Falling back to CPU."
+                )
+                use_gpu = False
         if colinear:
             if qspace:
                 return ExchangeCLQspace

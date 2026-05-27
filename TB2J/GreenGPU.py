@@ -114,6 +114,10 @@ class TBGreenGPU(TBGreen):
 
         print("Using GPU for eigenvalue/eigenvector computation...")
 
+        from TB2J.gpu.jax_utils import _require_jax_runtime
+
+        _require_jax_runtime()
+
         # Compute eigenvalues and eigenvectors on GPU
         self.evals, self.evecs, Sk_all = _prepare_eigen_gpu(self.tbmodel, self.kpts)
 

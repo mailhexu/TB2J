@@ -17,11 +17,18 @@ def run_abinit_nc_pao2J():
     parser = argparse.ArgumentParser(
         description=(
             "Calculate TB2J-style exchange parameters from an ABINIT "
-            "norm-conserving PAO savetb2j NetCDF file. The default operator "
-            f"component is {ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT}."
+            "norm-conserving PAO or NC spherical-window savetb2j NetCDF file. "
+            "For spherical-window files, the combined XC+U component is loaded "
+            "as delta_total. The default operator component is "
+            f"{ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT}, falling back to "
+            "delta_total when spectral_spin_split is unavailable."
         )
     )
-    parser.add_argument("--input", required=True, help="ABINIT NC PAO savetb2j file")
+    parser.add_argument(
+        "--input",
+        required=True,
+        help="ABINIT NC PAO or NC spherical-window savetb2j file",
+    )
     parser.add_argument(
         "--output_path",
         default="TB2J_results_abinit_nc_pao",
@@ -65,7 +72,9 @@ def run_abinit_nc_pao2J():
         "--operator_component",
         default=ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT,
         help=(
-            "ABINIT NC PAO operator component to use; default: "
+            "ABINIT NC PAO or NC spherical-window operator component to use; "
+            "spherical-window exchange-ready files provide delta_total from "
+            "delta_spherical_xc_u. Default: "
             f"{ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT}"
         ),
     )
