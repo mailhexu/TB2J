@@ -192,6 +192,31 @@ def cmd_symmetrize(args):
     print("  Done!")
 
 
+def cmd_supercell(args):
+    """Map TB2J results to a supercell."""
+    from TB2J.io_exchange.edit import load, make_supercell, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    if len(args.matrix) not in (3, 9):
+        print("Error: --matrix must contain either 3 or 9 integers")
+        sys.exit(1)
+
+    print(f"Mapping to supercell with matrix values: {args.matrix}")
+    sc_spinio = make_supercell(spinio, args.matrix, center=args.center)
+    print(f"  Atoms: {len(spinio.atoms)} -> {len(sc_spinio.atoms)}")
+    print(
+        "  Magnetic spins: "
+        f"{max(spinio.index_spin) + 1 if max(spinio.index_spin) >= 0 else 0} -> "
+        f"{max(sc_spinio.index_spin) + 1 if max(sc_spinio.index_spin) >= 0 else 0}"
+    )
+
+    print(f"Saving to: {args.output}")
+    save(sc_spinio, args.output)
+    print("  Done!")
+
+
 def cmd_remove_sublattice(args):
     """Remove interactions associated with a sublattice."""
     from TB2J.io_exchange.edit import load, remove_sublattice, save
@@ -367,6 +392,29 @@ def main():
         help="Symmetry precision in Angstrom (default: 1e-3)",
     )
     parser_symm.set_defaults(func=cmd_symmetrize)
+
+    parser_supercell = subparsers.add_parser(
+        "supercell", help="Map exchange parameters to a supercell"
+    )
+    parser_supercell.add_argument(
+        "-i", "--input", required=True, help="Input result directory or TB2J.pickle"
+    )
+    parser_supercell.add_argument(
+        "-o", "--output", required=True, help="Output directory"
+    )
+    parser_supercell.add_argument(
+        "--matrix",
+        nargs="+",
+        type=int,
+        required=True,
+        help="Supercell matrix as 3 diagonal integers or 9 full-matrix integers",
+    )
+    parser_supercell.add_argument(
+        "--center",
+        action="store_true",
+        help="Use centered supercell vectors from supercellmap",
+    )
+    parser_supercell.set_defaults(func=cmd_supercell)
 
     parser_rm_sub = subparsers.add_parser(
         "remove-sublattice",

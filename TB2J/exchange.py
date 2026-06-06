@@ -1003,6 +1003,11 @@ class ExchangeNCL(Exchange):
         #    pickle.dump({'Jiso_orb': self.Jiso_orb,
         #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
+    def run(self, path="TB2J_results"):
+        self.calculate_all()
+        self.write_output(path=path)
+        self.finalize()
+
 
 class ExchangeCL(ExchangeNCL):
     def set_tbmodels(self, tbmodels):

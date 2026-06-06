@@ -18,8 +18,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from ase import Atoms
 
-from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+from TB2J.magnon.magnon3 import Magnon, plot_magnon_bands_from_TB2J
 from TB2J.magnon.magnon_dos import plot_magnon_dos_from_TB2J
 from TB2J.magnon.magnon_parameters import MagnonParameters
 
@@ -77,6 +78,69 @@ class TestMagnonBandsDefault:
             data = json.load(f)
         assert "energies" in data
         assert len(data["energies"]) == 50
+
+    def test_primitive_kpath_folds_by_requested_supercell_matrix(self, temp_output_dir):
+        """Primitive q-points fold to supercell coordinates by q_prim @ S.T."""
+        supercell_matrix = np.array([[1, 1, 0], [1, 0, 1], [0, 1, 1]])
+        primitive_cell = Atoms("H", cell=np.eye(3), pbc=True)
+        output_file = Path(temp_output_dir) / "folded_bands.png"
+
+        magnon = Magnon(
+            nspin=1,
+            magmom=np.array([[0.0, 0.0, 1.0]]),
+            Rlist=np.zeros((1, 3), dtype=int),
+            JR=np.zeros((1, 1, 1, 3, 3)),
+            cell=supercell_matrix @ primitive_cell.get_cell().array,
+            _Q=np.zeros(3),
+            _uz=np.array([[0.0, 0.0, 1.0]]),
+            _n=np.array([0.0, 0.0, 1.0]),
+            primitive_cell=primitive_cell,
+            supercell_matrix=supercell_matrix,
+        )
+        captured = {}
+
+        def _fake_energies(kpoints):
+            captured["kpoints"] = np.array(kpoints)
+            return np.zeros((len(kpoints), 1))
+
+        magnon._magnon_energies = _fake_energies
+
+        magnon.plot_magnon_bands(
+            npoints=20,
+            use_primitive_kpath=True,
+            filename=str(output_file),
+            show=False,
+        )
+
+        kpoints = captured["kpoints"]
+        assert np.any(np.all(np.isclose(kpoints, [1.0, 0.5, 0.5]), axis=1))
+        assert np.any(np.all(np.isclose(kpoints, [0.5, 0.0, 0.5]), axis=1))
+
+    def test_gamma_label_is_latex_in_output(self):
+        """Gamma points should remain LaTeX-formatted in generated labels."""
+        cell = Atoms("H", cell=np.eye(3), pbc=True)
+        magnon = Magnon(
+            nspin=1,
+            magmom=np.array([[0.0, 0.0, 1.0]]),
+            Rlist=np.array([[0, 0, 0]], dtype=int),
+            JR=np.zeros((1, 1, 1, 3, 3)),
+            cell=cell.get_cell(),
+            _Q=np.zeros(3),
+            _uz=np.array([[0.0, 0.0, 1.0]]),
+            _n=np.array([0.0, 0.0, 1.0]),
+        )
+
+        magnon._magnon_energies = lambda kpoints: np.zeros((len(kpoints), 1))
+
+        labels, _bands, _xlist = magnon.get_magnon_bands(
+            path="GX",
+            npoints=30,
+            use_primitive_kpath=False,
+        )
+
+        label_values = [label for _, label in labels]
+        assert r"$\Gamma$" in label_values
+        assert "Gamma" not in label_values
 
 
 class TestMagnonBandsNoDMI:

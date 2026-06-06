@@ -10,6 +10,8 @@ This directory contains examples for calculating magnon band structures and DOS 
 | `magnon_bands_no_dmi.py` | Band structure without DMI and anisotropic exchange |
 | `magnon_bands_custom_qpoints.py` | Band structure with custom q-points |
 | `magnon_dos.py` | DOS calculation |
+| `sprkkr_ruo2_magnon.py` | Build RuO2 magnon bands from SPRKKR exchange data |
+| `sprkkr_ruo2_tb2j_results.py` | Convert RuO2 SPRKKR exchange data to a full `TB2J_sprkkr_results` directory |
 
 ## Shell Scripts
 
@@ -38,6 +40,12 @@ This directory contains examples for calculating magnon band structures and DOS 
 cd TB2J
 source .venv/bin/activate
 python examples/magnon/magnon_bands.py
+```
+
+To generate a TB2J result directory from the bundled SPRKKR RuO2 reference data:
+
+```bash
+python examples/magnon/sprkkr_ruo2_tb2j_results.py
 ```
 
 ### Shell Scripts

@@ -178,7 +178,8 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                     e_batch_size=exargs.get("e_batch_size", None),
                 )
             else:
-                exchange.run(path=output_path)
+                exchange.calculate_all()
+                exchange.write_output(path=output_path)
             print("\n")
             print(
                 f"All calculation finished. The results are in {output_path} directory."
@@ -235,7 +236,16 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                     efermi=None,  # set to None, compute from efermi.
                     **exargs,
                 )
-                exchange.run(path=output_path_full)
+                if use_gpu:
+                    exchange.run(
+                        path=output_path_full,
+                        use_gpu=use_gpu,
+                        vectorize_energy=exargs.get("vectorize_energy", False),
+                        e_batch_size=exargs.get("e_batch_size", None),
+                    )
+                else:
+                    exchange.calculate_all()
+                    exchange.write_output(path=output_path_full)
                 print("\n")
                 print(
                     f"All calculation finished. The results are in {output_path_full} directory."

@@ -82,6 +82,18 @@ def add_band_specific_args_to_group(group) -> None:
         default="magnon_bands.png",
         help="Output file name for band structure (default: magnon_bands.png)",
     )
+    group.add_argument(
+        "--use-primitive-kpath",
+        action="store_true",
+        default=False,
+        dest="use_primitive_kpath",
+        help=(
+            "Generate the high-symmetry k-path in the primitive-cell BZ and "
+            "fold k-points into the supercell reciprocal lattice. Requires "
+            "primitive_cell/supercell_matrix stored in the TB2J pickle "
+            "(set by TB2J_edit supercell / make_supercell)."
+        ),
+    )
 
 
 def add_dos_specific_args_to_group(group) -> None:
@@ -148,6 +160,16 @@ def main():
     else:
         if args.window is not None:
             window = tuple(args.window)
+        spin_conf = None
+        if args.spin_conf:
+            if len(args.spin_conf) % 3 != 0:
+                raise ValueError(
+                    f"--spin-conf must have 3n values (mx my mz for each spin), "
+                    f"got {len(args.spin_conf)} values"
+                )
+            spin_conf = [
+                args.spin_conf[i : i + 3] for i in range(0, len(args.spin_conf), 3)
+            ]
         params = MagnonParameters(
             path=args.path,
             Jiso=args.Jiso,
@@ -155,6 +177,7 @@ def main():
             SIA=args.SIA,
             DMI=args.DMI,
             spin_conf_file=args.spin_conf_file,
+            spin_conf=spin_conf,
             show=args.show,
         )
 
@@ -190,10 +213,12 @@ def main():
             uz_file=params.uz_file,
             n=params.n,
             spin_conf_file=params.spin_conf_file,
+            spin_conf=params.spin_conf,
             show=params.show,
             kpath=args.kpath,
             npoints=args.npoints,
             qpoints=qpoints,
+            use_primitive_kpath=getattr(args, "use_primitive_kpath", False),
         )
         plot_magnon_bands_from_TB2J(band_params)
 
@@ -209,6 +234,7 @@ def main():
             uz_file=params.uz_file,
             n=params.n,
             spin_conf_file=params.spin_conf_file,
+            spin_conf=params.spin_conf,
             show=params.show,
             kmesh=args.kmesh,
             gamma=args.gamma,

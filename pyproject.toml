@@ -41,6 +41,7 @@ dependencies = [
     "HamiltonIO>=0.3.0",
     "pre-commit",
     "sympair>=0.1.4",
+    "supercellmap",
     "tomli>=2.0.0",
     "tomli-w>=1.0.0",
     "typing_extensions",
@@ -72,8 +73,10 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "TB2J_symmetrize.py" = "TB2J.symmetrize_J:symmetrize_J_cli"
 "lawaf2J.py" = "TB2J.interfaces.lawaf_interface:lawaf2J_cli"
 "TB2J_edit.py" = "TB2J.scripts.TB2J_edit:main"
+"TB2J_edit" = "TB2J.scripts.TB2J_edit:main"
 "TB2J_plot_exchange.py" = "TB2J.scripts.TB2J_plot_exchange:main"
 "dmft2J.py" = "TB2J.scripts.dmft2J:run_dmft2J"
+"sprkkr2magnon.py" = "TB2J.scripts.sprkkr2magnon:main"
 
 
 [tool.setuptools]

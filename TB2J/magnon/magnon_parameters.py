@@ -37,6 +37,7 @@ class MagnonParameters:
     kpath: Optional[str] = None
     npoints: int = 300
     qpoints: Optional[dict] = None
+    use_primitive_kpath: bool = False
 
     kmesh: List[int] = field(default_factory=lambda: [20, 20, 20])
     gamma: bool = True
@@ -240,6 +241,18 @@ def add_band_specific_args(parser: argparse.ArgumentParser) -> None:
         "--output",
         default="magnon_bands.png",
         help="Output file name (default: magnon_bands.png)",
+    )
+    parser.add_argument(
+        "--use-primitive-kpath",
+        action="store_true",
+        default=False,
+        dest="use_primitive_kpath",
+        help=(
+            "If the TB2J result is a supercell, generate the high-symmetry "
+            "k-path in the primitive-cell BZ and fold k-points into the "
+            "supercell reciprocal lattice.  Has no effect if no "
+            "primitive_cell is stored in the TB2J result."
+        ),
     )
 
 

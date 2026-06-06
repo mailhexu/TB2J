@@ -79,7 +79,7 @@ class MagnonBand:
                 for band in segment_bands:
                     ax.plot(
                         x,
-                        band[start_idx : start_idx + nbands] + shift,
+                        band + shift,
                         linewidth=linewidth,
                         color=color,
                         linestyle=linestyle,
@@ -138,10 +138,17 @@ class MagnonBand:
         if not filename.endswith(".json"):
             filename = filename + ".json"
 
+        def _json_number(value):
+            if isinstance(value, np.integer):
+                return int(value)
+            if isinstance(value, np.floating):
+                return float(value)
+            return value
+
         data = {
             "kpoints": self.kpoints.tolist(),
             "energies": self.energies.tolist(),
-            "kpath_labels": [(int(i), str(l)) for i, l in self.kpath_labels],
+            "kpath_labels": [(_json_number(i), str(l)) for i, l in self.kpath_labels],
             "special_points": {k: v.tolist() for k, v in self.special_points.items()},
             "xcoords": self.xcoords.tolist()
             if isinstance(self.xcoords, np.ndarray)
