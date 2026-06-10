@@ -369,6 +369,9 @@ def test_gen_exchange_abinit_projector_uses_delta_total_by_default(tmp_path):
 
     assert exchange_out == output_path / "exchange.out"
     assert exchange_out.exists()
+    assert (output_path / "TB2J.pickle").exists()
+    assert (output_path / "structure.vasp").exists()
+    assert (output_path / "Multibinit" / "exchange.xml").exists()
     assert exchange
     text = exchange_out.read_text(encoding="utf-8")
     assert "ABINIT savetb2j" in text
@@ -414,6 +417,7 @@ def test_abinit_projector2j_cli_writes_exchange(tmp_path, monkeypatch, capsys):
     run_abinit_projector2J()
 
     assert (output_path / "exchange.out").exists()
+    assert (output_path / "TB2J.pickle").exists()
     assert "Wrote" in capsys.readouterr().out
 
 

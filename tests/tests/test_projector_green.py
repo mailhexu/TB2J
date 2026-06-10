@@ -1047,7 +1047,7 @@ def test_projector_green_rejects_ill_conditioned_overlap_k():
         green.get_Gk(0, energy=1.0 + 0.4j)
 
 
-def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
+def test_abinit_nc_pao_exchange_api_writes_standard_tb2j_outputs(tmp_path):
     from TB2J.interfaces.abinit_savetb2j import gen_exchange_abinit_nc_pao
 
     filename = tmp_path / "abinit_nc_pao_savetb2j.nc"
@@ -1063,6 +1063,12 @@ def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
     )
 
     assert exchange_out.is_file()
+    assert (output_path / "TB2J.pickle").is_file()
+    assert (output_path / "structure.vasp").is_file()
+    assert (output_path / "Multibinit" / "exchange.xml").is_file()
+    assert (output_path / "Vampire" / "input").is_file()
+    assert (output_path / "TomASD").is_dir()
+    assert (output_path / "ESPInS" / "espins.in").is_file()
     assert jdict
 
 
@@ -1123,6 +1129,7 @@ def test_abinit_nc_pao_cli_writes_exchange_out(tmp_path, monkeypatch):
     run_abinit_nc_pao2J()
 
     assert (output_path / "exchange.out").is_file()
+    assert (output_path / "TB2J.pickle").is_file()
 
 
 def test_project_potential_to_hij_for_non_paw_projectors():
