@@ -978,6 +978,11 @@ class ExchangeNCL(Exchange):
             else:
                 self.index_spin.append(-1)
 
+    def run(self, path="TB2J_results"):
+        self.calculate_all()
+        self.write_output(path=path)
+        self.finalize()
+
     def write_output(self, path="TB2J_results"):
         self._prepare_index_spin()
         output = SpinIO(
