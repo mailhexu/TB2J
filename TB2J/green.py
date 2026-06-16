@@ -97,6 +97,7 @@ class TBGreen:
         nproc=1,
         initial_emin=-25,
         smearing_width=0.01,
+        use_gpu=False,
     ):
         """
         :param tbmodel: A tight binding model
@@ -110,7 +111,33 @@ class TBGreen:
         :param cache_path: path to store cache
         :param nproc: number of processes to use
         :param emin: minimum energy relative to fermi level to consider
+        :param use_gpu: if True, use TBGreenGPU for GPU acceleration
         """
+        # Use GPU-accelerated Green's function if requested
+        if use_gpu:
+            # Import here to avoid JAX import when not using GPU
+            from TB2J.GreenGPU import TBGreenGPU
+
+            gpu_instance = TBGreenGPU(
+                tbmodel=tbmodel,
+                kmesh=kmesh,
+                ibz=ibz,
+                efermi=efermi,
+                gamma=gamma,
+                kpts=kpts,
+                kweights=kweights,
+                k_sym=k_sym,
+                use_cache=use_cache,
+                cache_path=cache_path,
+                nproc=nproc,
+                initial_emin=initial_emin,
+                smearing_width=smearing_width,
+            )
+            # Copy all attributes from GPU instance to self
+            self.__dict__.update(gpu_instance.__dict__)
+            return
+
+        # CPU initialization
         self.initial_emin = initial_emin
         self.tbmodel = tbmodel
         self.is_orthogonal = tbmodel.is_orthogonal
@@ -119,6 +146,7 @@ class TBGreen:
         self.efermi = efermi
         self._use_cache = use_cache
         self.cache_path = cache_path
+        self.use_gpu = use_gpu
         if use_cache:
             self._prepare_cache()
         self.prepare_kpts(
@@ -239,6 +267,8 @@ class TBGreen:
             self.S = np.zeros((nkpts, self.nbasis, self.nbasis), dtype=complex)
         else:
             self.S = None
+
+        # CPU computation using multiprocessing
         if self.nproc == 1:
             results = map(self.tbmodel.HSE_k, self.kpts)
         else:
@@ -409,13 +439,37 @@ class TBGreen:
     def get_density(self):
         return np.real(np.diag(self.get_density_matrix()))
 
-    def get_Gk(self, ik, energy, evals=None, evecs=None):
+    def get_Gk(self, ik, energy, evals=None, evecs=None, ispin=0):
         """Green's function G(k) for one energy
         G(\epsilon)= (\epsilon I- H)^{-1}
         :param ik: indices for kpoint
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
+        if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
+            # DMFT case
+            sigma = self.tbmodel.get_sigma(energy, ispin=ispin)
+            # sigma has shape (n_spin, n_orb, n_orb)
+
+            if hasattr(self.tbmodel, "get_hamiltonian"):
+                Hk = self.tbmodel.get_hamiltonian(self.kpts[ik], ispin=ispin)
+            else:
+                Hk = self.tbmodel.gen_ham(self.kpts[ik])
+
+            Sk = self.get_Sk(ik)
+            if Sk is None:
+                Sk = np.eye(Hk.shape[0])
+
+            # For now, if sigma has 2 spins, we return a (2, norb, norb) Gk
+            # or we need to know if the system is NCL.
+            if sigma.ndim == 3:
+                Gk = np.zeros(sigma.shape, dtype=complex)
+                for s in range(sigma.shape[0]):
+                    Gk[s] = np.linalg.inv((energy + self.efermi) * Sk - (Hk + sigma[s]))
+            else:
+                Gk = np.linalg.inv((energy + self.efermi) * Sk - (Hk + sigma))
+            return Gk
+
         if evals is None:
             evals = self.get_evalue(ik)
         if evecs is None:
@@ -431,12 +485,16 @@ class TBGreen:
         # Gk = np.linalg.inv((energy+self.efermi)*self.S[ik,:,:] - self.H[ik,:,:])
         return Gk
 
-    def get_Gk_all(self, energy):
+    def get_Gk_all(self, energy, ispin=0):
         """Green's function G(k) for one energy for all kpoints"""
+        if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
+            Gk0 = self.get_Gk(0, energy, ispin=ispin)
+            Gk_all = np.zeros((self.nkpts,) + Gk0.shape, dtype=complex)
+            Gk_all[0] = Gk0
+            for ik in range(1, self.nkpts):
+                Gk_all[ik] = self.get_Gk(ik, energy, ispin=ispin)
+            return Gk_all
         if self._use_cache:
-            # If using cache, self.evecs is a memmap.
-            # We can still use it, or we might want to be careful.
-            # But eigen_to_G should handle it.
             return eigen_to_G(self.evals, self.evecs, self.efermi, energy)
         else:
             return eigen_to_G(self.evals, self.evecs, self.efermi, energy)
@@ -445,7 +503,7 @@ class TBGreen:
         Rvecs = np.array(Rpts)
         phase = np.exp(self.k2Rfactor * np.einsum("ni,mi->nm", Rvecs, kpts))
         phase *= self.kweights[None]
-        GR = np.einsum("kij,rk->rij", Gks, phase, optimize="optimal")
+        GR = np.einsum("k...,rk->r...", Gks, phase, optimize="optimal")
         return GR
 
     def get_GR(self, Rpts, energy, Gk_all=None):

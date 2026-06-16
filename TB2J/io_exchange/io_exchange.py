@@ -390,7 +390,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if Ja is not None:
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
-
         if SIA and i == j and np.linalg.norm(R) < 0.001:
             if (
                 self.has_sia_tensor
@@ -499,7 +498,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         elif order == "ij33":
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
             for iR, R in enumerate(self.Rlist):
-                print(f"R={R}")
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(
                     R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
@@ -573,7 +571,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_pickle(path=path)
         self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
         self.write_txt(path=path)
-        if self.Jiso_orb:
+        if self.Jiso_orb or self.DMI_orb or self.Jani_orb or self.dJdx_orb:
             self.write_txt(
                 path=path,
                 fname="exchange_orb_decomposition.out",

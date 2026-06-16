@@ -32,6 +32,9 @@ def gen_exchange_abacus(
     orb_decomposition=False,
     index_magnetic_atoms=None,
     description=None,
+    use_gpu=False,
+    vectorize_energy=True,
+    e_batch_size=None,
 ):
     outpath = Path(path) / f"OUT.{suffix}"
 
@@ -67,6 +70,9 @@ data directory: {outpath}
             orb_decomposition=orb_decomposition,
             index_magnetic_atoms=index_magnetic_atoms,
             description=description,
+            use_gpu=use_gpu,
+            vectorize_energy=vectorize_energy,
+            e_batch_size=e_batch_size,
         )
         exchange.run(path=output_path)
         print("\n")
@@ -95,6 +101,9 @@ data directory: {outpath}
             orb_decomposition=orb_decomposition,
             index_magnetic_atoms=index_magnetic_atoms,
             description=description,
+            use_gpu=use_gpu,
+            vectorize_energy=vectorize_energy,
+            e_batch_size=e_batch_size,
         )
         exchange.run(path=output_path)
         print("\n")

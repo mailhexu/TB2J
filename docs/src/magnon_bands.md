@@ -1,67 +1,198 @@
-# Magnon Band Structure Plotting
+# Magnon Band Structure and DOS Plotting
 
-TB2J provides functionality to calculate and plot magnon band structures from the exchange parameters. This can be done either through the Python interface or using the command-line tool.
+TB2J provides a unified command-line tool `TB2J_magnon.py` to calculate and plot magnon band structures and density of states (DOS) from exchange parameters.
 
-## Python Interface
-
-### Band Structure Data and Plotting
-
-When you plot the magnon band structure using any of the available methods, the data is automatically saved to a JSON file (with the same name as the output figure but with .json extension). Additionally, an executable Python script `plot_magnon_bands.py` is created that can be used to replot the data.
-
-```bash
-# Original plotting command
-TB2J_plot_magnon_bands.py --kpath GXMR --output bands.png
-
-# This creates:
-# - bands.png: the band structure plot
-# - bands.json: the band structure data
-# - plot_magnon_bands.py: a script to replot the data
-
-# Replot the data with the provided script
-./plot_magnon_bands.py bands.json -o new_plot.png
-```
-
-The JSON data file contains:
-- k-point coordinates
-- Band energies (in meV)
-- k-path labels
-- Axis labels
+## Command Line Interface
 
 ### Basic Usage
 
-```python
-from TB2J.magnon.magnon3 import MagnonParameters, plot_magnon_bands_from_TB2J
+```bash
+# Plot magnon band structure
+TB2J_magnon.py --bands
 
-# Using default parameters
-params = MagnonParameters()
-plot_magnon_bands_from_TB2J(params)
+# Plot magnon DOS
+TB2J_magnon.py --dos
 
-# Or customize parameters
-params = MagnonParameters(
-    path="TB2J_results",
-    kpath="GXMR",
-    npoints=300,
-    filename="magnon_bands.png",
-    Jiso=True,
-    Jani=False,
-    DMI=False,
-)
-plot_magnon_bands_from_TB2J(params)
+# Plot both band structure and DOS
+TB2J_magnon.py --bands --dos
 ```
 
-### Configuration File Support
+### Command Line Options
+
+```
+usage: TB2J_magnon.py [-h] [--bands] [--dos]
+                      [--config CONFIG | --save-config SAVE_CONFIG] [-p PATH]
+                      [--no-Jiso] [--no-Jani] [--no-DMI] [--no-SIA]
+                      [-c SPIN_CONF_FILE | --spin-conf M [M ...]]
+                      [-s]
+                      # Band options
+                      [-k KPATH] [--npoints NPOINTS] [--qpoints QPOINTS] [--band-output BAND_OUTPUT]
+                      # DOS options
+                      [--kmesh nx ny nz] [--no-gamma] [--width WIDTH]
+                      [--window emin emax] [--npts NPTS] [--dos-output DOS_OUTPUT]
+
+Calculate and plot magnon band structure and/or DOS from TB2J results
+
+options:
+  -h, --help            show this help message and exit
+  --bands               Plot magnon band structure
+  --dos                 Plot magnon density of states
+  --config CONFIG       Path to TOML configuration file
+  --save-config SAVE_CONFIG
+                        Save default configuration to specified TOML file
+  -p PATH, --path PATH  Path to TB2J results directory (default: TB2J_results)
+  --no-Jiso             Exclude isotropic exchange interactions
+  --no-Jani             Exclude anisotropic exchange interactions
+  --no-DMI              Exclude Dzyaloshinskii-Moriya interactions
+  --no-SIA              Exclude single-ion anisotropy
+  -c SPIN_CONF_FILE, --spin-conf-file SPIN_CONF_FILE
+                        Path to file containing magnetic moments (nspin×3 array)
+  --spin-conf M [M ...]
+                        Spin configuration as flat list: mx1 my1 mz1 mx2 my2 mz2 ...
+                        Values in μB. E.g., --spin-conf 0 0 3 0 0 -3
+  -s, --show            Show figure on screen
+
+Band structure options:
+  -k KPATH, --kpath KPATH
+                        k-path specification (default: auto-detected)
+  --npoints NPOINTS     Number of k-points along the path (default: 300)
+  --qpoints QPOINTS     Custom q-points as name:coord pairs (e.g., "G:0,0,0,X:0.5,0,0")
+                        Overrides ASE default special points
+  --band-output BAND_OUTPUT
+                        Output file name for band structure (default: magnon_bands.png)
+
+DOS options:
+  --kmesh nx ny nz      k-point mesh dimensions (default: 20, 20, 20)
+  --no-gamma            Exclude Gamma point from k-mesh
+  --width WIDTH         Gaussian smearing width in eV (default: 0.001)
+  --window emin emax    Energy window in meV (optional)
+  --npts NPTS           Number of energy points (default: 401)
+  --dos-output DOS_OUTPUT
+                        Output filename for DOS plot (default: magnon_dos.png)
+```
+
+### Examples
+
+```bash
+# Plot band structure with custom k-path
+TB2J_magnon.py --bands --kpath GXMR --band-output my_bands.png
+
+# Plot DOS with finer k-mesh
+TB2J_magnon.py --dos --kmesh 30 30 30 --width 0.0005
+
+# Plot both, excluding anisotropic and DMI interactions
+TB2J_magnon.py --bands --dos --no-Jani --no-DMI
+
+# Use configuration file
+TB2J_magnon.py --save-config config.toml
+TB2J_magnon.py --config config.toml --bands --dos
+
+# Specify spin configuration via CLI (two antiparallel spins of 3 μB)
+TB2J_magnon.py --bands --spin-conf 0 0 3 0 0 -3
+
+# Use custom q-points (see Custom Q-Points section below)
+TB2J_magnon.py --bands --kpath GXMR --qpoints "G:0,0,0,X:0.5,0,0,M:0.5,0.5,0,R:0.5,0.5,0.5"
+```
+
+### Configuration File
+
+You can save and load parameters from a TOML configuration file:
+
+```bash
+# Save default configuration
+TB2J_magnon.py --save-config config.toml
+
+# Use configuration file
+TB2J_magnon.py --config config.toml --bands --dos
+```
+
+Example `config.toml`:
+
+```toml
+# TB2J results location
+path = "TB2J_results"
+
+# Exchange interactions (all enabled by default)
+Jiso = true
+Jani = true
+DMI = false
+SIA = true
+
+# Spin configuration (optional, uses TB2J results if not specified)
+# Values in μB (Bohr magneton), for spin S use 2S
+# spin_conf = [[0.0, 0.0, 3.0]]           # Single spin: S=3/2 → 3 μB
+# spin_conf = [[0.0, 0.0, 3.0], [0.0, 0.0, -3.0]]  # Two antiparallel spins
+
+# Band structure parameters
+kpath = "GXMR"
+npoints = 300
+filename = "magnon_bands.png"
+
+# Custom q-points (optional, overrides ASE defaults)
+# Uncomment to use custom q-point definitions
+# [qpoints]
+# G = [0.0, 0.0, 0.0]
+# X = [0.5, 0.0, 0.0]
+# M = [0.5, 0.5, 0.0]
+# R = [0.5, 0.5, 0.5]
+
+# DOS parameters
+kmesh = [20, 20, 20]
+gamma = true
+width = 0.001
+npts = 401
+```
+
+## Python Interface
+
+### Using MagnonParameters
 
 ```python
-# Save parameters to TOML file
-params = MagnonParameters(
-    kpath="GXMR",
-    Q=[0.5, 0.0, 0.0],
-    uz_file="spins.txt"
-)
-params.to_toml("config.toml")
+from TB2J.magnon.magnon_parameters import MagnonParameters
+from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+from TB2J.magnon.magnon_dos import plot_magnon_dos_from_TB2J
 
-# Load parameters from TOML file
-params = MagnonParameters.from_toml("config.toml")
+# Create parameters with all interactions enabled by default
+params = MagnonParameters(
+    path="TB2J_results",
+    Jiso=True,
+    Jani=True,
+    DMI=False,  # Disable DMI
+    SIA=True,
+)
+
+# Plot band structure
+params.filename = "magnon_bands.png"
+params.kpath = "GXMR"
+plot_magnon_bands_from_TB2J(params)
+
+# Plot DOS
+params.filename = "magnon_dos.png"
+params.kmesh = [30, 30, 30]
+plot_magnon_dos_from_TB2J(params)
+```
+
+#### With Custom Q-Points
+
+```python
+from TB2J.magnon.magnon_parameters import MagnonParameters
+from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+
+# Define custom q-points
+custom_qpoints = {
+    "G": [0.0, 0.0, 0.0],
+    "X": [0.5, 0.0, 0.0],
+    "M": [0.5, 0.5, 0.0],
+    "R": [0.5, 0.5, 0.5],
+}
+
+params = MagnonParameters(
+    path="TB2J_results",
+    kpath="GXMRG",
+    qpoints=custom_qpoints,  # Pass custom q-points
+    filename="magnon_bands_custom.png",
+)
+
 plot_magnon_bands_from_TB2J(params)
 ```
 
@@ -69,9 +200,11 @@ plot_magnon_bands_from_TB2J(params)
 
 ```python
 import numpy as np
+from TB2J.magnon.magnon_parameters import MagnonParameters
+from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
 
 # Create quantization axes file for non-collinear magnetism
-nspin = 4  # number of magnetic atoms
+nspin = 4
 uz = np.array([
     [0.0, 0.0, 1.0],   # atom 1: spin up
     [0.0, 0.0, -1.0],  # atom 2: spin down
@@ -80,98 +213,244 @@ uz = np.array([
 ])
 np.savetxt("spins.txt", uz)
 
-# Plot bands with custom magnetic configuration
+# Plot with custom magnetic configuration
 params = MagnonParameters(
     kpath="GXMR",
-    Q=[0.5, 0.0, 0.0],    # Propagation vector
-    uz_file="spins.txt",   # Quantization axes for each spin
-    n=[0.0, 0.0, 1.0]     # Normal vector for rotation
+    uz_file="spins.txt",
 )
 plot_magnon_bands_from_TB2J(params)
 ```
 
-## Command Line Interface
+## Output Files
 
-The `TB2J_plot_magnon_bands.py` script provides easy access to magnon band structure plotting.
+### Band Structure
 
-### Basic Usage
+When plotting band structure, the following files are created:
+- `magnon_bands.png` (or specified output): The band structure plot
+- `magnon_bands.json`: Band structure data (k-points, energies, labels)
+
+### DOS
+
+When plotting DOS, the following files are created:
+- `magnon_dos.png` (or specified output): The DOS plot
+- `magnon_dos.json`: DOS data (energies, DOS values)
+
+## Spin Configuration
+
+By default, TB2J uses magnetic moments from the DFT calculation stored in 
+TB2J results. You can override this for several reasons:
+
+### Use Cases
+
+1. **Quantum Theory Alignment**: In linear spin wave theory, the spin 
+   quantum number $S$ should be an integer or half-integer (1/2, 1, 3/2, ...).
+   
+   The magnetic moment input uses units of $\mu_B$ (Bohr magneton), 
+   which corresponds to $2S$ (i.e., $S=3/2$ → $3\,\mu_B$).
+   
+   For example, Cr³⁺ has $S = 3/2$, so the moment should be $3\,\mu_B$, 
+   even though DFT may give $\sim 3.1\,\mu_B$. Using $3\,\mu_B$ ensures 
+   the spin wave theory is internally consistent.
+
+2. **Explore Different Magnetic States**: Calculate magnon dispersion for 
+   FM state even if DFT used AFM ordering.
+
+3. **Rotate Spin Directions**: DFT calculated with spins along $z$, explore 
+   magnons with spins along $x$.
+
+### Methods to Specify
+
+| Method | Example |
+|--------|---------|
+| Default (TB2J results) | *(no option)* |
+| TOML config | `spin_conf = [[0, 0, 3], [0, 0, -3]]` |
+| CLI | `--spin-conf 0 0 3 0 0 -3` |
+| File | `--spin-conf-file spins.txt` |
+
+### CLI Examples
 
 ```bash
-# Default settings
-TB2J_plot_magnon_bands.py
+# Two antiparallel spins of 3 μB each
+TB2J_magnon.py --bands --spin-conf 0 0 3 0 0 -3
 
-# Specify k-path and output file
-TB2J_plot_magnon_bands.py --kpath GXMR --output bands.png
-
-# Include different interactions
-TB2J_plot_magnon_bands.py --Jani --DMI
+# Four spins in different directions
+TB2J_magnon.py --bands --spin-conf 3 0 0 -3 0 0 0 0 3 0 0 -3
 ```
 
-### Configuration File Support
-
-```bash
-# Save default configuration
-TB2J_plot_magnon_bands.py --save-config config.toml
-
-# Use configuration file
-TB2J_plot_magnon_bands.py --config config.toml
-```
-
-### Example Configuration File (config.toml)
+### TOML Example
 
 ```toml
-# TB2J results location
-path = "TB2J_results"
+# Cr³⁺ with S=3/2: use 3 μB (not DFT value ~3.1 μB)
+spin_conf = [[0.0, 0.0, 3.0]]
 
-# Band structure parameters
-kpath = "GXMR"
-npoints = 300
-filename = "magnon_bands.png"
+# Two antiparallel spins
+spin_conf = [[0.0, 0.0, 3.0], [0.0, 0.0, -3.0]]
 
-# Exchange interactions to include
-Jiso = true
-Jani = false
-DMI = false
-
-# Magnetic structure parameters
-Q = [0.5, 0.0, 0.0]      # Propagation vector
-uz_file = "spins.txt"     # Quantization axes file
-n = [0.0, 0.0, 1.0]      # Normal vector for rotation
+# Four spins in different directions
+spin_conf = [
+    [3.0, 0.0, 0.0],   # along +x
+    [-3.0, 0.0, 0.0],  # along -x
+    [0.0, 0.0, 3.0],   # along +z
+    [0.0, 0.0, -3.0],  # along -z
+]
 ```
 
-### Command Line Options
+The moment values are in $\mu_B$. For spin $S$, use $m = 2S\,\mu_B$.
+
+### File Format
+
+The `--spin-conf-file` should contain a nspin×3 array with magnetic moments:
+
+```
+0.0  0.0  3.0   # atom 1: 3 μB along +z
+0.0  0.0  -3.0  # atom 2: 3 μB along -z
+1.0  0.0  0.0   # atom 3: 1 μB along +x
+```
+
+Each row represents the magnetic moment vector $(m_x, m_y, m_z)$ in $\mu_B$. 
+The number of rows must match the number of magnetic atoms in your system.
+
+## Custom Q-Points
+
+By default, TB2J uses ASE's built-in special k-points for standard crystal structures. 
+These are high-symmetry points (Γ, X, M, R, etc.) that ASE automatically identifies 
+based on the crystal lattice type and symmetry.
+
+However, you can specify **custom q-points** with your own names and coordinates. 
+This is useful when:
+
+1. **Non-standard high-symmetry points**: Your crystal has high-symmetry points 
+   that don't match ASE's defaults
+2. **Custom k-path**: You want to explore a specific region of the Brillouin zone
+3. **Different naming convention**: You prefer different labels (e.g., "G" vs "Γ")
+
+### Three Methods to Specify Custom Q-Points
+
+#### Method 1: Command Line
+
+Use the `--qpoints` option with format `name:x,y,z` pairs separated by commas:
 
 ```bash
-TB2J_plot_magnon_bands.py --help
+TB2J_magnon.py --bands \
+    --kpath GXMRG \
+    --qpoints "G:0,0,0,X:0.5,0,0,M:0.5,0.5,0,R:0.5,0.5,0.5"
 ```
 
-Will show all available options:
+**Format**: Each q-point is specified as `NAME:x,y,z` where:
+- `NAME`: The label for the q-point (e.g., "G", "X", "M")
+- `x,y,z`: The three coordinates in fractional reciprocal lattice units
 
-```
-  --config CONFIG      Path to TOML configuration file
-  --save-config FILE  Save default configuration to specified TOML file
-  --path PATH         Path to TB2J results directory (default: TB2J_results)
-  --kpath KPATH       k-path specification (default: GXMR)
-  --npoints NPOINTS   Number of k-points along the path (default: 300)
-  --output OUTPUT     Output file name (default: magnon_bands.png)
-  --Jiso             Include isotropic exchange interactions (default: True)
-  --no-Jiso          Exclude isotropic exchange interactions
-  --Jani             Include anisotropic exchange interactions (default: False)
-  --DMI              Include Dzyaloshinskii-Moriya interactions (default: False)
-  --Q Qx Qy Qz       Propagation vector [Qx, Qy, Qz] (default: [0, 0, 0])
-  --uz-file FILE     Path to file containing quantization axes for each spin
-  --n nx ny nz       Normal vector for rotation [nx, ny, nz] (default: [0, 0, 1])
-```
+Multiple q-points are separated by commas.
 
-### Quantization Axes File Format
+#### Method 2: TOML Configuration
 
-The `--uz-file` should point to a space-separated text file containing a natom×3 array, where each row represents the quantization axis direction for that spin. For example:
+In your TOML configuration file, add a `[qpoints]` section:
 
-```
-0.0  0.0  1.0   # atom 1: spin up
-0.0  0.0  -1.0  # atom 2: spin down
-1.0  0.0  0.0   # atom 3: spin along x
-0.0  1.0  0.0   # atom 4: spin along y
+```toml
+kpath = "GXMRG"
+
+[qpoints]
+G = [0.0, 0.0, 0.0]     # Gamma point
+X = [0.5, 0.0, 0.0]     # X point
+M = [0.5, 0.5, 0.0]     # M point
+R = [0.5, 0.5, 0.5]     # R point
 ```
 
-Each row must have exactly 3 components representing the x, y, and z components of the quantization axis for that spin. The number of rows must match the number of magnetic atoms in your system.
+The `kpath` parameter specifies the path connecting these q-points, and the 
+`[qpoints]` section defines their coordinates.
+
+#### Method 3: Python API
+
+When using the Python API, pass a dictionary to the `qpoints` parameter:
+
+```python
+from TB2J.magnon.magnon_parameters import MagnonParameters
+from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+
+# Define custom q-points as a dictionary
+custom_qpoints = {
+    "G": [0.0, 0.0, 0.0],    # Gamma point
+    "X": [0.5, 0.0, 0.0],    # X point
+    "M": [0.5, 0.5, 0.0],    # M point
+    "R": [0.5, 0.5, 0.5],    # R point
+}
+
+params = MagnonParameters(
+    path="TB2J_results",
+    kpath="GXMRG",           # Path connecting the q-points
+    qpoints=custom_qpoints,  # Your custom q-points
+    filename="magnon_bands.png",
+)
+
+plot_magnon_bands_from_TB2J(params)
+```
+
+### How It Works
+
+1. **Default Behavior**: When `qpoints` is not specified, TB2J uses ASE's 
+   `bandpath()` function with built-in special points for the crystal structure.
+
+2. **Custom Q-Points**: When you provide custom q-points, they are passed to 
+   ASE's `bandpath()` function via the `special_points` parameter, overriding 
+   the defaults.
+
+3. **K-Path**: The `kpath` parameter (e.g., "GXMRG") specifies the sequence of 
+   q-points to visit. Each letter should correspond to a name in your q-points 
+   definition.
+
+### Examples
+
+#### Example 1: Hexagonal Lattice with Custom K-Point
+
+```bash
+# For a hexagonal lattice where you want to define a specific K-point
+TB2J_magnon.py --bands \
+    --kpath GMKG \
+    --qpoints "G:0,0,0,M:0.5,0,0,K:0.333,0.333,0"
+```
+
+#### Example 2: Complete TOML Example
+
+```toml
+# config_custom.toml
+path = "TB2J_results"
+
+# Exchange interactions
+Jiso = true
+Jani = true
+DMI = true
+SIA = true
+
+# Band structure with custom q-points
+kpath = "GXMRG"
+npoints = 300
+filename = "magnon_bands_custom.png"
+
+[qpoints]
+G = [0.0, 0.0, 0.0]
+X = [0.5, 0.0, 0.0]
+M = [0.5, 0.5, 0.0]
+R = [0.5, 0.5, 0.5]
+```
+
+Then use it:
+
+```bash
+TB2J_magnon.py --config config_custom.toml --bands
+```
+
+### Important Notes
+
+1. **Coordinate System**: Q-point coordinates are in **fractional reciprocal 
+   lattice units** (not Cartesian). For example, [0.5, 0, 0] means halfway 
+   along the first reciprocal lattice vector.
+
+2. **Matching Names**: The names in your `kpath` must match the keys in your 
+   `qpoints` dictionary/TOML section. Case-sensitive.
+
+3. **Backward Compatibility**: If you don't specify custom q-points, TB2J 
+   works exactly as before, using ASE's default special points.
+
+4. **Partial Override**: You only need to define the q-points referenced in 
+   your kpath. Any additional points in ASE's defaults that aren't used won't 
+   matter.

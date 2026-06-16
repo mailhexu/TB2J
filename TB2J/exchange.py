@@ -25,19 +25,25 @@ class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
         self.integration_method = params.pop("integration_method", "CFR")
-        super().__init__(**params)
+        import inspect
+
+        sig = inspect.signature(ExchangeParams.__init__)
+        params_for_init = {k: v for k, v in params.items() if k in sig.parameters}
+        super().__init__(**params_for_init)
         self._prepare_kmesh(self._kmesh)
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        self._prepare_elist(method=self.integration_method)
+        method = params.get("method", self.integration_method)
+        self._prepare_elist(method=method)
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
 
-        # whether to calculate J and DMI with NJt method.
-        # self._prepare_NijR()
-        self._is_collinear = True
+        if hasattr(self, "backend_name") and self.backend_name == "DMFT":
+            pass  # Keep what was set in set_tbmodels
+        else:
+            self._is_collinear = True
         self.has_elistc = False
 
         # Store overlap matrix before cleaning tbmodels
@@ -371,6 +377,7 @@ class ExchangeNCL(Exchange):
             nproc=self.nproc,
             initial_emin=self.emin,
             smearing_width=self.smearing,
+            use_gpu=self.use_gpu,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -390,6 +397,9 @@ class ExchangeNCL(Exchange):
         self.Pdict = {}
         if self.write_density_matrix:
             self.G.write_rho_R()
+
+    def finalize(self):
+        self.G.clean_cache()
 
     def get_MAE(self, thetas, phis):
         """
@@ -993,9 +1003,6 @@ class ExchangeNCL(Exchange):
         #    pickle.dump({'Jiso_orb': self.Jiso_orb,
         #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
-    def finalize(self):
-        self.G.clean_cache()
-
     def run(self, path="TB2J_results"):
         self.calculate_all()
         self.write_output(path=path)
@@ -1003,11 +1010,11 @@ class ExchangeNCL(Exchange):
 
 
 class ExchangeCL(ExchangeNCL):
-    def set_tbmodels(self, tbmodel):
+    def set_tbmodels(self, tbmodels):
         """
         only difference is a colinear tag.
         """
-        super().set_tbmodels(tbmodel)
+        super().set_tbmodels(tbmodels)
         self._is_collinear = True
 
     def write_output(self, path="TB2J_results"):
