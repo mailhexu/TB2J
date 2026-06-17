@@ -612,13 +612,13 @@ def create_plot_script(base_name: str, output_dir: str = "."):
     Parameters
     ----------
     base_name : str
-        Base name (without extension) for the script and data files
+        Base name (without extension) for the default data and plot files
     output_dir : str
         Directory to write the script to (default: current directory)
     """
     from pathlib import Path
 
-    script_path = Path(output_dir) / f"plot_{base_name}.py"
+    script_path = Path(output_dir) / "plot_magnon_band.py"
     script = f'''#!/usr/bin/env python3
 """Simple script to plot magnon band structure from saved data."""
 
@@ -722,13 +722,13 @@ def save_bands_data(
     from pathlib import Path
 
     filepath = Path(filename)
-    script_name = filepath.parent / f"plot_{filepath.stem}.py"
+    script_name = filepath.parent / "plot_magnon_band.py"
     create_plot_script(filepath.stem, str(filepath.parent))
 
-    print(f"Band structure data saved to {filename}")
-    print(f"Created plotting script: {script_name}")
-    print("Usage: ")
-    print(f"See {script_name} for example usage")
+    print("Generated magnon band files:")
+    print(f"  data: {filename}")
+    print(f"  plotting script: {script_name}")
+    print(f"Run {script_name} to replot the saved band data.")
 
     return bands
 

@@ -61,7 +61,14 @@ def create_parser() -> argparse.ArgumentParser:
         "--tensor-policy",
         choices=("transverse-block", "transverse-block-jzz", "isotropic"),
         default="transverse-block",
-        help="How to convert SPRKKR J_xx/J_yy/J_xy/J_yx columns",
+        help=(
+            "How to convert SPRKKR J_xx/J_yy/J_xy/J_yx columns. "
+            "isotropic: use scalar J=(J_xx+J_yy)/2; "
+            "transverse-block: keep J_xx,J_yy,J_xy,J_yx as a transverse "
+            "3x3 tensor block and set unavailable z terms to zero; "
+            "transverse-block-jzz: same transverse block, plus "
+            "J_zz=(J_xx+J_yy)/2."
+        ),
     )
     parser.add_argument(
         "-b", "--bands", action="store_true", help="Compute magnon bands"
@@ -191,6 +198,7 @@ def main(argv: list[str] | None = None):
             filename=str(data_file),
         )
         bands.plot(filename=str(output), show=args.show)
+        print(f"  plot: {output}")
     return None
 
 

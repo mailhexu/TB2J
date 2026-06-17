@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 
-from TB2J.magnon.magnon3 import Magnon, plot_magnon_bands_from_TB2J
+from TB2J.magnon.magnon3 import Magnon, plot_magnon_bands_from_TB2J, save_bands_data
 from TB2J.magnon.magnon_dos import plot_magnon_dos_from_TB2J
 from TB2J.magnon.magnon_parameters import MagnonParameters
 
@@ -141,6 +141,30 @@ class TestMagnonBandsDefault:
         label_values = [label for _, label in labels]
         assert r"$\Gamma$" in label_values
         assert "Gamma" not in label_values
+
+    def test_save_bands_data_uses_fixed_plot_script_name(self, temp_output_dir, capsys):
+        data_file = Path(temp_output_dir) / "custom_band_name.json"
+
+        save_bands_data(
+            kpoints=np.zeros((2, 3)),
+            energies=np.zeros((2, 1)),
+            kpath_labels=[(0, r"$\Gamma$"), (1, "X")],
+            special_points={"G": np.zeros(3), "X": np.array([0.5, 0.0, 0.0])},
+            xcoords=np.arange(2),
+            filename=str(data_file),
+        )
+
+        output = capsys.readouterr().out
+        assert data_file.exists()
+        assert (Path(temp_output_dir) / "plot_magnon_band.py").exists()
+        assert not (Path(temp_output_dir) / "plot_custom_band_name.py").exists()
+        assert "Generated magnon band files:" in output
+        assert f"data: {data_file}" in output
+        assert (
+            f"plotting script: {Path(temp_output_dir) / 'plot_magnon_band.py'}"
+            in output
+        )
+        assert "Usage:" not in output
 
 
 class TestMagnonBandsNoDMI:
