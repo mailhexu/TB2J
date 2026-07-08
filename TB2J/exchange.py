@@ -745,7 +745,6 @@ class ExchangeNCL(Exchange):
             rho[iatom] = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)]).real
             self.charges[iatom] = rho[iatom][0]
             self.spinat[iatom, :] = rho[iatom][1:]
-            print(f"DEBUG: Atom {iatom} charge: {self.charges[iatom]}")
         self.rho_dict = rho
         return self.rho_dict
 

@@ -461,7 +461,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
         returns:
-            Jmat: (nspin,nspin,3,3) matrix.
+            Jmat: (nspin,nspin) matrix.
         """
         if Jani or DMI or SIA:
             raise ValueError(
