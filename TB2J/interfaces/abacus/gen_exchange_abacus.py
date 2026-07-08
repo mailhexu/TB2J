@@ -12,6 +12,8 @@ from HamiltonIO.abacus import AbacusParser
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
 
 
 def gen_exchange_abacus(
@@ -51,7 +53,7 @@ def gen_exchange_abacus(
         description = f""" Input from collinear Abacus data.
 data directory: {outpath}
 \n"""
-        exchange = ExchangeCL2(
+        exchange = (ExchangeCL2GPU if use_gpu else ExchangeCL2)(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
             basis=tbmodel_up.basis,
@@ -74,7 +76,15 @@ data directory: {outpath}
             vectorize_energy=vectorize_energy,
             e_batch_size=e_batch_size,
         )
-        exchange.run(path=output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=True,
+                vectorize_energy=vectorize_energy,
+                e_batch_size=e_batch_size,
+            )
+        else:
+            exchange.run(path=output_path)
         print("\n")
         print(f"All calculation finished. The results are in {output_path} directory.")
     else:
@@ -83,7 +93,7 @@ data directory: {outpath}
         description = f""" Input from non-collinear Abacus data.
 data directory: {outpath}
 \n"""
-        exchange = ExchangeNCL(
+        exchange = (ExchangeNCLGPU if use_gpu else ExchangeNCL)(
             tbmodels=tbmodel,
             atoms=tbmodel.atoms,
             basis=tbmodel.basis,
@@ -105,7 +115,15 @@ data directory: {outpath}
             vectorize_energy=vectorize_energy,
             e_batch_size=e_batch_size,
         )
-        exchange.run(path=output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=True,
+                vectorize_energy=vectorize_energy,
+                e_batch_size=e_batch_size,
+            )
+        else:
+            exchange.run(path=output_path)
         print("\n")
         print("All calculation finsihed. The results are in TB2J_results directory.")
 
