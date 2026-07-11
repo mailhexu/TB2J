@@ -8,7 +8,13 @@ import numpy as np
 _jax_available = None
 _jnp = None
 _jax = None
-_jit = None
+
+
+def _identity_jit(f):
+    return f
+
+
+_jit = _identity_jit
 _vmap = None
 
 
