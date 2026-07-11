@@ -12,8 +12,6 @@ from HamiltonIO.abacus import AbacusParser
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
-from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
-from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
 
 
 def gen_exchange_abacus(
@@ -53,7 +51,13 @@ def gen_exchange_abacus(
         description = f""" Input from collinear Abacus data.
 data directory: {outpath}
 \n"""
-        exchange = (ExchangeCL2GPU if use_gpu else ExchangeCL2)(
+        if use_gpu:
+            from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
+
+            ExchangeClass = ExchangeCL2GPU
+        else:
+            ExchangeClass = ExchangeCL2
+        exchange = ExchangeClass(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
             basis=tbmodel_up.basis,
@@ -93,7 +97,13 @@ data directory: {outpath}
         description = f""" Input from non-collinear Abacus data.
 data directory: {outpath}
 \n"""
-        exchange = (ExchangeNCLGPU if use_gpu else ExchangeNCL)(
+        if use_gpu:
+            from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+
+            ExchangeClass = ExchangeNCLGPU
+        else:
+            ExchangeClass = ExchangeNCL
+        exchange = ExchangeClass(
             tbmodels=tbmodel,
             atoms=tbmodel.atoms,
             basis=tbmodel.basis,
