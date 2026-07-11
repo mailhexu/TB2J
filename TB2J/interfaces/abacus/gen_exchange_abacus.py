@@ -9,6 +9,10 @@ from pathlib import Path
 
 # from TB2J.abacus.abacus_wrapper import AbacusParser
 from HamiltonIO.abacus import AbacusParser
+from HamiltonIO.abacus.abacus_wrapper import (
+    AbacusSingleStepSOCParser,
+    AbacusSplitSOCParser,
+)
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
@@ -35,6 +39,8 @@ def gen_exchange_abacus(
     use_gpu=False,
     vectorize_energy=True,
     e_batch_size=None,
+    split_soc=None,
+    path_nosoc=None,
 ):
     outpath = Path(path) / f"OUT.{suffix}"
 
@@ -42,8 +48,22 @@ def gen_exchange_abacus(
         raise ValueError(
             f"The path {outpath} does not exist. Please check if the path and the suffix is correct"
         )
-    parser = AbacusParser(outpath=outpath, spin=None, binary=binary)
-    spin = parser.read_spin()
+    if split_soc == "single":
+        parser = AbacusSingleStepSOCParser(outpath=str(outpath), binary=binary)
+        tbmodel = parser.parse()
+        spin = "noncollinear"
+    elif split_soc == "two":
+        if path_nosoc is None:
+            raise ValueError("--path_nosoc required for split_soc='two'")
+        nosoc_outpath = Path(path_nosoc) / f"OUT.{suffix}"
+        parser = AbacusSplitSOCParser(
+            outpath_nosoc=str(nosoc_outpath), outpath_soc=str(outpath), binary=binary
+        )
+        tbmodel = parser.parse()
+        spin = "noncollinear"
+    else:
+        parser = AbacusParser(outpath=outpath, spin=None, binary=binary)
+        spin = parser.read_spin()
     if spin == "collinear":
         tbmodel_up, tbmodel_dn = parser.get_models()
         efermi = parser.read_efermi()
@@ -92,10 +112,12 @@ data directory: {outpath}
         print("\n")
         print(f"All calculation finished. The results are in {output_path} directory.")
     else:
-        tbmodel = parser.get_models()
+        if split_soc is None:
+            tbmodel = parser.get_models()
         print("Starting to calculate exchange.")
         description = f""" Input from non-collinear Abacus data.
 data directory: {outpath}
+split_soc: {split_soc}
 \n"""
         if use_gpu:
             from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
