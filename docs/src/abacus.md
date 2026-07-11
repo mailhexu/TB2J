@@ -45,6 +45,24 @@ abacus2J.py --path . --suffix Fe --elements Fe  --kmesh 7 7 7
 And then the "TB2J_merge.py" command can be used to get the final spin interaction parameters. 
 
 
+#### Split SOC workflow
+
+TB2J supports two split-SOC modes for non-collinear exchange calculations with ABACUS, selected with the `--split_soc` flag:
+
+**Single-step** (`--split_soc single`): uses the SOC Hamiltonian written by a single ABACUS run with `out_mat_hs2_soc` enabled. No separate no-SOC calculation is needed.
+
+```bash
+abacus2J.py --path . --suffix Fe --elements Fe --kmesh 7 7 7 --split_soc single
+```
+
+**Two-step** (`--split_soc two`): uses two ABACUS calculations — one without SOC and one with SOC started from the no-SOC density. The `--path_nosoc` option points to the no-SOC output directory.
+
+```bash
+abacus2J.py --path . --suffix Fe --elements Fe --kmesh 7 7 7 --split_soc two --path_nosoc ../nosoc
+```
+
+> **Note:** The ABACUS version that writes the SOC Hamiltonian (`out_mat_hs2_soc`) is not yet publicly released. This feature is therefore not usable until that version is available.
+
 
 #### Parameters of abacus2J.py
 
