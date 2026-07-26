@@ -8,8 +8,8 @@ import os
 from pathlib import Path
 
 # from TB2J.abacus.abacus_wrapper import AbacusParser
-from HamiltonIO.abacus import AbacusParser
-from HamiltonIO.abacus.abacus_wrapper import (
+from HamiltonIO.abacus import (
+    AbacusParser,
     AbacusSingleStepSOCParser,
     AbacusSplitSOCParser,
 )
@@ -42,6 +42,9 @@ def gen_exchange_abacus(
     split_soc=None,
     path_nosoc=None,
 ):
+    if split_soc not in (None, "single", "two"):
+        raise ValueError("split_soc must be None, 'single', or 'two'")
+
     outpath = Path(path) / f"OUT.{suffix}"
 
     if not os.path.exists(outpath):
@@ -56,6 +59,10 @@ def gen_exchange_abacus(
         if path_nosoc is None:
             raise ValueError("--path_nosoc required for split_soc='two'")
         nosoc_outpath = Path(path_nosoc) / f"OUT.{suffix}"
+        if not os.path.exists(nosoc_outpath):
+            raise ValueError(
+                f"The path {nosoc_outpath} does not exist. Please check path_nosoc and the suffix"
+            )
         parser = AbacusSplitSOCParser(
             outpath_nosoc=str(nosoc_outpath), outpath_soc=str(outpath), binary=binary
         )
@@ -157,7 +164,7 @@ split_soc: {split_soc}
         else:
             exchange.run(path=output_path)
         print("\n")
-        print("All calculation finsihed. The results are in TB2J_results directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
 
 
 if __name__ == "__main__":

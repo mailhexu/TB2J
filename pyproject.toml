@@ -7,6 +7,7 @@ name = "TB2J"
 version = "0.9.17"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
+requires-python = ">=3.8"
 license = { text = "BSD-2-Clause" }
 authors = [{ name = "Xu He", email = "mailhexu@gmail.com" }]
 maintainers = [{ name = "Xu He", email = "mailhexu@gmail.com" }]
@@ -14,8 +15,6 @@ keywords = ["magnetism", "DFT", "Heisenberg", "exchange", "physics"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -29,7 +28,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
     "License :: OSI Approved :: BSD License",
 ]
-#requires-python = ">3.6"
 dependencies = [
     "numpy",
     "scipy>=1.9,<1.17",
@@ -38,7 +36,7 @@ dependencies = [
     "tqdm",
     "pathos",
     "packaging>=20.0",
-    "HamiltonIO>=0.3.7",
+    "HamiltonIO>=0.3.8",
     "pre-commit",
     "sympair>=0.1.4",
     "supercellmap",

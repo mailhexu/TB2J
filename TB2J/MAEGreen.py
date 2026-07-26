@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import tqdm
-from HamiltonIO.abacus.abacus_wrapper import (
+from HamiltonIO.abacus import (
     AbacusSingleStepSOCParser,
     AbacusSplitSOCParser,
 )

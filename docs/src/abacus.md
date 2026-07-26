@@ -49,19 +49,26 @@ And then the "TB2J_merge.py" command can be used to get the final spin interacti
 
 TB2J supports two split-SOC modes for non-collinear exchange calculations with ABACUS, selected with the `--split_soc` flag:
 
-**Single-step** (`--split_soc single`): uses the SOC Hamiltonian written by a single ABACUS run with `out_mat_hs2_soc` enabled. No separate no-SOC calculation is needed.
+**Single-step** (`--split_soc single`): requires one SOC ABACUS output directory with both
+
+```
+out_mat_hs2 1
+out_mat_hs2_soc 1
+```
+
+in `INPUT`. These write `hrs1_nao.csr` (total Hamiltonian), `srs1_nao.csr` (overlap), and `hrs1-soc_nao.csr` (the exact nonlocal difference $H(\mathrm{configured\ SOC}) - H_{\mathrm{scalar}}$). No separate no-SOC calculation is needed.
 
 ```bash
 abacus2J.py --path . --suffix Fe --elements Fe --kmesh 7 7 7 --split_soc single
 ```
 
-**Two-step** (`--split_soc two`): uses two ABACUS calculations — one without SOC and one with SOC started from the no-SOC density. The `--path_nosoc` option points to the no-SOC output directory.
+**Two-step** (`--split_soc two`): requires matched no-SOC and SOC ABACUS output directories with the same suffix. The `--path` option selects the SOC directory, and `--path_nosoc` selects the no-SOC directory.
 
 ```bash
 abacus2J.py --path . --suffix Fe --elements Fe --kmesh 7 7 7 --split_soc two --path_nosoc ../nosoc
 ```
 
-> **Note:** The ABACUS version that writes the SOC Hamiltonian (`out_mat_hs2_soc`) is not yet publicly released. This feature is therefore not usable until that version is available.
+In both modes, `--output_path` selects the directory where TB2J writes the exchange results.
 
 
 #### Parameters of abacus2J.py
@@ -115,7 +122,4 @@ options:
   --output_path OUTPUT_PATH
                         The path of the output directory, default is TB2J_results
 ```
-
-
-
 
