@@ -886,6 +886,11 @@ class ProjectorGreen:
             data.metadata.get("overlap_condition_threshold", 1.0e12)
         )
         self.adjusted_emin = float(np.min(data.eigenvalues) - data.efermi)
+        import os
+
+        self.use_contravariant = (
+            os.environ.get("TB2J_GREEN_MODE", "contravariant") != "plain"
+        )
 
     def _fermi(self, ispin):
         if self.efermi_spin is not None:
@@ -929,7 +934,7 @@ class ProjectorGreen:
         return np.eye(self.nbasis, dtype=complex)
 
     def _contravariant_Gk(self, Gk, ik):
-        if self.data.overlap_k is None:
+        if self.data.overlap_k is None or not self.use_contravariant:
             return Gk
         Sk = self.get_Sk(ik)
         condition = np.linalg.cond(Sk)

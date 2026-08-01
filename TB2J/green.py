@@ -517,7 +517,20 @@ class TBGreen:
         :returns: real space green's function for one energy for a list of R.
         :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
         """
+
+        import os as _os
+
+        _contravariant = (
+            _os.environ.get("TB2J_SIESTA_GREEN_MODE") == "contravariant"
+            and not self.is_orthogonal
+        )
         if Gk_all is not None:
+            if _contravariant:
+                for ik in range(Gk_all.shape[0]):
+                    Sk = self.get_Sk(ik)
+                    if Sk is not None:
+                        Sinv = np.linalg.inv(Sk)
+                        Gk_all[ik] = Sinv @ Gk_all[ik] @ Sinv
             return self.compute_GR(Rpts, self.kpts, Gk_all)
 
         Rvecs = np.array(Rpts)
@@ -526,6 +539,11 @@ class TBGreen:
 
         for ik, kpt in enumerate(self.kpts):
             Gk = self.get_Gk(ik, energy)
+            if _contravariant:
+                Sk = self.get_Sk(ik)
+                if Sk is not None:
+                    Sinv = np.linalg.inv(Sk)
+                    Gk = Sinv @ Gk @ Sinv
             weight = self.kweights[ik]
             phase_k = np.exp(self.k2Rfactor * np.dot(Rvecs, kpt)) * weight
             GR += Gk[None, :, :] * phase_k[:, None, None]

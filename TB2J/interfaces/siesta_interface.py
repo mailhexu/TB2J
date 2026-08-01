@@ -139,7 +139,8 @@ def gen_exchange_siesta(
                 e_batch_size=exargs.get("e_batch_size", None),
             )
         else:
-            exchange.run(path=output_path)
+            exchange.calculate_all()
+            exchange.write_output(path=output_path)
         print("\n")
         print(f"All calculation finished. The results are in {output_path} directory.")
 

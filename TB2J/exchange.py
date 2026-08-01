@@ -229,10 +229,14 @@ class Exchange(ExchangeParams):
                         orbs,
                         spinor=not (self._is_collinear),
                         include_only=self.include_orbs[syms[iatom]],
+                        group_by_zeta=self.group_by_zeta,
                     )
                 else:
                     mmat, reduced_orbs = map_orbs_matrix(
-                        orbs, spinor=not (self._is_collinear), include_only=None
+                        orbs,
+                        spinor=not (self._is_collinear),
+                        include_only=None,
+                        group_by_zeta=self.group_by_zeta,
                     )
 
                 self.mmats[iatom] = mmat

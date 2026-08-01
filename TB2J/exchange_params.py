@@ -29,7 +29,7 @@ class ExchangeParams:
     description: str = ""
     write_density_matrix: bool = False
     orb_decomposition: bool = False
-    output_path: str = "TB2J_results"
+    group_by_zeta: bool = False
     mae_angles = None
     orth = False
     ibz = False
@@ -61,6 +61,7 @@ class ExchangeParams:
         description="",
         write_density_matrix=False,
         orb_decomposition=False,
+        group_by_zeta=False,
         output_path="TB2J_results",
         exclude_orbs=[],
         mae_angles=None,
@@ -112,6 +113,7 @@ class ExchangeParams:
         self.description = description
         self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
+        self.group_by_zeta = group_by_zeta
         self.output_path = output_path
         self.mae_angles = mae_angles
         self.orth = orth
@@ -270,6 +272,13 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--group_by_zeta",
+        default=False,
+        action="store_true",
+        help="Retain per-zeta orbital contributions instead of summing over radial zeta. Only affects LCAO backends (SIESTA/ABACUS).",
+    )
+
+    parser.add_argument(
         "--output_path",
         help="The path of the output directory, default is TB2J_results",
         type=str,
@@ -367,6 +376,7 @@ def parser_argument_to_dict(args) -> dict:
         "description": args.description,
         "write_density_matrix": args.write_dm,
         "orb_decomposition": args.orb_decomposition,
+        "group_by_zeta": args.group_by_zeta,
         "output_path": args.output_path,
         "orth": args.orth,
         "index_magnetic_atoms": ind_mag_atoms,

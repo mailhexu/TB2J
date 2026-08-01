@@ -13,14 +13,34 @@ def split_orb_name(name):
     return m[0], m[1]
 
 
-def map_orbs_matrix(orblist, spinor=False, include_only=None):
+def map_orbs_matrix(orblist, spinor=False, include_only=None, group_by_zeta=False):
     """
-    map the orbitals to a matrix
-    Method:
-    1. split the orbital name to n, l, label
-    2. group the orbitals by n, l
-    3. create a matrix with 1 for each orbital in the group
-    4. return the matrix and the group names
+    Build the orbital-grouping matrix.
+
+    Parameters
+    ----------
+    orblist : list[str]
+        Orbital labels (e.g. ``"3dz2Z1"``, ``"3dz2Z2"``, ``"4pxZ1P"``).
+    spinor : bool
+        If True, every orbital is duplicated for spin up/down; take only the
+        even-indexed entries.
+    include_only : list[str] | None
+        If given, keep only orbitals whose ``(n,l)`` prefix matches an entry
+        (e.g. ``["3d"]`` or ``["d"]``).
+    group_by_zeta : bool
+        If False (default), orbitals sharing the same ``(n,l,m)`` are summed
+        over all zeta and polarisation shells — this is the historical
+        behaviour.
+        If True, each ``(n,l,m,zeta)`` combination becomes its own group so
+        that per-zeta contributions are retained individually.
+
+    Returns
+    -------
+    mmat : ndarray, shape (norb, ngroup)
+        Integer grouping matrix.  ``mmat.T @ M @ mmat`` aggregates the
+        full-orbital matrix *M* into the grouped representation.
+    reduced_orbs : tuple[str]
+        Group labels in column order.
     """
 
     if spinor:
@@ -28,25 +48,29 @@ def map_orbs_matrix(orblist, spinor=False, include_only=None):
 
     norb = len(orblist)
 
-    # print("orblist: ", orblist)
     ss = [split_orb_name(orb) for orb in orblist]
     orbdict = dict(zip(ss, range(norb)))
 
     reduced_orbdict = defaultdict(lambda: [])
 
-    # print(f"Orbital dictionary: {orbdict}")
-    # print("include_only: ", include_only)
-
     if include_only is None:
         for key, val in orbdict.items():
-            reduced_orbdict[key[0]].append(val)
+            group_key = key if group_by_zeta else key[0]
+            reduced_orbdict[group_key].append(val)
     else:
         for key, val in orbdict.items():
             if key[0][:2] in include_only or key[0][:1] in include_only:
                 # [:2] for 3d, 4d, 5d, etc. and [:1] for s, p, d, etc
-                reduced_orbdict[key[0]].append(val)
+                group_key = key if group_by_zeta else key[0]
+                reduced_orbdict[group_key].append(val)
 
-    # print(f"reduced_orbdict: {reduced_orbdict}")
+    # When grouping by zeta, flatten tuple keys to readable strings
+    if group_by_zeta:
+        flat_orbdict = defaultdict(list)
+        for key, val in reduced_orbdict.items():
+            flat_orbdict[key[0] + key[1]].extend(val)
+        reduced_orbdict = flat_orbdict
+
     reduced_orbs = tuple(reduced_orbdict.keys())
     ngroup = len(reduced_orbdict)
     mmat = np.zeros((norb, ngroup), dtype=int)
@@ -318,9 +342,38 @@ def test():
 
     olist = odict[0]
     r1 = map_orbs_matrix(olist, spinor=True)
-    print(r1)
+    print("Default (sum over zeta):", r1[1])
+    assert len(r1[1]) == 13, f"Expected 13 reduced orbitals, got {len(r1[1])}"
+
     r2 = map_orbs_matrix(olist, spinor=True, include_only=["3d"])
-    print(r2)
+    print("3d only (sum over zeta):", r2[1])
+    assert len(r2[1]) == 5, f"Expected 5 d orbitals, got {len(r2[1])}"
+
+    r3 = map_orbs_matrix(olist, spinor=True, group_by_zeta=True)
+    print("Group by zeta:", r3[1])
+    assert len(r3[1]) == 19, f"Expected 19 per-zeta groups, got {len(r3[1])}"
+    # Verify that 3dz2Z1 and 3dz2Z2 are separate groups
+    assert "3dz2Z1" in r3[1] and "3dz2Z2" in r3[1]
+
+    r4 = map_orbs_matrix(olist, spinor=True, group_by_zeta=True, include_only=["3d"])
+    print("3d only (group by zeta):", r4[1])
+    assert len(r4[1]) == 10, f"Expected 10 per-zeta d groups, got {len(r4[1])}"
+
+    # Sanity: summing per-zeta columns should reproduce zeta-summed result
+    mmat_sum, orbs_sum = r1
+    mmat_zeta, orbs_zeta = r3
+    # Build a summation matrix from zeta → summed
+    rebuild = np.zeros((len(orbs_zeta), len(orbs_sum)), dtype=int)
+    for iz, oz in enumerate(orbs_zeta):
+        prefix = split_orb_name(oz)[0]
+        js = [j for j, os in enumerate(orbs_sum) if os == prefix]
+        for j in js:
+            rebuild[iz, j] = 1
+    mmat_combined = mmat_zeta @ rebuild
+    assert np.array_equal(
+        mmat_combined, mmat_sum
+    ), "Per-zeta groups don't sum to zeta-summed groups"
+    print("All tests passed.")
 
 
 if __name__ == "__main__":
