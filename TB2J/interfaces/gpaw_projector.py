@@ -520,6 +520,7 @@ def compute_projector_exchange_jdict(
     smearing_eV=0.05,
     sites=None,
     local_operators=None,
+    operator_component=None,
 ):
     """Compute TB2J-style isotropic exchange dictionary from projector trace."""
     if Rpts is None:
@@ -528,6 +529,10 @@ def compute_projector_exchange_jdict(
     if sites is None:
         sites = list(range(len(data.site_nproj)))
     sites = [int(site) for site in sites]
+    if operator_component is not None and local_operators is None:
+        local_operators = component_local_operators(
+            data, operator_component, sites, "projector exchange"
+        )
     site_to_spin = {site: ispin for ispin, site in enumerate(sites)}
     green = ProjectorGreen(data)
     contour = CFR(nz=nz, T=smearing_eV / kB)
@@ -571,6 +576,7 @@ def write_projector_exchange_out(
     spinat=None,
     Rcut=None,
     local_operators=None,
+    operator_component=None,
 ):
     """Write TB2J exchange.out from projector Green data."""
     atoms = Atoms(
@@ -591,6 +597,7 @@ def write_projector_exchange_out(
         smearing_eV=smearing_eV,
         sites=sites,
         local_operators=local_operators,
+        operator_component=operator_component,
     )
     if charges is not None or spinat is not None:
         if charges is None or spinat is None:
@@ -694,4 +701,61 @@ def gen_exchange_projector_netcdf(
         Rcut=Rcut,
         local_operators=local_operators,
         description=description,
+    )
+
+
+def gen_exchange_gpaw(
+    calc,
+    atoms=None,
+    output_path="TB2J_results",
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+    operator_component=None,
+    Rmax=None,
+    Rcut=None,
+    nz=30,
+    smearing_eV=0.05,
+    save_netcdf=None,
+    metadata=None,
+):
+    """High-level GPAW projector-Green exchange API.
+
+    Take a *converged* GPAW calculator, build the projector-Green data (which
+    collects the explicit pseudo-partial-wave ``delta_xc`` exchange field
+    V_xc^up - V_xc^down via ``hamiltonian.xc.calculate_paw_correction``),
+    optionally save the NetCDF to ``save_netcdf``, and evaluate the controlled
+    projector exchange trace, writing the standard ``exchange.out``.
+
+    Operator selection: by default ``ProjectorGreen.get_local_operator`` prefers
+    the ``delta_xc`` component exported here, then ``delta_total``, then the
+    ``hij`` spin splitting. Pass ``operator_component`` (e.g. ``"delta_xc"``,
+    ``"delta_total"``) to force a specific component.
+
+    Returns ``(exchange_out_path, exchange_Jdict)``.
+    """
+    data = gpaw_calc_to_projector_green_data(calc, atoms=atoms, metadata=metadata)
+    if save_netcdf is not None:
+        data.save_netcdf(save_netcdf)
+    sites = None
+    if index_magnetic_atoms is not None:
+        sites = [int(site) for site in index_magnetic_atoms]
+    Rpts = _R_grid_for_cutoff(
+        data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
+    )
+    return write_projector_exchange_out(
+        data,
+        path=output_path,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+        Rcut=Rcut,
+        operator_component=operator_component,
+        description=(
+            "Projector Green workflow using GPAW PAW projections and operator "
+            f"component {operator_component or 'delta_xc (auto)'} in basis "
+            f"{data.operator_basis}. Values are from the controlled projector "
+            "exchange-like trace, not yet a production PAW MFT benchmark.\n"
+        ),
     )

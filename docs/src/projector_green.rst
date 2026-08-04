@@ -39,6 +39,13 @@ TB2J reconstructs
    \frac{C^p_{n k \sigma} C^{q *}_{n k \sigma}}
    {E + E_{F,\sigma} - \epsilon_{n k \sigma}}.
 
+The conjugate is on the second index (``C^p C^{q*}``); this is verified by a SymPy
+identity (``PAW_green_convention_check.py``) and matches the dual-dual Green
+matrix :math:`G^{pq}=\langle\tilde p_p|\hat G|\tilde p_q\rangle`.  PAW projector
+overlaps are dual coefficients, so the spectral sum above already yields the
+dual-dual Green matrix and needs **no** :math:`S^{-1}GS^{-1}` dressing (only the
+k-dependent NC-PAO ``overlap_k`` triggers that transform).
+
 When ``efermi_spin`` is absent, TB2J uses the scalar ``efermi`` for every spin
 channel.  When ``efermi_spin`` is present, it must have shape ``(nspin,)`` and
 ``efermi`` is kept as the mean scalar fallback for legacy consumers.
@@ -137,6 +144,16 @@ occupations, native GPAW ``dH_asp`` as ``hij``, PAW onsite ``dO_ii`` as
 the exporter stores those values as ``efermi_spin`` and stores their mean in the
 scalar ``efermi`` fallback.
 
+The exporter also writes the explicit pseudo-partial-wave exchange field as the
+operator component ``delta_xc``: per atom, the spin splitting of the PAW XC
+energy derivative :math:`\partial E_{xc}/\partial D_{sp}` from
+``hamiltonian.xc.calculate_paw_correction``, i.e. the partial-wave matrix
+element of :math:`V_{xc}^{\uparrow}-V_{xc}^{\downarrow}` (XC contribution only).
+For collinear DFT this coincides with the ``dH_asp`` spin splitting (Hartree,
+ionic, and scalar terms are spin independent); it cleanly isolates the XC
+exchange field for +U/SOC/general cases.  ``ProjectorGreen.get_local_operator``
+prefers ``delta_xc`` over ``delta_total`` and the ``hij`` spin difference.
+
 CLI Use
 -------
 
@@ -159,6 +176,37 @@ For cubic SrMnO3 with Mn as the only magnetic site:
 The CLI reads the NetCDF file, reconstructs ``G(R,E)`` at the continued-fraction
 energy points, contracts the controlled projector trace, and writes the standard
 TB2J text output ``exchange.out``.
+
+Python API
+----------
+
+For in-memory use (no NetCDF round-trip), ``gen_exchange_gpaw`` takes a converged
+GPAW calculator directly and runs the full exchange with the ``delta_xc``
+operator by default:
+
+.. code-block:: python
+
+   from TB2J.interfaces.gpaw_projector import gen_exchange_gpaw
+
+   exchange_out, Jdict = gen_exchange_gpaw(
+       calc,
+       atoms=atoms,
+       output_path="TB2J_results",
+       magnetic_elements=["Fe"],
+       Rcut=10.0,
+       nz=30,
+       smearing_eV=0.05,
+       save_netcdf="gpaw_bcc_fe_projector_green.nc",  # optional
+   )
+
+The building blocks are also public: ``gpaw_calc_to_projector_green_data`` and
+``save_gpaw_projector_netcdf`` (export), ``compute_projector_exchange_jdict``
+and ``write_projector_exchange_out`` (exchange trace).  The operator is selected
+via ``operator_component`` (CLI ``--operator_component``): ``"delta_xc"`` (GPAW
+default, explicit :math:`V_{xc}^{\uparrow}-V_{xc}^{\downarrow}` field),
+``"delta_total"`` (ABINIT, :math:`\delta V_{xc}+\delta U`), or ``"hij"``-style
+fall-back.  ``ProjectorGreenData.operator_component_names`` lists the components
+stored in a file.
 
 ABINIT PAW Export
 -----------------

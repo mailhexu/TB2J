@@ -53,8 +53,10 @@ def run_gpaw_projector2J():
         "--operator_component",
         default=None,
         help=(
-            "operator component to use for exchange instead of the default "
-            "delta_total/hij path, for example mft_site_operator"
+            "site-local operator component for the exchange trace (default: "
+            "delta_xc for GPAW exports = the explicit V_xc^up - V_xc^down "
+            "partial-wave field; falls back to delta_total, then the hij spin "
+            "splitting). Other options: delta_total, hij."
         ),
     )
     args = parser.parse_args()

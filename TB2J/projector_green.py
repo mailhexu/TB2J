@@ -461,6 +461,11 @@ class ProjectorGreenData:
             block = block[:nproj, :nproj]
         return block
 
+    @property
+    def operator_component_names(self):
+        """Names of the stored operator components (e.g. delta_xc, delta_total)."""
+        return list(self.operator_components) if self.operator_components else []
+
     def get_hij_spin_difference(self, site=None):
         """Return H_ij(up) - H_ij(down), optionally for one site."""
         if self.hij is None:

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
 from TB2J.projector_green import (
     ProjectorGreen,
     ProjectorGreenData,
@@ -513,6 +514,31 @@ def test_projector_green_gk_matches_operator_matrix_element():
     np.testing.assert_allclose(gk, gtrue, atol=1e-10)
     # the pre-fix transpose form must NOT match
     assert not np.allclose(gk, gtrue.T, atol=1e-6)
+
+
+def test_operator_component_api_prefers_delta_xc_and_is_selectable():
+    """Lock the GPAW operator-component API contract.
+
+    get_local_operator prefers an exported 'delta_xc' component; operator_component_names
+    lists stored components; compute_projector_exchange_jdict(operator_component=...) uses
+    that component.
+    """
+    data = make_bcc_fe_projector_data()
+    # inject a distinct delta_xc operator component (2x the hij spin difference)
+    hij_split = data.get_hij_spin_difference(site=0)
+    delta_xc_block = 2.0 * hij_split[None, :, :]
+    data.operator_components = {"delta_xc": delta_xc_block}
+    data.operator_component_metadata = {"delta_xc": {}}
+
+    assert data.operator_component_names == ["delta_xc"]
+    green = ProjectorGreen(data)
+    np.testing.assert_allclose(green.get_local_operator(0), hij_split * 2.0)
+
+    # explicit selection runs and produces an exchange dict
+    jdict = compute_projector_exchange_jdict(
+        data, Rpts=[(0, 0, 0)], nz=6, smearing_eV=0.05, operator_component="delta_xc"
+    )
+    assert jdict  # non-empty
 
 
 def test_projector_green_transforms_full_bz_gk_to_gr():
