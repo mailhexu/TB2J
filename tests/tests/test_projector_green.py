@@ -462,11 +462,57 @@ def test_projector_green_reconstructs_gk_with_k_dependent_overlap():
 
     coeff = data.coefficients[0, ik]
     inv_denom = 1.0 / (energy + data.efermi - data.eigenvalues[0, ik])
-    covariant = np.einsum("np,nq,n->pq", coeff.conj(), coeff, inv_denom)
+    covariant = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
     Sinv = np.linalg.inv(data.overlap_k[ik])
     expected = Sinv @ covariant @ Sinv
     np.testing.assert_allclose(green.get_Sk(ik), data.overlap_k[ik])
     np.testing.assert_allclose(gk, expected)
+
+
+def test_projector_green_gk_matches_operator_matrix_element():
+    """Phase-sensitive regression for the projector coefficient convention.
+
+    get_Gk must return the true dual-dual Green matrix <p~_p|G(z)|p~_q>, not its
+    transpose. With complex non-diagonal projector overlaps the conj-on-1st-index
+    form (the pre-fix code) yields G^T and fails; conj-on-2nd (docs +
+    sympy identity [F], PAW_green_convention_check.py) passes.
+    """
+    rng = np.random.default_rng(20260804)
+    nproj = nband = 3
+    a = rng.standard_normal((nproj, nband)) + 1j * rng.standard_normal((nproj, nband))
+    psi, _ = np.linalg.qr(a)  # psi[:, n] = |psi~_n>, orthonormal columns
+    pmat = rng.standard_normal((nproj, nproj)) + 1j * rng.standard_normal(
+        (nproj, nproj)
+    )
+    evals = np.array([-0.5, 0.3, 1.7])
+    z = 0.9 + 0.4j
+
+    # coefficients C[n, p] = <p~_p | psi~_n> = pmat[:, p]^dagger . psi[:, n]
+    coeff = (pmat.conj().T @ psi).T
+    # operator resolvent and the true G^{pq} = p_p^dagger G p_q
+    gop = psi @ np.diag(1.0 / (z - evals)) @ psi.conj().T
+    gtrue = pmat.conj().T @ gop @ pmat
+
+    data = ProjectorGreenData(
+        kpoints=np.array([[0.0, 0.0, 0.0]]),
+        weights=np.array([1.0]),
+        eigenvalues=evals[None, None, :],
+        coefficients=coeff[None, None, :, :],
+        efermi=0.0,
+        projector_site=np.zeros(nproj, dtype=int),
+        projector_atom=np.zeros(nproj, dtype=int),
+        cell=np.eye(3),
+        positions=np.array([[0.0, 0.0, 0.0]]),
+        atomic_numbers=np.array([26]),
+        projector_l=np.zeros(nproj, dtype=int),
+        projector_m=np.zeros(nproj, dtype=int),
+        projector_radial=np.zeros(nproj, dtype=int),
+    )
+    green = ProjectorGreen(data)
+    gk = green.get_Gk(ik=0, energy=z, ispin=0)
+    np.testing.assert_allclose(gk, gtrue, atol=1e-10)
+    # the pre-fix transpose form must NOT match
+    assert not np.allclose(gk, gtrue.T, atol=1e-6)
 
 
 def test_projector_green_transforms_full_bz_gk_to_gr():
@@ -495,7 +541,7 @@ def test_projector_green_transforms_overlap_k_corrected_gk_to_gr():
     for ik in range(data.nkpt):
         coeff = data.coefficients[0, ik]
         inv_denom = 1.0 / (energy + data.efermi - data.eigenvalues[0, ik])
-        covariant = np.einsum("np,nq,n->pq", coeff.conj(), coeff, inv_denom)
+        covariant = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
         Sinv = np.linalg.inv(data.overlap_k[ik])
         corrected.append(Sinv @ covariant @ Sinv)
     corrected = np.asarray(corrected)

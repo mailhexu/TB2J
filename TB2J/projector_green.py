@@ -881,7 +881,11 @@ class ProjectorGreen:
         self.nbasis = data.nproj
         self.norb = data.nproj
         self.k2Rfactor = -2.0j * np.pi
-        self.is_orthogonal = True
+        # PAW projector overlaps are dual coefficients: the spectral sum already
+        # yields the dual-dual Green matrix, so no S^-1 G S^-1 dressing is applied
+        # here (derivation [D], PAW_LKAG_derivation). Only the k-dependent NC-PAO
+        # overlap (overlap_k) triggers the contravariant transform in _contravariant_Gk.
+        self.is_orthogonal = data.overlap_k is None
         self.overlap_condition_threshold = float(
             data.metadata.get("overlap_condition_threshold", 1.0e12)
         )
@@ -905,7 +909,7 @@ class ProjectorGreen:
             evals = evals[mask]
             coeff = coeff[mask]
         inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
-        Gk = np.einsum("np,nq,n->pq", coeff.conj(), coeff, inv_denom)
+        Gk = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
         return self._contravariant_Gk(Gk, ik)
 
     def get_Gk_all(self, energy, ispin=0):
@@ -917,7 +921,7 @@ class ProjectorGreen:
         evals = self.data.eigenvalues[ispin]
         coeff = self.data.coefficients[ispin]
         inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
-        Gk_all = np.einsum("knp,knq,kn->kpq", coeff.conj(), coeff, inv_denom)
+        Gk_all = np.einsum("knp,knq,kn->kpq", coeff, coeff.conj(), inv_denom)
         if self.data.overlap_k is None:
             return Gk_all
         return np.asarray(
