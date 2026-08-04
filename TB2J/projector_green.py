@@ -997,6 +997,11 @@ class ProjectorGreen:
         """Return a validated site-local operator for exchange-like traces."""
         if operator != "hij_spin_difference":
             raise ValueError(f"unsupported local operator source: {operator}")
+        # Prefer the explicit XC exchange field (V_xc^up - V_xc^down) partial-wave
+        # matrix when exported (GPAW eq:pseudo-partial-delta); fall back to the
+        # assembled delta_total, then to the hij spin splitting.
+        if self.data.has_operator_component("delta_xc"):
+            return self.data.get_operator_component("delta_xc", site=site)
         if self.data.has_operator_component("delta_total"):
             return self.data.get_operator_component("delta_total", site=site)
         if not _definition_is_supported(

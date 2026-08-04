@@ -188,6 +188,39 @@ def _collect_hij(calc, site_nproj):
     return hij
 
 
+def _collect_delta_xc_paw_xc(calc, site_nproj):
+    """Atom-centered XC exchange field in the PAW partial-wave basis.
+
+    Per atom, evaluate the spin splitting of the PAW XC energy derivative matrix
+    dE_xc/dD_sp via GPAW ``hamiltonian.xc.calculate_paw_correction``.  For
+    LSDA/GGA this is the explicit partial-wave matrix element of the
+    exchange-correlation spin field V_xc^up - V_xc^down restricted to the XC
+    contribution (paper eq:pseudo-partial-delta).  Hartree, ionic, and scalar
+    external PAW terms are spin independent, so for plain collinear DFT this
+    coincides with the full dH_asp spin splitting (verified on bcc Fe); it
+    cleanly isolates the XC exchange field for +U/SOC/general cases.
+    """
+    from gpaw.utilities import unpack_hermitian
+
+    nspin = calc.wfs.nspins
+    nsite = len(site_nproj)
+    nmax = int(np.max(site_nproj))
+    delta_xc = np.zeros((nsite, nmax, nmax), dtype=complex)
+    if nspin != 2:
+        return delta_xc
+    xc = calc.hamiltonian.xc
+    for atom, D_sp in calc.density.D_asp.items():
+        atom = int(atom)
+        setup = calc.wfs.setups[atom]
+        D_sp = np.asarray(D_sp)
+        dEdD_sp = np.zeros_like(D_sp)
+        xc.calculate_paw_correction(setup, D_sp, dEdD_sp)
+        delta = (unpack_hermitian(dEdD_sp[0]) - unpack_hermitian(dEdD_sp[1])) * Ha
+        nproj = site_nproj[atom]
+        delta_xc[atom, :nproj, :nproj] = delta[:nproj, :nproj]
+    return delta_xc
+
+
 def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
     """Convert a converged GPAW PAW calculation to ProjectorGreenData."""
     if atoms is None:
@@ -208,6 +241,23 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
     efermi = float(np.mean(fermi_levels))
     projector_metadata = _setup_projector_metadata(calc.wfs.setups)
     hij = _collect_hij(calc, projector_metadata["site_nproj"])
+    delta_xc = _collect_delta_xc_paw_xc(calc, projector_metadata["site_nproj"])
+    operator_components = {"delta_xc": delta_xc} if calc.wfs.nspins == 2 else None
+    operator_component_metadata = (
+        {
+            "delta_xc": {
+                "units": "eV",
+                "definition": (
+                    "explicit V_xc^up - V_xc^down PAW partial-wave matrix "
+                    "(GPAW xc.calculate_paw_correction spin splitting)"
+                ),
+                "source": "GPAW hamiltonian.xc.calculate_paw_correction",
+                "operator_basis": "paw_partial_wave_channel",
+            }
+        }
+        if calc.wfs.nspins == 2
+        else None
+    )
     metadata = {} if metadata is None else dict(metadata)
     metadata.update(
         {
@@ -261,6 +311,8 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
         ),
         population_metric="GPAW PAW N0_p packed density contraction",
         operator_basis="native_paw_projector_hamiltonian",
+        operator_components=operator_components,
+        operator_component_metadata=operator_component_metadata,
         metadata=metadata,
     )
 
