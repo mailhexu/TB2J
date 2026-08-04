@@ -599,7 +599,7 @@ def write_projector_exchange_out(
 def gen_exchange_projector_netcdf(
     filename,
     output_path="TB2J_results",
-    Rmax=1,
+    Rmax=None,
     Rcut=None,
     nz=30,
     smearing_eV=0.05,

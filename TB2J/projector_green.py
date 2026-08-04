@@ -1126,10 +1126,9 @@ def projector_exchange_trace(
 def projector_charge_moments_from_green(green, contour, sites=None):
     """Compute projector-space charges and collinear moments from Green functions.
 
-    The convention follows TB2J's existing contour-density path: for each spin
-    and site, integrate the diagonal of the onsite Green block at ``R=0`` as
-    ``-Im(integral G_ii) / pi``.  The returned charge is the sum of spin-up and
-    spin-down projected occupations; the returned moment is their difference.
+    The convention follows TB2J's existing contour-density path.  For NC PAOs,
+    the Green function is contravariant, so its density is left-contracted by
+    the k-dependent overlap on the right before taking the site trace.
     """
     validate_green_backend(green)
     if not callable(getattr(green, "get_site_block", None)):
@@ -1154,7 +1153,17 @@ def projector_charge_moments_from_green(green, contour, sites=None):
     for ispin in range(green.data.nspin):
         site_diags = {site: [] for site in sites}
         for energy in contour.path:
-            GR0 = green.get_GR(R0, energy=energy, ispin=ispin)[0]
+            if green.data.overlap_k is None:
+                GR0 = green.get_GR(R0, energy=energy, ispin=ispin)[0]
+            else:
+                Gk = green.get_Gk_all(energy, ispin=ispin)
+                GR0 = np.einsum(
+                    "k,kpq,kqr->pr",
+                    green.kweights,
+                    Gk,
+                    green.data.overlap_k,
+                    optimize="optimal",
+                )
             for site in sites:
                 block = green.get_site_block(GR0, site, site)
                 site_diags[site].append(np.diag(block))

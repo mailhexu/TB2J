@@ -13,7 +13,7 @@ from TB2J.interfaces.gpaw_projector import (
     component_local_operators,
     write_projector_exchange_out,
 )
-from TB2J.mycfr import CFR
+from TB2J.mycfr import CFR2
 from TB2J.projector_green import (
     ProjectorGreen,
     ProjectorGreenData,
@@ -86,6 +86,16 @@ def _validate_local_operators_hermitian(local_operators, label, tolerance=1.0e-8
                 f"ABINIT NC PAO operator component {label!r} is not Hermitian "
                 f"on site {site}: max |Delta-Delta^dagger|={err:.3e} eV"
             )
+
+
+def _population_contour(data, nz, smearing_eV):
+    temperature = smearing_eV / kB
+    fermi = data.efermi if data.efermi_spin is None else data.efermi_spin[:, None, None]
+    spectral_range = float(np.max(np.abs(data.eigenvalues - fermi)))
+    contour = CFR2(nz=nz, T=temperature)
+    while np.max(np.abs(contour.path[:-1].imag)) < 4.0 * spectral_range:
+        contour = CFR2(nz=2 * contour.nz, T=temperature)
+    return contour
 
 
 def compute_nc_pao_projected_charges_moments(data):
@@ -1350,7 +1360,7 @@ load_abinit_savetb2j_projector = load_abinit_savetb2j
 def gen_exchange_abinit_projector(
     filename,
     output_path="TB2J_results_abinit",
-    Rmax=1,
+    Rmax=None,
     Rcut=None,
     nz=30,
     smearing_eV=0.05,
@@ -1408,7 +1418,9 @@ def gen_exchange_abinit_projector(
     output_population_mode = population_mode
     if population_mode == "green":
         density = projector_charge_moments_from_green(
-            ProjectorGreen(data), CFR(nz=nz, T=smearing_eV / kB), sites=sites
+            ProjectorGreen(data),
+            _population_contour(data, nz, smearing_eV),
+            sites=sites,
         )
         charges = np.zeros(len(data.atomic_numbers), dtype=float)
         spinat = np.zeros((len(data.atomic_numbers), 3), dtype=float)
@@ -1435,7 +1447,7 @@ def gen_exchange_abinit_projector(
 def gen_exchange_abinit_nc_pao(
     filename,
     output_path="TB2J_results_abinit_nc_pao",
-    Rmax=1,
+    Rmax=None,
     Rcut=None,
     nz=30,
     smearing_eV=0.05,
@@ -1511,7 +1523,9 @@ def gen_exchange_abinit_nc_pao(
         output_population_mode = "none"
     elif population_mode == "green":
         density = projector_charge_moments_from_green(
-            ProjectorGreen(data), CFR(nz=nz, T=smearing_eV / kB), sites=sites
+            ProjectorGreen(data),
+            _population_contour(data, nz, smearing_eV),
+            sites=sites,
         )
         charges = np.zeros(len(data.atomic_numbers), dtype=float)
         spinat = np.zeros((len(data.atomic_numbers), 3), dtype=float)

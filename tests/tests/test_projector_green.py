@@ -1229,6 +1229,44 @@ def test_projector_charge_moments_from_green_matches_manual_contour_trace():
     np.testing.assert_allclose(density["spinat"][:, 2], [manual[0] - manual[1]])
 
 
+def test_abinit_nc_pao_green_population_matches_occupations(tmp_path, monkeypatch):
+    from TB2J.interfaces import abinit_savetb2j
+
+    source = make_nc_pao_exchange_data()
+    source.eigenvalues = np.array([[[-80.0, 1.0]], [[-80.0, 1.0]]])
+    source.efermi = 0.0
+    source.occupations = np.array([[[1.0, 0.0]], [[1.0, 0.0]]])
+    source.coefficients[:, 0, 0] = [1.0, 0.25j]
+    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    filename = tmp_path / "abinit_nc_pao_savetb2j.nc"
+    write_abinit_nc_pao_fixture(filename, source)
+    captured = {}
+
+    def capture_output(data, **kwargs):
+        captured.update(kwargs)
+        return tmp_path / "exchange.out", {}
+
+    monkeypatch.setattr(abinit_savetb2j, "write_projector_exchange_out", capture_output)
+    abinit_savetb2j.gen_exchange_abinit_nc_pao(
+        filename,
+        output_path=tmp_path / "TB2J_results",
+        Rmax=0,
+        nz=30,
+        smearing_eV=0.05,
+        population_mode="green",
+        shell_charge_threshold=None,
+        shell_moment_threshold=None,
+    )
+
+    from TB2J.interfaces.abinit_savetb2j import compute_nc_pao_projected_charges_moments
+
+    expected_charges, expected_spinat, _ = compute_nc_pao_projected_charges_moments(
+        source
+    )
+    np.testing.assert_allclose(captured["charges"], expected_charges)
+    np.testing.assert_allclose(captured["spinat"], expected_spinat)
+
+
 def test_projector_exchange_trace_rejects_unsupported_hij_definition():
     data = make_bcc_fe_projector_data()
     data.hij_definition = "projected_density_matrix"

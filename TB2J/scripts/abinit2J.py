@@ -67,7 +67,12 @@ def run_abinit2J():
         default=None,
         help="Indices of magnetic atoms (1-based, as in exchange.out)",
     )
-    parser.add_argument("--Rmax", type=int, default=1, help="Real-space R-grid radius")
+    parser.add_argument(
+        "--Rmax",
+        type=int,
+        default=None,
+        help="Real-space R-grid radius; inferred from --Rcut",
+    )
     parser.add_argument("--Rcut", type=float, default=None, help="Exchange cutoff (Å)")
     parser.add_argument(
         "--nz", type=int, default=30, help="Green-function integration points"
