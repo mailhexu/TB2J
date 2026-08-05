@@ -888,6 +888,20 @@ def _load_abinit_nc_pao_hs_v2(nc):
         eigenvalues = eigenvalues[:, bz_to_ibz, :]
         if occupations is not None:
             occupations = occupations[:, bz_to_ibz, :]
+        # Use BZ-resolved eigenvalues/occupations if available (needed when
+        # the IBZ-to-BZ expansion applies per-k transforms like spin-flip).
+        if "eigenvalues_bz" in nc.variables:
+            eigenvalues = (
+                _array_in_dimension_order(
+                    _require_var(nc, "eigenvalues_bz", "NC PAO H/S"),
+                    ("nsppol", "nkpt_bz", "nband"),
+                )
+                * HARTREE_TO_EV
+            )
+        if occupations is not None and "occupations_bz" in nc.variables:
+            occupations = _array_in_dimension_order(
+                nc.variables["occupations_bz"], ("nsppol", "nkpt_bz", "nband")
+            )
 
     component_sources = {
         "delta_xc_smooth": _decode_split_complex_var_ordered(
