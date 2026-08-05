@@ -111,8 +111,8 @@ def compute_nc_pao_projected_charges_moments(data):
             rho = np.einsum(
                 "b,bp,bq->pq",
                 data.occupations[spin, ikpt],
-                coeff.conj(),
                 coeff,
+                coeff.conj(),
                 optimize="optimal",
             )
             dual_density = np.linalg.inv(data.overlap_k[ikpt]) @ rho
@@ -183,8 +183,8 @@ def compute_nc_pao_shell_populations(data):
             rho = np.einsum(
                 "b,bp,bq->pq",
                 data.occupations[spin, ikpt],
-                coeff.conj(),
                 coeff,
+                coeff.conj(),
                 optimize="optimal",
             )
             dual_density = np.linalg.inv(data.overlap_k[ikpt]) @ rho
@@ -853,9 +853,10 @@ def _load_abinit_nc_pao_hs_v2(nc):
         occupations = _array_in_dimension_order(
             nc.variables["occupations"], ("nsppol", "nkpt_ibz", "nband")
         )
+    # abinao stores <psi|phi>; ProjectorGreen uses <phi|psi> like GPAW.
     coefficients = _decode_split_complex_var_ordered(
         nc, "coefficients_ibz", "NC PAO H/S", ("nsppol", "nkpt_ibz", "nband", "nproj")
-    )
+    ).conj()
     overlap_k = _decode_split_complex_var_ordered(
         nc, "overlap_ibz", "NC PAO H/S", ("nkpt_ibz", "nproj", "nproj")
     )
@@ -874,7 +875,7 @@ def _load_abinit_nc_pao_hs_v2(nc):
         weights = np.ones(kpoints.shape[0], dtype=float) / kpoints.shape[0]
         coefficients = _decode_split_complex_var_ordered(
             nc, "coefficients_bz", "NC PAO H/S", ("nsppol", "nkpt_bz", "nband", "nproj")
-        )
+        ).conj()
         overlap_k = _decode_split_complex_var_ordered(
             nc, "overlap_bz", "NC PAO H/S", ("nkpt_bz", "nproj", "nproj")
         )

@@ -533,6 +533,13 @@ def compute_projector_exchange_jdict(
         local_operators = component_local_operators(
             data, operator_component, sites, "projector exchange"
         )
+    if local_operators is None:
+        from TB2J.projector_green import ProjectorGreen as _PG
+
+        green_tmp = _PG(data)
+        local_operators = {
+            int(site): green_tmp.get_local_operator(site) for site in sites
+        }
     site_to_spin = {site: ispin for ispin, site in enumerate(sites)}
     green = ProjectorGreen(data)
     contour = CFR(nz=nz, T=smearing_eV / kB)
@@ -554,10 +561,22 @@ def compute_projector_exchange_jdict(
             values[key].append(trace["trace"][key])
 
     exchange_Jdict = {}
+    sign_cache = {}
     for (R, i, j), vals in values.items():
         integrated = contour.integrate_values(np.asarray(vals))
-        exchange_Jdict[(R, site_to_spin[i], site_to_spin[j])] = float(
-            np.imag(integrated)
+        if i not in sign_cache:
+            tr_i = (
+                float(np.real(np.trace(local_operators[i]))) if local_operators else 0.0
+            )
+            sign_cache[i] = 1.0 if tr_i >= 0 else -1.0
+        if j not in sign_cache:
+            tr_j = (
+                float(np.real(np.trace(local_operators[j]))) if local_operators else 0.0
+            )
+            sign_cache[j] = 1.0 if tr_j >= 0 else -1.0
+        sign = sign_cache[i] * sign_cache[j]
+        exchange_Jdict[(R, site_to_spin[i], site_to_spin[j])] = (
+            float(np.imag(integrated)) / sign
         )
     return exchange_Jdict
 

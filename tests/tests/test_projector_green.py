@@ -321,7 +321,8 @@ def write_abinit_nc_pao_hs_v2_fixture(
         nc.createVariable("occupations", "f8", ("nsppol", "nkpt_ibz", "nband"))[:] = (
             data.occupations
         )
-        coeff = data.coefficients
+        # ABINIT PAO_HS stores <psi|phi>, unlike ProjectorGreen's <phi|psi>.
+        coeff = data.coefficients.conj()
         nc.createVariable(
             "coefficients_ibz_real", "f8", ("nsppol", "nkpt_ibz", "nband", "nproj")
         )[:] = coeff.real
