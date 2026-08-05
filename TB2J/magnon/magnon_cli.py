@@ -8,6 +8,7 @@ from TB2J.magnon.magnon_dos import plot_magnon_dos_from_TB2J
 from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_common_magnon_args,
+    parse_common_args,
 )
 
 
@@ -160,26 +161,7 @@ def main():
     else:
         if args.window is not None:
             window = tuple(args.window)
-        spin_conf = None
-        if args.spin_conf:
-            if len(args.spin_conf) % 3 != 0:
-                raise ValueError(
-                    f"--spin-conf must have 3n values (mx my mz for each spin), "
-                    f"got {len(args.spin_conf)} values"
-                )
-            spin_conf = [
-                args.spin_conf[i : i + 3] for i in range(0, len(args.spin_conf), 3)
-            ]
-        params = MagnonParameters(
-            path=args.path,
-            Jiso=args.Jiso,
-            Jani=args.Jani,
-            SIA=args.SIA,
-            DMI=args.DMI,
-            spin_conf_file=args.spin_conf_file,
-            spin_conf=spin_conf,
-            show=args.show,
-        )
+        params = parse_common_args(args)
 
     if args.bands:
         warnings.warn(

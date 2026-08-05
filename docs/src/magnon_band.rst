@@ -28,6 +28,11 @@ Quick Start
    # Exclude specific interactions
    TB2J_magnon.py --bands --no-Jani --no-DMI
 
+   # Single-Q incommensurate reference with known ground-state Q
+   # Q defines the reference spiral; --kpath samples independent magnon k.
+   TB2J_magnon.py --bands --ordering-vector 0 0 0.1429 \
+       --rotation-axis 0 0 1 --kpath GX
+
 Legacy Interface
 --------------
 

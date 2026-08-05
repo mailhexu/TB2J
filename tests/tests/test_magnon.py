@@ -13,6 +13,7 @@ Run from the repository root:
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -69,6 +70,7 @@ class TestMagnonBandsDefault:
         magnon = plot_magnon_bands_from_TB2J(params)
 
         assert magnon.nspin == 2
+        np.testing.assert_allclose(magnon._n, [1.0, 0.0, 0.0])
         assert output_file.exists()
 
         json_file = output_file.with_suffix(".json")
@@ -323,6 +325,144 @@ class TestMagnonDOS:
 
         json_file = output_file.with_suffix(".json")
         assert json_file.exists()
+
+
+class TestIncommensurateReferenceCLI:
+    """Test public CLI configuration of the known single-Q reference."""
+
+    def test_parser_exposes_ordering_vector_and_rotation_axis(self):
+        """The reference Q/n inputs are distinct from sampled magnon k inputs."""
+        from TB2J.magnon.magnon_cli import create_parser
+
+        args = create_parser().parse_args(
+            [
+                "--bands",
+                "--ordering-vector",
+                "0",
+                "0",
+                "0.1429",
+                "--rotation-axis",
+                "0",
+                "0",
+                "2",
+                "--kpath",
+                "GX",
+            ]
+        )
+
+        assert args.ordering_vector == [0.0, 0.0, 0.1429]
+        assert args.rotation_axis == [0.0, 0.0, 2.0]
+        assert args.kpath == "GX"
+
+    def test_bands_cli_passes_reference_configuration(self, monkeypatch):
+        """The canonical bands CLI forwards Q/n/uz to its public params object."""
+        from TB2J.magnon import magnon_cli
+
+        captured = []
+        monkeypatch.setattr(magnon_cli, "plot_magnon_bands_from_TB2J", captured.append)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "TB2J_magnon.py",
+                "--bands",
+                "--ordering-vector",
+                "0",
+                "0",
+                "0.1429",
+                "--rotation-axis",
+                "0",
+                "0",
+                "2",
+                "--uz-file",
+                "reference_axes.dat",
+                "--kpath",
+                "GX",
+            ],
+        )
+
+        magnon_cli.main()
+
+        assert len(captured) == 1
+        params = captured[0]
+        assert params.Q == [0.0, 0.0, 0.1429]
+        assert params.n == [0.0, 0.0, 2.0]
+        assert params.uz_file == "reference_axes.dat"
+        assert params.kpath == "GX"
+
+    def test_omitted_rotation_axis_defaults_to_x(self, tb2j_results, tmp_path):
+        """Python, TOML, and CLI omission all configure the x spiral axis."""
+        from TB2J.magnon.magnon_cli import create_parser
+        from TB2J.magnon.magnon_parameters import (
+            parse_common_args,
+            prepare_magnon_from_params,
+        )
+
+        python_params = MagnonParameters(path=tb2j_results)
+        prepared = prepare_magnon_from_params(python_params)
+        np.testing.assert_allclose(prepared._n, [1.0, 0.0, 0.0])
+
+        config = tmp_path / "magnon.toml"
+        python_params.to_toml(config)
+        toml_params = MagnonParameters.from_toml(config)
+        np.testing.assert_allclose(
+            prepare_magnon_from_params(toml_params)._n, [1.0, 0.0, 0.0]
+        )
+
+        cli_params = parse_common_args(
+            create_parser().parse_args(["--bands", "--path", tb2j_results])
+        )
+        np.testing.assert_allclose(
+            prepare_magnon_from_params(cli_params)._n, [1.0, 0.0, 0.0]
+        )
+
+        class SpinIOStub:
+            nspin = 1
+            Rlist = np.zeros((1, 3), dtype=int)
+            atoms = Atoms("H", cell=np.eye(3), pbc=True)
+
+            def get_magnetic_moments(self):
+                return np.array([[0.0, 0.0, 1.0]])
+
+            def get_full_Jtensor_for_Rlist(self, **kwargs):
+                return np.zeros((1, 1, 1, 3, 3))
+
+        direct = Magnon.load_from_io(SpinIOStub())
+        np.testing.assert_allclose(direct._n, [1.0, 0.0, 0.0])
+
+    def test_set_reference_normalizes_axis_and_rejects_zero_axis(self):
+        """A rotation-axis magnitude must not rescale the spiral phase."""
+        magnon = Magnon(
+            nspin=1,
+            magmom=np.array([[0.0, 0.0, 2.0]]),
+            Rlist=np.array([[1, 0, 0]]),
+            JR=np.eye(3)[None, None, None, :, :],
+            cell=np.eye(3),
+            _Q=np.zeros(3),
+            _uz=np.array([[0.0, 0.0, 1.0]]),
+            _n=np.array([0.0, 0.0, 1.0]),
+        )
+
+        magnon.set_reference(
+            Q=[0.25, 0.0, 0.0],
+            uz=[[0.0, 0.0, 1.0]],
+            n=[0.0, 0.0, 2.0],
+        )
+
+        np.testing.assert_allclose(magnon._n, [0.0, 0.0, 1.0])
+        with pytest.raises(ValueError, match="non-zero"):
+            magnon.set_reference(
+                Q=[0.25, 0.0, 0.0],
+                uz=[[0.0, 0.0, 1.0]],
+                n=[0.0, 0.0, 0.0],
+            )
+
+    def test_parameter_vectors_reject_non_finite_values(self):
+        """Known reference vectors must be finite before calculation begins."""
+        with pytest.raises(ValueError, match="finite"):
+            MagnonParameters(Q=[0.0, np.nan, 0.0])
+        with pytest.raises(ValueError, match="non-zero"):
+            MagnonParameters(n=[0.0, 0.0, 0.0])
 
 
 class TestMagnonParametersValidation:

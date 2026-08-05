@@ -66,16 +66,29 @@ class Magnon:
             Normal vector for rotation
         """
         self.set_propagation_vector(Q)
+        axis = np.asarray(n, dtype=float)
+        if axis.shape != (3,):
+            raise ValueError("Rotation axis n must have three components.")
+        if not np.all(np.isfinite(axis)):
+            raise ValueError("Rotation axis n must contain only finite values.")
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm == 0:
+            raise ValueError("Rotation axis n must be non-zero.")
         self._uz = np.array(uz, dtype=float)
-        self._n = np.array(n, dtype=float)
+        self._n = axis / axis_norm
         if magmoms is not None:
             self.magmom = np.array(magmoms, dtype=float)
         self.Snorm = np.linalg.norm(self.magmom, axis=1) / 2
         # self.Snorm=np.ones(self.nspin)
 
     def set_propagation_vector(self, Q):
-        """Set propagation vector"""
-        self._Q = np.array(Q)
+        """Set the known reference ordering/propagation vector."""
+        Q = np.asarray(Q, dtype=float)
+        if Q.shape != (3,):
+            raise ValueError("Propagation vector Q must have three components.")
+        if not np.all(np.isfinite(Q)):
+            raise ValueError("Propagation vector Q must contain only finite values.")
+        self._Q = Q
 
     @property
     def Q(self):
@@ -86,11 +99,7 @@ class Magnon:
 
     @Q.setter
     def Q(self, value):
-        if not isinstance(value, (list, np.ndarray)):
-            raise TypeError("Propagation vector Q must be a list or numpy array.")
-        if len(value) != 3:
-            raise ValueError("Propagation vector Q must have three components.")
-        self._Q = np.array(value)
+        self.set_propagation_vector(value)
 
     def Jq(self, kpoints):
         """
@@ -519,7 +528,7 @@ class Magnon:
             cell=cell,
             _Q=np.zeros(3),  # Default propagation vector
             _uz=np.array([[0.0, 0.0, 1.0]]),  # Default quantization axis
-            _n=np.array([0.0, 0.0, 1.0]),  # Default rotation axis
+            _n=np.array([1.0, 0.0, 0.0]),  # Default rotation axis
             pbc=pbc,
             primitive_cell=getattr(exc, "primitive_cell", None),
             supercell_matrix=getattr(exc, "supercell_matrix", None),
@@ -913,10 +922,10 @@ def plot_magnon_bands_cli():
             Jani=args.Jani,
             SIA=args.SIA,
             DMI=args.DMI,
-            Q=args.Q,
+            Q=args.ordering_vector,
             uz_file=args.uz_file,
             spin_conf_file=args.spin_conf_file,
-            n=getattr(args, "n", None),
+            n=args.rotation_axis,
             show=args.show,
         )
 
