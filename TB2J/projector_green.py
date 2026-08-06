@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -877,7 +878,12 @@ class ProjectorGreenData:
 class ProjectorGreen:
     """Runtime projector-space Green-function backend."""
 
-    def __init__(self, data: ProjectorGreenData):
+    def __init__(
+        self,
+        data: ProjectorGreenData,
+        overlap_mode: str | None = None,
+        overlap_rcond: float | None = None,
+    ):
         self.data = data
         self.kpts = data.kpoints
         self.kweights = data.weights
@@ -886,20 +892,37 @@ class ProjectorGreen:
         self.nbasis = data.nproj
         self.norb = data.nproj
         self.k2Rfactor = -2.0j * np.pi
-        # PAW projector overlaps are dual coefficients: the spectral sum already
-        # yields the dual-dual Green matrix, so no S^-1 G S^-1 dressing is applied
-        # here (derivation [D], PAW_LKAG_derivation). Only the k-dependent NC-PAO
-        # overlap (overlap_k) triggers the contravariant transform in _contravariant_Gk.
-        self.is_orthogonal = data.overlap_k is None
+        # PAW coefficients are already overlaps with dual projectors. Their spectral
+        # sum is dual-dual; absence of overlap_k does not imply an orthogonal basis.
+        self.coefficients_are_dual = data.overlap_k is None
+        self.needs_overlap_transform = data.overlap_k is not None
         self.overlap_condition_threshold = float(
             data.metadata.get("overlap_condition_threshold", 1.0e12)
         )
         self.adjusted_emin = float(np.min(data.eigenvalues) - data.efermi)
-        import os
-
-        self.use_contravariant = (
-            os.environ.get("TB2J_GREEN_MODE", "contravariant") != "plain"
+        mode = overlap_mode or os.environ.get(
+            "TB2J_GREEN_MODE", data.metadata.get("overlap_mode", "inverse")
         )
+        self.overlap_mode = {"contravariant": "inverse"}.get(mode, mode)
+        if self.overlap_mode not in {
+            "inverse",
+            "svd",
+            "lowdin",
+            "tikhonov",
+            "plain",
+        }:
+            raise ValueError(
+                "overlap_mode must be one of: inverse, svd, lowdin, tikhonov, plain"
+            )
+        self.overlap_rcond = float(
+            overlap_rcond
+            if overlap_rcond is not None
+            else os.environ.get(
+                "TB2J_GREEN_RCOND", data.metadata.get("overlap_rcond", 1.0e-10)
+            )
+        )
+        if not 0.0 <= self.overlap_rcond < 1.0:
+            raise ValueError("overlap_rcond must satisfy 0 <= rcond < 1")
 
     def _fermi(self, ispin):
         if self.efermi_spin is not None:
@@ -943,18 +966,63 @@ class ProjectorGreen:
         return np.eye(self.nbasis, dtype=complex)
 
     def _contravariant_Gk(self, Gk, ik):
-        if self.data.overlap_k is None or not self.use_contravariant:
+        if self.data.overlap_k is None or self.overlap_mode == "plain":
             return Gk
         Sk = self.get_Sk(ik)
-        condition = np.linalg.cond(Sk)
-        if not np.isfinite(condition) or condition > self.overlap_condition_threshold:
-            raise ValueError(
-                "overlap_k is singular or ill-conditioned at k-point "
-                f"{ik}: condition={condition:.3e}, "
-                f"threshold={self.overlap_condition_threshold:.3e}"
-            )
-        Sinv = np.linalg.inv(Sk)
+        Sinv = self._inverse_overlap(Sk, ik)
         return Sinv @ Gk @ Sinv
+
+    def _inverse_overlap(self, Sk, ik):
+        """Construct the full or truncated inverse overlap for one k point."""
+        if self.overlap_mode == "inverse":
+            condition = np.linalg.cond(Sk)
+            if (
+                not np.isfinite(condition)
+                or condition > self.overlap_condition_threshold
+            ):
+                raise ValueError(
+                    "overlap_k is singular or ill-conditioned at k-point "
+                    f"{ik}: condition={condition:.3e}, "
+                    f"threshold={self.overlap_condition_threshold:.3e}"
+                )
+            return np.linalg.inv(Sk)
+
+        if self.overlap_mode == "svd":
+            left, singular, right = np.linalg.svd(Sk)
+            cutoff = self.overlap_rcond * singular[0]
+            inverse = np.divide(
+                1.0,
+                singular,
+                out=np.zeros_like(singular),
+                where=singular > cutoff,
+            )
+            return (right.conj().T * inverse) @ left.conj().T
+
+        hermitian = (Sk + Sk.conj().T) / 2.0
+        eigenvalues, eigenvectors = np.linalg.eigh(hermitian)
+        scale = np.max(np.abs(eigenvalues))
+        cutoff = self.overlap_rcond * scale
+        if scale == 0.0 or np.min(eigenvalues) < -cutoff:
+            raise ValueError(f"overlap_k is not positive semidefinite at k-point {ik}")
+        eigenvalues = np.maximum(eigenvalues, 0.0)
+        if self.overlap_mode == "tikhonov":
+            if cutoff == 0.0:
+                raise ValueError("tikhonov overlap mode requires overlap_rcond > 0")
+            filtered = eigenvalues / (eigenvalues**2 + cutoff**2)
+            return (eigenvectors * filtered) @ eigenvectors.conj().T
+
+        # A consistent Lowdin transformation has L=S^-1/2 on every operator.
+        # Pairing adjacent L factors gives the dual metric S^-1=L@L used here.
+        inverse_sqrt = np.sqrt(
+            np.divide(
+                1.0,
+                eigenvalues,
+                out=np.zeros_like(eigenvalues),
+                where=eigenvalues > cutoff,
+            )
+        )
+        lowdin = (eigenvectors * inverse_sqrt) @ eigenvectors.conj().T
+        return lowdin @ lowdin
 
     def compute_GR(self, Rpts, kpts, Gks):
         Rvecs = np.asarray(Rpts, dtype=float)

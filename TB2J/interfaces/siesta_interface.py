@@ -14,7 +14,7 @@ try:
     from HamiltonIO.siesta import SislParser
 except ImportError:
     print(
-        "Cannot import SislWrapper from HamiltonIO.siesta. Please install HamiltonIO first."
+        "Cannot import SislParser from HamiltonIO.siesta. Please install HamiltonIO first."
     )
 
 

@@ -471,6 +471,58 @@ def test_projector_green_reconstructs_gk_with_k_dependent_overlap():
     np.testing.assert_allclose(gk, expected)
 
 
+def test_projector_green_marks_paw_coefficients_as_already_dual():
+    green = ProjectorGreen(make_bcc_fe_projector_data())
+
+    assert green.coefficients_are_dual
+    assert not green.needs_overlap_transform
+    assert not hasattr(green, "is_orthogonal")
+
+
+def test_projector_green_svd_truncates_small_overlap_mode():
+    data = make_overlap_k_projector_data()
+    data.overlap_k[0] = np.diag([1.0, 1.0e-12])
+    green = ProjectorGreen(data, overlap_mode="svd", overlap_rcond=1.0e-8)
+    energy = 1.0 + 0.4j
+    coeff = data.coefficients[0, 0]
+    inv_denom = 1.0 / (energy + data.efermi - data.eigenvalues[0, 0])
+    covariant = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
+    truncated_inverse = np.diag([1.0, 0.0])
+
+    np.testing.assert_allclose(
+        green.get_Gk(0, energy=energy),
+        truncated_inverse @ covariant @ truncated_inverse,
+    )
+
+
+def test_projector_green_lowdin_matches_svd_at_same_cutoff():
+    data = make_overlap_k_projector_data()
+    unitary, _ = np.linalg.qr(np.array([[1.0, 1.0j], [0.5j, 1.0]], dtype=complex))
+    data.overlap_k[0] = unitary @ np.diag([2.0, 1.0e-8]) @ unitary.conj().T
+    energy = 1.0 + 0.4j
+
+    svd = ProjectorGreen(data, overlap_mode="svd", overlap_rcond=1.0e-6)
+    lowdin = ProjectorGreen(data, overlap_mode="lowdin", overlap_rcond=1.0e-6)
+
+    np.testing.assert_allclose(
+        lowdin.get_Gk(0, energy=energy),
+        svd.get_Gk(0, energy=energy),
+        atol=1.0e-12,
+    )
+
+
+def test_projector_green_tikhonov_smoothly_damps_small_overlap_modes():
+    data = make_overlap_k_projector_data()
+    data.overlap_k[0] = np.diag([1.0, 1.0e-4])
+    green = ProjectorGreen(data, overlap_mode="tikhonov", overlap_rcond=1.0e-2)
+    regularized = green._inverse_overlap(data.overlap_k[0], 0)
+
+    singular = np.array([1.0, 1.0e-4])
+    expected = singular / (singular**2 + 1.0e-4)
+    np.testing.assert_allclose(regularized, np.diag(expected))
+    assert 0.0 < regularized[1, 1] < 1.0 / singular[1]
+
+
 def test_projector_green_gk_matches_operator_matrix_element():
     """Phase-sensitive regression for the projector coefficient convention.
 
@@ -1133,6 +1185,8 @@ def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
         Rmax=0,
         nz=2,
         smearing_eV=0.1,
+        overlap_mode="svd",
+        overlap_rcond=1.0e-8,
     )
 
     assert exchange_out.is_file()

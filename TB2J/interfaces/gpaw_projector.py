@@ -521,6 +521,8 @@ def compute_projector_exchange_jdict(
     sites=None,
     local_operators=None,
     operator_component=None,
+    overlap_mode=None,
+    overlap_rcond=None,
 ):
     """Compute TB2J-style isotropic exchange dictionary from projector trace."""
     if Rpts is None:
@@ -533,15 +535,10 @@ def compute_projector_exchange_jdict(
         local_operators = component_local_operators(
             data, operator_component, sites, "projector exchange"
         )
+    green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
     if local_operators is None:
-        from TB2J.projector_green import ProjectorGreen as _PG
-
-        green_tmp = _PG(data)
-        local_operators = {
-            int(site): green_tmp.get_local_operator(site) for site in sites
-        }
+        local_operators = {int(site): green.get_local_operator(site) for site in sites}
     site_to_spin = {site: ispin for ispin, site in enumerate(sites)}
-    green = ProjectorGreen(data)
     contour = CFR(nz=nz, T=smearing_eV / kB)
     values = {
         (tuple(int(x) for x in R), i, j): [] for R in Rpts for i in sites for j in sites
@@ -596,6 +593,8 @@ def write_projector_exchange_out(
     Rcut=None,
     local_operators=None,
     operator_component=None,
+    overlap_mode=None,
+    overlap_rcond=None,
 ):
     """Write TB2J exchange.out from projector Green data."""
     atoms = Atoms(
@@ -617,6 +616,8 @@ def write_projector_exchange_out(
         sites=sites,
         local_operators=local_operators,
         operator_component=operator_component,
+        overlap_mode=overlap_mode,
+        overlap_rcond=overlap_rcond,
     )
     if charges is not None or spinat is not None:
         if charges is None or spinat is None:

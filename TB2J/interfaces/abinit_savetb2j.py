@@ -1476,6 +1476,8 @@ def gen_exchange_abinit_nc_pao(
     emax_relative_to_fermi_eV=None,
     n_empty=None,
     report_path=None,
+    overlap_mode=None,
+    overlap_rcond=None,
 ):
     """Generate projector exchange output from an ABINIT NC PAO savetb2j file."""
     data = load_abinit_nc_pao_savetb2j(filename)
@@ -1538,7 +1540,9 @@ def gen_exchange_abinit_nc_pao(
         output_population_mode = "none"
     elif population_mode == "green":
         density = projector_charge_moments_from_green(
-            ProjectorGreen(data),
+            ProjectorGreen(
+                data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond
+            ),
             _population_contour(data, nz, smearing_eV),
             sites=sites,
         )
@@ -1571,6 +1575,8 @@ def gen_exchange_abinit_nc_pao(
         spinat=spinat,
         Rcut=Rcut,
         local_operators=local_operators,
+        overlap_mode=overlap_mode,
+        overlap_rcond=overlap_rcond,
     )
     if report_path is not None:
         if shell_records is None:

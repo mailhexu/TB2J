@@ -127,6 +127,18 @@ def run_abinit_nc_pao2J():
         default=None,
         help="optional Markdown diagnostics report path",
     )
+    parser.add_argument(
+        "--overlap_mode",
+        choices=("inverse", "svd", "lowdin", "tikhonov", "plain"),
+        default="inverse",
+        help="overlap treatment for projected Green functions",
+    )
+    parser.add_argument(
+        "--overlap_rcond",
+        type=float,
+        default=1.0e-10,
+        help="relative cutoff or Tikhonov lambda for regularized overlap modes",
+    )
     args = parser.parse_args()
     indices = None
     if args.index_magnetic_atoms is not None:
@@ -152,6 +164,8 @@ def run_abinit_nc_pao2J():
         emax_relative_to_fermi_eV=args.emax_relative_to_fermi,
         n_empty=args.n_empty,
         report_path=args.report,
+        overlap_mode=args.overlap_mode,
+        overlap_rcond=args.overlap_rcond,
     )
     print(f"Wrote {exchange_out}")
 
