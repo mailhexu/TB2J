@@ -111,6 +111,13 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
+    # Vendored third-party code (copied from p_tqdm).
+    "TB2J/external/p_tqdm.py",
+    # Dev/scratch scripts not imported by the package.
+    "TB2J/utest.py",
+    "TB2J/spinham/plot.py",
+    # Separate test-data submodule (not this repository's source).
+    "tests/data",
 ]
 line-length = 88
 indent-width = 4
@@ -130,3 +137,27 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 docstring-code-format = false
 docstring-code-line-length = "dynamic"
+
+
+[tool.pytest.ini_options]
+# Make the tests/ helper packages (e.g. utils.spinio_checks) importable.
+pythonpath = ["tests"]
+testpaths = ["tests"]
+filterwarnings = [
+    # Fail on unregistered marker usage so marker typos can't slip in silently.
+    "error::pytest.PytestUnknownMarkWarning",
+]
+markers = [
+    # Validation tiers (ADR-001/005).
+    "tier1: workflow smoke / structural contract at a public entry point",
+    "tier2: scientific validation — schema + toleranced quantities + invariants",
+    "tier3: ecosystem producer/consumer reproduction (optional deps/data)",
+    # Execution profiles (ADR-004). The default profile deselects the others.
+    "default: routine CPU profile (~10 min); runs in CI without optional deps",
+    "slow: broader stored-input / full scientific validation, run on demand",
+    "gpu: requires JAX / a GPU; CPU-only import path is tested separately",
+    "ecosystem: T3 producer/consumer cases (ABINIT+abinao, spin-phonon, ...)",
+]
+# Default profile: everything except the opt-in slow/gpu/ecosystem work, so a
+# bare `pytest` is the fast CI/release signal (ADR-004).
+addopts = ["-m", "not slow and not gpu and not ecosystem"]

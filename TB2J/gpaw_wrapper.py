@@ -1,20 +1,21 @@
 try:
+    from gpaw import GPAW, restart
     from gpaw.lcao.tightbinding import TightBinding
-    from gpaw import restart, GPAW
     from gpaw.lcao.tools import (
-        get_lcao_hamiltonian,
         get_bf_centers,
+        get_lcao_hamiltonian,
     )
 
     _has_gpaw = True
-except:
+except Exception:
     _has_gpaw = False
 
 # from banddownfolder.scdm.downfolder import BandDownfolder
-import numpy as np
-from scipy.linalg import eigh
-from ase.dft.kpoints import monkhorst_pack
 import pickle
+
+import numpy as np
+from ase.dft.kpoints import monkhorst_pack
+from scipy.linalg import eigh
 
 
 class GPAWWrapper:
@@ -152,7 +153,7 @@ class GPAWTBWrapper:
         return eigh(self.Hk, self.Sk)
         try:
             return eigh(self.Hk, self.Sk)
-        except:
+        except Exception:
             return np.zeros(self.nbasis), np.zeros((self.nbasis, self.nbasis))
 
     def solve_all(self, kpts):
@@ -179,18 +180,6 @@ def test_Ham():
     tb = TightBinding(atoms, calc)
     kpath = monkhorst_pack([3, 3, 3])
     evals, evecs = tb.band_structure(kpath, blochstates=True)
-
-
-def test():
-    g = GPAWWrapper(fname="STO_nscf.gpw")
-    g.H_and_eigen(kpts=monkhorst_pack(2, 2, 2))
-    # g.save_pickle('model.pickle')
-    # df=GPAWDownfolder('model.pickle')
-    # df.downfold(nwann=1, anchor_kpt=[0,0,0] )
-    # df.plot_band_fitting(npoints=100)
-
-
-# test_Ham()
 
 
 def test():

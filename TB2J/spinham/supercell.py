@@ -1,10 +1,12 @@
 """
 A helper class for building supercells
 """
-import numpy as np
+
 from collections import OrderedDict
-from itertools import product
 from functools import lru_cache
+from itertools import product
+
+import numpy as np
 
 
 class SupercellMaker(object):
