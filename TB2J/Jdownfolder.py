@@ -182,7 +182,7 @@ class JDownfolder_pickle:
     def _downfold(self, **kwargs):
         if self.iso_only:
             JR2 = self.exc.get_full_Jtensor_for_Rlist(
-                order="ij", asr=True, DMI=False, Jani=False
+                order="ij", asr=True, DMI=False, Jani=False, SIA=False
             )
             # magmoms = self.exc.magmoms
             # magmoms of magnetic atoms (metal + ligand)

@@ -37,6 +37,7 @@ class MagnonParameters:
     kpath: Optional[str] = None
     npoints: int = 300
     qpoints: Optional[dict] = None
+    use_primitive_kpath: bool = False
 
     kmesh: List[int] = field(default_factory=lambda: [20, 20, 20])
     gamma: bool = True
@@ -63,10 +64,16 @@ class MagnonParameters:
 
     def __post_init__(self):
         """Validate parameters after initialization."""
-        if self.Q is not None and len(self.Q) != 3:
-            raise ValueError("Q must be a list of 3 numbers")
-        if self.n is not None and len(self.n) != 3:
-            raise ValueError("n must be a list of 3 numbers")
+        for name, vector in (("Q", self.Q), ("n", self.n)):
+            if vector is None:
+                continue
+            vector = np.asarray(vector, dtype=float)
+            if vector.shape != (3,):
+                raise ValueError(f"{name} must be a list of 3 numbers")
+            if not np.all(np.isfinite(vector)):
+                raise ValueError(f"{name} must contain only finite values")
+            if name == "n" and np.linalg.norm(vector) == 0:
+                raise ValueError("n must be non-zero")
         if self.kmesh is not None and len(self.kmesh) != 3:
             raise ValueError("kmesh must be a list of 3 integers")
 
@@ -95,12 +102,37 @@ def add_common_magnon_args(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument(
         "-Q",
-        "--qpoint",
+        "--ordering-vector",
+        dest="ordering_vector",
         type=float,
         nargs=3,
         metavar=("Qx", "Qy", "Qz"),
         default=None,
-        help="Propagation vector Q in reciprocal lattice coordinates (e.g., 0.5 0 0 for X-point). Default: [0, 0, 0] (Gamma point)",
+        help=(
+            "Known single-Q magnetic ordering/propagation vector defining the "
+            "reference structure in reciprocal lattice coordinates. This is "
+            "distinct from sampled magnon k-points. Default: [0, 0, 0]."
+        ),
+    )
+    parser.add_argument(
+        "--rotation-axis",
+        dest="rotation_axis",
+        type=float,
+        nargs=3,
+        metavar=("Nx", "Ny", "Nz"),
+        default=None,
+        help=(
+            "Global axis around which the known reference structure rotates. "
+            "Default: 1 0 0."
+        ),
+    )
+    parser.add_argument(
+        "--uz-file",
+        type=str,
+        help=(
+            "Path to an nspin×3 file of reference quantization axes. "
+            "Default: all spins use the global z axis."
+        ),
     )
 
     parser.add_argument(
@@ -245,6 +277,18 @@ def add_band_specific_args(parser: argparse.ArgumentParser) -> None:
         default="magnon_bands.png",
         help="Output file name (default: magnon_bands.png)",
     )
+    parser.add_argument(
+        "--use-primitive-kpath",
+        action="store_true",
+        default=False,
+        dest="use_primitive_kpath",
+        help=(
+            "If the TB2J result is a supercell, generate the high-symmetry "
+            "k-path in the primitive-cell BZ and fold k-points into the "
+            "supercell reciprocal lattice.  Has no effect if no "
+            "primitive_cell is stored in the TB2J result."
+        ),
+    )
 
 
 def add_dos_specific_args(parser: argparse.ArgumentParser) -> None:
@@ -303,20 +347,21 @@ def parse_common_args(args) -> MagnonParameters:
             args.spin_conf[i : i + 3] for i in range(0, len(args.spin_conf), 3)
         ]
 
-    Q = args.qpoint if hasattr(args, "qpoint") else None
-
     return MagnonParameters(
         path=args.path,
         Jiso=getattr(args, "Jiso", True),
         Jani=getattr(args, "Jani", True),
         DMI=getattr(args, "DMI", True),
         SIA=getattr(args, "SIA", True),
-        Q=Q,
-        uz_file=args.uz_file,
-        n=getattr(args, "n", None),
-        spin_conf_file=args.spin_conf_file,
+        Q=getattr(args, "ordering_vector", None),
+        uz_file=getattr(args, "uz_file", None),
+        n=getattr(args, "rotation_axis", None),
+        spin_conf_file=getattr(args, "spin_conf_file", None),
         spin_conf=spin_conf,
-        show=args.show,
+        show=getattr(args, "show", False),
+        export_formats=getattr(args, "export_format", ["json"]),
+        export_prefix=getattr(args, "export_prefix", None),
+        save_wavefunctions=getattr(args, "save_wavefunctions", False),
     )
 
 
@@ -337,7 +382,7 @@ def _load_uz(params: MagnonParameters, nspin: int) -> np.ndarray:
     """
     if params.uz_file is not None:
         uz_file = params.uz_file
-        uz = np.loadtxt(uz_file)
+        uz = np.atleast_2d(np.loadtxt(uz_file))
         if uz.shape[1] != 3:
             raise ValueError(
                 f"Quantization axes file should contain a natom×3 array. Got shape {uz.shape}"
@@ -435,7 +480,7 @@ def prepare_magnon_from_params(params: MagnonParameters) -> "Magnon":
     )
 
     Q = [0, 0, 0] if params.Q is None else params.Q
-    n = [0, 0, 1] if params.n is None else params.n
+    n = [1, 0, 0] if params.n is None else params.n
 
     uz = _load_uz(params, magnon.nspin)
     magmoms = _load_spin_conf(params, magnon.nspin)

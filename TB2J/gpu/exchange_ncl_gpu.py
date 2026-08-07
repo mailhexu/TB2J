@@ -16,10 +16,12 @@ from TB2J.gpu.jax_utils import (
     jax_to_numpy,
     numpy_to_jax,
 )
-
-_require_jax()
-import jax.numpy as jnp  # noqa: E402
-from jax import jit  # noqa: E402
+from TB2J.gpu.jax_utils import (
+    _jit as jit,
+)
+from TB2J.gpu.jax_utils import (
+    _jnp as jnp,
+)
 
 
 @jit

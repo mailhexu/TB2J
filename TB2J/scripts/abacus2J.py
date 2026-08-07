@@ -3,7 +3,7 @@ import argparse
 import sys
 
 from TB2J.exchange_params import add_exchange_args_to_parser
-from TB2J.interfaces import gen_exchange_abacus
+from TB2J.interfaces.abacus import gen_exchange_abacus
 from TB2J.versioninfo import print_license
 
 
@@ -20,6 +20,19 @@ def run_abacus2J():
         "--suffix",
         help="the label of the abacus calculation. There should be an output directory called OUT.suffix",
         default="abacus",
+        type=str,
+    )
+    parser.add_argument(
+        "--split_soc",
+        help="Split SOC workflow: 'single' for single-step (out_mat_hs2_soc), 'two' for two-step (nosoc+soc). Requires --path_nosoc for 'two'.",
+        default=None,
+        choices=["single", "two"],
+        type=str,
+    )
+    parser.add_argument(
+        "--path_nosoc",
+        help="Path to the no-SOC calculation (for split_soc='two')",
+        default=None,
         type=str,
     )
 
@@ -57,6 +70,8 @@ def run_abacus2J():
         use_gpu=args.use_gpu,
         vectorize_energy=args.vectorize_energy,
         e_batch_size=args.e_batch_size,
+        split_soc=args.split_soc,
+        path_nosoc=args.path_nosoc,
     )
 
 

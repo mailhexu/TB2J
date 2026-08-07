@@ -20,6 +20,18 @@ from TB2J.magnon.magnon_parameters import (
 )
 from TB2J.mathutils.auto_kpath import auto_kpath
 
+try:
+    from ase.cell import Cell as AseCell
+except ImportError:  # for compatibility with older ASE layout
+    from ase import Cell as AseCell
+
+
+def _normalize_kpoint_label(label: str) -> str:
+    """Normalize Gamma variants to LaTeX display text."""
+    if label in {"G", "Gamma", r"$\Gamma$"}:
+        return r"$\Gamma$"
+    return label
+
 
 @dataclass
 class Magnon:
@@ -41,6 +53,10 @@ class Magnon:
     atom_positions: Optional[np.ndarray] = None
     atom_symbols: Optional[list] = None
     magnetic_atom_indices: Optional[list] = None
+    # Optional: set when the Magnon is built from a supercell SpinIO so that
+    # the primitive-cell BZ k-path can be used and folded back.
+    primitive_cell: np.ndarray = None
+    supercell_matrix: np.ndarray = None
 
     def set_reference(self, Q, uz, n, magmoms=None):
         """
@@ -56,16 +72,29 @@ class Magnon:
             Normal vector for rotation
         """
         self.set_propagation_vector(Q)
+        axis = np.asarray(n, dtype=float)
+        if axis.shape != (3,):
+            raise ValueError("Rotation axis n must have three components.")
+        if not np.all(np.isfinite(axis)):
+            raise ValueError("Rotation axis n must contain only finite values.")
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm == 0:
+            raise ValueError("Rotation axis n must be non-zero.")
         self._uz = np.array(uz, dtype=float)
-        self._n = np.array(n, dtype=float)
+        self._n = axis / axis_norm
         if magmoms is not None:
             self.magmom = np.array(magmoms, dtype=float)
         self.Snorm = np.linalg.norm(self.magmom, axis=1) / 2
         # self.Snorm=np.ones(self.nspin)
 
     def set_propagation_vector(self, Q):
-        """Set propagation vector"""
-        self._Q = np.array(Q)
+        """Set the known reference ordering/propagation vector."""
+        Q = np.asarray(Q, dtype=float)
+        if Q.shape != (3,):
+            raise ValueError("Propagation vector Q must have three components.")
+        if not np.all(np.isfinite(Q)):
+            raise ValueError("Propagation vector Q must contain only finite values.")
+        self._Q = Q
 
     @property
     def Q(self):
@@ -76,11 +105,7 @@ class Magnon:
 
     @Q.setter
     def Q(self, value):
-        if not isinstance(value, (list, np.ndarray)):
-            raise TypeError("Propagation vector Q must be a list or numpy array.")
-        if len(value) != 3:
-            raise ValueError("Propagation vector Q must have three components.")
-        self._Q = np.array(value)
+        self.set_propagation_vector(value)
 
     def Jq(self, kpoints):
         """
@@ -307,6 +332,7 @@ class Magnon:
         labels: list = None,
         anisotropic: bool = True,
         u: np.array = None,
+        use_primitive_kpath: bool = False,
     ):
         """Get magnon band structure.
 
@@ -332,6 +358,12 @@ class Magnon:
             Whether to include anisotropic interactions. Default is True.
         u : np.array, optional
             Quantization axis. Default is None.
+        use_primitive_kpath : bool, optional
+            If True and this Magnon was built from a supercell (i.e.
+            ``self.primitive_cell`` and ``self.supercell_matrix`` are set),
+            generate the high-symmetry k-path from the primitive cell's BZ
+            and fold the k-points into the supercell reciprocal lattice via
+            ``k_sc = k_prim @ sc_matrix.T``.  Default is False.
 
         Returns
         -------
@@ -343,22 +375,82 @@ class Magnon:
         pbc = self.pbc if pbc is None else pbc
         pbc = [True, True, True]
         u = self._uz if u is None else u
+        xlist = None  # default; overwritten when auto_kpath segments are used
+
+        # Determine whether to use the primitive-cell BZ for k-path generation.
+        _use_prim = (
+            use_primitive_kpath
+            and self.primitive_cell is not None
+            and self.supercell_matrix is not None
+        )
+
         if kpoints.size == 0:
-            if path is None:
+            if _use_prim:
+                # Build k-path in the primitive BZ, then fold to supercell
+                # fractional coordinates.  The primitive reciprocal lattice
+                # For a supercell A_sc = S @ A_prim, a supercell translation
+                # R_sc has primitive coordinates R_sc @ S.  Since Jq uses the
+                # phase R_sc · k_sc, primitive fractional k-points fold as
+                # k_sc = S @ k_prim, i.e. row-vector k_prim @ S.T.
+                prim_cell_array = np.array(self.primitive_cell.get_cell())
+                sc_mat = np.array(self.supercell_matrix, dtype=float)
+                fold_matrix = sc_mat.T  # row-vector k_sc = k_prim @ fold_matrix
+
+                if path is None:
+                    xlist, kptlist, Xs, knames, spk = auto_kpath(
+                        prim_cell_array,
+                        None,
+                        npoints=npoints,
+                        supercell_matrix=fold_matrix,
+                    )
+                    kpoints = np.concatenate(kptlist)
+                    # Use Xs (real distances) as label positions so they align
+                    # with the xlist real-distance x-axis.
+                    labels = [
+                        (x, _normalize_kpoint_label(name))
+                        for x, name in zip(Xs.tolist(), knames)
+                    ]
+                else:
+                    prim_ase_cell = AseCell(prim_cell_array)
+                    bandpath = prim_ase_cell.bandpath(
+                        path=path,
+                        npoints=npoints,
+                        special_points=special_points,
+                        eps=tol,
+                        pbc=pbc,
+                    )
+                    k_prim = bandpath.kpts
+                    kpoints = k_prim @ fold_matrix
+                    spk_prim = bandpath.special_points
+                    spk_prim["Gamma"] = spk_prim.pop("G", np.zeros(3))
+                    spk_prim = {
+                        _normalize_kpoint_label(name): value
+                        for name, value in spk_prim.items()
+                    }
+                    spk = {name: v @ fold_matrix for name, v in spk_prim.items()}
+                    labels = [
+                        (i, symbol)
+                        for symbol in spk
+                        for i in np.where(
+                            np.all(np.abs(kpoints - spk[symbol]) < tol, axis=1)
+                        )[0]
+                    ]
+                    labels = [
+                        (i, _normalize_kpoint_label(symbol)) for i, symbol in labels
+                    ]
+                    xlist = None
+            elif path is None:
                 # Use auto_kpath to generate path automatically
                 xlist, kptlist, Xs, knames, spk = auto_kpath(
                     self.cell, None, npoints=npoints
                 )
                 kpoints = np.concatenate(kptlist)
-                # Create labels from special points
-                labels = []
-                current_pos = 0
-                for i, (x, k) in enumerate(zip(xlist, kptlist)):
-                    for name in knames:
-                        matches = np.where((k == spk[name]).all(axis=1))[0]
-                        if matches.size > 0:
-                            labels.append((matches[0] + current_pos, name))
-                    current_pos += len(k)
+                # Use Xs (real distances) as label positions so they align
+                # with the xlist real-distance x-axis.
+                labels = [
+                    (x, _normalize_kpoint_label(name))
+                    for x, name in zip(Xs.tolist(), knames)
+                ]
             else:
                 bandpath = self.cell.bandpath(
                     path=path,
@@ -369,23 +461,25 @@ class Magnon:
                 )
                 kpoints = bandpath.kpts
                 spk = bandpath.special_points
-                spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+                spk["Gamma"] = spk.pop("G", np.zeros(3))
+                spk = {
+                    _normalize_kpoint_label(name): value for name, value in spk.items()
+                }
                 labels = [
                     (i, symbol)
                     for symbol in spk
                     for i in np.where((kpoints == spk[symbol]).all(axis=1))[0]
                 ]
+                labels = [(i, _normalize_kpoint_label(symbol)) for i, symbol in labels]
+                xlist = None
         elif cartesian:
             kpoints = np.linalg.solve(self.cell.T, kpoints.T).T
+            xlist = None
 
         bands = self._magnon_energies(kpoints)
         # print(f"bands shape: {bands.shape}")
 
-        if path is None and kpoints.size == 0:  # Fixed condition
-            # When using auto_kpath, return xlist for segmented plotting
-            return labels, bands, xlist
-        else:
-            return labels, bands, None
+        return labels, bands, xlist
 
     def plot_magnon_bands(self, **kwargs):
         """
@@ -404,31 +498,70 @@ class Magnon:
                 Whether to show the plot on screen
         """
         filename = kwargs.pop("filename", None)
+        show = kwargs.pop("show", True)
+        ax = kwargs.pop("ax", None)
+        use_primitive_kpath = kwargs.get("use_primitive_kpath", False)
         kpath_labels, bands, xlist = self.get_magnon_bands(**kwargs)
 
-        # Get k-points and special points
-        if "path" in kwargs and kwargs["path"] is None:
-            _, kptlist, _, _, spk = auto_kpath(
-                self.cell, None, npoints=kwargs.get("npoints", 300)
-            )
+        # Reconstruct k-points and special points for MagnonBand.
+        # Must match exactly what get_magnon_bands used, including the
+        # primitive-kpath folding when use_primitive_kpath=True.
+        _use_prim = (
+            use_primitive_kpath
+            and self.primitive_cell is not None
+            and self.supercell_matrix is not None
+        )
+        npoints = kwargs.get("npoints", 300)
+        path = kwargs.get("path", None)
+        if _use_prim:
+            prim_cell_array = np.array(self.primitive_cell.get_cell())
+            sc_mat = np.array(self.supercell_matrix, dtype=float)
+            fold_matrix = sc_mat.T
+            if path is None:
+                _, kptlist, _, _, spk_prim = auto_kpath(
+                    prim_cell_array,
+                    None,
+                    npoints=npoints,
+                    supercell_matrix=fold_matrix,
+                )
+                kpoints = np.concatenate(kptlist)
+                spk = {
+                    _normalize_kpoint_label(name): v @ fold_matrix
+                    for name, v in spk_prim.items()
+                }
+            else:
+                bandpath = AseCell(prim_cell_array).bandpath(
+                    path=path,
+                    npoints=npoints,
+                    pbc=[True, True, True],
+                )
+                spk_prim = bandpath.special_points.copy()
+                spk_prim["Gamma"] = spk_prim.pop("G", np.zeros(3))
+                spk_prim = {
+                    _normalize_kpoint_label(name): value
+                    for name, value in spk_prim.items()
+                }
+                kpoints = bandpath.kpts @ fold_matrix
+                spk = {name: v @ fold_matrix for name, v in spk_prim.items()}
+        elif path is None:
+            _, kptlist, _, _, spk = auto_kpath(self.cell, None, npoints=npoints)
             kpoints = np.concatenate(kptlist)
         else:
-            bandpath = self.cell.bandpath(
-                path=kwargs.get("path", "GXMG"), npoints=kwargs.get("npoints", 300)
-            )
+            bandpath = self.cell.bandpath(path=path, npoints=npoints)
             kpoints = bandpath.kpts
             spk = bandpath.special_points.copy()
-            spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+            spk["Gamma"] = spk.pop("G", np.zeros(3))
+            spk = {_normalize_kpoint_label(name): value for name, value in spk.items()}
 
         bands_plot = MagnonBand(
             energies=bands * 1000,  # Convert to meV
             kpoints=kpoints,
             kpath_labels=kpath_labels,
             special_points=spk,
-            xcoords=xlist,
+            xcoords=None,  # use integer indices; xlist from auto_kpath not directly usable here
         )
 
-        return bands_plot.plot(filename=filename, **kwargs)
+        return bands_plot.plot(filename=filename, show=show, ax=ax)
 
     @classmethod
     def load_from_io(cls, exc: SpinIO, **kwargs):
@@ -454,7 +587,8 @@ class Magnon:
 
         cell = exc.atoms.get_cell()
         pbc = exc.atoms.get_pbc()
-        ind_atoms = [exc.ind_atoms[i] for i in range(exc.nspin)]
+        atom_indices = getattr(exc, "ind_atoms", range(exc.nspin))
+        ind_atoms = [atom_indices[i] for i in range(exc.nspin)]
         positions = exc.atoms.get_positions()[ind_atoms]
         atom_symbols = exc.atoms.get_chemical_symbols()
         symbols = [atom_symbols[i] for i in ind_atoms]
@@ -475,13 +609,15 @@ class Magnon:
             cell=cell,
             _Q=np.zeros(3),  # Default propagation vector
             _uz=np.array([[0.0, 0.0, 1.0]]),  # Default quantization axis
-            _n=np.array([0.0, 0.0, 1.0]),  # Default rotation axis
+            _n=np.array([1.0, 0.0, 0.0]),  # Default rotation axis
             pbc=pbc,
             positions=positions,
             symbols=symbols,
             atom_positions=exc.atoms.get_positions(),
             atom_symbols=atom_symbols,
             magnetic_atom_indices=ind_atoms,
+            primitive_cell=getattr(exc, "primitive_cell", None),
+            supercell_matrix=getattr(exc, "supercell_matrix", None),
         )
 
     @classmethod
@@ -571,13 +707,13 @@ def create_plot_script(base_name: str, output_dir: str = "."):
     Parameters
     ----------
     base_name : str
-        Base name (without extension) for the script and data files
+        Base name (without extension) for the default data and plot files
     output_dir : str
         Directory to write the script to (default: current directory)
     """
     from pathlib import Path
 
-    script_path = Path(output_dir) / f"plot_{base_name}.py"
+    script_path = Path(output_dir) / "plot_magnon_band.py"
     script = f'''#!/usr/bin/env python3
 """Simple script to plot magnon band structure from saved data."""
 
@@ -681,13 +817,13 @@ def save_bands_data(
     from pathlib import Path
 
     filepath = Path(filename)
-    script_name = filepath.parent / f"plot_{filepath.stem}.py"
+    script_name = filepath.parent / "plot_magnon_band.py"
     create_plot_script(filepath.stem, str(filepath.parent))
 
-    print(f"Band structure data saved to {filename}")
-    print(f"Created plotting script: {script_name}")
-    print("Usage: ")
-    print(f"See {script_name} for example usage")
+    print("Generated magnon band files:")
+    print(f"  data: {filename}")
+    print(f"  plotting script: {script_name}")
+    print(f"Run {script_name} to replot the saved band data.")
 
     return bands
 
@@ -738,6 +874,7 @@ def plot_magnon_bands_from_TB2J(
         path=params.kpath,
         npoints=params.npoints,
         special_points=params.qpoints if params.qpoints else None,
+        use_primitive_kpath=getattr(params, "use_primitive_kpath", False),
     )
 
     # Convert energies to meV
@@ -747,10 +884,45 @@ def plot_magnon_bands_from_TB2J(
     export_prefix = params.export_prefix or params.filename.rsplit(".", 1)[0]
     data_file = export_prefix + ".json"
 
-    # Get k-points and special points
-    if params.kpath is None:
+    # Get k-points and special points (mirrors logic in get_magnon_bands)
+    _use_prim = (
+        getattr(params, "use_primitive_kpath", False)
+        and magnon.primitive_cell is not None
+        and magnon.supercell_matrix is not None
+    )
+    if _use_prim:
+        prim_cell_array = np.array(magnon.primitive_cell.get_cell())
+        sc_mat = np.array(magnon.supercell_matrix, dtype=float)
+        fold_matrix = sc_mat.T
+        if params.kpath is None:
+            _, kptlist, _, _, spk_prim = auto_kpath(
+                prim_cell_array,
+                None,
+                npoints=params.npoints,
+                supercell_matrix=fold_matrix,
+            )
+            kpoints = np.concatenate(kptlist)
+            spk_prim = {
+                _normalize_kpoint_label(name): value for name, value in spk_prim.items()
+            }
+        else:
+            bp = AseCell(prim_cell_array).bandpath(
+                path=params.kpath,
+                npoints=params.npoints,
+                special_points=params.qpoints if params.qpoints else None,
+            )
+            k_prim = bp.kpts
+            kpoints = k_prim @ fold_matrix
+            spk_prim = bp.special_points
+            spk_prim["Gamma"] = spk_prim.pop("G", np.zeros(3))
+            spk_prim = {
+                _normalize_kpoint_label(name): value for name, value in spk_prim.items()
+            }
+        spk = {name: v @ fold_matrix for name, v in spk_prim.items()}
+    elif params.kpath is None:
         _, kptlist, _, _, spk = auto_kpath(magnon.cell, None, npoints=params.npoints)
         kpoints = np.concatenate(kptlist)
+        spk = {_normalize_kpoint_label(name): value for name, value in spk.items()}
     else:
         bandpath = magnon.cell.bandpath(
             path=params.kpath,
@@ -759,7 +931,8 @@ def plot_magnon_bands_from_TB2J(
         )
         kpoints = bandpath.kpts
         spk = bandpath.special_points
-        spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+        spk["Gamma"] = spk.pop("G", np.zeros(3))
+        spk = {_normalize_kpoint_label(name): value for name, value in spk.items()}
 
     magnon_bands = MagnonBand(
         energies=bands_meV,
@@ -861,10 +1034,10 @@ def plot_magnon_bands_cli():
             Jani=args.Jani,
             SIA=args.SIA,
             DMI=args.DMI,
-            Q=args.Q,
+            Q=args.ordering_vector,
             uz_file=args.uz_file,
             spin_conf_file=args.spin_conf_file,
-            n=getattr(args, "n", None),
+            n=args.rotation_axis,
             show=args.show,
         )
 

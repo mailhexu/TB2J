@@ -336,8 +336,12 @@ class DipDip(TwoBodyTerm):
 class SIATensorTerm(SingleBodyTerm):
     """
     Single Ion Anisotropy tensor term.
-    $H_{SIA} = -\\sum_i \\vec{S}_i^T \\mathbf{A}_i \\vec{S}_i$
+    $H_{SIA} = \\sum_i \\vec{S}_i^T \\mathbf{A}_i \\vec{S}_i$
     where A_i is a 3x3 anisotropy tensor for each atom i.
+
+    Sign convention:
+    - Positive A diagonal → easy axis
+    - Negative A diagonal → hard axis
     """
 
     def __init__(self, sia_tensor_dict, ms=None):
@@ -345,26 +349,26 @@ class SIATensorTerm(SingleBodyTerm):
         self.sia_tensor_dict = sia_tensor_dict
 
     def func_i(self, S, i):
-        return -np.dot(S[i], np.dot(self.sia_tensor_dict[i], S[i]))
+        return np.dot(S[i], np.dot(self.sia_tensor_dict[i], S[i]))
 
     def eff_field(self, S, Heff):
         for i, A in self.sia_tensor_dict.items():
-            Heff[i] += np.dot(A + A.T, S[i])
+            Heff[i] -= np.dot(A + A.T, S[i])
 
     def jacobian_i(self, S, i):
-        return np.dot(self.sia_tensor_dict[i] + self.sia_tensor_dict[i].T, S[i])
+        return -np.dot(self.sia_tensor_dict[i] + self.sia_tensor_dict[i].T, S[i])
 
     def calc_hessian(self):
         self._hessian = ssp.lil_matrix(
             (self.nmatoms * 3, self.nmatoms * 3), dtype=float
         )
         for i, A in self.sia_tensor_dict.items():
-            self._hessian[i * 3 : i * 3 + 3, i * 3 : i * 3 + 3] = A + A.T
+            self._hessian[i * 3 : i * 3 + 3, i * 3 : i * 3 + 3] = -(A + A.T)
         self._hessian = ssp.csr_matrix(self._hessian)
         return self._hessian
 
     def calc_hessian_ijR(self):
         self._hessian_ijR = {}
         for i, A in self.sia_tensor_dict.items():
-            self._hessian_ijR[(i, i, (0, 0, 0))] = A + A.T
+            self._hessian_ijR[(i, i, (0, 0, 0))] = -(A + A.T)
         return self._hessian_ijR

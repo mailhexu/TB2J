@@ -8,6 +8,7 @@ from TB2J.magnon.magnon_dos import plot_magnon_dos_from_TB2J
 from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_common_magnon_args,
+    parse_common_args,
 )
 
 
@@ -128,6 +129,18 @@ def add_band_specific_args_to_group(group) -> None:
         default="magnon_bands.png",
         help="Output file name for band structure (default: magnon_bands.png)",
     )
+    group.add_argument(
+        "--use-primitive-kpath",
+        action="store_true",
+        default=False,
+        dest="use_primitive_kpath",
+        help=(
+            "Generate the high-symmetry k-path in the primitive-cell BZ and "
+            "fold k-points into the supercell reciprocal lattice. Requires "
+            "primitive_cell/supercell_matrix stored in the TB2J pickle "
+            "(set by TB2J_edit supercell / make_supercell)."
+        ),
+    )
 
 
 def add_dos_specific_args_to_group(group) -> None:
@@ -214,18 +227,7 @@ def main():
     else:
         if args.window is not None:
             window = tuple(args.window)
-        params = MagnonParameters(
-            path=args.path,
-            Jiso=args.Jiso,
-            Jani=args.Jani,
-            SIA=args.SIA,
-            DMI=args.DMI,
-            spin_conf_file=args.spin_conf_file,
-            show=args.show,
-            export_formats=args.export_format,
-            export_prefix=args.export_prefix,
-            save_wavefunctions=args.save_wavefunctions,
-        )
+        params = parse_common_args(args)
 
     if args.bands:
         warnings.warn(
@@ -259,6 +261,7 @@ def main():
             uz_file=params.uz_file,
             n=params.n,
             spin_conf_file=params.spin_conf_file,
+            spin_conf=params.spin_conf,
             show=params.show,
             kpath=args.kpath,
             npoints=args.npoints,
@@ -266,6 +269,7 @@ def main():
             export_formats=params.export_formats,
             export_prefix=params.export_prefix,
             save_wavefunctions=params.save_wavefunctions,
+            use_primitive_kpath=getattr(args, "use_primitive_kpath", False),
         )
         plot_magnon_bands_from_TB2J(band_params)
 
@@ -281,6 +285,7 @@ def main():
             uz_file=params.uz_file,
             n=params.n,
             spin_conf_file=params.spin_conf_file,
+            spin_conf=params.spin_conf,
             show=params.show,
             kmesh=args.kmesh,
             gamma=args.gamma,

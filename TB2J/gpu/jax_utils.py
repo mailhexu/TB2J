@@ -8,7 +8,13 @@ import numpy as np
 _jax_available = None
 _jnp = None
 _jax = None
-_jit = None
+
+
+def _identity_jit(f):
+    return f
+
+
+_jit = _identity_jit
 _vmap = None
 
 
@@ -563,7 +569,57 @@ def _prepare_eigen_pipeline_jax(Rpts, HR, SR, kpts, R2kfactor):
     return _prepare_eigen_pipeline_cached(Rpts, HR, SR, kpts, R2kfactor)
 
 
-def _prepare_eigen_gpu(tbmodel, kpts):
+def _get_gpu_memory_budget():
+    """
+    Query total GPU memory (bytes) via JAX, or None if no GPU / query fails.
+
+    Uses total bytes_limit rather than currently-available: the eigenvalue
+    pipeline is the dominant allocator in its call path, so total capacity is
+    the right target. Mirrors the pattern in mae_green_gpu._auto_e_batch_size.
+    """
+    if not _check_jax():
+        return None
+    try:
+        gpu_devices = [d for d in _jax.devices() if d.platform != "cpu"]
+        if not gpu_devices:
+            return None
+        stats = gpu_devices[0].memory_stats()
+        if not stats:
+            return None
+        return stats.get("bytes_limit", 0) or None
+    except Exception:
+        return None
+
+
+def _estimate_kpt_batch_size(nbasis, non_orthogonal, gpu_bytes=None):
+    """
+    Estimate a safe k-point batch size for batched eigh on (nbasis, nbasis)
+    complex128 matrices.
+
+    Calibrated against the empirical baseline previously hardcoded here:
+    a 24 GB GPU safely handles 100 k-points at nbasis=728 (non-orthogonal).
+    Per-kpt memory scales as nbasis^2 (LAPACK workspace ~3x matrix size, plus
+    XLA/JIT fragmentation overhead already baked into the calibration).
+    """
+    #  Theoretical per-kpt ~ 28 * nb^2 * 16 bytes
+    # (workspace + XLA intermediates), inferred from the original calibration.
+    REF_GPU_BYTES = 24e9
+    REF_NBASIS = 728
+    REF_BATCH = 100
+
+    if gpu_bytes is None:
+        gpu_bytes = _get_gpu_memory_budget()
+    if not gpu_bytes or gpu_bytes <= 0:
+        # No GPU detected -> fall back to baseline assumption (24 GB).
+        gpu_bytes = REF_GPU_BYTES
+
+    ratio = (gpu_bytes / REF_GPU_BYTES) * (REF_NBASIS / nbasis) ** 2
+    if non_orthogonal:
+        ratio *= 0.9  # extra Sk matrix in the pipeline
+    return max(1, int(REF_BATCH * ratio))
+
+
+def _prepare_eigen_gpu(tbmodel, kpts, kpt_batch_size=None):
     """
     GPU-accelerated eigenvalue/eigenvector preparation.
 
@@ -575,6 +631,9 @@ def _prepare_eigen_gpu(tbmodel, kpts):
         Tight-binding model
     kpts : np.ndarray, shape (nk, 3)
         k-points
+    kpt_batch_size : int or None, optional
+        Explicit override for the k-point batch size. If None, the value is
+        estimated dynamically from GPU memory and nbasis.
 
     Returns:
     --------
@@ -590,20 +649,45 @@ def _prepare_eigen_gpu(tbmodel, kpts):
 
     # Prepare H(R) and S(R) data
     Rpts_jax, HR_jax, SR_jax, R2kfactor = _prepare_HR_jax(tbmodel)
-    kpts_jax = jnp.array(kpts)
+    nkpts = len(kpts)
+    nbasis = HR_jax.shape[1]
 
     print(
-        f"GPU eigen preparation: {len(kpts)} k-points, {Rpts_jax.shape[0]} R-vectors, {HR_jax.shape[1]} basis functions"
+        f"GPU eigen preparation: {nkpts} k-points, {Rpts_jax.shape[0]} R-vectors, {nbasis} basis functions"
     )
-    print(f"  Non-orthogonal: {SR_jax is not None}")
+    non_orth = SR_jax is not None
+    print(f"  Non-orthogonal: {non_orth}")
 
-    # Use the combined pipeline for better performance
-    evals, evecs, Sk_all = _prepare_eigen_pipeline_jax(
-        Rpts_jax, HR_jax, SR_jax, kpts_jax, R2kfactor
-    )
+    # Batch k-points to avoid GPU OOM. Each k-point needs a (nbasis, nbasis)
+    # complex128 eigh (syevBatched workspace ~3x matrix size). Size dynamically
+    # from GPU memory + nbasis unless explicitly overridden.
+    if kpt_batch_size is None:
+        kpt_batch_size = _estimate_kpt_batch_size(nbasis, non_orth)
+    print(f"  k-point batch size: {kpt_batch_size}")
 
-    # Block until computation is done
-    evals.block_until_ready()
+    if nkpts <= kpt_batch_size:
+        evals, evecs, Sk_all = _prepare_eigen_pipeline_jax(
+            Rpts_jax, HR_jax, SR_jax, jnp.array(kpts), R2kfactor
+        )
+        evals.block_until_ready()
+    else:
+        print(f"  Batching {nkpts} k-points in chunks of {kpt_batch_size}")
+        evals_list, evecs_list, Sk_list = [], [], []
+        for i_start in range(0, nkpts, kpt_batch_size):
+            i_end = min(i_start + kpt_batch_size, nkpts)
+            kpts_chunk = jnp.array(kpts[i_start:i_end])
+            print(f"    Batch {i_start}-{i_end-1}")
+            ev, evec, sk = _prepare_eigen_pipeline_jax(
+                Rpts_jax, HR_jax, SR_jax, kpts_chunk, R2kfactor
+            )
+            ev.block_until_ready()
+            evals_list.append(np.array(ev))
+            evecs_list.append(np.array(evec))
+            if sk is not None:
+                Sk_list.append(np.array(sk))
+        evals = np.concatenate(evals_list, axis=0)
+        evecs = np.concatenate(evecs_list, axis=0)
+        Sk_all = np.concatenate(Sk_list, axis=0) if Sk_list else None
 
     # Convert back to numpy
     Sk_np = np.array(Sk_all) if Sk_all is not None else None

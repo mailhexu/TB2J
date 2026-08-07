@@ -228,9 +228,7 @@ class TBGreen:
             raise ValueError(
                 f"Cannot find any band in the energy range specified by emin {emin} and emax {emax}, which are relative to the Fermi energy. Please check that the Fermi energy, the emin and emax are correct. If you're using Wannier90 output, check the Wannier functions give the right band structure."
             )
-        # istart, iend = ts[0], ts[-1] + 1
-        iend = ts[-1] + 1
-        # return evals[:, istart:iend], evecs[:, :, istart:iend]
+        _istart, iend = ts[0], ts[-1] + 1
         return evals[:, :iend], evecs[:, :, :iend]
 
     def find_energy_ingap(self, rbound, gap=2.0):

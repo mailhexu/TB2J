@@ -8,7 +8,11 @@ import os
 from pathlib import Path
 
 # from TB2J.abacus.abacus_wrapper import AbacusParser
-from HamiltonIO.abacus import AbacusParser
+from HamiltonIO.abacus import (
+    AbacusParser,
+    AbacusSingleStepSOCParser,
+    AbacusSplitSOCParser,
+)
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
@@ -35,15 +39,38 @@ def gen_exchange_abacus(
     use_gpu=False,
     vectorize_energy=True,
     e_batch_size=None,
+    split_soc=None,
+    path_nosoc=None,
 ):
+    if split_soc not in (None, "single", "two"):
+        raise ValueError("split_soc must be None, 'single', or 'two'")
+
     outpath = Path(path) / f"OUT.{suffix}"
 
     if not os.path.exists(outpath):
         raise ValueError(
             f"The path {outpath} does not exist. Please check if the path and the suffix is correct"
         )
-    parser = AbacusParser(outpath=outpath, spin=None, binary=binary)
-    spin = parser.read_spin()
+    if split_soc == "single":
+        parser = AbacusSingleStepSOCParser(outpath=str(outpath), binary=binary)
+        tbmodel = parser.parse()
+        spin = "noncollinear"
+    elif split_soc == "two":
+        if path_nosoc is None:
+            raise ValueError("--path_nosoc required for split_soc='two'")
+        nosoc_outpath = Path(path_nosoc) / f"OUT.{suffix}"
+        if not os.path.exists(nosoc_outpath):
+            raise ValueError(
+                f"The path {nosoc_outpath} does not exist. Please check path_nosoc and the suffix"
+            )
+        parser = AbacusSplitSOCParser(
+            outpath_nosoc=str(nosoc_outpath), outpath_soc=str(outpath), binary=binary
+        )
+        tbmodel = parser.parse()
+        spin = "noncollinear"
+    else:
+        parser = AbacusParser(outpath=outpath, spin=None, binary=binary)
+        spin = parser.read_spin()
     if spin == "collinear":
         tbmodel_up, tbmodel_dn = parser.get_models()
         efermi = parser.read_efermi()
@@ -51,7 +78,13 @@ def gen_exchange_abacus(
         description = f""" Input from collinear Abacus data.
 data directory: {outpath}
 \n"""
-        exchange = ExchangeCL2(
+        if use_gpu:
+            from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
+
+            ExchangeClass = ExchangeCL2GPU
+        else:
+            ExchangeClass = ExchangeCL2
+        exchange = ExchangeClass(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
             basis=tbmodel_up.basis,
@@ -74,16 +107,32 @@ data directory: {outpath}
             vectorize_energy=vectorize_energy,
             e_batch_size=e_batch_size,
         )
-        exchange.run(path=output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=True,
+                vectorize_energy=vectorize_energy,
+                e_batch_size=e_batch_size,
+            )
+        else:
+            exchange.run(path=output_path)
         print("\n")
         print(f"All calculation finished. The results are in {output_path} directory.")
     else:
-        tbmodel = parser.get_models()
+        if split_soc is None:
+            tbmodel = parser.get_models()
         print("Starting to calculate exchange.")
         description = f""" Input from non-collinear Abacus data.
 data directory: {outpath}
+split_soc: {split_soc}
 \n"""
-        exchange = ExchangeNCL(
+        if use_gpu:
+            from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+
+            ExchangeClass = ExchangeNCLGPU
+        else:
+            ExchangeClass = ExchangeNCL
+        exchange = ExchangeClass(
             tbmodels=tbmodel,
             atoms=tbmodel.atoms,
             basis=tbmodel.basis,
@@ -105,9 +154,17 @@ data directory: {outpath}
             vectorize_energy=vectorize_energy,
             e_batch_size=e_batch_size,
         )
-        exchange.run(path=output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=True,
+                vectorize_energy=vectorize_energy,
+                e_batch_size=e_batch_size,
+            )
+        else:
+            exchange.run(path=output_path)
         print("\n")
-        print("All calculation finsihed. The results are in TB2J_results directory.")
+        print(f"All calculation finished. The results are in {output_path} directory.")
 
 
 if __name__ == "__main__":

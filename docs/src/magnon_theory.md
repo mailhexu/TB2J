@@ -64,32 +64,71 @@ where $\mathbf{A}_i$ is the anisotropy tensor.
 
 ## Fourier Transform to Reciprocal Space
 
-### Exchange in q-Space
+### Exchange at the Magnon Wave Vector
 
-The real-space exchange tensors are transformed to reciprocal space:
+For a magnon Bloch wave vector $\mathbf{k}$, real-space exchange tensors are
+transformed as:
 
 $$
-\mathbf{J}_{ij}(\mathbf{q}) = \sum_{\mathbf{R}} \mathbf{J}_{ij}(\mathbf{R}) e^{i\mathbf{q}\cdot\mathbf{R}}
+\mathbf{J}_{ij}(\mathbf{k}) =
+\sum_{\mathbf{R}} \mathbf{J}_{ij}(\mathbf{R})
+e^{-2\pi i\mathbf{k}\cdot\mathbf{R}}
 $$
 
-This is implemented in `Magnon.Jq()` (see `TB2J/magnon/magnon3.py`):
+`Magnon.Jq()` implements this negative Fourier-phase convention:
 
 ```python
 for iR, R in enumerate(Rlist):
-    for iqpt, qpt in enumerate(kpoints):
-        phase = 2 * np.pi * R @ qpt
-        Jq[iqpt] += np.exp(1j * phase) * JRprime[iR]
+    for ikpt, kpt in enumerate(kpoints):
+        phase = 2 * np.pi * R @ kpt
+        Jq[ikpt] += np.exp(-1j * phase) * JRprime[iR]
 ```
 
-### Non-collinear Magnetic Structures
+### Single-Q Incommensurate Reference Structures
 
-For helimagnetic or spin-spiral systems with propagation vector $\mathbf{Q}$, each exchange tensor is rotated before the Fourier transform:
+The known magnetic ordering/propagation vector $\mathbf{Q}$ defines the
+reference (normally ground-state) structure; it is distinct from the sampled
+magnon vector $\mathbf{k}$. For each exchange displacement $\mathbf{R}$:
 
 $$
-\mathbf{J}'_{mn}(\mathbf{R}) = \mathbf{R}_m(\phi)^T \mathbf{J}_{mn}(\mathbf{R}) \mathbf{R}_n(\phi)
+\phi = 2\pi\mathbf{R}\cdot\mathbf{Q},
+\qquad
+\mathbf{J}'_{mn}(\mathbf{R}) =
+\mathbf{J}_{mn}(\mathbf{R})\mathcal{R}_{\mathbf{n}}(\phi)
 $$
 
-where $\phi = 2\pi \mathbf{R}\cdot\mathbf{Q}$ and $\mathbf{R}(\phi)$ is the rotation matrix.
+where $\mathbf{n}$ is the global spiral rotation axis. TB2J then Fourier
+transforms $\mathbf{J}'(\mathbf{R})$ at each independent $\mathbf{k}$ to build
+the existing $A(\mathbf{k})$, $B(\mathbf{k})$, and $C$ matrices. TB2J accepts a
+known $\mathbf{Q}$; it does not determine the ground-state ordering vector.
+
+```{figure} magnon_band.assets/afm_zone_folding.png
+:alt: Alternating G-type antiferromagnetic chemical cells and directional folding between chemical Gamma/R and magnetic Gamma.
+:width: 100%
+:align: center
+
+For $\mathbf{Q}=(\tfrac12,\tfrac12,\tfrac12)$, alternate chemical cells differ
+by a $\pi$ rotation. **Folding** maps chemical-cell $\Gamma$ and R, which differ
+by $\mathbf{Q}$, to the same magnetic-zone $\Gamma$. Conversely, **unfolding**
+that magnetic-$\Gamma$ mode gives chemical-zone representatives at both
+$\Gamma$ and R$=\mathbf{Q}$. Thus
+$\omega(\Gamma)=\omega(\mathrm{R})$ when the combined translation–spin-rotation
+symmetry is present, although their spectral intensities can differ.
+```
+
+```{figure} magnon_band.assets/afm_magnon_unfolding.png
+:alt: A magnetic-Gamma antiferromagnetic magnon whose uniform transverse x component is at chemical Gamma and staggered transverse y component is at chemical R.
+:width: 100%
+:align: center
+
+This is one magnetic-$\Gamma$ normal mode, drawn in two phases separated by a
+quarter period. With the B sublattice related to A by
+$\mathcal{R}_{\hat{x}}(\pi)$, its transverse components satisfy
+$\delta S_A^x=\delta S_B^x$ and $\delta S_A^y=-\delta S_B^y$. The first is a
+chemical-$\Gamma$ Fourier component and the second is a chemical-R component;
+they are quadratures of the same mode and therefore have the same frequency
+$\omega$.
+```
 
 ## Magnon Hamiltonian Construction
 

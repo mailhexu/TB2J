@@ -160,7 +160,19 @@ class MagnonBand:
                 "xcoords": xcoords,
             },
         )
-        data.save_json(filename)
+        payload = data.to_dict()
+        payload.update(
+            {
+                "kpath_labels": [(int(i), str(l)) for i, l in self.kpath_labels],
+                "special_points": {
+                    key: np.asarray(value).tolist()
+                    for key, value in self.special_points.items()
+                },
+                "xcoords": xcoords,
+            }
+        )
+        with open(filename, "w") as f:
+            json.dump(payload, f, indent=2)
 
     @classmethod
     def load(cls, filename: str) -> "MagnonBand":
