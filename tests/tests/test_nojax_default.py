@@ -85,3 +85,49 @@ def test_gpu_module_imports_without_jax_but_requires_it_at_use():
         result.returncode == 0
     ), f"gpu lazy-import contract broken:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     assert result.stdout.strip() == "OK"
+
+
+def test_default_exchange_runs_without_jax(tmp_path):
+    """A real CPU Wannier exchange runs with JAX blocked and yields a loadable SpinIO.
+
+    Covers story 010-3 AC2: not just imports, but an actual CPU calculation must run
+    without JAX and produce a loadable canonical result. Uses the smallest bundled
+    Wannier input (SrMnO3) at a reduced k-mesh/nz so it stays fast; skips when the
+    governed input is absent.
+    """
+    from conftest import require_input
+
+    input_dir = require_input(
+        "inputs/2_SrMnO3_wannier/data", "Wannier90 collinear", "SrMnO3"
+    )
+    out_dir = tmp_path / "TB2J_results"
+    script = f"""
+        import sys
+        sys.modules["jax"] = None  # block JAX; any eager `import jax` fails loudly
+        sys.argv = [
+            "wann2J.py",
+            "--path", {str(input_dir)!r},
+            "--posfile", "abinit.in",
+            "--efermi", "6.15",
+            "--kmesh", "2", "2", "2",
+            "--nz", "10",
+            "--elements", "Mn",
+            "--prefix_up", "abinito_w90_up",
+            "--prefix_down", "abinito_w90_down",
+            "--output_path", {str(out_dir)!r},
+        ]
+        from TB2J.scripts.wann2J import run_wann2J
+
+        run_wann2J()
+        print("OK")
+    """
+    result = _run_isolated(script)
+    assert (
+        result.returncode == 0
+    ), f"CPU exchange failed with JAX blocked:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    # The canonical result must be loadable as a SpinIO.
+    pickle_path = out_dir / "TB2J.pickle"
+    assert pickle_path.exists(), f"TB2J.pickle not written:\n{result.stdout}"
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    SpinIO.load_pickle(str(out_dir))  # loads without error
