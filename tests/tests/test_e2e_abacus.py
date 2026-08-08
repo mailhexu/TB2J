@@ -48,3 +48,44 @@ def test_abacus_fe_collinear(tmp_path):
     check_schema(sio)
     compare_J(sio, _FE_NN_J_MEV, tol=1e-2, unit="meV")
     check_pair_reversal(sio)
+
+
+# Cr-Cr in-plane exchange from the ABACUS CrI3 SOC (spinor) calculation for one
+# spin direction (x), in meV. The x/y H/S producer output was regenerated with
+# ABACUS v3.10.1 LTS (nspin=4, ecutwfc=100 Ry, symmetry off, 7x7x1) from the
+# supplied inputs -- the upstream-completion step recorded for this case.
+_CRI3_ABACUS_NN_J_MEV = {
+    ((-1, 0, 0), 0, 1): 3.5001,
+    ((1, 0, 0), 1, 0): 3.5001,
+}
+
+
+@pytest.mark.tier2
+@pytest.mark.slow
+def test_abacus_cri3_soc(tmp_path):
+    """Inventory: ABACUS exchange (CrI3 SOC spinor, one direction). Tier T2, slow.
+
+    Exercises the ABACUS SOC path on the CrI3 spinor H/S (regenerated producer
+    output). The full x/y/z + merge workflow is the multi-direction contract;
+    this single-direction case validates the SOC abacus2J path. ~100 s, hence
+    ``@slow`` (excluded from the default profile).
+    """
+    data_dir = resolve_example("Abacus/CrI3/DFT/x", "ABACUS SOC", "CrI3")
+    args = [
+        "--path",
+        str(data_dir),
+        "--suffix",
+        "CrI3",
+        "--elements",
+        "Cr",
+        "--kmesh",
+        "7",
+        "7",
+        "1",
+    ]
+    sio = run_tb2j_module("TB2J.scripts.abacus2J", args, tmp_path)
+
+    check_schema(sio)
+    assert not sio.colinear, "CrI3 SOC result should be non-collinear (spinor)"
+    compare_J(sio, _CRI3_ABACUS_NN_J_MEV, tol=1e-2, unit="meV")
+    check_pair_reversal(sio)
