@@ -4,9 +4,9 @@ import numpy as np
 
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchangeCL2 import ExchangeCL2
-from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
-from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
-from TB2J.gpu.mae_green_gpu import MAEGreenGPU
+
+# GPU exchange/MAE classes are imported lazily (only when use_gpu=True) so the
+# default CPU import path does not pull in TB2J.gpu / JAX.
 from TB2J.io_merge import merge
 from TB2J.MAEGreen import MAEGreen
 
@@ -121,7 +121,12 @@ def gen_exchange_siesta(
         exargs["use_gpu"] = use_gpu  # Pass use_gpu through exargs
 
         # Choose Exchange class based on use_gpu flag
-        ExchangeClass = ExchangeCL2GPU if use_gpu else ExchangeCL2
+        if use_gpu:
+            from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
+
+            ExchangeClass = ExchangeCL2GPU
+        else:
+            ExchangeClass = ExchangeCL2
         exchange = ExchangeClass(
             tbmodels=(tbmodel_up, tbmodel_dn),
             atoms=tbmodel_up.atoms,
@@ -160,7 +165,12 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
         exargs["use_gpu"] = use_gpu  # Pass use_gpu through exargs
         if not model.split_soc:
             # Choose Exchange class based on use_gpu flag
-            ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
+            if use_gpu:
+                from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+
+                ExchangeClass = ExchangeNCLGPU
+            else:
+                ExchangeClass = ExchangeNCL
             exchange = ExchangeClass(
                 tbmodels=model,
                 atoms=model.atoms,
@@ -190,7 +200,12 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
             model.set_so_strength(0.0)
 
             # Choose MAE class based on use_gpu flag
-            MAEClass = MAEGreenGPU if use_gpu else MAEGreen
+            if use_gpu:
+                from TB2J.gpu.mae_green_gpu import MAEGreenGPU
+
+                MAEClass = MAEGreenGPU
+            else:
+                MAEClass = MAEGreen
 
             mae_output_path = f"{output_path}_anisotropy"
             if skip and os.path.exists(os.path.join(mae_output_path, "MAE.dat")):
@@ -229,7 +244,12 @@ Warning: The DMI component parallel to the spin orientation, the Jani which has 
                 model.set_Hsoc_rotation_angle([theta, phi])
                 basis = dict(zip(model.orbs, list(range(model.nbasis))))
                 # Choose Exchange class based on use_gpu flag
-                ExchangeClass = ExchangeNCLGPU if use_gpu else ExchangeNCL
+                if use_gpu:
+                    from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+
+                    ExchangeClass = ExchangeNCLGPU
+                else:
+                    ExchangeClass = ExchangeNCL
                 exchange = ExchangeClass(
                     tbmodels=model,
                     atoms=model.atoms,

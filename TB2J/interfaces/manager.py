@@ -1,8 +1,10 @@
 from TB2J.exchange import ExchangeNCL
 from TB2J.exchange_qspace import ExchangeCLQspace
 from TB2J.exchangeCL2 import ExchangeCL2
-from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
-from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
+
+# NOTE: the GPU exchange classes are imported lazily inside select_exchange so
+# that the default CPU import path (e.g. wannier90_interface -> Manager) does
+# not pull in TB2J.gpu / JAX. JAX must remain an optional dependency.
 
 
 class Manager:
@@ -43,7 +45,16 @@ class Manager:
         if colinear:
             if qspace:
                 return ExchangeCLQspace
+            elif use_gpu:
+                from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
+
+                return ExchangeCL2GPU
             else:
-                return ExchangeCL2GPU if use_gpu else ExchangeCL2
+                return ExchangeCL2
         else:
-            return ExchangeNCLGPU if use_gpu else ExchangeNCL
+            if use_gpu:
+                from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+
+                return ExchangeNCLGPU
+            else:
+                return ExchangeNCL
