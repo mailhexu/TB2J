@@ -120,11 +120,9 @@ def _run_e2e_case(case_dir: Path) -> None:
     # which drifts after the Wannier90 ws-weights epic (tensor presentation;
     # CrI3 also carries a numerical change needing scientific review). They are
     # expected-fail until migrated to the SpinIO oracle in Epic 011.
-    if case_dir.name in (
-        "2_wannier_collinear_SrMnO3",
-        "3_CrI3_wannier_SOC",
-        "4_CrI3_wannier_SOC_indmagatoms",
-    ):
+    if case_dir.name == "2_wannier_collinear_SrMnO3":
+        pytest.skip("Migrated to the SpinIO oracle in test_e2e_wannier.py (Epic 011).")
+    elif case_dir.name in ("3_CrI3_wannier_SOC", "4_CrI3_wannier_SOC_indmagatoms"):
         pytest.xfail(
             "Legacy exchange.out text comparison drifted after the Wannier90 "
             "ws-weights epic; pending migration to the SpinIO oracle (Epic 011)."
