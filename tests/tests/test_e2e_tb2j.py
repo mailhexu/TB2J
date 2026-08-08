@@ -122,10 +122,12 @@ def _run_e2e_case(case_dir: Path) -> None:
     # expected-fail until migrated to the SpinIO oracle in Epic 011.
     if case_dir.name == "2_wannier_collinear_SrMnO3":
         pytest.skip("Migrated to the SpinIO oracle in test_e2e_wannier.py (Epic 011).")
-    elif case_dir.name in ("3_CrI3_wannier_SOC", "4_CrI3_wannier_SOC_indmagatoms"):
+    elif case_dir.name == "3_CrI3_wannier_SOC":
+        pytest.skip("Migrated to the SpinIO oracle in test_e2e_wannier.py (Epic 011).")
+    elif case_dir.name == "4_CrI3_wannier_SOC_indmagatoms":
         pytest.xfail(
-            "Legacy exchange.out text comparison drifted after the Wannier90 "
-            "ws-weights epic; pending migration to the SpinIO oracle (Epic 011)."
+            "Single-direction z SOC recompute; the x/y/z merge contract is "
+            "covered by test_e2e_wannier.py. Recompute variant deferred."
         )
     elif case_dir.name == "5_CrI3_SIESTA_collinear":
         pytest.xfail(

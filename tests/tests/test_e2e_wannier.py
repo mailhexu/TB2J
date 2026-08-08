@@ -17,7 +17,9 @@ from __future__ import annotations
 import pytest
 from utils.runners import run_tb2j_module
 from utils.spinio_checks import (
+    check_dmi_antisymmetry,
     check_exchange_out_section,
+    check_jani_hermiticity,
     check_pair_reversal,
     check_schema,
     compare_J,
@@ -74,3 +76,45 @@ def test_wannier_srmno3_collinear(tmp_path):
     check_pair_reversal(sio)
     # Focused exchange.out contract: the WS-interpolation scheme is recorded.
     check_exchange_out_section(tmp_path / "exchange.out", "Wannier90 WS interpolation")
+
+
+# Cr-Cr in-plane nearest-neighbour isotropic exchange in the merged CrI3 SOC
+# result, in meV. The merge runs on the stored x/y/z direction results with the
+# current TB2J tensor-reconstruction logic; the small anisotropy drift vs the
+# pre-ws-weights reference is the documented ws-weights correctness change.
+# J_iso is stable; the merged tensor invariants (DMI antisymmetry, Jani
+# Hermiticity, pair reversal) are the scientific checks.
+_CRI3_NN_J_MEV = {
+    ((1, 0, 0), 0, 0): 0.6877,
+    ((1, 0, 0), 1, 1): 0.6877,
+}
+
+
+@pytest.mark.tier2
+def test_wannier_cri3_soc_merge(tmp_path):
+    """Inventory: Wannier90 spinor/SOC exchange + merge. Tier T2, default profile.
+
+    Merges the stored CrI3 x/y/z spinor-direction results via the public
+    ``TB2J_merge`` entry point and checks the merged canonical SpinIO: schema,
+    nearest-neighbour J, pair reversal, DMI antisymmetry, and Jani Hermiticity
+    (the tensor-reconstruction invariants that the text comparison obscured).
+    """
+    from conftest import require_input
+
+    ref_root = require_input(
+        "tests/3_CrI3_wannier_SOC/refs", "Wannier90 SOC merge", "CrI3"
+    )
+    args = [
+        "-T",
+        "structure",
+        str(ref_root / "TB2J_results_x"),
+        str(ref_root / "TB2J_results_y"),
+        str(ref_root / "TB2J_results_z"),
+    ]
+    sio = run_tb2j_module("TB2J.scripts.TB2J_merge", args, tmp_path)
+
+    check_schema(sio)
+    compare_J(sio, _CRI3_NN_J_MEV, tol=1e-2, unit="meV")
+    check_pair_reversal(sio)
+    check_dmi_antisymmetry(sio)
+    check_jani_hermiticity(sio)
