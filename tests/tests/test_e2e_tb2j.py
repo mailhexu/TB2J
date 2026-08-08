@@ -130,9 +130,9 @@ def _run_e2e_case(case_dir: Path) -> None:
             "covered by test_e2e_wannier.py. Recompute variant deferred."
         )
     elif case_dir.name == "5_CrI3_SIESTA_collinear":
-        pytest.xfail(
-            "Siesta-based E2E currently fails due to HamiltonIO "
-            "returning a Hamiltonian with spin=None."
+        pytest.skip(
+            "Migrated to the SpinIO oracle in test_e2e_siesta.py (Epic 011); "
+            "the legacy spin=None xfail is resolved by current HamiltonIO/sisl."
         )
 
     # Ensure result directory exists
