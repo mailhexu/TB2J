@@ -9,7 +9,7 @@ This case exercises the public ``siesta2J`` entry point and checks the canonical
 from __future__ import annotations
 
 import pytest
-from conftest import require_input
+from conftest import require_input, resolve_example
 from utils.runners import run_tb2j_module
 from utils.spinio_checks import check_pair_reversal, check_schema, compare_J
 
@@ -48,4 +48,34 @@ def test_siesta_cri3_collinear(tmp_path):
 
     check_schema(sio)
     compare_J(sio, _CRI3_SIESTA_NN_J_MEV, tol=1e-3, unit="meV")
+    check_pair_reversal(sio)
+
+
+# bcc Fe nearest-neighbour J (R=(1,1,1)) from the SIESTA bccFe Hamiltonian, meV.
+_BCCFE_NN_J_MEV = {
+    ((1, 1, 1), 0, 0): 20.5145,
+    ((-1, -1, -1), 0, 0): 20.5145,
+}
+
+
+@pytest.mark.tier2
+def test_siesta_bccfe_collinear(tmp_path):
+    """Inventory: SIESTA exchange (bcc Fe collinear). Tier T2, default profile."""
+    data_dir = resolve_example("Siesta/bccFe/DFT", "SIESTA exchange", "bccFe")
+    args = [
+        "--fdf_fname",
+        str(data_dir / "siesta.fdf"),
+        "--elements",
+        "Fe",
+        "--kmesh",
+        "5",
+        "5",
+        "5",
+        "--nz",
+        "50",
+    ]
+    sio = run_tb2j_module("TB2J.scripts.siesta2J", args, tmp_path)
+
+    check_schema(sio)
+    compare_J(sio, _BCCFE_NN_J_MEV, tol=1e-2, unit="meV")
     check_pair_reversal(sio)
