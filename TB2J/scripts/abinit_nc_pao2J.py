@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 
 from TB2J.interfaces.abinit_savetb2j import (
     ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT,
@@ -13,6 +14,15 @@ from TB2J.versioninfo import print_license
 
 
 def run_abinit_nc_pao2J():
+    warnings.warn(
+        "abinit_nc_pao2J (native ABINIT NC-PAO exchange) is deprecated. For new "
+        "projector/Green-function exchange from ABINIT output, use the maintained "
+        "ABINIT + abinao handoff (abinao.exchange.gen_exchange_from_orbitals -> "
+        "TB2J projector core) or abinit_projector2J.py instead. This CLI is "
+        "retained only for backward compatibility.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     print_license()
     parser = argparse.ArgumentParser(
         description=(
