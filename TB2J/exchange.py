@@ -336,12 +336,19 @@ class Exchange(ExchangeParams):
 
     def simplify_orbital_contributions(self, Jorbij, iatom, jatom):
         """
-        sum up the contribution of all the orbitals with same (n,l,m)
+        Contract the orbital-resolved exchange tensor over orbitals sharing the
+        same (n, l, m), i.e. over zeta, and drop orbitals not in ``include_orbs``.
+
+        This applies the reduction matrix built by :func:`map_orbs_matrix`
+        (``self.mmats``): ``Jorbij -> mmat_i.T @ Jorbij @ mmat_j``. The einsum
+        form accepts both a single 2D orbital matrix ``(..., ni, nj)``-with-no-batch
+        and a batched tensor such as the vectorized ``(nR, 4, 4, ni, nj)`` A-orbital
+        tensor, so the same contraction is used by every exchange path.
         """
         if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
             mmat_i = self.mmats[iatom]
             mmat_j = self.mmats[jatom]
-            Jorbij = mmat_i.T @ Jorbij @ mmat_j
+            Jorbij = np.einsum("...ij,ia,jb->...ab", Jorbij, mmat_i, mmat_j)
         return Jorbij
 
     def calculate_all(self):
@@ -578,7 +585,12 @@ class ExchangeNCL(Exchange):
                 A_orb_tensor = (
                     np.einsum("ruij,rvji->ruvij", X, Y) / np.pi
                 )  # Shape: (nR, 4, 4, ni, nj)
-                # Vectorized sum over orbitals for simplified A values
+                # Contract over zeta and apply orbital selection. This must mirror
+                # the non-vectorized get_A_ijR path, otherwise the orbital-resolved
+                # output is left in the raw basis (every zeta separate, no element
+                # selection) and the scalar A sums over the wrong orbital set.
+                A_orb_tensor = self.simplify_orbital_contributions(A_orb_tensor, mi, mj)
+                # Scalar A is the sum over the reduced (contracted/selected) orbitals
                 A_val_tensor = np.sum(A_orb_tensor, axis=(-2, -1))  # Shape: (nR, 4, 4)
             else:
                 # Compute A_tensor for all R vectors at once

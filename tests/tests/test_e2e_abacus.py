@@ -18,12 +18,14 @@ from conftest import resolve_example
 from utils.runners import run_tb2j_module
 from utils.spinio_checks import check_pair_reversal, check_schema, compare_J
 
-# bcc Fe nearest-neighbour J (R=(1,1,1), the (1/2,1/2,1/2) shell) at kmesh 3x3x3,
-# in meV. Only the (i=0,j=1) pair and its reversal carry the NN value; the
-# (1,0) key at the same +R is a different (smaller) shell.
+# bcc Fe nearest-neighbour J for the (1/2,1/2,1/2) shell: atom 0 at the origin
+# to atom 1 at (1/2,1/2,1/2), i.e. key ((0,0,0),0,1) and its reversal, in meV.
+# kmesh 5x5x5: at 3x3x3 the NN J is unconverged (even negative) and the
+# ((1,1,1),0,1) key -- a 7.45 A distant pair, not NN -- carries a large
+# aliasing artifact (~50 meV) that vanishes on k-mesh refinement.
 _FE_NN_J_MEV = {
-    ((1, 1, 1), 0, 1): 50.7138,
-    ((-1, -1, -1), 1, 0): 50.7138,
+    ((0, 0, 0), 0, 1): 11.6956,
+    ((0, 0, 0), 1, 0): 11.6956,
 }
 
 
@@ -39,9 +41,9 @@ def test_abacus_fe_collinear(tmp_path):
         "--elements",
         "Fe",
         "--kmesh",
-        "3",
-        "3",
-        "3",
+        "5",
+        "5",
+        "5",
     ]
     sio = run_tb2j_module("TB2J.scripts.abacus2J", args, tmp_path)
 

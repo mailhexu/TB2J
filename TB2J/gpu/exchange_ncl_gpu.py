@@ -175,17 +175,22 @@ class ExchangeNCLGPU(ExchangeNCL):
         A_orb = {}
 
         for (i, j), (A_val_tensor, idx, jdx) in A_results.items():
-            A_val_np = jax_to_numpy(A_val_tensor)
             mi, mj = magnetic_sites[i], magnetic_sites[j]
+
+            if (i, j) in A_orb_results:
+                A_orb_np = jax_to_numpy(A_orb_results[(i, j)])
+                # Contract over zeta and apply orbital selection, mirroring the
+                # CPU get_all_A_vectorized / non-vectorized get_A_ijR paths.
+                A_orb_np = self.simplify_orbital_contributions(A_orb_np, mi, mj)
+                # Scalar A is the sum over the reduced (contracted/selected) orbitals
+                A_val_np = np.sum(A_orb_np, axis=(-2, -1))
+            else:
+                A_val_np = jax_to_numpy(A_val_tensor)
 
             for iR, R_vec in enumerate(self.short_Rlist):
                 if (R_vec, i, j) in self.distance_dict:
                     A[(R_vec, mi, mj)] = A_val_np[iR]
-
-            if (i, j) in A_orb_results:
-                A_orb_np = jax_to_numpy(A_orb_results[(i, j)])
-                for iR, R_vec in enumerate(self.short_Rlist):
-                    if (R_vec, i, j) in self.distance_dict:
+                    if (i, j) in A_orb_results:
                         A_orb[(R_vec, mi, mj)] = A_orb_np[iR]
 
         return {"AijR": A, "AijR_orb": A_orb}

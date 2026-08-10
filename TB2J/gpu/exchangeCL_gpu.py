@@ -29,11 +29,17 @@ def _compute_collinear_A_batch(Gij_up, Gji_dn, Delta_i, Delta_j):
     """
     Compute collinear exchange A tensor for all R vectors.
 
-    Returns: (nR, ni, ni) orbital-resolved A tensor, (nR,) total A values
+    Returns: (nR, ni, nj) orbital-resolved A tensor, (nR,) total A values
+
+    The product is *element-wise*: t[r,a,j] = (Delta_i@Gij)[r,a,j] *
+    (Delta_j@Gji)[r,j,a], matching the CPU reference (non-vectorized
+    ``einsum("ij,ji->ij", ...)`` and vectorized ``einsum("ab,rbc,cd,rda->rac",
+    ...)``). The previous ``"raj,rji->rai"`` contracted over j (a matrix
+    product) and gave both the wrong shape (nR, ni, ni) and wrong values.
     """
     X = jnp.einsum("ab,rbj->raj", Delta_i, Gij_up)
     Y = jnp.einsum("jk,rki->rji", Delta_j, Gji_dn)
-    t = jnp.einsum("raj,rji->rai", X, Y)
+    t = jnp.einsum("raj,rja->raj", X, Y)
     A_total = jnp.sum(t, axis=(1, 2))
     return t, A_total
 
