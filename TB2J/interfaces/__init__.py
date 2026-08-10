@@ -1,4 +1,5 @@
 from .abacus import gen_exchange_abacus
+from .abinit_paw import gen_exchange_abinit_paw
 from .dmft import DMFTstaticManager
 from .manager import Manager
 from .siesta_interface import gen_exchange_siesta
@@ -22,6 +23,6 @@ __all__ = [
     "WannierManager",
     "gen_exchange",
     "gen_exchange_abacus",
-    "TBUpyManager",
+    "gen_exchange_abinit_paw",
     "gen_exchange_tbupy",
 ]

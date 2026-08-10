@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Packaging
+
+- `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao
+  integration dependency.
+
 ### Validation foundation (Epic 010) and restored E2E baseline (Epic 011)
 
 - The canonical `SpinIO` result is now the primary scientific validation

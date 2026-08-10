@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TB2J"
-version = "0.9.18"
+version = "0.9.20"
 description = "TB2J: First principle to Heisenberg exchange J using tight-binding Green function method"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,7 +39,6 @@ dependencies = [
     "sympair>=0.1.4",
     "supercellmap",
     "tomli>=2.0.0",
-    "pypao>=0.1.0",
     "tomli-w>=1.0.0",
     "typing_extensions",
     "sisl>=0.16.2",
@@ -49,6 +48,7 @@ dependencies = [
 [project.optional-dependencies]
 siesta = ["sisl>=0.9.0", "netcdf4"]
 lawaf = ["lawaf>=0.2.3"]
+pypao = ["pypao>=0.1.0"]
 magnon = ["netcdf4", "streamlit"]
 all = ["sisl>=0.9.0", "netcdf4", "lawaf>=0.2.3", "streamlit"]
 
@@ -80,6 +80,7 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "abinit_projector2J.py" = "TB2J.scripts.abinit_projector2J:run_abinit_projector2J"
 "abinit_nc_pao2J.py" = "TB2J.scripts.abinit_nc_pao2J:run_abinit_nc_pao2J"
 "sprkkr2magnon.py" = "TB2J.scripts.sprkkr2magnon:main"
+"abinit_paw2J.py" = "TB2J.interfaces.abinit_paw:run_gen_exchange_abinit_paw"
 
 
 [tool.setuptools]
