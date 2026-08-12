@@ -155,6 +155,78 @@ def _read_v6_expansion_plan(
         spinflip=spinflip,
     )
 
+def _validate_v6_expansion_plan(
+    plan: VaspIbzExpansionPlan, nspin: int, nproj: int, nkpt_ibz: int
+) -> None:
+    """Validate all ADR-005 plan invariants before applying actions."""
+    nkpt_bz = len(plan.parent_ibz)
+
+    # BZ mesh completeness: no duplicates, Cartesian-product structure.
+    canonical = np.round(np.mod(plan.bz_kpoints, 1.0), decimals=12)
+    if len(np.unique(canonical, axis=0)) != nkpt_bz:
+        raise ValueError("v6 BZ k-points contain periodic duplicates")
+    axes = [np.unique(canonical[:, ax]) for ax in range(3)]
+    if int(np.prod([len(ax) for ax in axes])) != nkpt_bz:
+        raise ValueError("v6 BZ mesh is incomplete; not a Cartesian grid")
+
+    # Action unitarity: every action must satisfy A @ A† ≈ I.
+    identity = np.eye(nproj, dtype=complex)
+    for sigma in range(nspin):
+        for K in range(nkpt_bz):
+            A = plan.projector_actions[sigma, K]
+            if not np.allclose(A @ A.conj().T, identity, atol=1e-8):
+                raise ValueError(
+                    f"v6 projector action is not unitary (spin={sigma}, "
+                    f"kpt={K})"
+                )
+
+    # Parent coverage: every declared IBZ parent must appear at least once.
+    if len(np.unique(plan.parent_ibz)) < min(nkpt_ibz, nkpt_bz):
+        raise ValueError("v6 plan does not cover all IBZ parents")
+
+
+def _expand_vasp_native_ibz(
+    celtot: np.ndarray,
+    fertot: np.ndarray,
+    cproj: np.ndarray,
+    plan: VaspIbzExpansionPlan,
+    nprod: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Expand VASP v6 IBZ spectral arrays to full-BZ using the decoded plan.
+
+    Returns arrays in TB2J convention:
+    - eigenvalues:    (nspin, nkpt_bz, nband)
+    - occupations:    (nspin, nkpt_bz, nband)
+    - coefficients:   (nspin, nkpt_bz, nband, nproj)
+    """
+    nspin = plan.source_spin.shape[0]
+    nkpt_bz = len(plan.parent_ibz)
+    nband = celtot.shape[0]
+
+    _validate_v6_expansion_plan(plan, nspin, nprod, celtot.shape[1])
+
+    eigenvalues = np.empty((nspin, nkpt_bz, nband), dtype=float)
+    occupations = np.empty((nspin, nkpt_bz, nband), dtype=float)
+    coefficients = np.empty((nspin, nkpt_bz, nband, nprod), dtype=complex)
+
+    for sigma in range(nspin):
+        for K in range(nkpt_bz):
+            parent = int(plan.parent_ibz[K])
+            src_spin = int(plan.source_spin[sigma, K])
+            action = plan.projector_actions[sigma, K]
+
+            eigenvalues[sigma, K] = celtot[:, parent, src_spin]
+            occupations[sigma, K] = fertot[:, parent, src_spin]
+
+            # Parent projector coefficients: (nproj, nband)
+            coeff_parent = cproj[:nprod, :, parent, src_spin]
+            if plan.conjugate[sigma, K]:
+                coeff_parent = coeff_parent.conj()
+
+            # target = action @ source → (nproj, nband), then → (nband, nproj)
+            coefficients[sigma, K] = (action @ coeff_parent).T
+
+    return eigenvalues, occupations, coefficients
 HARTREE_TO_EV = 27.211386245988
 
 
@@ -241,14 +313,16 @@ def read_vasp_native(filename: str | Path) -> PawProjectorSnapshot:
         ).reshape(lmdim_max, lmdim_max, nions, ncdij, order="F")
 
     if v6_plan is not None:
-        raise NotImplementedError(
-            "VASP native v6 IBZ expansion is not yet implemented (Story 003). "
-            "The expansion plan was decoded successfully."
+        eigenvalues, occupations, coefficients = _expand_vasp_native_ibz(
+            celtot, fertot, cproj, v6_plan, nprod
         )
-    # Reshape to TB2J convention
-    eigenvalues = np.transpose(celtot, (2, 1, 0)).copy()
-    occupations = np.transpose(fertot, (2, 1, 0)).copy()
-    coefficients = np.transpose(cproj, (3, 2, 1, 0))[..., :nprod].copy()
+        vkpt = v6_plan.bz_kpoints
+        nkpt_bz = len(v6_plan.parent_ibz)
+        wtkpt = np.full(nkpt_bz, 1.0 / nkpt_bz)
+    else:
+        eigenvalues = np.transpose(celtot, (2, 1, 0)).copy()
+        occupations = np.transpose(fertot, (2, 1, 0)).copy()
+        coefficients = np.transpose(cproj, (3, 2, 1, 0))[..., :nprod].copy()
 
     # VASP CPROJ carries exp(-i 2π k·τ_i); TB2J applies real-space Bloch
     # factors itself, so convert each projector-site block to local overlaps.
@@ -390,6 +464,12 @@ def read_vasp_native(filename: str | Path) -> PawProjectorSnapshot:
         "stream_projector_capacity": int(nprod_stream),
         "j_eV": 0.0,
         "correlated_shells": [],
+        "kpoint_storage": "ibz" if v6_plan is not None else "full_bz",
+        "expanded_by": "tb2j.vasp_native" if v6_plan is not None else None,
+        "nkpt_ibz": int(nkpt) if v6_plan is not None else None,
+        "nkpt_bz": (
+            int(len(v6_plan.parent_ibz)) if v6_plan is not None else None
+        ),
     }
 
     return PawProjectorSnapshot(

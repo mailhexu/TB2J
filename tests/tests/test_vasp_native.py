@@ -234,7 +234,7 @@ def _write_v6_expansion_section(
     if bad_parent:
         parent = np.full(nkpt_bz, nkpt_ibz + 5, dtype="<i4")
     else:
-        parent = np.zeros(nkpt_bz, dtype="<i4")
+        parent = (np.arange(nkpt_bz) % nkpt_ibz).astype("<i4")
     f.write(parent.tobytes())
 
     if bad_spin:
@@ -479,21 +479,30 @@ def test_v6_read_expansion_plan_rejects_bad_spin(tmp_path):
             _read_v6_expansion_plan(f, 2, 4, 2)
 
 
-def test_read_vasp_native_v6_raises_not_implemented(tmp_path):
-    """v6 decoding succeeds; expansion deferred to Story 003."""
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
-        read_vasp_native(_write_test_native_v6(tmp_path / "test_v6.bin"))
+def test_read_vasp_native_v6_expands_to_full_bz(tmp_path):
+    """v6 stream expands to a valid full-BZ PawProjectorSnapshot."""
+    snapshot = read_vasp_native(_write_test_native_v6(tmp_path / "test_v6.bin"))
+
+    assert snapshot.kpoint_mode == "full_bz"
+    assert snapshot.kpoints.shape == (8, 3)
+    assert snapshot.eigenvalues.shape == (2, 8, 4)
+    assert snapshot.coefficients.shape == (2, 8, 4, 4)
+    assert np.isclose(snapshot.weights.sum(), 1.0)
+    assert np.allclose(snapshot.weights, 1.0 / 8)
+    assert snapshot.provenance["kpoint_storage"] == "ibz"
+    assert snapshot.provenance["expanded_by"] == "tb2j.vasp_native"
+    assert snapshot.provenance["nkpt_ibz"] == 2
+    assert snapshot.provenance["nkpt_bz"] == 8
 
 
 def test_read_vasp_native_v6_padded_stream_uses_physical_proj_count(tmp_path):
     """NPROD padding consumed for CPROJ alignment but actions use ion layout."""
     path = _write_test_native_v6(tmp_path / "test_v6_pad.bin", nprod_padding=2)
-    # If _read_v6_expansion_plan received the padded nprod (6) instead of
-    # the physical nprod (4), the action reshape would fail or frombuffer
-    # would read past the section boundary.  NotImplementedError proves the
-    # plan decoded with physical dimensions.
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
-        read_vasp_native(path)
+    snapshot = read_vasp_native(path)
+
+    assert snapshot.coefficients.shape == (2, 8, 4, 4)
+    assert snapshot.provenance["stream_projector_capacity"] == 6
+    assert snapshot.provenance["nkpt_bz"] == 8
 
 
 def test_read_vasp_native_v6_rejects_truncated_header(tmp_path):
@@ -501,3 +510,117 @@ def test_read_vasp_native_v6_rejects_truncated_header(tmp_path):
     path.write_bytes(np.array([20260812, 6], dtype="<i4").tobytes())
     with pytest.raises(Exception):
         read_vasp_native(path)
+
+
+
+def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
+    """Non-trivial action and conjugation route through to expanded coefficients."""
+    path = tmp_path / "test_v6_action.bin"
+
+    nspin = 2
+    nproj = 4
+    nkpt_ibz = 2
+    nkpt_bz = 8
+    nband = 3
+    nprod_stream = nproj
+    nions = 2
+    ntyp = 1
+    lmdim_max = 2
+    lmax_max = 2
+
+    # Parent CPROJ: fill IBZ point 0 spin-0 with a known pattern.
+    cproj_ibz = np.zeros(
+        (nprod_stream, nband, nkpt_ibz, nspin), dtype=np.complex128
+    )
+    for n in range(nband):
+        for p in range(nproj):
+            cproj_ibz[p, n, 0, 0] = complex(n + 1, p + 1)
+
+    # Action for spin=0, kpt=0: swap projector pairs (0↔2, 1↔3).
+    swap = np.array(
+        [[0, 0, 1, 0], [0, 0, 0, 1], [1, 0, 0, 0], [0, 1, 0, 0]],
+        dtype=np.complex128,
+    )
+
+    def custom_actions(nproj, nspin, nkpt_bz):
+        acts = np.zeros(
+            (nproj, nproj, nspin, nkpt_bz), dtype=np.complex128
+        )
+        for s in range(nspin):
+            for k in range(nkpt_bz):
+                acts[:, :, s, k] = np.eye(nproj, dtype=np.complex128)
+        # Override spin=0, kpt=0 with the swap.
+        acts[:, :, 0, 0] = swap
+        return acts
+
+    # Conjugation for spin=1, kpt=0.
+    conj_flags = np.zeros((nspin, nkpt_bz), dtype="<i4")
+    conj_flags[1, 0] = 1
+
+    with open(path, "wb") as f:
+        def wi(v):
+            f.write(np.array(v, dtype="<i4").tobytes())
+        def wr(v):
+            f.write(np.asarray(v, dtype="<f8").tobytes(order="F"))
+        def wc(v):
+            f.write(
+                np.asarray(v, dtype=complex).astype("<c16").tobytes(order="F")
+            )
+
+        wi(20260812)
+        wi(6)
+        wi(nspin)
+        wi(2)  # ncdij
+        wi(nkpt_ibz)
+        wi(nband)
+        wi(nprod_stream)
+        wi(nions)
+        wi(ntyp)
+        wi(lmdim_max)
+        wi(lmax_max)
+        wr(np.eye(3) * 5.0)
+        wr(np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]]).T)
+        wi([0, 2])
+        wi([2, 2])
+        wi([1, 1])
+        wi([2])
+        wi([0, 0])
+        wr(np.zeros((lmax_max, lmax_max, ntyp), dtype=float))
+        wr([26.0])
+        f.write(b"Fe")
+        _write_v6_expansion_section(
+            f,
+            nspin,
+            nproj,
+            nkpt_bz,
+            nkpt_ibz,
+            conjugate_flags=conj_flags,
+            action_factory=custom_actions,
+        )
+        ibz_kpts = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
+        wr(ibz_kpts.T)
+        wr(np.array([0.5, 0.5]))
+        wr(5.0)
+        wr(np.zeros((nband, nkpt_ibz, nspin), dtype=float))
+        wr(np.full((nband, nkpt_ibz, nspin), 0.5, dtype=float))
+        wc(cproj_ibz)
+        wc(np.zeros(
+            (lmdim_max, lmdim_max, nions, 2),
+            dtype=np.complex128,
+            order="F",
+        ))
+
+    snapshot = read_vasp_native(path)
+
+    # Verify swap action at spin=0, kpt=0.
+    expected_parent = cproj_ibz[:nproj, :, 0, 0]  # (nproj, nband)
+    expected_swapped = (swap @ expected_parent).T  # (nband, nproj)
+    # Remove Bloch phase at k=0 (identity, no phase).
+    np.testing.assert_allclose(
+        snapshot.coefficients[0, 0], expected_swapped, atol=1e-10
+    )
+
+    # Verify identity action at spin=0, kpt=1 (parent=1, empty CPROJ).
+    np.testing.assert_allclose(
+        snapshot.coefficients[0, 1], 0.0, atol=1e-10
+    )
