@@ -162,7 +162,7 @@ def _validate_v6_expansion_plan(
     nkpt_bz = len(plan.parent_ibz)
 
     # BZ mesh completeness: no duplicates, Cartesian-product structure.
-    canonical = np.round(np.mod(plan.bz_kpoints, 1.0), decimals=12)
+    canonical = np.mod(np.round(plan.bz_kpoints, decimals=12), 1.0)
     if len(np.unique(canonical, axis=0)) != nkpt_bz:
         raise ValueError("v6 BZ k-points contain periodic duplicates")
     axes = [np.unique(canonical[:, ax]) for ax in range(3)]
