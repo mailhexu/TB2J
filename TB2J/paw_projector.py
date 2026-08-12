@@ -188,16 +188,25 @@ def validate_full_bz_mesh(kpoints: np.ndarray, weights: np.ndarray) -> None:
         raise ValueError("weights must have shape (nkpt,)")
     if np.any(weights < 0.0) or not np.isclose(weights.sum(), 1.0, atol=1e-12):
         raise ValueError("full-BZ weights must be non-negative and normalized to one")
-    canonical = np.mod(np.round(kpoints, decimals=12), 1.0)
+    canonical = np.mod(np.round(kpoints, decimals=8), 1.0)
     if len(np.unique(canonical, axis=0)) != len(canonical):
         raise ValueError("full-BZ mesh contains duplicate periodic k-points")
-    axes = [np.unique(canonical[:, axis]) for axis in range(3)]
-    if int(np.prod([len(axis) for axis in axes])) != len(canonical):
+    # Cartesian-product completeness with tolerance grouping (handles
+    # non-trivial divisions like 1/7 that produce float near-duplicates).
+    tol = 1e-6
+    product = 1
+    for ax in range(3):
+        vals = np.sort(canonical[:, ax])
+        groups = 1
+        for i in range(1, len(vals)):
+            if vals[i] - vals[i - 1] > tol:
+                groups += 1
+        product *= groups
+    if product != len(canonical):
         raise ValueError(
             "full-BZ mesh is incomplete; generate an explicitly unsymmetrized "
             "full-BZ WFK instead of using magnetic IBZ reconstruction"
         )
-
 
 def _validate_spectral_data(
     snapshot: PawProjectorSnapshot,

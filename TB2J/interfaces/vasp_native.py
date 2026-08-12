@@ -162,11 +162,20 @@ def _validate_v6_expansion_plan(
     nkpt_bz = len(plan.parent_ibz)
 
     # BZ mesh completeness: no duplicates, Cartesian-product structure.
-    canonical = np.mod(np.round(plan.bz_kpoints, decimals=12), 1.0)
+    canonical = np.mod(np.round(plan.bz_kpoints, decimals=8), 1.0)
     if len(np.unique(canonical, axis=0)) != nkpt_bz:
         raise ValueError("v6 BZ k-points contain periodic duplicates")
-    axes = [np.unique(canonical[:, ax]) for ax in range(3)]
-    if int(np.prod([len(ax) for ax in axes])) != nkpt_bz:
+    # Cartesian-product completeness with tolerance grouping.
+    tol = 1e-6
+    product = 1
+    for ax in range(3):
+        vals = np.sort(canonical[:, ax])
+        groups = 1
+        for i in range(1, len(vals)):
+            if vals[i] - vals[i - 1] > tol:
+                groups += 1
+        product *= groups
+    if product != nkpt_bz:
         raise ValueError("v6 BZ mesh is incomplete; not a Cartesian grid")
 
     # Action unitarity: every action must satisfy A @ A† ≈ I.
