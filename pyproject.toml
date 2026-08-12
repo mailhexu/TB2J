@@ -81,6 +81,7 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "abinit_nc_pao2J.py" = "TB2J.scripts.abinit_nc_pao2J:run_abinit_nc_pao2J"
 "sprkkr2magnon.py" = "TB2J.scripts.sprkkr2magnon:main"
 "abinit_paw2J.py" = "TB2J.interfaces.abinit_paw:run_gen_exchange_abinit_paw"
+"vasp_native2J.py" = "TB2J.scripts.vasp_native2J:run_vasp_native2J"
 
 
 [tool.setuptools]
