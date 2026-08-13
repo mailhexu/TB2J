@@ -440,11 +440,12 @@ class ProjectorGreenData:
             raise ValueError("operator components require site projector indices")
         nsite = len(self.site_nproj)
         nmax = self.site_projector_indices.shape[1]
+        nproj = self.coefficients.shape[-1]
         for name, value in self.operator_components.items():
-            if value.shape != (nsite, nmax, nmax):
+            if value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
                 raise ValueError(
                     f"operator component {name!r} must have shape "
-                    "(nsite, nproj_site_max, nproj_site_max)"
+                    "(nsite, nproj_site_max, nproj_site_max) or (nproj, nproj)"
                 )
 
     def has_operator_component(self, name):
@@ -456,9 +457,17 @@ class ProjectorGreenData:
         component = self.operator_components[name]
         if site is None:
             return component
-        block = component[int(site)]
+        site = int(site)
+        if component.ndim == 2:
+            if self.site_projector_indices is None:
+                raise ValueError(
+                    "global operator components require site projector indices"
+                )
+            projectors = self.site_projector_indices[site, : self.site_nproj[site]]
+            return component[np.ix_(projectors, projectors)]
+        block = component[site]
         if self.site_nproj is not None:
-            nproj = self.site_nproj[int(site)]
+            nproj = self.site_nproj[site]
             block = block[:nproj, :nproj]
         return block
 
@@ -625,22 +634,22 @@ class ProjectorGreenData:
                     hij.operator_basis = self.operator_basis
 
             if self.operator_components is not None:
-                if "nsite" not in nc.dimensions:
-                    nc.createDimension(
-                        "nsite", next(iter(self.operator_components.values())).shape[0]
-                    )
-                if "nproj_site_max" not in nc.dimensions:
-                    nc.createDimension(
-                        "nproj_site_max",
-                        next(iter(self.operator_components.values())).shape[1],
-                    )
                 components = operators.createGroup("operator_components")
                 for name, component in self.operator_components.items():
-                    variable = components.createVariable(
-                        name,
-                        "f8",
-                        ("nsite", "nproj_site_max", "nproj_site_max", "complex"),
-                    )
+                    if component.ndim == 2:
+                        dimensions = ("nproj", "nproj", "complex")
+                    else:
+                        if "nsite" not in nc.dimensions:
+                            nc.createDimension("nsite", component.shape[0])
+                        if "nproj_site_max" not in nc.dimensions:
+                            nc.createDimension("nproj_site_max", component.shape[1])
+                        dimensions = (
+                            "nsite",
+                            "nproj_site_max",
+                            "nproj_site_max",
+                            "complex",
+                        )
+                    variable = components.createVariable(name, "f8", dimensions)
                     variable[:] = encode_complex(component)
                     if self.operator_component_metadata is not None:
                         for key, value in self.operator_component_metadata.get(
@@ -1206,11 +1215,12 @@ def projector_exchange_trace(
 
 
 def projector_charge_moments_from_green(green, contour, sites=None):
-    """Compute projector-space charges and collinear moments from Green functions.
+    """Compute site charges and collinear moments from a Green-function contour.
 
-    The convention follows TB2J's existing contour-density path.  For NC PAOs,
-    the Green function is contravariant, so its density is left-contracted by
-    the k-dependent overlap on the right before taking the site trace.
+    A PAW projector density is converted to a physical partial-wave population
+    with its producer-supplied metric when present; otherwise the legacy
+    projector-basis trace is retained.  The metric is a population observable,
+    not an overlap inverse or an exchange-kernel factor.
     """
     validate_green_backend(green)
     if not callable(getattr(green, "get_site_block", None)):
@@ -1230,6 +1240,13 @@ def projector_charge_moments_from_green(green, contour, sites=None):
     charges = np.zeros(nsites, dtype=float)
     spinat = np.zeros((nsites, 3), dtype=float)
     density_by_spin = np.zeros((green.data.nspin, nsites), dtype=float)
+    population_metric = getattr(green.data, "population_metric_matrix", None)
+    site_metrics = {}
+    if population_metric is not None:
+        population_metric = np.asarray(population_metric, dtype=complex)
+        for site in sites:
+            indices = green.get_site_projectors(site)
+            site_metrics[site] = population_metric[np.ix_(indices, indices)]
 
     R0 = np.array([[0, 0, 0]], dtype=int)
     for ispin in range(green.data.nspin):
@@ -1248,7 +1265,11 @@ def projector_charge_moments_from_green(green, contour, sites=None):
                 )
             for site in sites:
                 block = green.get_site_block(GR0, site, site)
-                site_diags[site].append(np.diag(block))
+                if site in site_metrics:
+                    block = np.trace(block @ site_metrics[site])
+                else:
+                    block = np.diag(block)
+                site_diags[site].append(block)
         for site in sites:
             integrated = (
                 -np.imag(contour.integrate_values(np.asarray(site_diags[site]))) / np.pi
@@ -1262,5 +1283,9 @@ def projector_charge_moments_from_green(green, contour, sites=None):
         "charges": charges,
         "spinat": spinat,
         "density_by_spin": density_by_spin,
-        "method": "projector_green_contour_diagonal",
+        "method": (
+            "projector_green_contour_population_metric"
+            if population_metric is not None
+            else "projector_green_contour_diagonal"
+        ),
     }

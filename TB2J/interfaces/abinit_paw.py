@@ -30,15 +30,26 @@ Architecture decisions (P2/P3/P4):
 
 from __future__ import annotations
 
+import hashlib
 import pickle
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from TB2J.paw_projector import (
+    PawOperatorComponent,
+    PawOperatorComponents,
+    PawProjectorChannel,
+    PawProjectorSnapshot,
+    PawSiteLayout,
+    build_projector_green_data,
+)
 from TB2J.projector_green import ProjectorGreenData
 
-# Hartree → eV conversion (same value as ase.units.Ha / abinao wfk.py).
+# Atomic length conversion. ABINIT WFK ``primitive_vectors`` are in Bohr;
+# TB2J writes structural metadata and applies ``Rcut`` in Å.
+BOHR_TO_ANGSTROM = 0.529177210903
 HARTREE_TO_EV = 27.211386245988
 
 __all__ = [
@@ -50,9 +61,247 @@ __all__ = [
 ]
 
 
+def normalize_paw_xml_mapping(
+    atom_species: Sequence[str],
+    paw_xml_path: str | Path | Mapping[str, str | Path],
+) -> dict[str, Path]:
+    """Resolve and validate the physical species-to-PAW-XML input mapping."""
+    species = tuple(str(symbol) for symbol in atom_species)
+    unique_species = tuple(dict.fromkeys(species))
+    if isinstance(paw_xml_path, Mapping):
+        mapping = {str(symbol): Path(path) for symbol, path in paw_xml_path.items()}
+        extras = set(mapping) - set(unique_species)
+        if extras:
+            raise ValueError("unknown species mapping for " + ", ".join(sorted(extras)))
+        for site, symbol in enumerate(species):
+            if symbol not in mapping:
+                raise ValueError(
+                    f"missing PAW XML for source site {site} species {symbol!r}; "
+                    "supply --paw_xml SPECIES=PATH"
+                )
+        return mapping
+    if len(unique_species) != 1:
+        raise ValueError(
+            "single PAW XML is valid only for a single-species WFK; "
+            "supply --paw_xml SPECIES=PATH for every species"
+        )
+    return {unique_species[0]: Path(paw_xml_path)}
+
+
+def build_abinit_paw_site_layout(
+    atom_species: Sequence[str],
+    paw_xml_by_species: Mapping[str, str | Path],
+    paw_by_species: Mapping[str, Any],
+    *,
+    site_slices: Sequence[slice] | None = None,
+) -> tuple[PawSiteLayout, ...]:
+    """Build and validate every physical ABINIT PAW site block."""
+    resolved_paths = normalize_paw_xml_mapping(atom_species, paw_xml_by_species)
+    inferred_widths = []
+    expanded_channels = {}
+    for symbol, pseudo in paw_by_species.items():
+        channels = []
+        for radial, (_n, l) in enumerate(pseudo.channel_labels):
+            channels.extend(
+                PawProjectorChannel(
+                    l=int(l), m=m, radial=radial, label=f"n{_n}l{l}m{m}"
+                )
+                for m in range(-int(l), int(l) + 1)
+            )
+        expanded_channels[str(symbol)] = tuple(channels)
+    for site, symbol in enumerate(atom_species):
+        if symbol not in expanded_channels:
+            raise ValueError(
+                f"missing loaded PAW XML for source site {site} species {symbol!r}"
+            )
+        inferred_widths.append(len(expanded_channels[symbol]))
+    if site_slices is None:
+        starts = np.cumsum([0, *inferred_widths[:-1]])
+        site_slices = tuple(
+            slice(int(start), int(start + width))
+            for start, width in zip(starts, inferred_widths, strict=True)
+        )
+    if len(site_slices) != len(atom_species):
+        raise ValueError("site_slices must contain every source site")
+    layout = []
+    for site, (symbol, projector_slice, expected_width) in enumerate(
+        zip(atom_species, site_slices, inferred_widths, strict=True)
+    ):
+        observed_width = projector_slice.stop - projector_slice.start
+        if observed_width != expected_width:
+            raise ValueError(
+                f"source site {site} species {symbol!r}: expected {expected_width} "
+                f"channels from {resolved_paths[symbol]}, observed shape "
+                f"({observed_width}, {observed_width}); correct the PAW XML mapping or Dij block"
+            )
+        path = resolved_paths[str(symbol)]
+        setup_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        layout.append(
+            PawSiteLayout(
+                source_site=site,
+                species=str(symbol),
+                atomic_number=int(_atomic_numbers_from_symbols([str(symbol)])[0]),
+                projector_slice=projector_slice,
+                channels=expanded_channels[str(symbol)],
+                setup_hash=setup_hash,
+            )
+        )
+    return tuple(layout)
+
+
+def build_abinit_paw_snapshot(
+    cprj_per_kpt: list,
+    delta_ij: Mapping[int, np.ndarray],
+    eigenvalues: np.ndarray,
+    kweights: np.ndarray,
+    kpoints: np.ndarray,
+    efermi: float,
+    *,
+    site_layout: Sequence[PawSiteLayout],
+    cell: np.ndarray,
+    positions: np.ndarray,
+    atomic_numbers: np.ndarray,
+    delta_unit: str,
+    provenance: Mapping[str, object],
+    selected_source_sites: Sequence[int] | None = None,
+) -> PawProjectorSnapshot:
+    """Construct the shared immutable snapshot from ABINIT PAW source data."""
+    layout = tuple(site_layout)
+    nproj_total = layout[-1].projector_slice.stop
+    eigenvalues = np.asarray(eigenvalues, dtype=float)
+    if eigenvalues.ndim != 3:
+        raise ValueError("eigenvalues must have shape (nspin, nkpt, nband)")
+    nspin, nkpt, nband = eigenvalues.shape
+    if len(cprj_per_kpt) != nkpt:
+        raise ValueError("cprj_per_kpt must contain every k-point")
+    coefficients = np.empty((nspin, nkpt, nband, nproj_total), dtype=complex)
+    for ik, by_spin in enumerate(cprj_per_kpt):
+        if len(by_spin) != nspin:
+            raise ValueError(f"k-point {ik} has incompatible spin count")
+        for spin, values in enumerate(by_spin):
+            values = np.asarray(values, dtype=complex)
+            if values.shape != (nproj_total, nband):
+                raise ValueError(
+                    f"k-point {ik} spin {spin}: coefficient shape {values.shape} "
+                    f"!= ({nproj_total}, {nband})"
+                )
+            coefficients[spin, ik] = values.T
+    nmax = max(
+        site.projector_slice.stop - site.projector_slice.start for site in layout
+    )
+    blocks = np.zeros((len(layout), nmax, nmax), dtype=complex)
+    for site, physical_site in enumerate(layout):
+        width = physical_site.projector_slice.stop - physical_site.projector_slice.start
+        try:
+            dij = np.asarray(delta_ij[site], dtype=complex)
+        except KeyError as exc:
+            raise ValueError(
+                f"missing Dij for source site {site} species {physical_site.species!r}"
+            ) from exc
+        if dij.shape != (width, width):
+            raise ValueError(
+                f"source site {site} species {physical_site.species!r}: expected "
+                f"{width} channels, observed shape {dij.shape}; correct the PAW XML "
+                "mapping or Dij block"
+            )
+        blocks[site, :width, :width] = dij
+    if not delta_unit.strip().lower().startswith(("ha", "hartree")):
+        raise ValueError("ABINIT PAW snapshot requires Hartree Dij input")
+    metadata = dict(provenance)
+    metadata.setdefault("source_code", "abinit")
+    metadata.setdefault("source_version", "unknown")
+    metadata.setdefault("functional", "unknown")
+    metadata["setup_hashes"] = [site.setup_hash for site in layout]
+    metadata.setdefault("u_eV", 0.0)
+    metadata.setdefault("j_eV", 0.0)
+    metadata.setdefault("correlated_shells", [])
+    return PawProjectorSnapshot(
+        kpoints=kpoints,
+        weights=kweights,
+        eigenvalues=eigenvalues,
+        occupations=None,
+        coefficients=coefficients,
+        efermi=efermi,
+        cell=cell,
+        positions=positions,
+        atomic_numbers=atomic_numbers,
+        site_layout=layout,
+        operators=PawOperatorComponents(
+            components=(
+                PawOperatorComponent(
+                    name="total",
+                    values=blocks,
+                    units="Hartree",
+                    basis_id="native_paw_projector_hamiltonian",
+                    definition="ABINIT pawprt total Dij spin difference",
+                    source="ABINIT pawprt Dij",
+                ),
+            ),
+            policy="authoritative_total",
+            selected_names=("total",),
+        ),
+        kpoint_mode="full_bz",
+        selected_source_sites=tuple(
+            range(len(layout))
+            if selected_source_sites is None
+            else selected_source_sites
+        ),
+        provenance=metadata,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Story 004 — Assembly
 # ---------------------------------------------------------------------------
+
+
+def _resolve_site_slices(
+    natom: int,
+    nproj_per_atom: int | None,
+    site_slices: Sequence[slice] | None,
+) -> tuple[tuple[slice, ...], int]:
+    """Validate contiguous global projector slices for every atomic site."""
+    if natom < 1:
+        raise ValueError("natom must be positive")
+    if site_slices is None:
+        if nproj_per_atom is None or nproj_per_atom < 1:
+            raise ValueError(
+                "nproj_per_atom must be positive when site_slices is not provided"
+            )
+        return (
+            tuple(
+                slice(atom * nproj_per_atom, (atom + 1) * nproj_per_atom)
+                for atom in range(natom)
+            ),
+            natom * nproj_per_atom,
+        )
+
+    if len(site_slices) != natom:
+        raise ValueError(f"site_slices has {len(site_slices)} sites, expected {natom}")
+    resolved: list[slice] = []
+    cursor = 0
+    for atom, site_slice in enumerate(site_slices):
+        if not isinstance(site_slice, slice):
+            raise TypeError(f"site_slices[{atom}] must be a slice")
+        if (
+            site_slice.start is None
+            or site_slice.stop is None
+            or site_slice.step not in (None, 1)
+            or site_slice.start != cursor
+            or site_slice.stop <= cursor
+        ):
+            raise ValueError(
+                "site_slices must be non-empty, contiguous, forward slices "
+                "covering the flattened projector axis"
+            )
+        resolved.append(slice(site_slice.start, site_slice.stop))
+        cursor = site_slice.stop
+    if nproj_per_atom is not None and any(
+        projector_slice.stop - projector_slice.start != nproj_per_atom
+        for projector_slice in resolved
+    ):
+        raise ValueError("nproj_per_atom conflicts with unequal site_slices")
+    return tuple(resolved), cursor
 
 
 def assemble_paw_exchange_data(
@@ -63,8 +312,9 @@ def assemble_paw_exchange_data(
     kpoints: np.ndarray,
     efermi: float,
     natom: int,
-    nproj_per_atom: int,
+    nproj_per_atom: int | None = None,
     *,
+    site_slices: Sequence[slice] | None = None,
     delta_unit: str = "eV",
     occupations: np.ndarray | None = None,
     cell: np.ndarray | None = None,
@@ -75,57 +325,32 @@ def assemble_paw_exchange_data(
     projector_radial: np.ndarray | None = None,
     efermi_spin: np.ndarray | None = None,
     metadata: dict | None = None,
+    site_layout: Sequence[PawSiteLayout] | None = None,
 ) -> ProjectorGreenData:
-    """Assemble ABINIT PAW projection results into exchange-ready spectral data.
+    """Assemble ABINIT PAW projections into exchange-ready spectral data.
 
-    Parameters
-    ----------
-    cprj_per_kpt:
-        ``[nkpt]`` list of ``[nsppol]`` lists of ``complex128`` arrays with shape
-        ``(natom, nproj_per_atom, nband)`` — the dual-projector coefficients
-        ``<~p|psi_n>`` produced by abinao (Story 003).  A flat
-        ``(nproj_total, nband)`` layout per spin is also accepted.
-    delta_ij:
-        ``{atom_index: Delta_matrix}`` from
-        :func:`abinao.pawprt_parser.compute_delta_ij` (``D^up - D^down`` per atom).
-    eigenvalues:
-        ``(nsppol, nkpt, nband)`` band energies in eV.
-    kweights:
-        ``(nkpt,)`` k-point weights.
-    kpoints:
-        ``(nkpt, 3)`` reduced k-point coordinates.
-    efermi:
-        Fermi energy in eV.
-    natom:
-        Number of atoms.
-    nproj_per_atom:
-        Number of PAW projector channels per atom.
-    delta_unit:
-        Energy unit of ``delta_ij``: ``"eV"`` (default) or ``"hartree"``.
-        The stored ``delta_xc`` is always converted to eV.
-    occupations, cell, positions, atomic_numbers, projector_l/m/radial, efermi_spin:
-        Optional metadata forwarded to :class:`ProjectorGreenData`.
-    metadata:
-        Extra metadata dict merged into the data record.
-
-    Returns
-    -------
-    ProjectorGreenData
-        A validated spectral-data container with ``overlap_k=None`` (dual
-        no-dressing), a block-diagonal ``delta_xc`` operator component, and
-        site-projector indexing.  Wrap it in
-        :class:`~TB2J.projector_green.ProjectorGreen` and feed to
-        :func:`~TB2J.projector_green.projector_exchange_trace`.
+    ``cprj_per_kpt[ik][ispin]`` is normally a flat
+    ``(nproj_total, nband)`` array and ``site_slices`` identifies each site's
+    contiguous portion of that global axis.  This permits distinct PAW datasets
+    with unequal channel counts without fake projector padding.  The original
+    uniform ``(natom, nproj_per_atom, nband)`` representation remains accepted
+    when ``site_slices`` is omitted.
     """
     eigenvalues = np.asarray(eigenvalues, dtype=float)
     if eigenvalues.ndim != 3:
         raise ValueError("eigenvalues must have shape (nsppol, nkpt, nband)")
     nsppol, nkpt, nband = eigenvalues.shape
+    if site_layout is not None:
+        if len(site_layout) != natom:
+            raise ValueError("site_layout must contain every source site")
+        layout_slices = tuple(site.projector_slice for site in site_layout)
+        if site_slices is not None and tuple(site_slices) != layout_slices:
+            raise ValueError("site_slices must match the physical PAW site_layout")
+        site_slices = layout_slices
+    site_slices, nproj_total = _resolve_site_slices(natom, nproj_per_atom, site_slices)
 
     kpoints = np.asarray(kpoints, dtype=float)
     kweights = np.asarray(kweights, dtype=float)
-    nproj_total = natom * nproj_per_atom
-
     if kpoints.shape != (nkpt, 3):
         raise ValueError(f"kpoints shape {kpoints.shape} inconsistent with nkpt={nkpt}")
     if kweights.shape != (nkpt,):
@@ -137,67 +362,82 @@ def assemble_paw_exchange_data(
             f"cprj_per_kpt has {len(cprj_per_kpt)} k-points, expected {nkpt}"
         )
 
-    # -- Build coefficients [nsppol, nkpt, nband, nproj_total] ----------------
     coefficients = np.empty((nsppol, nkpt, nband, nproj_total), dtype=complex)
-    for ik in range(nkpt):
-        kpt_cprj = cprj_per_kpt[ik]
+    for ik, kpt_cprj in enumerate(cprj_per_kpt):
         if len(kpt_cprj) != nsppol:
             raise ValueError(
                 f"k-point {ik} has {len(kpt_cprj)} spins, expected {nsppol}"
             )
-        for ispin in range(nsppol):
-            cprj = np.asarray(kpt_cprj[ispin], dtype=complex)
+        for ispin, cprj_spin in enumerate(kpt_cprj):
+            cprj = np.asarray(cprj_spin, dtype=complex)
             if cprj.ndim == 3:
-                if cprj.shape != (natom, nproj_per_atom, nband):
+                expected_shape = (natom, nproj_per_atom, nband)
+                if site_slices is not None and nproj_per_atom is None:
+                    raise ValueError(
+                        "ragged site_slices require flat cprj arrays; "
+                        "3-D cprj is only valid for uniform projector counts"
+                    )
+                if cprj.shape != expected_shape:
                     raise ValueError(
                         f"k-point {ik} spin {ispin}: cprj shape {cprj.shape} "
-                        f"!= ({natom}, {nproj_per_atom}, {nband})"
+                        f"!= {expected_shape}"
                     )
                 cprj = cprj.reshape(nproj_total, nband)
-            elif cprj.ndim == 2:
-                if cprj.shape != (nproj_total, nband):
-                    raise ValueError(
-                        f"k-point {ik} spin {ispin}: cprj shape {cprj.shape} "
-                        f"!= ({nproj_total}, {nband})"
-                    )
-            else:
+            elif cprj.ndim != 2 or cprj.shape != (nproj_total, nband):
                 raise ValueError(
-                    f"k-point {ik} spin {ispin}: cprj must be 2-D or 3-D, "
-                    f"got {cprj.ndim}-D"
+                    f"k-point {ik} spin {ispin}: cprj shape {cprj.shape} "
+                    f"!= ({nproj_total}, {nband})"
                 )
-            coefficients[ispin, ik] = cprj.T  # [nband, nproj_total]
+            coefficients[ispin, ik] = cprj.T
 
-    # -- Site / projector indexing (contiguous, zero-based) -------------------
-    projector_site = np.repeat(np.arange(natom, dtype=int), nproj_per_atom)
-    projector_atom = projector_site.copy()
-    site_nproj = np.full(natom, nproj_per_atom, dtype=int)
-    site_projector_indices = np.arange(nproj_total, dtype=int).reshape(
-        natom, nproj_per_atom
+    site_nproj = np.array(
+        [
+            projector_slice.stop - projector_slice.start
+            for projector_slice in site_slices
+        ],
+        dtype=int,
     )
+    nproj_site_max = int(site_nproj.max())
+    site_projector_indices = -np.ones((natom, nproj_site_max), dtype=int)
+    projector_site = np.empty(nproj_total, dtype=int)
+    for atom, projector_slice in enumerate(site_slices):
+        indices = np.arange(projector_slice.start, projector_slice.stop)
+        site_projector_indices[atom, : len(indices)] = indices
+        projector_site[indices] = atom
+    projector_atom = projector_site.copy()
 
-    # -- Block-diagonal delta_xc operator component ---------------------------
-    delta_xc = np.zeros((natom, nproj_per_atom, nproj_per_atom), dtype=complex)
+    # The new flattened path keeps the full delta on the global projector axis,
+    # so each unequal local block lands exactly in its own contiguous slice.
+    # Keep the old padded-site component for the legacy uniform representation.
+    global_delta = np.zeros((nproj_total, nproj_total), dtype=complex)
+    local_delta = np.zeros((natom, nproj_site_max, nproj_site_max), dtype=complex)
     for atom_key, delta in delta_ij.items():
         atom = int(atom_key)
         if atom < 0 or atom >= natom:
             raise ValueError(f"delta_ij atom index {atom} out of range [0, {natom})")
         delta = np.asarray(delta, dtype=complex)
-        if delta.shape != (nproj_per_atom, nproj_per_atom):
+        projector_slice = site_slices[atom]
+        nsite_proj = site_nproj[atom]
+        if delta.shape != (nsite_proj, nsite_proj):
+            context = ""
+            if site_layout is not None:
+                physical_site = site_layout[atom]
+                context = (
+                    f" for source site {atom} species {physical_site.species!r}; "
+                    f"expected {nsite_proj} channels, observed shape {delta.shape}; "
+                    "correct the PAW XML mapping or Dij block"
+                )
             raise ValueError(
                 f"delta_ij[{atom}] shape {delta.shape} != "
-                f"({nproj_per_atom}, {nproj_per_atom})"
+                f"({nsite_proj}, {nsite_proj}){context}"
             )
-        delta_xc[atom] = delta
+        global_delta[projector_slice, projector_slice] = delta
+        local_delta[atom, :nsite_proj, :nsite_proj] = delta
 
-    # Unit normalisation → eV (TB2J convention; eigenvalues are in eV).
-    unit_factor = 1.0
     if delta_unit.strip().lower().startswith("ha"):
-        unit_factor = HARTREE_TO_EV
-    if unit_factor != 1.0:
-        delta_xc = delta_xc * unit_factor
-
-    # Store as both delta_xc (preferred by get_local_operator) and delta_total
-    # (satisfies validate(exchange_ready=True)).  Same data, two names.
+        global_delta *= HARTREE_TO_EV
+        local_delta *= HARTREE_TO_EV
+    delta_xc = global_delta if nproj_per_atom is None else local_delta
     operator_components = {"delta_xc": delta_xc, "delta_total": delta_xc}
     operator_component_metadata = {
         "delta_xc": {
@@ -233,6 +473,10 @@ def assemble_paw_exchange_data(
             "coefficient_convention": "dual_projector_no_inverse (P2)",
             "delta_source": "pawprt Dij spin difference (P3)",
             "pipeline": "abinao projects (Story 003), TB2J consumes (Story 004)",
+            "site_projector_slices": [
+                (projector_slice.start, projector_slice.stop)
+                for projector_slice in site_slices
+            ],
         }
     )
 
@@ -277,7 +521,6 @@ _PROJECTED_DATA_KEYS = (
     "kpoints",
     "efermi",
     "natom",
-    "nproj_per_atom",
 )
 
 
@@ -290,7 +533,8 @@ def save_projected_data(
     kpoints: np.ndarray,
     efermi: float,
     natom: int,
-    nproj_per_atom: int,
+    nproj_per_atom: int | None = None,
+    site_slices: Sequence[slice] | None = None,
     cell: np.ndarray | None = None,
     positions: np.ndarray | None = None,
     atomic_numbers: np.ndarray | None = None,
@@ -303,6 +547,11 @@ def save_projected_data(
     structural metadata, so :func:`gen_exchange_abinit_paw` can skip the
     in-process WFK projection step.
     """
+    if nproj_per_atom is None and site_slices is None:
+        raise ValueError(
+            "provide nproj_per_atom or site_slices for the projector layout"
+        )
+
     payload: dict[str, Any] = {
         "cprj_per_kpt": cprj_per_kpt,
         "eigenvalues": np.asarray(eigenvalues),
@@ -310,8 +559,14 @@ def save_projected_data(
         "kpoints": np.asarray(kpoints),
         "efermi": float(efermi),
         "natom": int(natom),
-        "nproj_per_atom": int(nproj_per_atom),
     }
+    if nproj_per_atom is not None:
+        payload["nproj_per_atom"] = int(nproj_per_atom)
+    if site_slices is not None:
+        payload["site_slices"] = tuple(
+            slice(projector_slice.start, projector_slice.stop)
+            for projector_slice in site_slices
+        )
     if cell is not None:
         payload["cell"] = np.asarray(cell)
     if positions is not None:
@@ -336,6 +591,10 @@ def load_projected_data(path: str | Path) -> dict:
     missing = [k for k in _PROJECTED_DATA_KEYS if k not in payload]
     if missing:
         raise ValueError(f"projected-data file {path} is missing keys: {missing}")
+    if payload.get("nproj_per_atom") is None and payload.get("site_slices") is None:
+        raise ValueError(
+            f"projected-data file {path} is missing projector layout metadata"
+        )
     return payload
 
 
@@ -372,7 +631,7 @@ def _read_delta_from_log(log_path: str | Path) -> tuple[dict[int, np.ndarray], s
 
 def _project_wfk_in_process(
     wfk_path: str | Path,
-    paw_xml_path: str | Path,
+    paw_xml_path: str | Path | Mapping[str, str | Path],
 ) -> dict:
     """Project a WFK file with PAW projectors using abinao (Story 003).
 
@@ -385,11 +644,12 @@ def _project_wfk_in_process(
             "abinao is required for in-process WFK projection. "
             "Either install abinao or pass projected_data_path."
         ) from exc
-
     wfk = read_wfk(wfk_path)
 
+    xml_by_species = normalize_paw_xml_mapping(wfk.atom_species, paw_xml_path)
+
     # Load the PAW pseudo from XML via pypao.
-    paw_pseudo = _load_paw_pseudo(paw_xml_path)
+    paw_pseudo = _load_paw_pseudo(xml_by_species)
 
     try:
         from abinao.paw_projection import project_wfk_paw
@@ -398,8 +658,14 @@ def _project_wfk_in_process(
             "abinao.paw_projection.project_wfk_paw is not available "
             "(Story 003). Use projected_data_path instead."
         ) from exc
-
     result = project_wfk_paw(wfk, paw_pseudo)
+
+    site_layout = build_abinit_paw_site_layout(
+        wfk.atom_species,
+        xml_by_species,
+        paw_pseudo,
+        site_slices=getattr(result, "site_slices", None),
+    )
 
     # Reshape eigenvalues[ik][ispin] → [nsppol, nkpt, nband].
     nsppol = len(result.eigenvalues[0])
@@ -411,41 +677,56 @@ def _project_wfk_in_process(
         ]
     )  # [nsppol, nkpt, nband]
 
-    kpoints = np.array([kp.kred for kp in wfk.kpoints], dtype=float)
+    kpoints = np.asarray(result.kpoints, dtype=float)
     kweights = np.asarray(result.kweights, dtype=float)
 
-    # Structural metadata from the WFK.
-    cell = np.asarray(wfk.rprimd, dtype=float)
+    # ABINIT stores primitive vectors in Bohr; TB2J's public structural
+    # metadata and real-space cutoffs use Å.
+    cell = np.asarray(wfk.rprimd, dtype=float) * BOHR_TO_ANGSTROM
     positions = np.asarray(wfk.xred, dtype=float) @ cell
     atomic_numbers = _atomic_numbers_from_symbols(wfk.atom_species)
 
-    return {
+    payload = {
         "cprj_per_kpt": result.cprj,
         "eigenvalues": eigenvalues,
         "kweights": kweights,
         "kpoints": kpoints,
         "efermi": float(result.efermi) if result.efermi is not None else 0.0,
         "natom": int(result.natom),
-        "nproj_per_atom": int(result.nproj_per_atom),
         "cell": cell,
         "positions": positions,
         "atomic_numbers": atomic_numbers,
     }
+    payload["site_layout"] = site_layout
+    payload["atom_species"] = tuple(wfk.atom_species)
+    site_slices = getattr(result, "site_slices", None)
+    if site_slices is not None:
+        payload["site_slices"] = tuple(site_slices)
+    nproj_per_atom = getattr(result, "nproj_per_atom", None)
+    if nproj_per_atom is not None:
+        payload["nproj_per_atom"] = int(nproj_per_atom)
+    if "site_slices" not in payload and "nproj_per_atom" not in payload:
+        raise ValueError(
+            "abinao PAW projection must provide site_slices or nproj_per_atom"
+        )
+    return payload
 
 
-def _load_paw_pseudo(paw_xml_path: str | Path):
-    """Load a PAW-XML pseudopotential via pypao.
-
-    Uses :meth:`pypao.libpsp.PawXmlPseudo.from_file`, which returns a
-    :class:`~pypao.libpsp.PawPseudo` subclass accepted by abinao's
-    ``project_wfk_paw``.
-    """
+def _load_paw_pseudo(
+    paw_xml_path: str | Path | Mapping[str, str | Path],
+):
+    """Load one PAW-XML pseudo or a species-to-PAW-XML mapping via pypao."""
     try:
         from pypao.libpsp import PawXmlPseudo
     except ImportError as exc:
         raise ImportError(
             "pypao is required to read PAW-XML pseudopotentials."
         ) from exc
+    if isinstance(paw_xml_path, Mapping):
+        return {
+            str(species): PawXmlPseudo.from_file(str(path))
+            for species, path in paw_xml_path.items()
+        }
     return PawXmlPseudo.from_file(str(paw_xml_path))
 
 
@@ -458,12 +739,13 @@ def _atomic_numbers_from_symbols(symbols: list[str]) -> np.ndarray:
 
 def gen_exchange_abinit_paw(
     wfk_path: str | None = None,
-    paw_xml_path: str | None = None,
+    paw_xml_path: str | Mapping[str, str | Path] | None = None,
     log_path: str | None = None,
     projected_data_path: str | None = None,
     *,
     natom: int | None = None,
     nproj_per_atom: int | None = None,
+    site_slices: Sequence[slice] | None = None,
     delta_ij: dict[int, np.ndarray] | None = None,
     delta_unit: str | None = None,
     magnetic_elements: list[str] | None = None,
@@ -479,6 +761,8 @@ def gen_exchange_abinit_paw(
     efermi: float | None = None,
     description: str | None = None,
     population_mode: str = "none",
+    snapshot_cache: str | None = None,
+    write_snapshot_cache: str | None = None,
     **kwargs: Any,
 ) -> tuple[Path, dict]:
     """Run PAW exchange calculation from ABINIT outputs.
@@ -511,59 +795,113 @@ def gen_exchange_abinit_paw(
     (Path, dict)
         Path to ``exchange.out`` and the exchange ``J`` dictionary.
     """
-    # -- Step 1-4: obtain projection data ------------------------------------
-    if projected_data_path is not None:
-        proj = load_projected_data(projected_data_path)
-    elif wfk_path is not None:
-        if paw_xml_path is None:
-            raise ValueError("paw_xml_path is required when wfk_path is given")
-        proj = _project_wfk_in_process(wfk_path, paw_xml_path)
-    else:
-        raise ValueError(
-            "Provide either projected_data_path or wfk_path (+paw_xml_path)."
+    # -- Cache read: load a previously validated snapshot and skip projection -
+    snapshot = None
+    if snapshot_cache is not None:
+        import json
+
+        from TB2J.paw_snapshot_cache import read_paw_snapshot_netcdf
+
+        identity_path = Path(snapshot_cache).with_suffix(".identity.json")
+        if not identity_path.exists():
+            raise ValueError(
+                f"expected identity sidecar {identity_path} beside snapshot cache"
+            )
+        expected_identity = json.loads(identity_path.read_text())
+        snapshot = read_paw_snapshot_netcdf(
+            snapshot_cache, expected_identity=expected_identity
         )
 
-    # Structural metadata: CLI args override projected-data payload.
-    proj_natom = int(natom if natom is not None else proj["natom"])
-    proj_nproj = int(
-        nproj_per_atom if nproj_per_atom is not None else proj["nproj_per_atom"]
-    )
-    proj_cell = cell if cell is not None else proj.get("cell")
-    proj_positions = positions if positions is not None else proj.get("positions")
-    proj_atomic_numbers = (
-        atomic_numbers if atomic_numbers is not None else proj.get("atomic_numbers")
-    )
-    proj_efermi = float(efermi) if efermi is not None else float(proj["efermi"])
-
-    # -- Step 3: obtain delta_ij ---------------------------------------------
-    if delta_ij is not None:
-        resolved_delta = delta_ij
-        resolved_unit = delta_unit or "eV"
-    elif log_path is not None:
-        resolved_delta, detected_unit = _read_delta_from_log(log_path)
-        resolved_unit = delta_unit or detected_unit
+    if snapshot is not None:
+        data = build_projector_green_data(snapshot)
     else:
-        raise ValueError(
-            "Either log_path or delta_ij must be provided to obtain Delta_ij."
+        # -- Step 1-4: obtain projection data --------------------------------
+        if projected_data_path is not None:
+            proj = load_projected_data(projected_data_path)
+        elif wfk_path is not None:
+            if paw_xml_path is None:
+                raise ValueError("paw_xml_path is required when wfk_path is given")
+            proj = _project_wfk_in_process(wfk_path, paw_xml_path)
+        else:
+            raise ValueError(
+                "Provide either snapshot_cache, projected_data_path, "
+                "or wfk_path (+paw_xml_path)."
+            )
+
+        # Structural metadata
+        proj_efermi = float(efermi) if efermi is not None else float(proj["efermi"])
+        proj_cell = cell if cell is not None else proj.get("cell")
+        proj_positions = positions if positions is not None else proj.get("positions")
+        proj_atomic_numbers = (
+            atomic_numbers if atomic_numbers is not None else proj.get("atomic_numbers")
         )
 
-    # -- Step 5: assemble ----------------------------------------------------
-    data = assemble_paw_exchange_data(
-        cprj_per_kpt=proj["cprj_per_kpt"],
-        delta_ij=resolved_delta,
-        eigenvalues=proj["eigenvalues"],
-        kweights=proj["kweights"],
-        kpoints=proj["kpoints"],
-        efermi=proj_efermi,
-        natom=proj_natom,
-        nproj_per_atom=proj_nproj,
-        delta_unit=resolved_unit,
-        occupations=proj.get("occupations"),
-        cell=proj_cell,
-        positions=proj_positions,
-        atomic_numbers=proj_atomic_numbers,
-        metadata=proj.get("extra"),
-    )
+        # -- Step 3: obtain delta_ij ----------------------------------------
+        if delta_ij is not None:
+            resolved_delta = delta_ij
+            resolved_unit = delta_unit or "eV"
+        elif log_path is not None:
+            resolved_delta, detected_unit = _read_delta_from_log(log_path)
+            resolved_unit = delta_unit or detected_unit
+        else:
+            raise ValueError(
+                "Either log_path or delta_ij must be provided to obtain Delta_ij."
+            )
+
+        # -- Step 5: validate/build the source-neutral PAW seam -------------
+        if proj.get(
+            "site_layout"
+        ) is not None and resolved_unit.strip().lower().startswith(("ha", "hartree")):
+            snapshot = build_abinit_paw_snapshot(
+                cprj_per_kpt=proj["cprj_per_kpt"],
+                delta_ij=resolved_delta,
+                eigenvalues=proj["eigenvalues"],
+                kweights=proj["kweights"],
+                kpoints=proj["kpoints"],
+                efermi=proj_efermi,
+                site_layout=proj["site_layout"],
+                cell=proj_cell,
+                positions=proj_positions,
+                atomic_numbers=proj_atomic_numbers,
+                delta_unit=resolved_unit,
+                provenance=proj.get("extra", {}),
+            )
+            data = build_projector_green_data(snapshot)
+        else:
+            data = assemble_paw_exchange_data(
+                cprj_per_kpt=proj["cprj_per_kpt"],
+                delta_ij=resolved_delta,
+                eigenvalues=proj["eigenvalues"],
+                kweights=proj["kweights"],
+                kpoints=proj["kpoints"],
+                efermi=proj_efermi,
+                natom=int(natom if natom is not None else proj["natom"]),
+                nproj_per_atom=(
+                    nproj_per_atom
+                    if nproj_per_atom is not None
+                    else proj.get("nproj_per_atom")
+                ),
+                delta_unit=resolved_unit,
+                site_slices=(
+                    site_slices if site_slices is not None else proj.get("site_slices")
+                ),
+                occupations=proj.get("occupations"),
+                cell=proj_cell,
+                positions=proj_positions,
+                atomic_numbers=proj_atomic_numbers,
+                metadata=proj.get("extra"),
+                site_layout=proj.get("site_layout"),
+            )
+
+    # -- Optional: write validated snapshot cache ---------------------------
+    if write_snapshot_cache is not None and snapshot is not None:
+        import json
+
+        from TB2J.paw_snapshot_cache import write_paw_snapshot_netcdf
+
+        identity = write_paw_snapshot_netcdf(write_snapshot_cache, snapshot)
+        identity_path = Path(write_snapshot_cache).with_suffix(".identity.json")
+        identity_path.write_text(json.dumps(identity, sort_keys=True, indent=2))
 
     # -- Step 6-7: run exchange trace and write output -----------------------
     from TB2J.interfaces.gpaw_projector import (
@@ -627,8 +965,26 @@ def run_gen_exchange_abinit_paw() -> None:
         "--projected_data",
         help="pickle of pre-projected PAW data (from abinao or save_projected_data)",
     )
-    parser.add_argument("--paw_xml", help="PAW-XML pseudopotential file")
-    parser.add_argument("--log", required=True, help="ABINIT log/.abo with pawprt Dij")
+    src.add_argument(
+        "--snapshot_cache",
+        help="load a previously validated PAW snapshot NetCDF cache",
+    )
+    parser.add_argument(
+        "--paw_xml",
+        action="append",
+        default=None,
+        help="PAW XML path for a single-species WFK, or repeat SPECIES=PATH",
+    )
+    parser.add_argument(
+        "--write_snapshot_cache",
+        default=None,
+        help="write a validated PAW snapshot NetCDF cache before exchange",
+    )
+    parser.add_argument(
+        "--log",
+        default=None,
+        help="ABINIT log/.abo with pawprt Dij (not needed with --snapshot_cache)",
+    )
     parser.add_argument(
         "--output_path", default="TB2J_results_abinit_paw", help="output directory"
     )
@@ -664,9 +1020,25 @@ def run_gen_exchange_abinit_paw() -> None:
     if args.index_magnetic_atoms is not None:
         indices = [i - 1 for i in args.index_magnetic_atoms]
 
+    paw_xml_path = None
+    if args.paw_xml:
+        if len(args.paw_xml) == 1 and "=" not in args.paw_xml[0]:
+            paw_xml_path = args.paw_xml[0]
+        else:
+            paw_xml_path = {}
+            for entry in args.paw_xml:
+                if "=" not in entry:
+                    parser.error("--paw_xml mappings must use SPECIES=PATH")
+                species, path = entry.split("=", 1)
+                if not species or not path or species in paw_xml_path:
+                    parser.error(
+                        "--paw_xml mappings require unique SPECIES=PATH entries"
+                    )
+                paw_xml_path[species] = path
+
     exchange_out, _ = gen_exchange_abinit_paw(
         wfk_path=args.wfk,
-        paw_xml_path=args.paw_xml,
+        paw_xml_path=paw_xml_path,
         log_path=args.log,
         projected_data_path=args.projected_data,
         magnetic_elements=args.magnetic_elements,
@@ -677,6 +1049,8 @@ def run_gen_exchange_abinit_paw() -> None:
         Rcut=args.Rcut,
         Rmax=args.Rmax,
         delta_unit=args.delta_unit,
+        snapshot_cache=args.snapshot_cache,
+        write_snapshot_cache=args.write_snapshot_cache,
     )
     print(f"Wrote {exchange_out}")
 

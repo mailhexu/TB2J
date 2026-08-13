@@ -149,6 +149,12 @@ def run_abinit_nc_pao2J():
         default=1.0e-10,
         help="relative cutoff or Tikhonov lambda for regularized overlap modes",
     )
+    parser.add_argument(
+        "--dftu_file",
+        type=str,
+        default=None,
+        help="path to ABINIT NC DFT+U *_DFTU.nc file for Hubbard operator component",
+    )
     args = parser.parse_args()
     indices = None
     if args.index_magnetic_atoms is not None:
@@ -176,6 +182,7 @@ def run_abinit_nc_pao2J():
         report_path=args.report,
         overlap_mode=args.overlap_mode,
         overlap_rcond=args.overlap_rcond,
+        dftu_file=args.dftu_file,
     )
     print(f"Wrote {exchange_out}")
 

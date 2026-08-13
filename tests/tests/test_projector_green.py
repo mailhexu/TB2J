@@ -1356,6 +1356,36 @@ def test_projector_charge_moments_from_green_matches_manual_contour_trace():
     np.testing.assert_allclose(density["spinat"][:, 2], [manual[0] - manual[1]])
 
 
+def test_projector_charge_moments_from_green_contracts_population_metric():
+    class FakeContour:
+        path = np.array([1.0 + 0.2j, 1.5 + 0.3j])
+        weights = np.array([0.7 + 0.1j, -0.2 + 0.4j])
+
+        def integrate_values(self, values):
+            return np.einsum("e,e...->...", self.weights, values)
+
+    data = make_bcc_fe_projector_data()
+    data.coefficients[0, 0, 0] = [1.0, 0.5j]
+    data.population_metric_matrix = np.array([[2.0, 0.3j], [-0.3j, 1.5]], dtype=complex)
+    green = ProjectorGreen(data)
+    contour = FakeContour()
+
+    density = projector_charge_moments_from_green(green, contour)
+
+    manual = np.zeros(2)
+    for ispin in range(2):
+        values = []
+        for energy in contour.path:
+            GR0 = green.get_GR([(0, 0, 0)], energy=energy, ispin=ispin)[0]
+            values.append(np.trace(GR0 @ data.population_metric_matrix))
+        manual[ispin] = -np.imag(contour.integrate_values(np.asarray(values))) / np.pi
+
+    assert density["method"] == "projector_green_contour_population_metric"
+    np.testing.assert_allclose(density["density_by_spin"][:, 0], manual)
+    np.testing.assert_allclose(density["charges"], [np.sum(manual)])
+    np.testing.assert_allclose(density["spinat"][:, 2], [manual[0] - manual[1]])
+
+
 def test_abinit_nc_pao_green_population_matches_occupations(tmp_path, monkeypatch):
     from TB2J.interfaces import abinit_savetb2j
 
@@ -1451,7 +1481,7 @@ def test_gpaw_bcc_fe_projector_green_workflow(tmp_path):
     assert data.metadata["source_code"] == "gpaw"
     assert data.hij_definition == "paw_dh_asp_projector_hamiltonian"
     assert data.hij_source == "GPAW dH_asp"
-    assert data.coefficient_source == "gpaw.P_ani"
+    assert data.coefficient_source == "gpaw"
     assert data.coefficient_projector == "dual_paw_projector"
     assert data.channel_interpretation == "paw_partial_wave_channel"
     assert data.operator_basis == "native_paw_projector_hamiltonian"

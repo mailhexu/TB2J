@@ -263,6 +263,81 @@ class TestAssemblePawExchangeData:
         data = _build_synthetic_data(cprj_per_kpt=cprj_flat)
         assert data.coefficients.shape == (NSPPOL, NKPT, NBAND, NPROJ_TOTAL)
 
+    def test_assembles_unequal_site_slices_without_padding(self, tmp_path: Path):
+        """Fe/O-like PAW blocks occupy their exact slices on the global axis."""
+        site_slices = (slice(0, 2), slice(2, 5))
+        delta_ij = {
+            0: np.array([[0.5, 0.1], [0.1, 0.3]]),
+            1: np.array([[0.4, 0.02, 0.03], [0.02, 0.2, 0.04], [0.03, 0.04, 0.1]]),
+        }
+        cprj = [
+            [
+                (
+                    np.arange(20, dtype=float).reshape(5, NBAND)
+                    + 100 * ik
+                    + 10 * ispin
+                    + 1j * (ik + ispin)
+                )
+                for ispin in range(NSPPOL)
+            ]
+            for ik in range(NKPT)
+        ]
+        data = assemble_paw_exchange_data(
+            cprj_per_kpt=cprj,
+            delta_ij=delta_ij,
+            eigenvalues=_synthetic_eigenvalues(),
+            kweights=_synthetic_kweights(),
+            kpoints=_synthetic_kpoints(),
+            efermi=0.0,
+            natom=NATOM,
+            site_slices=site_slices,
+            cell=_synthetic_cell(),
+            positions=_synthetic_positions(),
+            atomic_numbers=np.array([26, 8]),
+        )
+
+        assert data.coefficients.shape == (NSPPOL, NKPT, NBAND, 5)
+        np.testing.assert_allclose(data.coefficients[1, 1], cprj[1][1].T)
+        np.testing.assert_array_equal(data.site_nproj, [2, 3])
+        np.testing.assert_array_equal(
+            data.site_projector_indices, [[0, 1, -1], [2, 3, 4]]
+        )
+        global_delta = data.get_operator_component("delta_xc")
+        assert global_delta.shape == (5, 5)
+        np.testing.assert_allclose(global_delta[:2, :2], delta_ij[0])
+        np.testing.assert_allclose(global_delta[2:, 2:], delta_ij[1])
+        np.testing.assert_allclose(global_delta[:2, 2:], 0.0)
+        np.testing.assert_allclose(global_delta[2:, :2], 0.0)
+        np.testing.assert_allclose(
+            data.get_operator_component("delta_xc", site=1), delta_ij[1]
+        )
+        green = ProjectorGreen(data)
+        trace = projector_exchange_trace(
+            green, np.array([[0, 0, 0]]), energy=0.1j, sites=[0, 1]
+        )
+        assert np.isfinite(trace["trace"][((0, 0, 0), 0, 1)])
+        pytest.importorskip("netCDF4")
+        filename = tmp_path / "unequal-paw.nc"
+        data.save_netcdf(filename)
+        loaded = ProjectorGreenData.load_netcdf(filename)
+        np.testing.assert_allclose(
+            loaded.get_operator_component("delta_xc"), global_delta
+        )
+        np.testing.assert_allclose(
+            loaded.get_operator_component("delta_xc", site=1), delta_ij[1]
+        )
+
+    def test_rejects_noncontiguous_unequal_site_slices(self):
+        with pytest.raises(ValueError, match="contiguous"):
+            _build_synthetic_data(
+                cprj_per_kpt=[
+                    [np.zeros((5, NBAND), dtype=complex) for _ in range(NSPPOL)]
+                    for _ in range(NKPT)
+                ],
+                nproj_per_atom=None,
+                site_slices=(slice(0, 2), slice(3, 5)),
+            )
+
 
 # ---------------------------------------------------------------------------
 # Exchange trace tests (acceptance: trace can be evaluated)
@@ -377,12 +452,43 @@ class TestProjectedDataIO:
         assert loaded["nproj_per_atom"] == NPROJ_PER_ATOM
         np.testing.assert_array_equal(loaded["eigenvalues"], _synthetic_eigenvalues())
 
+    def test_roundtrip_unequal_site_slices(self, tmp_path: Path):
+        site_slices = (slice(0, 2), slice(2, 5))
+        path = save_projected_data(
+            tmp_path / "mixed-proj.pkl",
+            cprj_per_kpt=[
+                [np.zeros((5, NBAND), dtype=complex) for _ in range(NSPPOL)]
+                for _ in range(NKPT)
+            ],
+            eigenvalues=_synthetic_eigenvalues(),
+            kweights=_synthetic_kweights(),
+            kpoints=_synthetic_kpoints(),
+            efermi=0.0,
+            natom=NATOM,
+            site_slices=site_slices,
+        )
+        loaded = load_projected_data(path)
+        assert "nproj_per_atom" not in loaded
+        assert loaded["site_slices"] == site_slices
+
     def test_load_missing_keys_raises(self, tmp_path: Path):
         path = tmp_path / "bad.pkl"
         with open(path, "wb") as fh:
             pickle.dump({"foo": 1}, fh)
         with pytest.raises(ValueError, match="missing keys"):
             load_projected_data(path)
+
+    def test_layout_metadata_is_required(self, tmp_path: Path):
+        with pytest.raises(ValueError, match="projector layout"):
+            save_projected_data(
+                tmp_path / "no-layout.pkl",
+                cprj_per_kpt=_synthetic_cprj(),
+                eigenvalues=_synthetic_eigenvalues(),
+                kweights=_synthetic_kweights(),
+                kpoints=_synthetic_kpoints(),
+                efermi=0.0,
+                natom=NATOM,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +653,7 @@ class TestGenExchangeAbinitPaw:
         assert "exchange" in content.lower() or len(content) > 0
 
     def test_requires_data_source(self, tmp_path: Path):
-        with pytest.raises(ValueError, match="projected_data_path or wfk_path"):
+        with pytest.raises(ValueError, match="snapshot_cache, projected_data_path"):
             gen_exchange_abinit_paw(
                 log_path=str(tmp_path / "dummy.log"),
                 delta_ij=_synthetic_delta_ij(),

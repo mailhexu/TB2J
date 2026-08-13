@@ -1478,9 +1478,26 @@ def gen_exchange_abinit_nc_pao(
     report_path=None,
     overlap_mode=None,
     overlap_rcond=None,
+    dftu_file=None,
 ):
     """Generate projector exchange output from an ABINIT NC PAO savetb2j file."""
     data = load_abinit_nc_pao_savetb2j(filename)
+    if dftu_file is not None:
+        from TB2J.interfaces.abinit_nc_dftu import (
+            embed_dftu_potential,
+            read_abinit_dftu_nc,
+        )
+
+        dftu = read_abinit_dftu_nc(dftu_file)
+        delta_u = embed_dftu_potential(dftu, data.projector_l, data.site_nproj)
+        data.operator_components["delta_U"] = delta_u
+        data.operator_component_metadata["delta_U"] = {
+            "source": "abinit_nc_dftu_file",
+            "units": "eV",
+            "operator_basis": "abinit_nc_pao",
+            "spin_treatment": "spin_difference",
+            "completeness": "complete",
+        }
     if data.metadata.get("kpoint_set") != "full_bz":
         raise ValueError(
             "ABINIT NC PAO exchange requires full-BZ spectral coefficients; "

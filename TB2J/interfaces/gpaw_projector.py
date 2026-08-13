@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from importlib import import_module
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,13 @@ from ase.units import Ha, kB
 
 from TB2J.io_exchange import SpinIO
 from TB2J.mycfr import CFR
+from TB2J.paw_projector import (
+    PawOperatorComponent,
+    PawOperatorComponents,
+    PawProjectorChannel,
+    PawProjectorSnapshot,
+    PawSiteLayout,
+)
 from TB2J.projector_green import (
     ProjectorGreen,
     ProjectorGreenData,
@@ -167,10 +176,116 @@ def _make_ibz2bz_maps(calc):
     return IBZ2BZMaps.from_calculator(calc)
 
 
-def _map_projections_in_bz(wfs, bz_index, spin, ibz2bz):
-    from gpaw.wannier90 import get_projections_in_bz
+def _projection_mapper():
+    """Return GPAW's full-BZ PAW-projection mapper across supported layouts."""
+    for module_name in ("gpaw.wannier.wannier90", "gpaw.wannier90"):
+        try:
+            return import_module(module_name).get_projections_in_bz
+        except ModuleNotFoundError as error:
+            if error.name != module_name:
+                raise
+    raise ModuleNotFoundError(
+        "GPAW does not provide a full-BZ PAW-projection mapper; "
+        "install a GPAW build with its Wannier projection support"
+    )
 
-    return get_projections_in_bz(wfs, bz_index, spin, ibz2bz, bcomm=None)
+
+def _map_projections_in_bz(wfs, bz_index, spin, ibz2bz):
+    return _projection_mapper()(wfs, bz_index, spin, ibz2bz, bcomm=None)
+
+
+def _collect_hubbard_metadata(calc):
+    """Return normalized per-site GPAW PAW+U setup metadata."""
+    records = []
+    for atom, setup in enumerate(calc.wfs.setups):
+        hubbard_u = getattr(setup, "hubbard_u", None)
+        if hubbard_u is None:
+            continue
+        l_values = list(hubbard_u.l)
+        u_values = list(hubbard_u.U)
+        scales = list(hubbard_u.scale)
+        if not (len(l_values) == len(u_values) == len(scales)):
+            raise ValueError(
+                f"inconsistent Hubbard metadata for GPAW atom {atom}: "
+                "l, U, and scale must have equal lengths"
+            )
+        records.append(
+            {
+                "atom_index": atom,
+                "l": [int(l) for l in l_values],
+                "U_eV": [float(u) * Ha for u in u_values],
+                "scale": [bool(scale) for scale in scales],
+            }
+        )
+    return records
+
+
+def _unpack_gpaw_density(density):
+    from gpaw.utilities import unpack_density
+
+    return unpack_density(density)
+
+
+def _validate_gpaw_hubbard_prerequisites(calc, hubbard_metadata):
+    """Fail before XC collection when a PAW+U prerequisite is absent."""
+    if calc.wfs.nspins != 2:
+        raise ValueError(
+            "GPAW PAW+U exchange requires exactly two collinear spin channels"
+        )
+    density_blocks = getattr(getattr(calc, "density", None), "D_asp", None)
+    if density_blocks is None:
+        raise ValueError("GPAW PAW+U exchange requires converged PAW density D_asp")
+    for record in hubbard_metadata:
+        atom = int(record["atom_index"])
+        try:
+            density_blocks[atom]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError(
+                "GPAW PAW+U exchange requires converged PAW density "
+                f"for correlated atom {atom}"
+            ) from error
+        if not callable(getattr(calc.wfs.setups[atom].hubbard_u, "calculate", None)):
+            raise ValueError(
+                "GPAW PAW+U exchange requires a Hubbard evaluator "
+                f"for correlated atom {atom}"
+            )
+
+
+def _build_gpaw_total_delta(calc, delta_xc, site_nproj, hubbard_metadata):
+    """Build a covariant PAW XC-plus-Hubbard spin splitting once per site."""
+    _validate_gpaw_hubbard_prerequisites(calc, hubbard_metadata)
+    density_blocks = calc.density.D_asp
+
+    total = np.array(delta_xc, dtype=complex, copy=True)
+    for record in hubbard_metadata:
+        atom = int(record["atom_index"])
+        try:
+            packed_density = density_blocks[atom]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError(
+                "GPAW PAW+U exchange requires converged PAW density "
+                f"for correlated atom {atom}"
+            ) from error
+        hubbard_u = getattr(calc.wfs.setups[atom], "hubbard_u", None)
+        calculate = getattr(hubbard_u, "calculate", None)
+        if not callable(calculate):
+            raise ValueError(
+                "GPAW PAW+U exchange requires a Hubbard evaluator "
+                f"for correlated atom {atom}"
+            )
+        _, dHU_sii = calculate(
+            calc.wfs.setups[atom], _unpack_gpaw_density(packed_density)
+        )
+        nproj = int(site_nproj[atom])
+        dHU_sii = np.asarray(dHU_sii)
+        if dHU_sii.shape != (2, nproj, nproj):
+            raise ValueError(
+                "GPAW Hubbard evaluator returned incompatible PAW matrix "
+                f"shape {dHU_sii.shape} for correlated atom {atom}; "
+                f"expected {(2, nproj, nproj)}"
+            )
+        total[atom, :nproj, :nproj] += (dHU_sii[0] - dHU_sii[1]) * Ha
+    return total
 
 
 def _collect_hij(calc, site_nproj):
@@ -221,7 +336,7 @@ def _collect_delta_xc_paw_xc(calc, site_nproj):
     return delta_xc
 
 
-def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
+def _legacy_gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
     """Convert a converged GPAW PAW calculation to ProjectorGreenData."""
     if atoms is None:
         atoms = calc.get_atoms()
@@ -229,6 +344,11 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
         calc
     )
     nspin = calc.wfs.nspins
+    if nspin != 2:
+        raise ValueError(
+            "GPAW PAW exchange requires a supported collinear two-spin calculation; "
+            "noncollinear/SOC or spinless states are not accepted"
+        )
     fermi_levels = _collect_fermi_levels(calc)
     fermi_spin = None
     if fermi_levels.shape[0] == nspin and nspin > 1:
@@ -240,9 +360,22 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
         )
     efermi = float(np.mean(fermi_levels))
     projector_metadata = _setup_projector_metadata(calc.wfs.setups)
+    hubbard_metadata = _collect_hubbard_metadata(calc)
+    if hubbard_metadata:
+        _validate_gpaw_hubbard_prerequisites(calc, hubbard_metadata)
     hij = _collect_hij(calc, projector_metadata["site_nproj"])
     delta_xc = _collect_delta_xc_paw_xc(calc, projector_metadata["site_nproj"])
-    operator_components = {"delta_xc": delta_xc} if calc.wfs.nspins == 2 else None
+    delta_total = (
+        _build_gpaw_total_delta(
+            calc,
+            delta_xc,
+            projector_metadata["site_nproj"],
+            hubbard_metadata,
+        )
+        if hubbard_metadata
+        else None
+    )
+    operator_components = {"delta_xc": delta_xc} if nspin == 2 else None
     operator_component_metadata = (
         {
             "delta_xc": {
@@ -255,9 +388,28 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
                 "operator_basis": "paw_partial_wave_channel",
             }
         }
-        if calc.wfs.nspins == 2
+        if nspin == 2
         else None
     )
+    if delta_total is not None:
+        operator_components["delta_total"] = delta_total
+        operator_component_metadata["delta_total"] = {
+            "units": "eV",
+            "definition": (
+                "explicit PAW XC spin difference plus GPAW Hubbard "
+                "derivative spin difference"
+            ),
+            "source": (
+                "GPAW hamiltonian.xc.calculate_paw_correction + "
+                "setup.hubbard_u.calculate"
+            ),
+            "operator_basis": "paw_partial_wave_channel",
+            "hubbard_included": "true",
+            "hubbard_evaluation_count": str(len(hubbard_metadata)),
+            "hubbard_evaluation_count_per_site": "1",
+            "completeness": "complete",
+            "exchange_ready": "true",
+        }
     metadata = {} if metadata is None else dict(metadata)
     metadata.update(
         {
@@ -279,6 +431,8 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
             "magnetic_moments": calc.get_magnetic_moments().tolist(),
         }
     )
+    if hubbard_metadata:
+        metadata["gpaw_hubbard"] = hubbard_metadata
     return ProjectorGreenData(
         kpoints=kpoints,
         weights=weights,
@@ -314,6 +468,130 @@ def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
         operator_components=operator_components,
         operator_component_metadata=operator_component_metadata,
         metadata=metadata,
+    )
+
+
+def gpaw_calc_to_paw_snapshot(calc, atoms=None, metadata=None) -> PawProjectorSnapshot:
+    """Collect GPAW PAW exchange state in the shared immutable snapshot form."""
+    data = _legacy_gpaw_calc_to_projector_green_data(
+        calc, atoms=atoms, metadata=metadata
+    )
+    layout = []
+    for site, nproj in enumerate(data.site_nproj):
+        indices = data.site_projector_indices[site, :nproj]
+        channels = tuple(
+            PawProjectorChannel(
+                l=int(data.projector_l[index]),
+                m=int(data.projector_m[index]),
+                radial=int(data.projector_radial[index]),
+                label=(
+                    f"l{int(data.projector_l[index])}"
+                    f"m{int(data.projector_m[index])}"
+                    f"r{int(data.projector_radial[index])}"
+                ),
+            )
+            for index in indices
+        )
+        setup = calc.wfs.setups[site]
+        setup_identity = repr(
+            (getattr(setup, "symbol", ""), getattr(setup, "l_j", ()), channels)
+        ).encode()
+        layout.append(
+            PawSiteLayout(
+                source_site=site,
+                species=str(getattr(setup, "symbol", data.atomic_numbers[site])),
+                atomic_number=int(data.atomic_numbers[site]),
+                projector_slice=slice(int(indices[0]), int(indices[-1]) + 1),
+                channels=channels,
+                setup_hash=hashlib.sha256(setup_identity).hexdigest(),
+            )
+        )
+    xc = np.asarray(data.operator_components["delta_xc"], dtype=complex) / Ha
+    components = [
+        PawOperatorComponent(
+            name="xc",
+            values=xc,
+            units="Hartree",
+            basis_id="native_paw_projector_hamiltonian",
+            definition=data.operator_component_metadata["delta_xc"]["definition"],
+            source=data.operator_component_metadata["delta_xc"]["source"],
+        )
+    ]
+    selected_names = ("xc",)
+    if "delta_total" in data.operator_components:
+        total = np.asarray(data.operator_components["delta_total"], dtype=complex) / Ha
+        components.append(
+            PawOperatorComponent(
+                name="hubbard",
+                values=total - xc,
+                units="Hartree",
+                basis_id="native_paw_projector_hamiltonian",
+                definition="GPAW evaluated Hubbard derivative spin difference",
+                source="GPAW setup.hubbard_u.calculate",
+            )
+        )
+        selected_names = ("xc", "hubbard")
+    provenance = dict(data.metadata)
+    provenance.update(
+        {
+            "source_code": "gpaw",
+            "source_version": str(getattr(calc, "version", "unknown") or "unknown"),
+            "functional": str(
+                getattr(
+                    getattr(getattr(calc, "hamiltonian", None), "xc", None),
+                    "name",
+                    "unknown",
+                )
+            ),
+            "setup_hashes": [site.setup_hash for site in layout],
+            "u_eV": float(
+                sum(
+                    sum(record["U_eV"]) for record in provenance.get("gpaw_hubbard", [])
+                )
+            ),
+            "j_eV": 0.0,
+            "correlated_shells": [
+                f"{record['atom_index']}:{record['l']}"
+                for record in provenance.get("gpaw_hubbard", [])
+            ],
+        }
+    )
+    provenance["operator_component_metadata"] = data.operator_component_metadata
+    return PawProjectorSnapshot(
+        kpoints=data.kpoints,
+        weights=data.weights,
+        eigenvalues=data.eigenvalues,
+        occupations=data.occupations,
+        coefficients=data.coefficients,
+        efermi=data.efermi,
+        cell=data.cell,
+        overlap_metric=data.overlap_metric,
+        hij=data.hij,
+        hij_definition=data.hij_definition,
+        hij_units=data.hij_units,
+        hij_source=data.hij_source,
+        efermi_spin=data.efermi_spin,
+        population_metric=data.population_metric,
+        positions=data.positions,
+        atomic_numbers=data.atomic_numbers,
+        site_layout=tuple(layout),
+        operators=PawOperatorComponents(
+            components=tuple(components),
+            policy="compose",
+            selected_names=selected_names,
+        ),
+        kpoint_mode="full_bz",
+        selected_source_sites=tuple(range(len(layout))),
+        provenance=provenance,
+    )
+
+
+def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
+    """Build GPAW projector Green data through the shared PAW snapshot seam."""
+    from TB2J.paw_projector import build_projector_green_data
+
+    return build_projector_green_data(
+        gpaw_calc_to_paw_snapshot(calc, atoms=atoms, metadata=metadata)
     )
 
 
@@ -694,8 +972,8 @@ def gen_exchange_projector_netcdf(
     Rpts = _R_grid_for_cutoff(
         data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
     )
-    local_operators = None
-    description = None
+    if operator_component is None and data.has_operator_component("delta_total"):
+        operator_component = "delta_total"
     if operator_component is not None:
         component_name = operator_component
         local_operators = component_local_operators(
@@ -719,8 +997,8 @@ def gen_exchange_projector_netcdf(
         magnetic_elements=magnetic_elements,
         index_magnetic_atoms=index_magnetic_atoms,
         Rcut=Rcut,
-        local_operators=local_operators,
-        description=description,
+        local_operators=local_operators if operator_component is not None else None,
+        description=description if operator_component is not None else None,
     )
 
 
@@ -756,6 +1034,8 @@ def gen_exchange_gpaw(
     data = gpaw_calc_to_projector_green_data(calc, atoms=atoms, metadata=metadata)
     if save_netcdf is not None:
         data.save_netcdf(save_netcdf)
+    if operator_component is None and data.has_operator_component("delta_total"):
+        operator_component = "delta_total"
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]

@@ -144,15 +144,16 @@ occupations, native GPAW ``dH_asp`` as ``hij``, PAW onsite ``dO_ii`` as
 the exporter stores those values as ``efermi_spin`` and stores their mean in the
 scalar ``efermi`` fallback.
 
-The exporter also writes the explicit pseudo-partial-wave exchange field as the
-operator component ``delta_xc``: per atom, the spin splitting of the PAW XC
-energy derivative :math:`\partial E_{xc}/\partial D_{sp}` from
-``hamiltonian.xc.calculate_paw_correction``, i.e. the partial-wave matrix
-element of :math:`V_{xc}^{\uparrow}-V_{xc}^{\downarrow}` (XC contribution only).
-For collinear DFT this coincides with the ``dH_asp`` spin splitting (Hartree,
-ionic, and scalar terms are spin independent); it cleanly isolates the XC
-exchange field for +U/SOC/general cases.  ``ProjectorGreen.get_local_operator``
-prefers ``delta_xc`` over ``delta_total`` and the ``hij`` spin difference.
+The exporter writes the explicit pseudo-partial-wave XC field as
+``delta_xc``: per atom, the spin splitting of the PAW XC energy derivative
+:math:`\partial E_{xc}/\partial D_{sp}` from
+``hamiltonian.xc.calculate_paw_correction``.  For ordinary collinear DFT this
+coincides with the ``dH_asp`` spin splitting because Hartree, ionic, and scalar
+terms are spin independent.  For a supported collinear GPAW +U setup, GPAW has
+already added its converged Hubbard potential to ``dH_asp``; TB2J exports
+``delta_total = dH_asp(up) - dH_asp(down)`` and selects it by default.  The
+Hubbard term is never recomputed or added again.  ``delta_xc`` remains available
+as an XC-only diagnostic component.
 
 CLI Use
 -------
@@ -181,8 +182,8 @@ Python API
 ----------
 
 For in-memory use (no NetCDF round-trip), ``gen_exchange_gpaw`` takes a converged
-GPAW calculator directly and runs the full exchange with the ``delta_xc``
-operator by default:
+GPAW calculator directly.  It defaults to ``delta_xc`` for no-U calculations
+and to ``delta_total`` for supported collinear GPAW +U calculations.
 
 .. code-block:: python
 
@@ -202,11 +203,10 @@ operator by default:
 The building blocks are also public: ``gpaw_calc_to_projector_green_data`` and
 ``save_gpaw_projector_netcdf`` (export), ``compute_projector_exchange_jdict``
 and ``write_projector_exchange_out`` (exchange trace).  The operator is selected
-via ``operator_component`` (CLI ``--operator_component``): ``"delta_xc"`` (GPAW
-default, explicit :math:`V_{xc}^{\uparrow}-V_{xc}^{\downarrow}` field),
-``"delta_total"`` (ABINIT, :math:`\delta V_{xc}+\delta U`), or ``"hij"``-style
-fall-back.  ``ProjectorGreenData.operator_component_names`` lists the components
-stored in a file.
+via ``operator_component`` (CLI ``--operator_component``): ``"delta_xc"`` is
+the explicit XC-only field, while ``"delta_total"`` is the GPAW converged
+``dH_asp`` spin difference for supported +U exports (and ABINIT's complete PAW
+operator).  ``"hij"`` remains a spin-resolved fallback.
 
 ABINIT PAW Export
 -----------------
