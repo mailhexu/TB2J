@@ -1,0 +1,306 @@
+\begin{thebibliography}{10}
+
+\bibitem{Illas1998}
+Francesc Illas and Richard~L. Martin.
+\newblock {Magnetic coupling in ionic solids studied by density functional
+  theory}.
+\newblock {\em The Journal of Chemical Physics}, 108(6):2519, 1998.
+
+\bibitem{Xiang2013}
+Hongjun Xiang, Changhoon Lee, Hyun-Joo Koo, Xingao Gong, and Myung-Hwan
+  Whangbo.
+\newblock {Magnetic properties and energy-mapping analysis}.
+\newblock {\em Dalton Trans.}, 42(4):823--853, 2013.
+
+\bibitem{Torelli2019b}
+Daniele Torelli, Kristian~Sommer Thygesen, and Thomas Olsen.
+\newblock {High throughput computational screening for 2D ferromagnetic
+  materials: the critical role of anisotropy and local correlations}.
+\newblock {\em 2D Materials}, 6(4):045018, jul 2019.
+
+\bibitem{Torelli2020}
+Daniele Torelli and Thomas Olsen.
+\newblock {First principles Heisenberg models of 2D magnetic materials: the
+  importance of quantum corrections to the exchange coupling}.
+\newblock {\em Journal of Physics: Condensed Matter}, 32(33):335802, aug 2020.
+
+\bibitem{Karabach1997}
+Michael Karabach, Gerhard M{\"{u}}ller, Harvey Gould, and Jan Tobochnik.
+\newblock {Introduction to the Bethe Ansatz I}.
+\newblock {\em Computers in Physics}, 11(1):36, 1997.
+
+\bibitem{Karbach1998}
+Michael Karbach, Kun Hu, and Gerhard M{\"{u}}ller.
+\newblock {Introduction to the Bethe Ansatz II}.
+\newblock {\em Computers in Physics}, 12(6):565, 1998.
+
+\bibitem{PhysRevB.48.3844}
+Steven~R. White and David~A. Huse.
+\newblock Numerical renormalization-group study of low-lying eigenstates of the
+  antiferromagnetic s=1 heisenberg chain.
+\newblock {\em Phys. Rev. B}, 48:3844--3852, Aug 1993.
+
+\bibitem{Akturk2017}
+S.~Sarikurt, Y.~Kadioglu, F.~Ersan, E.~Vatansever, O.~{\"{U}}zengi
+  Akt{\"{u}}rk, Y.~Y{\"{u}}ksel, {\"{U}}.~Akıncı, and E.~Akt{\"{u}}rk.
+\newblock {Electronic and magnetic properties of monolayer $\alpha$-RuCl 3 : a
+  first-principles and Monte Carlo study}.
+\newblock {\em Physical Chemistry Chemical Physics}, 20(2):997--1004, 2018.
+
+\bibitem{Torelli_2019}
+Daniele Torelli and Thomas Olsen.
+\newblock Calculating critical temperatures for ferromagnetic order in
+  two-dimensional materials.
+\newblock {\em 2D Materials}, 6(1):015028, dec 2018.
+
+\bibitem{Kim2021}
+Tae~Yun Kim and Cheol-Hwan Park.
+\newblock {Magnetic Anisotropy and Magnetic Ordering of Transition-Metal
+  Phosphorus Trisulfides}.
+\newblock {\em Nano Letters}, 21(23):10114--10121, dec 2021.
+
+\bibitem{Li2022}
+Xuanyi Li, Changsong Xu, Boyu Liu, Xueyang Li, L.~Bellaiche, and Hongjun Xiang.
+\newblock {Realistic Spin Model for Multiferroic NiI$_2$}.
+\newblock {\em Physical Review Letters}, 131(3):036701, jul 2023.
+
+\bibitem{Shen2022}
+Zhen-xiong Shen, Chuanxun Su, and Lixin He.
+\newblock {High-throughput computation and structure prototype analysis for
+  two-dimensional ferromagnetic materials}.
+\newblock {\em npj Computational Materials}, 8(1):132, jun 2022.
+
+\bibitem{Xiang1998}
+Tao Xiang.
+\newblock {Thermodynamics of quantum Heisenberg spin chains}.
+\newblock {\em Physical Review B}, 58(14):9142--9149, oct 1998.
+
+\bibitem{holsteinprimakoff1940}
+T.~Holstein and H.~Primakoff.
+\newblock Field dependence of the intrinsic domain magnetization of a
+  ferromagnet.
+\newblock {\em Phys. Rev.}, 58:1098--1113, Dec 1940.
+
+\bibitem{Bloch1930}
+F~Bloch.
+\newblock {Zur Theorie des Ferromagnetismus}.
+\newblock {\em Zeitschrift f{\"{u}}r Physik}, 61(3):206--219, 1930.
+
+\bibitem{Yosida1996}
+K~Yosida.
+\newblock {\em {Theory of magnetism}}.
+\newblock Springer Berlin, Heidelberg, 1996.
+
+\bibitem{tyablikov1959}
+N.~N. {Bogolyubov} and S.~V. {Tyablikov}.
+\newblock {Retarded and Advanced Green Functions in Statistical Physics}.
+\newblock {\em Soviet Physics Doklady}, 4:589, 1959.
+
+\bibitem{tahir1962}
+R.~A. Tahir-Kheli and D.~ter Haar.
+\newblock Use of green functions in the theory of ferromagnetism. i. general
+  discussion of the spin-$s$ case.
+\newblock {\em Phys. Rev.}, 127:88--94, Jul 1962.
+
+\bibitem{callen1963}
+Herbert~B. Callen.
+\newblock Green function theory of ferromagnetism.
+\newblock {\em Phys. Rev.}, 130:890--898, May 1963.
+
+\bibitem{Jensen1991}
+J~Jensen and A.~R. Mackintosh.
+\newblock {\em Rare Earth Magnetism}.
+\newblock Oxford University Press, 1991.
+
+\bibitem{Kudrnovsky2001}
+M.~Pajda, J.~Kudrnovsk{\'{y}}, I.~Turek, V.~Drchal, and P.~Bruno.
+\newblock {Ab initio calculations of exchange interactions, spin-wave stiffness
+  constants, and Curie temperatures of Fe, Co, and Ni}.
+\newblock {\em Physical Review B}, 64(17):174402, oct 2001.
+
+\bibitem{Bruno2003}
+P.~Bruno.
+\newblock {Exchange Interaction Parameters and Adiabatic Spin-Wave Spectra of
+  Ferromagnets: A “ Renormalized Magnetic Force Theorem”}.
+\newblock {\em Physical Review Letters}, 90(8):087205, feb 2003.
+
+\bibitem{Katsnelson2004}
+M.~I. Katsnelson and A.~I. Lichtenstein.
+\newblock {Magnetic susceptibility, exchange interactions and spin-wave spectra
+  in the local spin density approximation}.
+\newblock {\em Journal of Physics: Condensed Matter}, 16(41):7439--7446, oct
+  2004.
+
+\bibitem{LIECHTENSTEIN198765}
+A.I. Liechtenstein, M.I. Katsnelson, V.P. Antropov, and V.A. Gubanov.
+\newblock Local spin density functional approach to the theory of exchange
+  interactions in ferromagnetic metals and alloys.
+\newblock {\em Journal of Magnetism and Magnetic Materials}, 67(1):65--74,
+  1987.
+
+\bibitem{Huang2017}
+Bevin Huang, Genevieve Clark, Efr{\'{e}}n Navarro-Moratalla, Dahlia~R. Klein,
+  Ran Cheng, Kyle~L. Seyler, DIng Zhong, Emma Schmidgall, Michael~A. McGuire,
+  David~H. Cobden, Wang Yao, Di~Xiao, Pablo Jarillo-Herrero, and Xiaodong Xu.
+\newblock {Layer-dependent ferromagnetism in a van der Waals crystal down to
+  the monolayer limit}.
+\newblock {\em Nature}, 546(7657):270--273, jun 2017.
+
+\bibitem{Gibertini2019}
+M~Gibertini, M~Koperski, A~F Morpurgo, and K~S Novoselov.
+\newblock {Magnetic 2D materials and heterostructures}.
+\newblock {\em Nature Nanotechnology}, 14(5):408--419, may 2019.
+
+\bibitem{Olsen2017}
+Thomas Olsen.
+\newblock {Assessing the performance of the random phase approximation for
+  exchange and superexchange coupling constants in magnetic crystalline
+  solids}.
+\newblock {\em Physical Review B}, 96(12):125143, sep 2017.
+
+\bibitem{Lado2017}
+J.~L. Lado and J.~Fern{\'{a}}ndez-Rossier.
+\newblock {On the origin of magnetic anisotropy in two dimensional CrI 3}.
+\newblock {\em 2D Materials}, 4(3):035002, jun 2017.
+
+\bibitem{Xu2018a}
+Changsong Xu, Junsheng Feng, Hongjun Xiang, and Laurent Bellaiche.
+\newblock {Interplay between Kitaev interaction and single ion anisotropy in
+  ferromagnetic CrI3 and CrGeTe3 monolayers}.
+\newblock {\em npj Computational Materials}, 4(1):57, dec 2018.
+
+\bibitem{Olsen2019}
+Thomas Olsen.
+\newblock {Theory and simulations of critical temperatures in CrI 3 and other
+  2D materials: easy-axis magnetic order and easy-plane Kosterlitz–Thouless
+  transitions}.
+\newblock {\em MRS Communications}, 9(4):1142--1150, dec 2019.
+
+\bibitem{Lu2019}
+Xiaobo Lu, Ruixiang Fei, and Li~Yang.
+\newblock {Curie temperature of emerging two-dimensional magnetic structures}.
+\newblock {\em Physical Review B}, 100(20):205409, nov 2019.
+
+\bibitem{Pizzochero2020}
+Michele Pizzochero, Ravi Yadav, and Oleg~V. Yazyev.
+\newblock {Magnetic exchange interactions in monolayer CrI 3 from many-body
+  wavefunction calculations}.
+\newblock {\em 2D Materials}, 7(3):035005, apr 2020.
+
+\bibitem{Mermin1966}
+N.~D. Mermin and H.~Wagner.
+\newblock {Absence of Ferromagnetism or Antiferromagnetism in One- or
+  Two-Dimensional Isotropic Heisenberg Models}.
+\newblock {\em Physical Review Letters}, 17(22):1133--1136, nov 1966.
+
+\bibitem{Toth2015}
+S.~Toth and B.~Lake.
+\newblock {Linear spin wave theory for single-Q incommensurate magnetic
+  structures}.
+\newblock {\em J. Phys. Condens. Matter}, 27(16):166002, apr 2015.
+
+\bibitem{FROBRICH2006223}
+P.~Fröbrich and P.J. Kuntz.
+\newblock Many-body green's function theory of heisenberg films.
+\newblock {\em Physics Reports}, 432(5):223--304, 2006.
+
+\bibitem{Pajda2001}
+M.~Pajda, J.~Kudrnovsk\'y, I.~Turek, V.~Drchal, and P.~Bruno.
+\newblock Ab initio calculations of exchange interactions, spin-wave stiffness
+  constants, and curie temperatures of fe, co, and ni.
+\newblock {\em Phys. Rev. B}, 64:174402, Oct 2001.
+
+\bibitem{Durhuus2023}
+Frederik~L Durhuus, Thorbjørn Skovhus, and Thomas Olsen.
+\newblock Plane wave implementation of the magnetic force theorem for magnetic
+  exchange constants: application to bulk fe, co and ni.
+\newblock {\em Journal of Physics: Condensed Matter}, 35(10):105802, January
+  2023.
+
+\bibitem{Mortensen2024}
+Jens~Jørgen Mortensen, Ask~Hjorth Larsen, Mikael Kuisma, Aleksei~V. Ivanov,
+  Alireza Taghizadeh, Andrew Peterson, Anubhab Haldar, Asmus~Ougaard Dohn,
+  Christian Schäfer, Elvar~Örn Jónsson, Eric~D. Hermes, Fredrik~Andreas
+  Nilsson, Georg Kastlunger, Gianluca Levi, Hannes Jónsson, Hannu Häkkinen,
+  Jakub Fojt, Jiban Kangsabanik, Joachim Sødequist, Jouko Lehtomäki, Julian
+  Heske, Jussi Enkovaara, Kirsten~Trøstrup Winther, Marcin Dulak, Marko~M.
+  Melander, Martin Ovesen, Martti Louhivuori, Michael Walter, Morten Gjerding,
+  Olga Lopez-Acevedo, Paul Erhart, Robert Warmbier, Rolf Würdemann, Sami
+  Kaappa, Simone Latini, Tara~Maria Boland, Thomas Bligaard, Thorbjørn
+  Skovhus, Toma Susi, Tristan Maxson, Tuomas Rossi, Xi~Chen, Yorick Leonard~A.
+  Schmerwitz, Jakob Schiøtz, Thomas Olsen, Karsten~Wedel Jacobsen, and
+  Kristian~Sommer Thygesen.
+\newblock {GPAW: An open Python package for electronic structure calculations}.
+\newblock {\em The Journal of Chemical Physics}, 160(9):092503, 03 2024.
+
+\bibitem{Skovhus2021}
+Thorbj{\o}rn Skovhus and Thomas Olsen.
+\newblock {Dynamic transverse magnetic susceptibility in the projector
+  augmented-wave method: Application to Fe, Ni, and Co}.
+\newblock {\em Phys. Rev. B}, 103(24):245110, jun 2021.
+
+\bibitem{Aryasetiawan1992}
+F.~Aryasetiawan.
+\newblock Self-energy of ferromagnetic nickel in the gw approximation.
+\newblock {\em Phys. Rev. B}, 46:13051--13064, Nov 1992.
+
+\bibitem{Muller2019}
+Mathias C. T.~D. M\"uller, Stefan Bl\"ugel, and Christoph Friedrich.
+\newblock Electron-magnon scattering in elementary ferromagnets from first
+  principles: Lifetime broadening and band anomalies.
+\newblock {\em Phys. Rev. B}, 100:045130, Jul 2019.
+
+\bibitem{Cenker2021}
+John Cenker, Bevin Huang, Nishchay Suri, Pearl Thijssen, Aaron Miller,
+  Tiancheng Song, Takashi Taniguchi, Kenji Watanabe, Michael~A. McGuire,
+  Di~Xiao, and Xiaodong Xu.
+\newblock Direct observation of two-dimensional magnons in atomically thin
+  cri3.
+\newblock {\em Nature Physics}, 17(1):20--25, Jan 2021.
+
+\bibitem{Olsen2021}
+Thomas Olsen.
+\newblock {Unified Treatment of Magnons and Excitons in Monolayer CrI$_3$ from
+  Many-Body Perturbation Theory}.
+\newblock {\em Physical Review Letters}, 127(16):166402, oct 2021.
+
+\bibitem{Chen2018a}
+Lebing Chen, Jae-Ho Chung, Bin Gao, Tong Chen, Matthew~B. Stone, Alexander~I.
+  Kolesnikov, Qingzhen Huang, and Pengcheng Dai.
+\newblock {Topological Spin Excitations in Honeycomb Ferromagnet CrI$_3$}.
+\newblock {\em Physical Review X}, 8(4):041028, nov 2018.
+
+\bibitem{Lee2020}
+Inhee Lee, Franz~G. Utermohlen, Daniel Weber, Kyusung Hwang, Chi Zhang, Johan
+  van Tol, Joshua~E. Goldberger, Nandini Trivedi, and P.~Chris Hammel.
+\newblock {Fundamental Spin Interactions Underlying the Magnetic Anisotropy in
+  the Kitaev Ferromagnet CrI$_3$}.
+\newblock {\em Physical Review Letters}, 124(1):017201, jan 2020.
+
+\bibitem{Delugas2023}
+Pietro Delugas, Oscar Baseggio, Iurii Timrov, Stefano Baroni, and Tommaso
+  Gorni.
+\newblock Magnon-phonon interactions enhance the gap at the dirac point in the
+  spin-wave spectra of ${\mathrm{cri}}_{3}$ two-dimensional magnets.
+\newblock {\em Phys. Rev. B}, 107:214452, Jun 2023.
+
+\bibitem{Paischer2021}
+Sebastian Paischer, Pawe{\l}~A. Buczek, Nadine Buczek, David Eilmsteiner, and
+  Arthur Ernst.
+\newblock {Spin waves in alloys at finite temperatures: Application to the FeCo
+  magnonic crystal}.
+\newblock {\em Phys. Rev. B}, 104(2), 2021.
+
+\bibitem{Kabiraj2022}
+Arnab Kabiraj, Tripti Jain, and Santanu Mahapatra.
+\newblock {Massive Monte Carlo simulations-guided interpretable learning of
+  two-dimensional Curie temperature}.
+\newblock {\em Patterns}, 3(12):100625, dec 2022.
+
+\bibitem{Wines2023}
+Daniel Wines, Kamal Choudhary, and Francesca Tavazza.
+\newblock Systematic dft+u and quantum monte carlo benchmark of magnetic
+  two-dimensional (2d) crx3 (x = i, br, cl, f).
+\newblock {\em The Journal of Physical Chemistry C}, 127(2):1176--1188, 2023.
+
+\end{thebibliography}
