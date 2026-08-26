@@ -461,3 +461,205 @@ class TestThermalMagnonResult:
         )
         assert r.transition.kind == "temperature_hp_breakdown"
         assert r.transition.breakdown_magnetization == 0.15
+
+
+# ----------------------------------------------------------------------------
+# Story 015: FM RPA temperature bands and Curie temperature
+# ----------------------------------------------------------------------------
+
+
+def sc_chain_fm_magnon(J=0.05, S=1.0):
+    """1D FM chain (isotropic): Rlist +-x only."""
+    R = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=float)
+    JR = np.zeros((3, 1, 1, 3, 3))
+    half = 0.5 * S * S
+    JR[1, 0, 0] = half * np.eye(3) * J
+    JR[2, 0, 0] = half * np.eye(3) * J
+    mag = Magnon(
+        nspin=1,
+        magmom=np.array([[0.0, 0.0, 2.0 * S]]),
+        Rlist=R,
+        JR=JR,
+        cell=_identity_cell(),
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0.0, 1.0]]),
+        _n=np.array([0.0, 0.0, 1.0]),
+    )
+    return _finalize(mag)
+
+
+def sc_square_fm_magnon(J=0.05, S=1.0):
+    """2D FM square lattice (isotropic)."""
+    R = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=float)
+    JR = np.zeros((5, 1, 1, 3, 3))
+    half = 0.5 * S * S
+    for iR in range(1, 5):
+        JR[iR, 0, 0] = half * np.eye(3) * J
+    mag = Magnon(
+        nspin=1,
+        magmom=np.array([[0.0, 0.0, 2.0 * S]]),
+        Rlist=R,
+        JR=JR,
+        cell=_identity_cell(),
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0.0, 1.0]]),
+        _n=np.array([0.0, 0.0, 1.0]),
+    )
+    return _finalize(mag)
+
+
+class TestFmRpaSolver:
+    def test_t0_bands_match_magnon3(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = simple_cubic_fm_magnon(J=0.05, S=1.0)
+        solver = ThermalMagnonSolver(mag, default_params())
+        result = solver.calculate(
+            temperatures_K=[0.0],
+            band_kpoints=np.array([[0.0, 0, 0], [0.25, 0.25, 0.25]]),
+        )
+        assert result.status == "ok"
+        band = result.bands[0]
+        ref = np.sort(mag._magnon_energies(band.kpoints), axis=1)
+        assert np.allclose(band.energies_eV, ref, atol=2e-6)
+
+    def test_temperature_softens_bands(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = simple_cubic_fm_magnon(J=0.05, S=1.0)
+        solver = ThermalMagnonSolver(mag, default_params())
+        kp = np.array([[0.5, 0.0, 0.0]])
+        r = solver.calculate(temperatures_K=[0.0, 200.0], band_kpoints=kp)
+        assert r.bands[1].energies_eV[0, 0] < r.bands[0].energies_eV[0, 0]
+        assert r.bands[1].order_parameters[0] < r.bands[0].order_parameters[0]
+        assert np.isclose(r.bands[0].order_parameters[0], 1.0)
+
+    def test_sc_rpa_tc_watson_reference(self):
+        """Tc = S(S+1)/3 * [mean 1/(J0-Jq)]^-1 with the Watson/Joyce sum."""
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        J = 0.05
+        S = 0.5
+        mag = simple_cubic_fm_magnon(J=J, S=S)
+        p = default_params(
+            thermal_qmeshes=[[32, 32, 32], [48, 48, 48]],
+            thermal_mesh_tolerance=20.0,
+        )
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate()
+        # continuum closed form: kBTc = S(S+1) * 1.318926 * J
+        ref = S * (S + 1) * 1.318926 * J
+        assert r.transition.converged
+        assert abs(r.transition.temperature_K * 8.617333262e-5 - ref) / ref < 0.02
+
+    def test_1d_zero_transition(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = sc_chain_fm_magnon()
+        p = default_params(
+            thermal_dimensionality=1,
+            thermal_qmeshes=[[16, 1, 1], [32, 1, 1]],
+        )
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate(
+            temperatures_K=[10.0], band_kpoints=np.array([[0.5, 0, 0]])
+        )
+        assert r.status == "zero_transition"
+        assert r.transition.temperature_K == 0.0
+
+    def test_2d_zero_transition_isotropic(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = sc_square_fm_magnon()
+        p = default_params(
+            thermal_dimensionality=2,
+            thermal_qmeshes=[[16, 16, 1], [24, 24, 1]],
+        )
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate()
+        assert r.status == "zero_transition"
+        assert r.transition.kind == "curie_temperature"
+
+    def test_2d_gap_gives_finite_tc(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = sc_square_fm_magnon(J=0.05, S=1.0)
+        A = 0.5e-3
+        mag.JR[0, 0, 0] = np.diag([0.0, 0.0, A * 1.0])
+        p = default_params(
+            thermal_dimensionality=2,
+            thermal_qmeshes=[[24, 24, 1], [32, 32, 1]],
+            thermal_mesh_tolerance=2.0,
+        )
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate()
+        assert r.status == "ok"
+        assert r.transition.temperature_K > 0
+
+    def test_self_consistent_matches_closed_form(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver, gamma_centered_mesh
+
+        mag = simple_cubic_fm_magnon(J=0.05, S=0.5)
+        p = default_params(thermal_qmeshes=[[8, 8, 8]])
+        solver = ThermalMagnonSolver(mag, p)
+        q = gamma_centered_mesh([8, 8, 8], 3)
+        closed = solver._tc_closed_form(q)
+        t1 = solver._tc_self_consistent(q, 1e-4)
+        t2 = solver._tc_self_consistent(q, 2e-4)
+        sc = 2.0 * t1 - t2  # Richardson extrapolation in m* (docs/sympy/02)
+        assert abs(closed - sc) / closed < 5e-3
+
+    def test_strict_mode_raises_on_unconverged(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = simple_cubic_fm_magnon()
+        p = default_params(
+            thermal_qmeshes=[[6, 6, 6]],
+            thermal_mesh_tolerance=1e-6,
+            thermal_strict=True,
+        )
+        solver = ThermalMagnonSolver(mag, p)
+        with pytest.raises(RuntimeError, match="thermal_strict"):
+            solver.calculate()
+
+    def test_flagged_estimate_without_strict(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = simple_cubic_fm_magnon()
+        p = default_params(
+            thermal_qmeshes=[[6, 6, 6]],
+            thermal_mesh_tolerance=1e-6,
+        )
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate()
+        assert r.status == "ok"
+        assert r.transition.converged is False
+        assert len(r.mesh_history) == 1
+
+    def test_unstable_reference_detected(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = simple_cubic_fm_magnon(J=-0.05, S=1.0)  # AFM exchange, FM mode
+        p = default_params()
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate()
+        assert r.status == "unstable_reference"
+
+    def test_multisite_fm_bands_and_tc(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        mag = two_site_fm_magnon(J=0.05, S=1.0)
+        p = default_params(
+            thermal_qmeshes=[[16, 1, 1], [24, 1, 1]], thermal_mesh_tolerance=5.0
+        )
+        # 1D two-site chain is 1D: use 3D-declared? No: keep 3D cell but chain
+        # exchange only couples x -> still 3D-declared mesh is fine (y,z divisions
+        # see dispersionless bands). Use 3D declaration to avoid dimensionality
+        # rejection since R vectors have zero y/z.
+        solver = ThermalMagnonSolver(mag, p)
+        r = solver.calculate(temperatures_K=[0.0], band_kpoints=np.array([[0.0, 0, 0]]))
+        assert r.status == "ok"
+        # optic Goldstone at Gamma: acoustic zero, optic finite
+        energies = r.bands[0].energies_eV[0]
+        assert abs(energies[0]) < 1e-8
+        assert energies[1] > 0
