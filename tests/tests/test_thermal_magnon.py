@@ -6,6 +6,7 @@ ThermalSpinModel validation/rejection rules.
 """
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -805,6 +806,424 @@ class TestFmCallenHpMethods:
             )
             results[method] = r.bands[0].order_parameters[0]
         assert results["callen"] > results["rpa"]
+
+
+# ----------------------------------------------------------------------------
+# Story 021: FM Weiss mean-field (MFA) thermal baseline
+# ----------------------------------------------------------------------------
+
+
+def _mfa_tc_analytic(J0, S):
+    """Paper eq. eq:T_mf: k_B Tc^MFA = J0 S(S+1)/3."""
+    return J0 * S * (S + 1.0) / 3.0 / KB
+
+
+class TestFmMfaBaseline:
+    """Weiss single-site MFA: Brillouin self-consistency, analytic Tc.
+
+    MFA is the uncorrelated paper-comparison baseline (arXiv:2405.00477
+    Sec. II.A): it has no magnon-band interpretation and its transition is
+    the exact linearized single-site result, so these tests pin the
+    Brillouin closure, the analytic Tc in both spin regimes, the
+    Mermin-Wagner validity warning, and the bandless result schema.
+    """
+
+    def test_brillouin_function_matches_exact_level_sum(self):
+        from TB2J.magnon.thermal_solver import brillouin_function
+
+        for S in (0.5, 1.0, 1.5, 2.5):
+            levels = np.arange(2 * S + 1) - S  # eigenvalues m_s of S^z
+            for x in (1e-3, 0.1, 1.0, 3.0, 10.0):
+                # <Sz> = sum m_s exp(x m_s / S) / Z with <Sz> = S B_S(x)
+                w = np.exp(x / S * (levels - S))
+                exact = float((levels * w).sum() / w.sum()) / S
+                assert np.isclose(float(brillouin_function(S, x)), exact, rtol=1e-11)
+            # small-x linearization B_S(x) -> (S+1) x / (3S)
+            x = 1e-9
+            assert np.isclose(
+                float(brillouin_function(S, x)), (S + 1.0) * x / (3.0 * S), rtol=1e-9
+            )
+
+    def test_mfa_self_consistency_solves_single_site_partition(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        J, S = 0.05, 1.0
+        J0 = 6.0 * J
+        solver = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(J=J, S=S), default_params(thermal_method="mfa")
+        )
+        Tc = _mfa_tc_analytic(J0, S)
+        assert solver._solve_mfa(0.0) == S
+        m = solver._solve_mfa(0.8 * Tc)
+        assert 0.0 < m < S
+        # residual of the paper's eq. mfa-mag level sum (independent form
+        # of the Brillouin function used by the solver)
+        levels = np.arange(2 * S + 1) - S
+        w = np.exp(J0 * m * (levels - S) / (KB * 0.8 * Tc))
+        assert abs(m - float((levels * w).sum() / w.sum())) < 1e-9
+        # no ordered solution survives above the linearized transition
+        assert solver._solve_mfa(1.001 * Tc) == 0.0
+        assert solver._solve_mfa(0.5 * Tc) > m
+
+    def test_mfa_near_tc_and_low_temperature_roots(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        J, S = 0.05, 1.0
+        solver = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(J=J, S=S), default_params(thermal_method="mfa")
+        )
+        Tc = _mfa_tc_analytic(6.0 * J, S)
+        # regression (story-021 review): the ordered root within 1e-8 of
+        # Tc is only ~1e-4*S tall, below any fixed probe floor, and the
+        # root at very low T sits above 0.95*S, above the old ladder's
+        # top bracket; the monotone iteration from m = S must find both.
+        m_near = solver._solve_mfa((1.0 - 1e-8) * Tc)
+        assert 0.0 < m_near < S
+        m_low = solver._solve_mfa(1e-3 * Tc)
+        assert 0.95 * S < m_low <= S
+        # m(T) stays monotone between the extremes
+        assert solver._solve_mfa(0.5 * Tc) > m_near
+        assert solver._solve_mfa(0.5 * Tc) < m_low
+
+    def test_mfa_quantum_tc_is_analytic(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        J = 0.05
+        for S in (0.5, 1.5):
+            solver = ThermalMagnonSolver(
+                simple_cubic_fm_magnon(J=J, S=S), default_params(thermal_method="mfa")
+            )
+            r = solver.calculate()
+            assert r.status == "ok"
+            assert r.transition.kind == "curie_temperature"
+            assert r.transition.converged
+            assert r.transition.method_validity == "nominal"
+            assert r.transition.temperature_K == pytest.approx(
+                _mfa_tc_analytic(6.0 * J, S), rel=1e-12
+            )
+        # the uncorrelated baseline overestimates: MFA sits above the RPA
+        # Watson value S(S+1) * 1.318926 * J (story 015 test)
+        r = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(J=J, S=0.5), default_params(thermal_method="mfa")
+        ).calculate()
+        kbtc = r.transition.temperature_K * KB
+        assert 1.2 * J < kbtc < 1.6 * J  # exact MFA: 1.5 J; RPA: 0.989 J
+
+    def test_mfa_classical_regime_scaling_and_langevin_limit(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        J, S = 0.05, 1.0
+        J0 = 6.0 * J
+        solver = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(J=J, S=S),
+            default_params(thermal_method="mfa", thermal_spin_regime="classical"),
+        )
+        r = solver.calculate()
+        # classical prescription (K-mapping with S_eff = K S): k_B Tc -> J0 S^2/3
+        expected = J0 * S * S / 3.0 / KB
+        assert abs(r.transition.temperature_K - expected) / expected < 0.01
+        # m(T) follows the classical Langevin closure m = S L(beta S J0 m)
+        T = 0.7 * expected
+        m = solver._solve_mfa(T)
+        assert 0.0 < m <= S
+        x = S * J0 * m / (KB * T)
+        langevin = 1.0 / np.tanh(x) - 1.0 / x
+        assert abs(m - S * langevin) < 0.01 * S
+
+    def test_mfa_low_dimensional_finite_transition_mermin_wagner_warning(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        p2d = default_params(
+            thermal_method="mfa",
+            thermal_dimensionality=2,
+            thermal_qmeshes=[[8, 8, 1], [12, 12, 1]],
+        )
+        r = ThermalMagnonSolver(sc_square_fm_magnon(), p2d).calculate()
+        assert r.status == "ok"  # finite transition, not zero_transition
+        assert r.transition.temperature_K > 0.0
+        assert r.transition.method_validity == "limited"
+        assert "Mermin" in r.transition.validity_reason
+        assert "Wagner" in r.transition.validity_reason
+
+        # 1D isotropic: same policy
+        p1d = default_params(
+            thermal_method="mfa", thermal_dimensionality=1, thermal_qmeshes=[[8, 1, 1]]
+        )
+        r1d = ThermalMagnonSolver(sc_chain_fm_magnon(), p1d).calculate()
+        assert r1d.transition.temperature_K > 0.0
+        assert r1d.transition.method_validity == "limited"
+
+        # RPA behaviour on the same model is unchanged: zero transition
+        rpa2d = ThermalMagnonSolver(
+            sc_square_fm_magnon(),
+            default_params(
+                thermal_dimensionality=2, thermal_qmeshes=[[16, 16, 1], [24, 24, 1]]
+            ),
+        ).calculate()
+        assert rpa2d.status == "zero_transition"
+        assert rpa2d.transition.temperature_K == 0.0
+        assert rpa2d.transition.method_validity == "nominal"
+
+        # 3D stays nominal
+        assert (
+            ThermalMagnonSolver(
+                simple_cubic_fm_magnon(), default_params(thermal_method="mfa")
+            )
+            .calculate()
+            .transition.method_validity
+            == "nominal"
+        )
+        # gapped 2D (finite exact Tc) stays nominal as well
+        mag = sc_square_fm_magnon(J=0.05, S=1.0)
+        mag.JR[0, 0, 0] = np.diag([0.0, 0.0, 0.5e-3])
+        rg = ThermalMagnonSolver(mag, p2d).calculate()
+        assert rg.transition.method_validity == "nominal"
+
+    def test_mfa_calculate_emits_bandless_order_parameter_blocks(self, tmp_path):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        J, S = 0.05, 1.0
+        J0 = 6.0 * J
+        solver = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(J=J, S=S), default_params(thermal_method="mfa")
+        )
+        Tc = _mfa_tc_analytic(J0, S)
+        r = solver.calculate(temperatures_K=[0.0, 0.5 * Tc, 1.5 * Tc])
+        # AC1: requested temperatures are answered with bandless blocks
+        # carrying the Brillouin order parameter m(T), not dropped.
+        assert [b.temperature_K for b in r.bands] == [0.0, 0.5 * Tc, 1.5 * Tc]
+        for block in r.bands:
+            assert block.kpoints.shape == (0, 3)  # bandless: no k-points
+            assert block.energies_eV.shape == (0, 1)  # no magnon energies
+            assert block.magnetization.shape == (1,)  # per-site <Sz> = m
+        m0, m_half, m_hot = (b.order_parameters[0] for b in r.bands)
+        assert m0 == S
+        assert 0.0 < m_half < S
+        # m(0.5 Tc) satisfies the independent single-site partition sum
+        levels = np.arange(2 * S + 1) - S
+        w = np.exp(J0 * m_half * (levels - S) / (KB * 0.5 * Tc))
+        assert abs(m_half - float((levels * w).sum() / w.sum())) < 1e-9
+        # above the transition the ordered solution is gone
+        assert m_hot == 0.0
+        assert r.bands[0].status == "ordered"
+        assert r.bands[2].status == "zero_transition"
+        # both serializations round-trip the bandless blocks
+        fjson = tmp_path / "mfa_blocks.json"
+        r.save_json(str(fjson))
+        loaded = ThermalMagnonResult.load_json(str(fjson))
+        assert len(loaded.bands) == 3
+        assert loaded.bands[1].order_parameters[0] == pytest.approx(m_half)
+        assert loaded.bands[1].kpoints.shape == (0, 3)
+        netcdf4 = pytest.importorskip("netCDF4")
+        assert netcdf4 is not None
+        fnc = tmp_path / "mfa_blocks.nc"
+        r.save_netcdf(str(fnc))
+        loaded_nc = ThermalMagnonResult.load_netcdf(str(fnc))
+        assert len(loaded_nc.bands) == 3
+        assert loaded_nc.bands[1].order_parameters[0] == pytest.approx(m_half)
+        assert loaded_nc.bands[1].energies_eV.shape == (0, 1)
+
+    def test_mfa_result_is_bandless_with_baseline_label(self, tmp_path):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        solver = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(), default_params(thermal_method="mfa")
+        )
+        r = solver.calculate(
+            temperatures_K=[0.0, 300.0],
+            band_kpoints=np.array([[0.0, 0, 0], [0.5, 0, 0]]),
+        )
+        assert r.method == "mfa"
+        # bandless: requested temperatures yield per-temperature blocks
+        # carrying only m(T); the band_kpoints request is deliberately
+        # ignored because MFA has no thermal magnon-spectrum output.
+        assert len(r.bands) == 2
+        for block in r.bands:
+            assert block.kpoints.shape == (0, 3)
+            assert block.energies_eV.shape == (0, 1)
+        meta = r.to_dict()["metadata"]
+        assert meta["method_class"] == "thermodynamic_baseline"
+        assert (
+            sample_result().to_dict()["metadata"]["method_class"] == "magnon_spectrum"
+        )
+        assert len(r.mesh_history) == 1
+        assert r.mesh_history[0].status == "converged"
+        assert r.transition.detail is not None
+        fname = tmp_path / "mfa.json"
+        r.save_json(str(fname))
+        loaded = ThermalMagnonResult.load_json(str(fname))
+        assert loaded.method == "mfa"
+        assert len(loaded.bands) == 2
+        assert all(b.kpoints.shape == (0, 3) for b in loaded.bands)
+        assert loaded.to_dict()["metadata"]["method_class"] == "thermodynamic_baseline"
+        # no temperatures requested -> no band blocks at all
+        r_plain = ThermalMagnonSolver(
+            simple_cubic_fm_magnon(),
+            default_params(thermal_method="mfa", thermal_temperatures=[]),
+        ).calculate()
+        assert r_plain.bands == []
+
+    def test_mfa_afm_rejected(self):
+        from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+        with pytest.raises(ThermalModelValidationError, match="mfa"):
+            ThermalMagnonSolver(
+                bipartite_afm_magnon(1), afm_params(1, thermal_method="mfa")
+            )
+
+    def test_mfa_cli_and_toml_registration(self, tmp_path):
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        add_thermal_args(parser)
+        args = parser.parse_args(["--thermal-method", "mfa"])
+        p = thermal_parameters_from_args(args)
+        assert p.thermal_method == "mfa"
+        fname = tmp_path / "mfa.toml"
+        p.to_toml(str(fname))
+        assert ThermalMagnonParameters.from_toml(str(fname)).thermal_method == "mfa"
+
+
+# ----------------------------------------------------------------------------
+# Unified magnon CLI thermal dispatch (story-021 review fix, ADR-0006)
+# ----------------------------------------------------------------------------
+
+
+class TestThermalCliDispatch:
+    """The registered TB2J_magnon.py CLI runs thermal calculations."""
+
+    TB2J_RESULTS = (
+        Path(__file__).resolve().parents[2]
+        / "tests"
+        / "data"
+        / "tests"
+        / "3_CrI3_wannier_SOC"
+        / "refs"
+        / "TB2J_results"
+    )
+
+    def test_thermal_dispatch_serializes_versioned_result(self, monkeypatch, tmp_path):
+        import sys
+
+        from TB2J.magnon import magnon_cli
+
+        args = magnon_cli.create_parser().parse_args(
+            ["--thermal-method", "mfa", "--thermal-temperatures", "0,50"]
+        )
+        assert args.thermal_method == "mfa"
+        assert thermal_parameters_from_args(args).thermal_temperatures == [0.0, 50.0]
+
+        out = tmp_path / "thermal.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "TB2J_magnon.py",
+                "--path",
+                str(self.TB2J_RESULTS),
+                "--no-DMI",
+                "--no-Jani",
+                "--thermal-method",
+                "mfa",
+                "--thermal-temperatures",
+                "0,50",
+                "--thermal-output",
+                str(out),
+            ],
+        )
+        magnon_cli.main()
+        data = json.loads(out.read_text())
+        assert data["schema_name"] == "tb2j.magnon.thermal"
+        assert data["metadata"]["method"] == "mfa"
+        assert data["bands"][0]["order_parameters"] == pytest.approx(
+            [data["metadata"]["spins"][0]]
+        )
+        assert [b["temperature_K"] for b in data["bands"]] == [0.0, 50.0]
+
+    def test_thermal_only_invocation_without_bands_or_dos(self, monkeypatch, tmp_path):
+        import sys
+
+        from TB2J.magnon import magnon_cli
+
+        out = tmp_path / "thermal.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "TB2J_magnon.py",
+                "--path",
+                str(self.TB2J_RESULTS),
+                "--no-DMI",
+                "--no-Jani",
+                "--thermal-method",
+                "mfa",
+                "--thermal-output",
+                str(out),
+            ],
+        )
+        magnon_cli.main()  # must not error about missing --bands/--dos
+        assert (
+            json.loads(out.read_text())["metadata"]["method_class"]
+            == "thermodynamic_baseline"
+        )
+
+    def test_thermal_cli_spectral_temperatures_emit_band_blocks(
+        self, monkeypatch, tmp_path
+    ):
+        """Explicit temperatures with a spectral method produce bands (ADR 0006)."""
+        import sys
+
+        from TB2J.magnon import magnon_cli
+
+        out = tmp_path / "thermal_rpa.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "TB2J_magnon.py",
+                "--path",
+                str(self.TB2J_RESULTS),
+                "--no-DMI",
+                "--no-Jani",
+                "--thermal-method",
+                "rpa",
+                "--thermal-temperatures",
+                "0,300",
+                "--thermal-qmeshes",
+                "4x4x4",
+                "--thermal-mesh-tolerance",
+                "1000",
+                "--thermal-output",
+                str(out),
+            ],
+        )
+        magnon_cli.main()
+        data = json.loads(out.read_text())
+        assert data["metadata"]["method"] == "rpa"
+        assert [b["temperature_K"] for b in data["bands"]] == [0.0, 300.0]
+        for block in data["bands"]:
+            assert block["kpoints"]
+            assert block["energies_eV"]
+
+    def test_no_thermal_args_preserves_band_only_behavior(self, monkeypatch):
+        import sys
+
+        from TB2J.magnon import magnon_cli
+
+        captured = []
+        monkeypatch.setattr(magnon_cli, "plot_magnon_bands_from_TB2J", captured.append)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "TB2J_magnon.py",
+                "--bands",
+                "--path",
+                str(self.TB2J_RESULTS),
+            ],
+        )
+        magnon_cli.main()
+        assert len(captured) == 1
 
 
 # ----------------------------------------------------------------------------

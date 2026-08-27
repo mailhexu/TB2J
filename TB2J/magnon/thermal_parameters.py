@@ -15,12 +15,13 @@ import numpy as np
 import tomli
 import tomli_w
 
-THERMAL_METHODS = ("rpa", "callen", "hp", "rpa_callen")
+THERMAL_METHODS = ("rpa", "callen", "hp", "rpa_callen", "mfa")
 THERMAL_METHOD_LABELS = {
     "rpa": "RPA (Tyablikov)",
     "callen": "Callen decoupling",
     "hp": "HP mean field",
     "rpa_callen": "RPA+CD (RPA with Callen SIA)",
+    "mfa": "Weiss mean-field approximation (MFA)",
 }
 SPIN_REGIMES = ("quantum", "classical")
 ORDER_MODES = ("ferromagnetic", "bipartite_afm")
@@ -161,7 +162,8 @@ def add_thermal_args(parser: argparse.ArgumentParser) -> None:
         "--thermal-method",
         choices=list(THERMAL_METHODS),
         default=None,
-        help="finite-temperature decoupling method (default: rpa)",
+        help="finite-temperature method: RPA/Callen/HP decouplings or the "
+        "bandless Weiss mean-field (MFA) baseline (default: rpa)",
     )
     group.add_argument(
         "--thermal-spin-regime",

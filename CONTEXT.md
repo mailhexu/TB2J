@@ -5,7 +5,7 @@
 | Term | Meaning | Boundary |
 |---|---|---|
 | **Thermal-magnon solver** | A self-consistent solver that evaluates magnon energies, Bose occupations, and ordered moments at a specified temperature. | Does not mean the existing $T=0$ `Magnon` band solver. |
-| **Thermal method** | One of RPA (Tyablikov), Callen decoupling (CD), HP mean-field, or RPA+CD. | A method is part of the physical result, not an interchangeable numerical option. |
+| **Thermal method** | One of RPA (Tyablikov), Callen decoupling (CD), HP mean-field, or RPA+CD; selecting `mfa` instead runs the Weiss single-site thermodynamic baseline, which sits outside these four magnon-spectrum methods. | A method is part of the physical result, not an interchangeable numerical option; MFA answers Brillouin order parameters m(T) and an analytic $T_\mathrm C$ but no temperature-dependent magnon bands. |
 | **RPA+CD** | RPA for isotropic and exchange-anisotropy terms, with Callen decoupling only for single-ion anisotropy. | Required because SIA has an operator-ordering ambiguity. |
 | **Curie temperature ($T_\mathrm C$)** | Continuous-loss temperature of uniform ferromagnetic order. | HP reports a finite-magnetization instability estimate rather than a continuous $m\to0$ $T_\mathrm C$. |
 | **Néel temperature ($T_\mathrm N$)** | Continuous-loss temperature of staggered collinear antiferromagnetic order. | Requires a local-frame, multi-sublattice thermal formulation; it is not a Curie temperature with negative $J$. |

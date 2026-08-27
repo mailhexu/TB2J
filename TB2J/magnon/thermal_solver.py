@@ -79,6 +79,29 @@ def classical_magnetization(S: float, phi: float) -> float:
     return S * float(np.clip(x, 0.0, 1.0))
 
 
+def brillouin_function(S: float, x):
+    """Weiss single-site Brillouin function B_S(x), stable near x = 0.
+
+    ``B_S(x) = (1 + 1/2S) coth((1 + 1/2S) x) - (1/2S) coth(x/2S)`` is the
+    exact thermal average ``<S^z> / S`` of a spin S in a field along z
+    (arXiv:2405.00477 Sec. II.A eq. mfa-mag).  The two ``coth`` terms
+    cancel catastrophically at small x, so the small-argument branch uses
+    the cancellation-free series ``B_S(x) = x(a^2-b^2)/3 - x^3(a^4-b^4)/45
+    + O(x^5)`` with ``a = 1 + 1/2S``, ``b = 1/2S``, whose leading term is
+    the linearization ``B_S -> (S+1)x/(3S)`` behind
+    ``k_B Tc^MFA = J_0 S(S+1)/3``.
+    """
+    x = np.asarray(x, dtype=float)
+    a = 1.0 + 1.0 / (2.0 * S)
+    b = 1.0 / (2.0 * S)
+    small = np.abs(x) < 1e-4
+    x_series = np.where(small, x, 0.0)  # masked -> 0: no overflow in x^3
+    x_direct = np.where(small, 1.0, x)  # masked -> 1: no division by tanh(0)
+    series = x_series * (a * a - b * b) / 3.0 - x_series**3 * (a**4 - b**4) / 45.0
+    direct = a / np.tanh(a * x_direct) - b / np.tanh(b * x_direct)
+    return np.where(small, series, direct)
+
+
 def bose_factors(omega_eV: np.ndarray, T_K: float) -> np.ndarray:
     """Bose occupation 1/(exp(w/kT) - 1), clipped for stability."""
     if T_K <= 0:
@@ -160,6 +183,14 @@ class ThermalMagnonSolver:
     def _validate_method_policy(self):
         p = self.params
         model = self.model
+        if model.order_mode == "bipartite_afm" and p.thermal_method == "mfa":
+            raise ThermalModelValidationError(
+                "thermal_method='mfa' is not implemented for "
+                "thermal_order_mode='bipartite_afm': the Weiss single-site "
+                "baseline is defined here only for the ferromagnetic order "
+                "mode. Use thermal_method='rpa' for the supported bipartite "
+                "AFM Nambu RPA calculation."
+            )
         if model.order_mode == "bipartite_afm" and p.thermal_method != "rpa":
             raise ThermalModelValidationError(
                 f"thermal_method={p.thermal_method!r} is not implemented for "
@@ -184,6 +215,19 @@ class ThermalMagnonSolver:
     def _method_validity(self):
         """Method-validity status for known limited regimes."""
         p = self.params
+        if p.thermal_method == "mfa":
+            if self.model.dimensionality < 3 and self._gamma_gap <= _ZERO_MODE_TOL:
+                return "limited", (
+                    "MFA returns a finite transition for an isotropic "
+                    f"{self.model.dimensionality}D ferromagnet, in direct "
+                    "violation of the Mermin-Wagner theorem "
+                    "(arXiv:2405.00477 Sec. II.A): the uncorrelated Weiss "
+                    "baseline cannot represent the critical long-wavelength "
+                    "fluctuations that enforce a zero transition. Treat the "
+                    "value as a baseline only; use thermal_method='rpa' for "
+                    "the correlated zero-transition result."
+                )
+            return "nominal", None
         if p.thermal_spin_regime != "quantum":
             return "nominal", None
         S = self.model.S[0]
@@ -592,6 +636,144 @@ class ThermalMagnonSolver:
         return ThermalSolution(m / K, True, 1, min_energy / K)
 
     # ------------------------------------------------------------------
+    # Weiss mean-field (MFA) baseline
+    # ------------------------------------------------------------------
+
+    def _weiss_field(self) -> float:
+        """Single-site Weiss field per unit magnetization (eV).
+
+        The mean-field exchange field of site ``a`` is the Gamma row sum of
+        the transverse exchange kernel, ``sum_b (J'_0 + Lambda_0)[a, b]``:
+        the paper's ``J_0`` plus ``lambda_0`` and the ``2 A`` mean-field
+        single-ion-anisotropy field (``3 k_B Tc = S(S+1)(J_0 + 2A)``,
+        arXiv:2405.00477 Secs. II.A/III.C).  Equivalent spins make the
+        site average the natural single-site value.
+        """
+        gamma = np.zeros((1, 3))
+        Jp0 = self.model.Jp_q(gamma)[0]
+        Lam0 = self.model.Lambda_q(gamma)[0]
+        return float(np.real((Jp0 + Lam0).sum(axis=1)).mean())
+
+    def _solve_mfa(self, T_K: float) -> float:
+        """Weiss single-site Brillouin self-consistency m(T), 0 <= m <= S.
+
+        Solves ``m = S B_S(beta J_W S m)`` for the Weiss field ``J_W`` in
+        the effective (classical-mapping) variables and rescales by ``K``,
+        exactly like the magnon closures.  ``B_S`` is strictly concave
+        with ``B_S(0) = 0`` and ``B_S(x) < 1``, so below the transition
+        the residual ``g(m) = m - S B_S(beta J_W S m)`` is negative just
+        above zero (the curve starts above the diagonal) and positive at
+        ``m = S`` (the curve ends below it): ``[eps*S, S]`` brackets the
+        unique ordered root for every ``T < Tc``, however close, and
+        root finding converges superlinearly instead of the critically
+        slow ``1/sqrt(n)`` decay of the plain fixed-point iteration.  The
+        linearized slope at the origin decides existence exactly
+        (``k_B Tc = J_W S(S+1)/3``): at or above it the only solution is
+        the disordered ``m = 0`` one, returned directly.
+        """
+        from scipy.optimize import brentq
+
+        K = self._K
+        S = self._S_eff()
+        T_eff = T_K * K * K
+        if T_eff <= 0.0:
+            return S / K
+        beta = 1.0 / (KB_EV_PER_K * T_eff)
+        J0 = self._weiss_field()
+        if beta * J0 * S * (S + 1.0) / 3.0 <= 1.0:
+            return 0.0
+
+        def residual(m):
+            return m - S * float(brillouin_function(S, beta * J0 * S * m))
+
+        lo = 1e-12 * S
+        root = brentq(
+            residual,
+            lo,
+            S,
+            xtol=1e-14 * S,
+            rtol=8.881784197001252e-16,
+            maxiter=self.params.thermal_max_iterations,
+        )
+        return float(root) / K
+
+    def _tc_mfa(self) -> float:
+        """Analytic linearized Weiss transition temperature (K).
+
+        Linearizing the Brillouin closure at ``m -> 0`` gives
+        ``k_B Tc = J_W S(S+1)/3`` (arXiv:2405.00477 eq. eq:T_mf).  The
+        classical regime follows the shared ``S_eff = K S`` prescription,
+        i.e. ``k_B Tc -> J_W S^2/3``; the result is q-independent, so no
+        mesh sequence is needed.
+        """
+        S = self._S_eff()
+        coeff = S * (S + 1.0) / 3.0 / (self._K * self._K)
+        return coeff * self._weiss_field() / KB_EV_PER_K
+
+    def _calculate_mfa(self, validity, reason, temperatures) -> ThermalMagnonResult:
+        """Bandless MFA result: analytic transition plus Weiss m(T) blocks.
+
+        MFA neglects correlations entirely, so it has no
+        temperature-dependent magnon spectrum to report: each requested
+        temperature is answered with a bandless block carrying only the
+        Brillouin order parameter ``m(T)`` (empty k-points and energies,
+        per-site magnetization ``m``; the same ``zero_transition`` block
+        status the spectrum methods use once the ordered solution is
+        gone), and the exported metadata labels the method a
+        thermodynamic baseline.
+        """
+        p = self.params
+        model = self.model
+        tc = self._tc_mfa()
+        transition = TransitionRecord(
+            kind=self._transition_kind(),
+            temperature_K=tc,
+            converged=True,
+            method_validity=validity,
+            validity_reason=reason,
+            detail=(
+                "Weiss mean-field baseline: analytic linearized single-site "
+                "Brillouin transition, mesh-independent and bandless by "
+                "construction (k_B Tc = J_0 S(S+1)/3 in the quantum regime, "
+                "the S(S+1) -> S^2 classical prescription otherwise)"
+            ),
+        )
+        bands = []
+        for T in temperatures:
+            m = self._solve_mfa(float(T))
+            bands.append(
+                ThermalBandBlock(
+                    temperature_K=float(T),
+                    kpoints=np.zeros((0, 3)),
+                    energies_eV=np.zeros((0, model.nspin)),
+                    order_parameters=np.array([m]),
+                    status="ordered" if m > 0.0 else "zero_transition",
+                    magnetization=np.full(model.nspin, m),
+                )
+            )
+        return ThermalMagnonResult(
+            method="mfa",
+            spin_regime=p.thermal_spin_regime,
+            spin_interpretation=model.spin_interpretation,
+            spins=model.S.tolist(),
+            order_mode=model.order_mode,
+            dimensionality=model.dimensionality,
+            status="ok",
+            transition=transition,
+            mesh_history=[
+                MeshHistoryEntry(
+                    qmesh=list(p.thermal_qmeshes[0]),
+                    estimate_K=tc,
+                    residual=0.0,
+                    iterations=0,
+                    min_energy_eV=self._min_mu,
+                    status="converged",
+                )
+            ],
+            bands=bands,
+        )
+
+    # ------------------------------------------------------------------
     # transitions
     # ------------------------------------------------------------------
 
@@ -836,6 +1018,17 @@ class ThermalMagnonSolver:
                 bands=[],
             )
 
+        if method_label == "mfa":
+            # Bandless Weiss baseline: analytic, mesh-independent
+            # transition; deliberately bypasses the Mermin-Wagner
+            # zero-transition gate (flagged as limited validity instead).
+            # Requested temperatures still get bandless m(T) blocks.
+            temperatures = (
+                list(temperatures_K)
+                if temperatures_K is not None
+                else list(p.thermal_temperatures)
+            )
+            return self._calculate_mfa(validity, reason, temperatures)
         zero_transition = model.dimensionality < 3 and self._gamma_gap <= _ZERO_MODE_TOL
 
         history: List[MeshHistoryEntry] = []

@@ -18,6 +18,14 @@ import numpy as np
 SCHEMA_NAME = "tb2j.magnon.thermal"
 SCHEMA_VERSION = "1.0"
 
+# Method classification for data export: MFA is a Weiss single-site
+# thermodynamic baseline with no finite-temperature magnon-spectrum
+# interpretation (bandless); every other thermal method produces
+# temperature-dependent magnon spectra.  Derived from ``method`` so both
+# old files (key absent) and new files round-trip identically.
+THERMAL_METHOD_CLASSES = {"mfa": "thermodynamic_baseline"}
+DEFAULT_METHOD_CLASS = "magnon_spectrum"
+
 
 def _jsonable(value):
     if isinstance(value, np.ndarray):
@@ -140,10 +148,19 @@ class ThermalBandBlock:
 
     @classmethod
     def from_dict(cls, data):
+        kpoints = np.array(data["kpoints"], dtype=float)
+        energies = np.array(data["energies_eV"], dtype=float)
+        # JSON renders empty arrays as a flat [], losing the trailing
+        # dimensions of bandless blocks; rebuild them (kpoints is always
+        # (nkpt, 3), energies is empty in both dimensions when nkpt = 0).
+        if kpoints.size == 0:
+            kpoints = kpoints.reshape(0, 3)
+        if energies.size == 0:
+            energies = energies.reshape(0, 0)
         return cls(
             temperature_K=float(data["temperature_K"]),
-            kpoints=np.array(data["kpoints"], dtype=float),
-            energies_eV=np.array(data["energies_eV"], dtype=float),
+            kpoints=kpoints,
+            energies_eV=energies,
             order_parameters=np.array(data["order_parameters"], dtype=float),
             status=data["status"],
             magnetization=(
@@ -183,6 +200,9 @@ class ThermalMagnonResult:
             "schema_version": self.schema_version,
             "metadata": {
                 "method": self.method,
+                "method_class": THERMAL_METHOD_CLASSES.get(
+                    self.method, DEFAULT_METHOD_CLASS
+                ),
                 "spin_regime": self.spin_regime,
                 "spin_interpretation": self.spin_interpretation,
                 "spins": list(self.spins),
@@ -274,7 +294,9 @@ class ThermalMagnonResult:
                 group.createVariable("energies_eV", "f8", ("nkpt", "nmode"))[:] = (
                     band.energies_eV
                 )
-                op_var = group.createVariable("order_parameters", "f8", ("nkpt",))
+                norder = band.order_parameters.shape[0]
+                group.createDimension("norder", norder if norder else 1)
+                op_var = group.createVariable("order_parameters", "f8", ("norder",))
                 op_var[:] = band.order_parameters
                 mag = group.createVariable(
                     "magnetization", "f8", ("nsite",), fill_value=False

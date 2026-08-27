@@ -10,6 +10,7 @@ from TB2J.magnon.magnon_parameters import (
     add_common_magnon_args,
     parse_common_args,
 )
+from TB2J.magnon.thermal_parameters import add_thermal_args
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -94,6 +95,15 @@ def create_parser() -> argparse.ArgumentParser:
 
     dos_group = parser.add_argument_group("DOS options")
     add_dos_specific_args_to_group(dos_group)
+
+    add_thermal_args(parser)
+    parser.add_argument(
+        "--thermal-output",
+        type=str,
+        default=None,
+        help="Output JSON file for the thermal-magnon result "
+        "(default: <export-prefix>.thermal.json)",
+    )
 
     return parser
 
@@ -185,6 +195,107 @@ def add_dos_specific_args_to_group(group) -> None:
     )
 
 
+def _thermal_band_kpoints(magnon, args):
+    """Band k-points for explicit-temperature thermal runs.
+
+    Reuses the band-path CLI options exactly like the ``--bands`` path:
+    named ``--qpoints`` take precedence, then ``--kpath`` (ASE bandpath),
+    then the auto-detected high-symmetry path.  With
+    ``--use-primitive-kpath`` and a supercell-backed model, the path is
+    generated in the primitive BZ and folded with the same
+    ``k_sc = k_prim @ S.T`` convention as ``Magnon.get_magnon_bands``.
+    """
+    import numpy as np
+
+    if getattr(args, "qpoints", None):
+        from TB2J.magnon.magnon_parameters import parse_qpoints_string
+
+        qpoints = parse_qpoints_string(args.qpoints)
+        return np.array(list(qpoints.values()), dtype=float)
+
+    npoints = getattr(args, "npoints", None) or 300
+    path = getattr(args, "kpath", None)
+    use_primitive = getattr(args, "use_primitive_kpath", False)
+    if (
+        use_primitive
+        and magnon.primitive_cell is not None
+        and magnon.supercell_matrix is not None
+    ):
+        from ase.cell import Cell as AseCell
+
+        from TB2J.mathutils.auto_kpath import auto_kpath
+
+        fold_matrix = np.array(magnon.supercell_matrix, dtype=float).T
+        prim_cell_array = np.array(magnon.primitive_cell.get_cell())
+        if path is None:
+            _, kptlist, _, _, _ = auto_kpath(
+                prim_cell_array,
+                None,
+                npoints=npoints,
+                supercell_matrix=fold_matrix,
+            )
+            return np.concatenate(kptlist)
+        k_prim = (
+            AseCell(prim_cell_array)
+            .bandpath(path=path, npoints=npoints, pbc=[True, True, True])
+            .kpts
+        )
+        return k_prim @ fold_matrix
+    if path is not None:
+        return np.array(
+            magnon.cell.bandpath(
+                path=path, npoints=npoints, pbc=[True, True, True]
+            ).kpts
+        )
+    from TB2J.mathutils.auto_kpath import auto_kpath
+
+    _, kptlist, _, _, _ = auto_kpath(magnon.cell, None, npoints=npoints)
+    return np.concatenate(kptlist)
+
+
+def run_thermal_calculation(args, params):
+    """Run the thermal-magnon solver and export its versioned JSON result.
+
+    Reuses the band/DOS model preparation (TB2J results path, reference
+    configuration), runs ``ThermalMagnonSolver`` for the selected
+    ``--thermal-*`` method, and serializes the ``tb2j.magnon.thermal``
+    result alongside the band/DOS outputs.
+    """
+    from TB2J.magnon.magnon_parameters import prepare_magnon_from_params
+    from TB2J.magnon.thermal_parameters import thermal_parameters_from_args
+    from TB2J.magnon.thermal_solver import ThermalMagnonSolver
+
+    thermal_params = thermal_parameters_from_args(args)
+    magnon = prepare_magnon_from_params(params)
+    print(f"\nRunning thermal calculation (method: {thermal_params.thermal_method})...")
+    solver = ThermalMagnonSolver(magnon, thermal_params)
+    temperatures = list(thermal_params.thermal_temperatures)
+    if thermal_params.thermal_method != "mfa" and temperatures:
+        # Spectral methods emit temperature blocks only when band k-points
+        # accompany the temperatures; reuse the band-path options (ADR 0006).
+        result = solver.calculate(
+            temperatures_K=temperatures,
+            band_kpoints=_thermal_band_kpoints(magnon, args),
+        )
+    else:
+        result = solver.calculate()
+    filename = args.thermal_output
+    if filename is None:
+        prefix = params.export_prefix or "TB2J_magnon"
+        filename = f"{prefix}.thermal.json"
+    result.save_json(filename)
+    transition = result.transition
+    print(f"Thermal result written to {filename}")
+    if transition is not None:
+        print(
+            f"  status: {result.status}, {transition.kind}: "
+            f"{transition.temperature_K:.2f} K (converged: "
+            f"{transition.converged}, method validity: "
+            f"{transition.method_validity})"
+        )
+    return result
+
+
 def main():
     """Main entry point for the unified magnon CLI."""
     parser = create_parser()
@@ -216,8 +327,15 @@ def main():
             render_scene(scene)
         return
 
-    if not args.bands and not args.dos:
-        parser.error("Please specify at least one of --bands or --dos")
+    thermal_requested = any(
+        value is not None
+        for name, value in vars(args).items()
+        if name.startswith("thermal_")
+    )
+    if not args.bands and not args.dos and not thermal_requested:
+        parser.error(
+            "Please specify at least one of --bands, --dos, or a --thermal-* option"
+        )
 
     window = None
     if args.config:
@@ -228,6 +346,9 @@ def main():
         if args.window is not None:
             window = tuple(args.window)
         params = parse_common_args(args)
+
+    if thermal_requested:
+        run_thermal_calculation(args, params)
 
     if args.bands:
         warnings.warn(
