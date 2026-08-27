@@ -5,7 +5,8 @@ Deep module behind the thermal-magnon architecture: validates the input
 converges the transition over a declared q-mesh sequence, classifies the
 physical outcome, and evaluates explicit-temperature bands on a separate
 k path. All equations follow the verified derivations in ``docs/sympy``
-(01 LSWT, 02 RPA/Callen/HP + Tc, 03 anisotropy/multisite + TB2J bridge).
+(01 LSWT, 02 RPA/Callen/HP + Tc, 03 anisotropy/multisite + TB2J bridge,
+04 local-frame AFM Nambu RPA).
 
 Energies are in eV, temperatures in K, k-points in fractional reciprocal
 coordinates.
@@ -22,6 +23,8 @@ from TB2J.magnon.magnon3 import Magnon
 from TB2J.magnon.thermal_model import (
     ThermalModelValidationError,
     ThermalSpinModel,
+    _metric_positive_modes,
+    _paraunitary_eigenvalues,
     build_thermal_spin_model,
 )
 from TB2J.magnon.thermal_parameters import ThermalMagnonParameters
@@ -33,9 +36,10 @@ from TB2J.magnon.thermal_result import (
 )
 
 _ZERO_MODE_TOL = 1e-10
+_HP_BREAKDOWN_TOL = -1e-11
 _STABILITY_TOL = -1e-9
 _BISECTION_STEPS = 60
-_MSTAR_FRACTION = 1e-3
+_MSTAR_FRACTION = 5e-3
 
 
 def callen_magnetization(S: float, phi: float) -> float:
@@ -84,6 +88,19 @@ def bose_factors(omega_eV: np.ndarray, T_K: float) -> np.ndarray:
         return 1.0 / np.expm1(x)
 
 
+def classical_bose_factors(omega_eV: np.ndarray, T_K: float) -> np.ndarray:
+    """Classical-limit occupation kBT/omega - 1/2 (S -> infinity of Bose).
+
+    This is the occupation implied by the paper's classical prescription
+    (replace S(S+1) by S^2); it is clipped at zero for modes below 2 kBT
+    where the classical expansion is invalid (low-T saturation of classical
+    spins).
+    """
+    if T_K <= 0:
+        return np.zeros_like(omega_eV)
+    return np.clip(KB_EV_PER_K * T_K / omega_eV - 0.5, 0.0, None)
+
+
 def gamma_centered_mesh(mesh: List[int], dimensionality: int) -> np.ndarray:
     """Gamma-centered fractional q mesh, Gamma at index 0.
 
@@ -105,11 +122,12 @@ def gamma_centered_mesh(mesh: List[int], dimensionality: int) -> np.ndarray:
 class ThermalSolution:
     """Converged thermal state at one temperature (internal)."""
 
-    def __init__(self, m: float, converged: bool, iterations: int, min_energy: float):
+    def __init__(self, m, converged, iterations, min_energy, psi_q=None):
         self.m = m
         self.converged = converged
         self.iterations = iterations
         self.min_energy = min_energy
+        self.psi_q = psi_q
 
 
 class ThermalMagnonSolver:
@@ -128,6 +146,12 @@ class ThermalMagnonSolver:
         else:
             self.unstable = False
         self._gamma_gap = self._compute_gamma_gap()
+        self._fcache = {}
+        self._current_mesh_shape = None
+        # Classical regime: the paper's prescription solves the quantum
+        # equations at S_eff = K S, T_eff = K^2 T and rescales outputs
+        # (S -> infinity limit); K = 200 gives <0.5% discretization error.
+        self._K = 200.0 if params.thermal_spin_regime == "classical" else 1.0
 
     # ------------------------------------------------------------------
     # policy checks
@@ -136,6 +160,14 @@ class ThermalMagnonSolver:
     def _validate_method_policy(self):
         p = self.params
         model = self.model
+        if model.order_mode == "bipartite_afm" and p.thermal_method != "rpa":
+            raise ThermalModelValidationError(
+                f"thermal_method={p.thermal_method!r} is not implemented for "
+                "thermal_order_mode='bipartite_afm': its Callen/HP "
+                "correlator closure is derived only for the ferromagnetic "
+                "normal (non-Nambu) spectrum. Use thermal_method='rpa' for "
+                "the supported bipartite AFM Nambu RPA calculation."
+            )
         if (
             p.thermal_method == "rpa"
             and p.thermal_spin_regime == "quantum"
@@ -174,33 +206,71 @@ class ThermalMagnonSolver:
         if self.model.order_mode == "ferromagnetic":
             vals = np.linalg.eigvalsh(self.model.M_normal_q(gap_q))
             return float(vals.min())
-        vals = self._paraunitary_eig(self.model.M_bdg_q(gap_q))
-        return float(np.sort(vals.real)[: vals.shape[-1] // 2].min())
+        # Use the same metric diagonalization as the AFM Nambu spectrum so
+        # the Goldstone detection noise floor (1e-13-ish) sits safely below
+        # _ZERO_MODE_TOL; the Cholesky route leaves ~1e-9 residual noise at
+        # exactly singular Goldstone blocks, which would defeat the
+        # zero-transition (Mermin-Wagner) policy in 1D/2D.
+        return float(self._afm_positive_modes(gap_q, 1.0).min())
 
-    @staticmethod
-    def _paraunitary_eig(H: np.ndarray):
-        n = H.shape[-1] // 2
-        I = np.eye(n)
-        K = np.linalg.cholesky(H)
-        g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
-        return np.linalg.eigvalsh(K.swapaxes(-1, -2).conj() @ g @ K)[:, n:]
+    def _fourier_cache(self, qpoints):
+        """Cache Fourier-space quantities for a fixed q-point set."""
+        key = (qpoints.shape[0], qpoints.tobytes())
+        cache = self._fcache.get(key)
+        if cache is None:
+            gamma = np.zeros((1, 3))
+            cache = {
+                "Jp": self.model.Jp_q(qpoints),
+                "Lam": self.model.Lambda_q(qpoints),
+                "Jp0": self.model.Jp_q(gamma)[0],
+                "lam0": self.model.lambda_q(gamma)[0],
+                "lam": self.model.lambda_q(qpoints),
+            }
+            self._fcache[key] = cache
+        return cache
 
-    def _fm_matrices(self, qpoints, m: float, psi_q=None):
+    def _circular_conv(self, kernel, correl):
+        """acc[i] = sum_j kernel[(i - j) % N] * correl[j] per matrix element.
+
+        FFT circular convolution over the q grid (meshgrid 'ij' order with
+        Gamma at index 0 makes index differences modular per axis).
+        """
+        Nq = kernel.shape[0]
+        shape = self._mesh_shape(Nq)
+        if shape is None:
+            acc = np.zeros_like(kernel, dtype=np.result_type(kernel, correl))
+            for iq2 in range(Nq):
+                iqd = (np.arange(Nq) - iq2) % Nq
+                acc += kernel[iqd] * correl[iq2]
+            return acc
+        k = kernel.reshape(shape + kernel.shape[1:])
+        c = correl.reshape(shape + correl.shape[1:])
+        fk = np.fft.fftn(k, axes=(0, 1, 2))
+        fc = np.fft.fftn(c, axes=(0, 1, 2))
+        return np.fft.ifftn(fk * fc, axes=(0, 1, 2)).reshape(kernel.shape)
+
+    def _mesh_shape(self, Nq):
+        shape = self._current_mesh_shape
+        if shape is not None and int(np.prod(shape)) == Nq:
+            return shape
+        return None
+
+    def _fm_matrices(self, qpoints, m: float, psi_q=None, cache=None):
         """FM dynamical matrices H_q for the selected method (eV)."""
         model = self.model
         method = self.params.thermal_method
-        S = model.S[0]
+        S = self._S_eff()
         qpoints = np.atleast_2d(np.asarray(qpoints, dtype=float))
         Nq = qpoints.shape[0]
-        gamma = np.zeros((1, 3))
-        Jp = model.Jp_q(qpoints)
-        Jp0 = model.Jp_q(gamma)[0]
-        lam0 = model.lambda_q(gamma)[0]
+        if cache is None:
+            cache = self._fourier_cache(qpoints)
+        Jp = cache["Jp"]
+        Jp0 = cache["Jp0"]
+        lam0 = cache["lam0"]
         base = np.diag(m * (Jp0 + lam0).sum(axis=1))[None, :, :] - m * Jp
 
         if method == "rpa":
-            Lam = model.Lambda_q(qpoints)
-            Lam0 = model.Lambda_q(gamma)[0]
+            Lam0 = cache["Lam"][0]
             return np.diag(m * (Jp0 + Lam0).sum(axis=1))[None, :, :] - m * Jp
 
         if method in ("callen", "rpa_callen"):
@@ -209,63 +279,51 @@ class ThermalMagnonSolver:
             psi_bar = np.real(np.diag(psi_q.mean(axis=0)))
             pref = m / (2.0 * S * S * Nq)
             if method == "callen":
-                kernel = model.Jp_q(qpoints) + model.Lambda_q(qpoints)
-                # q - q' differences on the Gamma-centered mesh
-                acc = np.zeros_like(base)
-                for iq2 in range(Nq):
-                    iqd = (np.arange(Nq) - iq2) % Nq
-                    acc += kernel[iqd] * psi_q[iq2]
+                kernel = Jp + cache["Lam"]
+                acc = self._circular_conv(kernel, psi_q)
                 H = base - pref * acc
                 Jpsi = np.einsum("qac,qca->a", Jp, psi_q) / Nq
                 H = H + np.diag(m / (2.0 * S * S) * Jpsi)[None, :, :]
             else:  # rpa_callen: SIA-only Callen feedback
                 A_mat = np.diag(2.0 * model.A)
-                acc = np.zeros_like(base)
-                for iq2 in range(Nq):
-                    acc += A_mat[None, :, :] * psi_q[iq2]
+                acc = self._circular_conv(
+                    np.broadcast_to(A_mat, (Nq, model.nspin, model.nspin)), psi_q
+                )
                 H = base - pref * acc
             a_term = np.diag(model.A * (2.0 * m - (m / S**2) * (m + psi_bar)))
             return H + a_term[None, :, :]
 
         if method == "hp":
-            # Appendix H^HP with S -> m in the exchange terms; A(2S-1) exact.
             if psi_q is None or psi_q.shape[0] != Nq:
                 nq = np.zeros((Nq, model.nspin, model.nspin), dtype=complex)
             else:
-                nq = psi_q  # reused slot: normal correlators n^{ab}_q
-            Lam = model.Jp_q(qpoints) + model.lambda_q(qpoints)
-            Jp0Lam0 = Jp0 + lam0
+                nq = psi_q  # slot reused: normal correlators n^{ab}_q
+            d = np.real(np.diag(nq.mean(axis=0)))
+            # ``base`` already contains m = S - d in the HP closure.
+            # Do not add the appendix's J_q*d - (J_0+lambda_0)*d terms:
+            # those are exactly the S -> m conversion and would subtract
+            # the magnon stiffness twice.
+            kernel = Jp + cache["lam"]
+            conv = self._circular_conv(kernel, nq.transpose(0, 2, 1))
+            jpsi = (
+                0.5
+                * (np.einsum("qac,qca->a", Jp, nq) + np.einsum("qca,qac->a", Jp, nq))
+                / Nq
+            )
             H = base + np.diag(model.A * (2.0 * S - 1.0))[None, :, :]
-            for iq2 in range(Nq):
-                iqd = (np.arange(Nq) - iq2) % Nq
-                n2 = nq[iq2]
-                d = np.diag(n2).real
-                H = (
-                    H
-                    + (
-                        Jp * 0.5 * (d[:, None] + d[None, :])[None, :, :]
-                        - Lam[iqd] * n2.T[None, :, :]
-                        + 0.5
-                        * np.diag(
-                            np.einsum("ac,ca->a", Jp[iq2], n2)
-                            + np.einsum("ca,ac->a", Jp[iq2], n2)
-                        )[None, :, :]
-                        - np.diag(np.einsum("ac,cc->a", Jp0Lam0, n2))[None, :, :]
-                        - np.diag(4.0 * model.A * np.diag(n2).real)[None, :, :]
-                    )
-                    / Nq
-                )
+            H = H + (-conv / Nq + np.diag(jpsi - 4.0 * model.A * d)[None, :, :])
             return H
 
         raise ValueError(f"unknown thermal method {method!r}")
 
+    def _S_eff(self) -> float:
+        return self.model.S[0] * self._K
+
     def _closure_m(self, phi: float, m_prev: float) -> float:
-        S = self.model.S[0]
+        S = self._S_eff()
         if self.params.thermal_method == "hp":
             return S - phi  # HP closure (paper eq. HP_mag)
-        if self.params.thermal_spin_regime == "quantum":
-            return callen_magnetization(S, phi)
-        return classical_magnetization(S, phi)
+        return callen_magnetization(S, phi)
 
     def _phi_of_m(self, T_K: float, qpoints, m: float, psi_q=None):
         """Bose-sum phi and minimum energy at magnetization m."""
@@ -279,15 +337,96 @@ class ThermalMagnonSolver:
         phi = float(nB.sum() / w.size)
         return phi, min_energy
 
-    def _root_m(self, T_K: float, qpoints, psi_q=None):
+    def _afm_positive_modes(self, qpoints, m: float) -> np.ndarray:
+        """Positive Nambu energies for the bipartite AFM RPA spectrum.
+
+        Metric diagonalization keeps exact Goldstone blocks at the
+        ~1e-13 noise floor (below ``_ZERO_MODE_TOL``).  Its reality gate
+        returns negative markers for complex unstable blocks, so an
+        instability cannot masquerade as a Goldstone zero.
+        """
+        return _metric_positive_modes(m * self.model.M_bdg_q(qpoints))
+
+    def _afm_phi_of_m(self, T_eff: float, qpoints, m: float):
+        """Local AFM Nambu normal contraction ``Phi(m, T)``.
+
+        The RPA/Callen closure uses docs/sympy/04 eq. (6), not the FM's
+        bare Bose mean:
+
+        ``Phi = mean'[ (A_q (2 n_B + 1) / omega_q - 1) / 2 ]``.
+
+        Model validation enforces the equivalent two-sublattice form
+        ``A_q = m K_0``.  Thus ``A_q / omega_q = K_0 / eps_q`` supplies
+        both the Bogoliubov amplification of the finite-T occupation and
+        the ``v_q^2`` zero-point depletion at ``T = 0``.  Exact
+        Goldstone modes are excluded from this finite-mesh regulator,
+        consistently with the weighted transition kernel.
+        """
+        w = self._afm_positive_modes(qpoints, m)
+        mask = w > _ZERO_MODE_TOL
+        if not mask.any():
+            return 0.0, float(w.min())
+        nB = bose_factors(w[mask], T_eff)
+        phi = float(
+            (0.5 * (m * self._afm_K0() / w[mask] * (2.0 * nB + 1.0) - 1.0)).mean()
+        )
+        return phi, float(w.min())
+
+    def _solve_afm_rpa(self, T_K, qpoints) -> ThermalSolution:
+        """Self-consistent staggered order in the supported AFM RPA branch.
+
+        The Callen order relation is evaluated with the local Nambu
+        normal contraction above, which has the same
+        ``K_0 / eps_q^2`` critical kernel as ``_tc_closed_form``.  The
+        classical branch mirrors the FM prescription: solve at
+        ``S_eff = K S`` and ``T_eff = K^2 T``, then report ``m/K`` and
+        energies divided by ``K``.
+        """
+        from scipy.optimize import brentq
+
+        K = self._K
+        S = self._S_eff()
+        T_eff = T_K * K * K
+        if T_eff <= 0.0:
+            # At T=0, A_q / omega_q is m-independent, so this direct
+            # closure evaluation retains the Nambu v_q^2 depletion.
+            phi, minimum = self._afm_phi_of_m(0.0, qpoints, S)
+            return ThermalSolution(
+                self._closure_m(phi, S) / K,
+                True,
+                1,
+                minimum / K,
+            )
+
+        def residual(m):
+            phi, _ = self._afm_phi_of_m(T_eff, qpoints, m)
+            return m - self._closure_m(phi, m)
+
+        probes = S * np.array(
+            [1.0, 0.95, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.001]
+        )
+        if residual(probes[0]) <= 0.0:
+            m = S
+        else:
+            m = None
+            for low, high in zip(probes[1:], probes[:-1]):
+                if residual(low) < 0.0:
+                    m = float(brentq(residual, low, high, xtol=1e-14, rtol=1e-13))
+                    break
+            if m is None:
+                return ThermalSolution(0.0, True, 1, 0.0)
+        _, minimum = self._afm_phi_of_m(T_eff, qpoints, m)
+        return ThermalSolution(m / K, True, 1, minimum / K)
+
+    def _root_m(self, T_eff: float, qpoints, psi_q=None):
         """Order-parameter root of m = closure(phi(m)); None if disordered."""
-        S = self.model.S[0]
-        if T_K <= 0.0:
+        S = self._S_eff()
+        if T_eff <= 0.0:
             return S
         from scipy.optimize import brentq
 
         def F(m):
-            phi, _ = self._phi_of_m(T_K, qpoints, m, psi_q)
+            phi, _ = self._phi_of_m(T_eff, qpoints, m, psi_q)
             return m - self._closure_m(phi, m)
 
         probes = [
@@ -320,120 +459,340 @@ class ThermalMagnonSolver:
                 )
         return None
 
-    def _solve_fm(self, T_K: float, qpoints) -> ThermalSolution:
-        """Self-consistent FM state at temperature T_K on the given mesh."""
+    def _solve_fm(self, T_K, qpoints, warm=None) -> ThermalSolution:
+        """Self-consistent FM state at temperature T_K on the given mesh.
+
+        ``warm`` is an optional (m, psi_q) state from a nearby temperature
+        used as continuation seed so ordered CD/HP solutions survive beyond
+        the RPA transition.
+        """
         p = self.params
         method = p.thermal_method
+        K = self._K
+        T_eff = T_K * K * K
         psi_q = None
+        m_last = 0.95 * self._S_eff()
+        if warm is not None:
+            if warm[1] is not None:
+                psi_q = warm[1] * K
+            if warm[0] is not None:
+                m_last = warm[0] * K
         iterations = 1
-        if method in ("callen", "hp", "rpa_callen"):
-            for _ in range(p.thermal_max_iterations // 50 + 1):
-                m = self._root_m(T_K, qpoints, psi_q)
-                if m is None or m <= 0.0:
-                    return ThermalSolution(0.0, True, iterations, 0.0)
-                H = self._fm_matrices(qpoints, m, psi_q)
+        if method == "hp":
+            # Direct port of the verified docs/sympy/02 HP scheme: m is
+            # slaved to the current Bose sum (m = S - phi), correlators are
+            # iterated with adaptive mixing, and negative iterate energies
+            # signal the HP breakdown.
+            S_eff = self._S_eff()
+            na = self.model.nspin
+            psi = (
+                psi_q
+                if psi_q is not None
+                else np.zeros((qpoints.shape[0], na, na), dtype=complex)
+            )
+            mix, prev_res, bad = 0.4, np.inf, 0
+            m = S_eff
+            w_min = 0.0
+            converged_state = None
+            for it in range(2000):
+                phi = float(np.real(np.trace(psi, axis1=1, axis2=2).mean()) / na)
+                m = S_eff - phi
+                H = self._fm_matrices(qpoints, m, psi)
                 Hh = 0.5 * (H + H.conj().transpose(0, 2, 1))
                 w, U = np.linalg.eigh(Hh)
-                min_energy = float(w.min())
-                if method == "hp" and min_energy <= _ZERO_MODE_TOL:
-                    return ThermalSolution(m, True, iterations, min_energy)
+                w_min = float(w.min())
+                iterations = it + 1
+                if w_min < _HP_BREAKDOWN_TOL:
+                    return ThermalSolution(m / K, True, iterations, w_min / K, psi / K)
                 mask = w > _ZERO_MODE_TOL
                 nB = np.zeros_like(w)
-                nB[mask] = bose_factors(w[mask], T_K)
-                if method == "hp":
-                    psi_new = (U * nB[:, None, :]) @ U.conj().transpose(0, 2, 1)
-                    scale = 2.0
+                nB[mask] = bose_factors(w[mask], T_eff)
+                psi_new = (U * nB[:, None, :]) @ U.conj().transpose(0, 2, 1)
+                res = float(np.max(np.abs(psi_new - psi)))
+                if res < 1e-9 * (1.0 + float(np.abs(psi_new).max())):
+                    converged_state = (m, w_min, psi_new)
+                    break
+                if res > prev_res:
+                    bad += 1
                 else:
+                    bad = max(0, bad - 1)
+                if bad > 3:
+                    mix = max(0.002, 0.4 * mix)
+                    bad = 0
+                prev_res = res
+                psi = (1.0 - mix) * psi + mix * psi_new
+            if converged_state is None:
+                return ThermalSolution(m / K, False, iterations, w_min / K, psi / K)
+            m, w_min, psi = converged_state
+            return ThermalSolution(m / K, True, iterations, w_min / K, psi / K)
+
+        if method in ("callen", "rpa_callen"):
+            # Paper's nested closure: for each Callen magnetization, converge
+            # the correlator/Bose occupations first, then update phi.  Solving
+            # a scalar root against a stale correlator selects an unphysical
+            # high-m branch near the transition and causes critical slowdown.
+            S_eff = self._S_eff()
+            na = self.model.nspin
+            phi = 1e-8
+            if psi_q is None:
+                psi = np.zeros((qpoints.shape[0], na, na), dtype=complex)
+            else:
+                psi = psi_q
+            m = m_last
+            min_energy = 0.0
+            iterations = 0
+            for outer in range(400):
+                m = self._closure_m(phi, m)
+                if not np.isfinite(m) or m <= 0.0:
+                    return ThermalSolution(0.0, True, iterations, min_energy / K, None)
+                mix, previous_residual, bad = p.thermal_mixing, np.inf, 0
+                for inner in range(p.thermal_max_iterations):
+                    H = self._fm_matrices(qpoints, m, psi)
+                    Hh = 0.5 * (H + H.conj().transpose(0, 2, 1))
+                    w, U = np.linalg.eigh(Hh)
+                    min_energy = float(w.min())
+                    mask = w > _ZERO_MODE_TOL
+                    nB = np.zeros_like(w)
+                    nB[mask] = bose_factors(w[mask], T_eff)
                     psi_new = (
                         2.0 * m * (U * nB[:, None, :]) @ U.conj().transpose(0, 2, 1)
                     )
-                    scale = 2.0 * m
-                if psi_q is not None and np.max(
-                    np.abs(psi_new - psi_q)
-                ) < p.thermal_tolerance * max(scale, 1.0):
-                    psi_q = psi_new
+                    residual = float(np.max(np.abs(psi_new - psi)))
                     iterations += 1
-                    break
-                psi_q = psi_new if psi_q is None else 0.5 * psi_q + 0.5 * psi_new
-                iterations += 1
-                if iterations > 200:
-                    break
-            phi, min_energy = self._phi_of_m(T_K, qpoints, m, psi_q)
-            m = self._closure_m(phi, m)
-            if method == "hp":
-                H = self._fm_matrices(qpoints, m, psi_q)
-                Hh = 0.5 * (H + H.conj().transpose(0, 2, 1))
-                min_energy = float(np.linalg.eigvalsh(Hh).min())
-            return ThermalSolution(max(m, 0.0), True, iterations, min_energy)
+                    if residual < p.thermal_tolerance * (
+                        1.0 + float(np.abs(psi_new).max())
+                    ):
+                        psi = psi_new
+                        break
+                    if residual > previous_residual:
+                        bad += 1
+                    else:
+                        bad = max(0, bad - 1)
+                    if bad > 3:
+                        mix = max(0.002, 0.4 * mix)
+                        bad = 0
+                    previous_residual = residual
+                    psi = (1.0 - mix) * psi + mix * psi_new
+                else:
+                    return ThermalSolution(
+                        m / K, False, iterations, min_energy / K, psi / K
+                    )
+                phi_new = float(nB.sum() / w.size)
+                if abs(phi_new - phi) < p.thermal_tolerance:
+                    return ThermalSolution(
+                        m / K, True, iterations, min_energy / K, psi / K
+                    )
+                phi = 0.5 * phi + 0.5 * phi_new
+            return ThermalSolution(m / K, False, iterations, min_energy / K, psi / K)
         # RPA: no correlator feedback, single scalar root
-        m = self._root_m(T_K, qpoints)
+        m = self._root_m(T_eff, qpoints)
         if m is None or m <= 0.0:
             return ThermalSolution(0.0, True, 1, 0.0)
-        phi, min_energy = self._phi_of_m(T_K, qpoints, m)
-        return ThermalSolution(m, True, 1, min_energy)
+        phi, min_energy = self._phi_of_m(T_eff, qpoints, m)
+        return ThermalSolution(m / K, True, 1, min_energy / K)
 
     # ------------------------------------------------------------------
     # transitions
     # ------------------------------------------------------------------
 
+    def _set_mesh_shape(self, mesh):
+        shape = []
+        for axis in range(3):
+            n = int(mesh[axis])
+            shape.append(n if (axis < self.model.dimensionality and n > 1) else 1)
+        self._current_mesh_shape = tuple(shape)
+
+    def _afm_K0(self) -> float:
+        """On-site Nambu mean field K_0 per unit magnetization (eV).
+
+        With the RPA scaling A_q = m K_0 (docs/sympy/04 Section 4), K_0 is
+        the q-independent diagonal of the BdG normal block, i.e. the
+        sublattice exchange field at Gamma per unit magnetization.
+        """
+        n = self.model.nspin
+        H0 = self.model.M_bdg_q(np.zeros((1, 3)))[0]
+        return float(np.mean(np.real(np.diag(H0)[:n])))
+
     def _tc_closed_form(self, qpoints) -> Optional[float]:
-        """Linearized RPA transition (closed form), Gamma mode excluded."""
+        """Linearized RPA transition, using the relevant positive spectrum."""
         if self.params.thermal_method != "rpa":
             return None
-        if self.model.order_mode != "ferromagnetic":
-            return None
-        mu = np.linalg.eigvalsh(self.model.M_normal_q(qpoints))
-        mask = mu > _ZERO_MODE_TOL
-        if not mask.any():
-            return 0.0
-        g = float((1.0 / mu[mask]).mean()) / self.model.nspin
+        if self.model.order_mode == "ferromagnetic":
+            mu = np.linalg.eigvalsh(self.model.M_normal_q(qpoints))
+            mask = mu > _ZERO_MODE_TOL
+            if not mask.any():
+                return 0.0
+            g = float((1.0 / mu[mask]).mean()) / self.model.nspin
+        else:
+            # AFM Nambu RPA (docs/sympy/04 eq. TN): the local contraction
+            # n_q = 1/2[A_q(2n_B+1)/omega_q - 1] with A_q = m K_0 and
+            # omega_q = m epsilon_q has an m-independent ratio A_q/omega_q =
+            # K_0/epsilon_q, so as m -> 0 the Bose-divergent part of the
+            # site occupation is (k_B T/m) K_0/epsilon_q^2.  Callen's
+            # linearization then gives k_B T_N = S(S+1)/(3 mean[K_0/eps^2]).
+            # A scalar 1/epsilon weight is wrong: it would converge in 2D
+            # and violate Mermin-Wagner.  Exact Goldstone modes
+            # (epsilon_q <= _ZERO_MODE_TOL, e.g. Gamma on any mesh) are
+            # excluded from the mean: that exclusion is the finite-mesh
+            # regulator of the weighted kernel.
+            mu = self._afm_positive_modes(qpoints, 1.0)
+            mask = mu > _ZERO_MODE_TOL
+            if not mask.any():
+                return 0.0
+            g = float((self._afm_K0() / mu[mask] ** 2).mean())
         if not np.isfinite(g) or g <= 0:
             return 0.0
-        S = self.model.S[0]
-        if self.params.thermal_spin_regime == "quantum":
-            coeff = S * (S + 1.0) / 3.0
-        else:
-            coeff = S * S / 3.0
+        S = self._S_eff()
+        coeff = S * (S + 1.0) / 3.0 / (self._K * self._K)
         return coeff / g / KB_EV_PER_K
 
     def _tc_self_consistent(self, qpoints, mstar) -> Optional[float]:
-        """Temperature at which the self-consistent order reaches mstar."""
-        lo, hi = 0.0, None
-        # exponential search for a bracketing upper bound
-        T = 10.0 * self._energy_scale(qpoints) / KB_EV_PER_K
-        for _ in range(80):
-            sol = self._solve_fm(T, qpoints)
-            if self.params.thermal_method == "hp":
-                if sol.min_energy <= _ZERO_MODE_TOL:
-                    hi = T
+        """Temperature at which the self-consistent order reaches mstar.
+
+        Anchored on the RPA closed form for the initial bracket, then solved
+        by bisection on the (monotone) ordered solution m(T).
+        """
+        from scipy.optimize import brentq
+
+        if self.params.thermal_method in ("callen", "rpa_callen"):
+            # Follow docs/sympy/02 T_of_m: hold m fixed while converging the
+            # CD occupations, then bisect T on phi(T, m).  Iterating m(T)
+            # directly is critically slow and can choose the wrong branch.
+            K = self._K
+            m_fixed = mstar * K
+            S = self._S_eff()
+            target_phi = brentq(
+                lambda phi: self._closure_m(phi, m_fixed) - m_fixed,
+                0.0,
+                1e8,
+            )
+            na = self.model.nspin
+            state_psi = None
+
+            def phi_at_fixed_m(T):
+                nonlocal state_psi
+                psi = state_psi
+                if psi is None:
+                    psi = np.zeros((qpoints.shape[0], na, na), dtype=complex)
+                T_eff = T * K * K
+                for _ in range(self.params.thermal_max_iterations):
+                    H = self._fm_matrices(qpoints, m_fixed, psi)
+                    Hh = 0.5 * (H + H.conj().transpose(0, 2, 1))
+                    w, U = np.linalg.eigh(Hh)
+                    mask = w > _ZERO_MODE_TOL
+                    nB = np.zeros_like(w)
+                    nB[mask] = bose_factors(w[mask], T_eff)
+                    psi_new = (
+                        2.0
+                        * m_fixed
+                        * (U * nB[:, None, :])
+                        @ U.conj().transpose(0, 2, 1)
+                    )
+                    if np.max(np.abs(psi_new - psi)) < self.params.thermal_tolerance * (
+                        1.0 + float(np.abs(psi_new).max())
+                    ):
+                        state_psi = psi_new
+                        return float(nB.sum() / w.size)
+                    psi = 0.5 * psi + 0.5 * psi_new
+                return None
+
+            mu = np.linalg.eigvalsh(self.model.M_normal_q(qpoints))
+            mask = mu > _ZERO_MODE_TOL
+            if not mask.any():
+                return 0.0
+            g = float((1.0 / mu[mask]).mean()) / self.model.nspin
+            guess = S * (S + 1.0) / (3.0 * K * K * g * KB_EV_PER_K)
+            lo, hi = 0.1 * guess, 5.0 * guess
+            for _ in range(8):
+                value = phi_at_fixed_m(lo)
+                if value is not None and value < target_phi:
                     break
-            elif sol.m <= mstar:
-                hi = T
-                break
-            lo = T
-            T *= 1.6
-        if hi is None:
-            return None
-        for _ in range(_BISECTION_STEPS):
-            mid = 0.5 * (lo + hi)
-            sol = self._solve_fm(mid, qpoints)
+                lo *= 0.4
+            else:
+                return None
+            for _ in range(8):
+                value = phi_at_fixed_m(hi)
+                if value is not None and value > target_phi:
+                    break
+                hi *= 2.5
+            else:
+                return None
+            for _ in range(34):
+                mid = 0.5 * (lo + hi)
+                value = phi_at_fixed_m(mid)
+                if value is None:
+                    return None
+                if value < target_phi:
+                    lo = mid
+                else:
+                    hi = mid
+            return 0.5 * (lo + hi)
+
+        state = {"m": None, "psi": None}  # m=None handled by the seed
+
+        def m_of_T(T):
+            sol = self._solve_fm(T, qpoints, warm=(state["m"], state["psi"]))
             if self.params.thermal_method == "hp":
-                satisfied = sol.min_energy <= _ZERO_MODE_TOL
-            else:
-                satisfied = sol.m <= mstar
-            if satisfied:
-                hi = mid
-            else:
-                lo = mid
-            if hi - lo < 1e-6 * max(hi, 1.0):
-                break
-        return hi
+                if not sol.converged:
+                    return -1.0
+                return sol.min_energy - _HP_BREAKDOWN_TOL
+            return sol.m - mstar
+
+        if self.params.thermal_method == "hp":
+            # The HP breakdown lies on the RPA energy scale.  Derive that
+            # scale directly rather than beginning an exponential search at
+            # an arbitrary band-energy estimate.
+            mu = np.linalg.eigvalsh(self.model.M_normal_q(qpoints))
+            mask = mu > _ZERO_MODE_TOL
+            if not mask.any():
+                return 0.0
+            g = float((1.0 / mu[mask]).mean()) / self.model.nspin
+            S = self._S_eff()
+            guess = S * (S + 1.0) / (3.0 * self._K * self._K * g * KB_EV_PER_K)
+            lo, hi = 0.5 * guess, 1.5 * guess
+            while m_of_T(lo) < 0.0 and lo > 1e-6 * guess:
+                lo *= 0.5
+            if m_of_T(lo) < 0.0:
+                return None
+            while m_of_T(hi) >= 0.0:
+                hi *= 1.5
+                if hi > 20.0 * guess:
+                    return None
+            for _ in range(30):
+                mid = 0.5 * (lo + hi)
+                if m_of_T(mid) < 0.0:
+                    hi = mid
+                else:
+                    lo = mid
+            return hi
+
+        guess = self._tc_closed_form(qpoints)
+        if guess is None or not np.isfinite(guess) or guess <= 0:
+            scale = self._energy_scale(qpoints)
+            guess = scale / KB_EV_PER_K
+        lo, hi = 0.2 * guess, 5.0 * guess
+        f_lo, f_hi = m_of_T(lo), m_of_T(hi)
+        widen = 0
+        while f_lo <= 0.0 and widen < 6:
+            lo *= 0.4
+            f_lo = m_of_T(lo)
+            widen += 1
+        if f_lo <= 0.0:
+            return None
+        widen = 0
+        while f_hi >= 0.0 and widen < 6:
+            hi *= 2.5
+            f_hi = m_of_T(hi)
+            widen += 1
+        if f_hi >= 0.0:
+            return hi
+        return float(brentq(m_of_T, lo, hi, xtol=1e-6 * guess, rtol=1e-6))
 
     def _energy_scale(self, qpoints) -> float:
         if self.model.order_mode == "ferromagnetic":
             mu = np.linalg.eigvalsh(self.model.M_normal_q(qpoints))
         else:
-            mu = self._paraunitary_eig(self.model.M_bdg_q(qpoints))
+            mu = _paraunitary_eigenvalues(self.model.M_bdg_q(qpoints))
         pos = mu[mu > _ZERO_MODE_TOL]
         return float(np.median(pos)) if pos.size else 1.0
 
@@ -496,6 +855,7 @@ class ThermalMagnonSolver:
         else:
             previous = None
             for mesh in p.thermal_qmeshes:
+                self._set_mesh_shape(mesh)
                 qpoints = gamma_centered_mesh(mesh, model.dimensionality)
                 if method_label == "rpa":
                     estimate = self._tc_closed_form(qpoints)
@@ -580,6 +940,7 @@ class ThermalMagnonSolver:
         )
         if temperatures and band_kpoints is not None and not self.unstable:
             final_mesh = p.thermal_qmeshes[-1]
+            self._set_mesh_shape(final_mesh)
             qpoints = gamma_centered_mesh(final_mesh, model.dimensionality)
             for T in temperatures:
                 if zero_transition and T > _ZERO_MODE_TOL:
@@ -594,14 +955,28 @@ class ThermalMagnonSolver:
                         )
                     )
                     continue
-                sol = self._solve_fm(float(T), qpoints)
-                H = self._fm_matrices(band_kpoints, sol.m)
-                Hh = 0.5 * (H + H.conj().transpose(0, 2, 1))
-                energies = np.linalg.eigvalsh(Hh)
+                sol = (
+                    self._solve_fm(float(T), qpoints)
+                    if model.order_mode == "ferromagnetic"
+                    else self._solve_afm_rpa(float(T), qpoints)
+                )
+                if model.order_mode == "ferromagnetic":
+                    H = self._fm_matrices(band_kpoints, sol.m * self._K) / self._K
+                    Hh = 0.5 * (H + H.conj().transpose(0, 2, 1))
+                    energies = np.linalg.eigvalsh(Hh)
+                    magnetization = np.full(model.nspin, sol.m)
+                else:
+                    # AFM mirrors the FM classical map: ``sol.m`` is
+                    # physical, so restore m_eff for the RPA spectrum
+                    # and divide its energies by K.
+                    energies = (
+                        self._afm_positive_modes(band_kpoints, sol.m * self._K)
+                        / self._K
+                    )
+                    magnetization = sol.m * np.sign(model.magmoms @ model.axis)
                 block_status = "ordered"
-                if (
-                    self.params.thermal_method == "hp"
-                    and sol.min_energy <= _ZERO_MODE_TOL
+                if self.params.thermal_method == "hp" and (
+                    not sol.converged or sol.min_energy < _HP_BREAKDOWN_TOL
                 ):
                     block_status = "hp_breakdown"
                 bands.append(
@@ -611,7 +986,7 @@ class ThermalMagnonSolver:
                         energies_eV=energies,
                         order_parameters=np.full(band_kpoints.shape[0], sol.m),
                         status=block_status,
-                        magnetization=np.full(model.nspin, sol.m),
+                        magnetization=magnetization,
                     )
                 )
 
@@ -626,6 +1001,7 @@ class ThermalMagnonSolver:
         )
         if method_label == "hp" and transition_T is not None:
             final_mesh = p.thermal_qmeshes[-1]
+            self._set_mesh_shape(final_mesh)
             qpoints = gamma_centered_mesh(final_mesh, model.dimensionality)
             sol = self._solve_fm(float(transition_T), qpoints)
             transition.breakdown_magnetization = float(sol.m)

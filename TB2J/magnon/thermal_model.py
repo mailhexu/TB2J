@@ -3,7 +3,11 @@
 Implements the fail-closed input boundary of the thermal-magnon architecture:
 only collinear ferromagnetic or equivalent bipartite antiferromagnetic
 references with tensors of the form ``J_iso + lambda z z`` plus on-site
-single-ion anisotropy are accepted. Unsupported DMI, transverse/off-diagonal
+single-ion anisotropy are accepted. The AFM Nambu RPA path additionally
+requires exactly one magnetic site per sublattice and a q-independent scalar
+normal BdG block ``A_q = m K_0 I``; same-sublattice transverse exchange,
+multisite covariances, and inequivalent normal weights are rejected instead
+of being silently Gamma-averaged. Unsupported DMI, transverse/off-diagonal
 tensors, non-collinear references, and inequivalent spins are rejected with
 actionable diagnostics — never silently projected away.
 
@@ -32,6 +36,12 @@ _COLLINEARITY_TOL = 1e-6
 _EQUAL_SPIN_RTOL = 1e-6
 _TENSOR_TOL = 1e-8
 _STABILITY_TOL = 1e-9
+# Reality gate of the metric spectrum: imaginary parts below these
+# thresholds are floating-point noise (exact Goldstone blocks sit at
+# ~1e-15 relative); genuinely unstable blocks carry omega-scale
+# imaginary parts.
+_METRIC_IMAG_RTOL = 1e-8
+_METRIC_IMAG_ATOL = 1e-12
 
 
 class ThermalModelValidationError(ValueError):
@@ -149,6 +159,8 @@ class ThermalSpinModel:
 
         # --- dimensionality vs exchange support ------------------------------
         self._validate_dimensionality()
+        if self.order_mode == "bipartite_afm":
+            self._validate_afm_nambu_reduction()
 
     # ------------------------------------------------------------------
     # validation helpers
@@ -231,6 +243,62 @@ class ThermalSpinModel:
                     np.arange(self._magnon.nspin), np.arange(self._magnon.nspin), 2, 2
                 ]
 
+    def _validate_afm_nambu_reduction(self):
+        """Accept only the equivalent two-site scalar-normal AFM form.
+
+        The verified Nambu RPA reduction (docs/sympy/04 eq. 8) has one
+        magnetic site per sublattice, ``A_q = m K_0``, and one shared
+        local normal contraction.  The result schema consequently
+        exposes a single staggered magnitude. General multisite AFMs
+        can carry unequal site covariances even if their normal block
+        happens to be scalar, so they need a site- and
+        eigenvector-resolved closure and are rejected here.
+
+        For the supported two-site form, same-sublattice transverse
+        exchange or inequivalent sublattices must not make the normal
+        BdG block q-dependent or non-scalar. Normal-block entries are
+        finite Fourier sums over ``Rlist``. The uniform grid below is
+        Nyquist-dense for its translation support, so equality on the
+        grid verifies the constant-block condition for the represented
+        lattice Fourier polynomial.
+        """
+        if self.nspin != 2 or int(self._upmask.sum()) != 1:
+            raise ThermalModelValidationError(
+                "thermal_order_mode='bipartite_afm' currently supports "
+                "exactly one magnetic site per sublattice (one up and one "
+                "down reference moment). General multisite AFMs require "
+                "site-resolved Nambu covariances and are not supported by "
+                "the verified scalar RPA closure."
+            )
+
+        max_R = np.ceil(np.abs(self._Rlist).max(axis=0)).astype(int)
+        mesh = 2 * max_R + 1
+        axes = [np.arange(count, dtype=float) / count for count in mesh]
+        qpoints = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
+        H = self.M_bdg_q(qpoints)
+        n = self.nspin
+        normal_blocks = (H[:, :n, :n], H[:, n:, n:])
+        K0 = 0.5 * sum(np.trace(block[0]) / n for block in normal_blocks)
+        target = K0 * np.eye(n)
+        deviation_by_q = np.maximum(
+            np.abs(normal_blocks[0] - target).max(axis=(1, 2)),
+            np.abs(normal_blocks[1] - target).max(axis=(1, 2)),
+        )
+        deviation = float(deviation_by_q.max())
+        scale = max(float(np.abs(H).max()), 1e-30)
+        if deviation > _TENSOR_TOL * scale:
+            iq = int(np.argmax(deviation_by_q))
+            raise ThermalModelValidationError(
+                "thermal_order_mode='bipartite_afm' accepts only the "
+                "equivalent two-sublattice Nambu form A_q = m K_0 I "
+                "(docs/sympy/04 eq. 8). same-sublattice transverse "
+                "exchange or inequivalent sublattices made the normal "
+                f"BdG block q-dependent/non-scalar (max deviation "
+                f"{deviation:.3e} eV at q={qpoints[iq].tolist()}). "
+                "This general AFM form is not supported by the verified "
+                "weighted RPA closure."
+            )
+
     # ------------------------------------------------------------------
     # paper-quantity accessors
     # ------------------------------------------------------------------
@@ -287,10 +355,12 @@ class ThermalSpinModel:
             matrices = self.M_normal_q(qpoints)
             values = np.linalg.eigvalsh(matrices)
             return float(values.min())
-        # AFM: full bosonic BdG via magnon3 contractions at unit magnetization
+        # AFM: full bosonic BdG via magnon3 contractions at unit
+        # magnetization; negative markers from the metric fallback
+        # (dynamically unstable blocks) are included in the minimum.
         H = self.M_bdg_q(qpoints)
         values = _paraunitary_eigenvalues(H)
-        return float(np.sort(values.real)[: H.shape[1] // 2].min())
+        return float(np.real(values).min())
 
     def M_bdg_q(self, qpoints) -> np.ndarray:
         """Bosonic BdG matrix per unit magnetization (collinear frames).
@@ -325,14 +395,76 @@ class ThermalSpinModel:
         )
 
 
+def _metric_positive_modes(H: np.ndarray) -> np.ndarray:
+    """Positive metric modes with explicit PSD and reality gates.
+
+    The metric fallback is reserved for marginal positive-semidefinite
+    BdG blocks, notably exact Goldstone modes that cannot be
+    Cholesky-factorized.  For every block it verifies both that ``H`` is
+    PSD (within the stability tolerance) and that ``eigvals(g H)`` is
+    real.  An indefinite ``H`` or appreciably complex metric spectrum
+    is dynamically unstable and is returned as a negative pseudo-mode
+    marker, never as the zero real part of a complex pair.
+
+    Singular PSD blocks have their null branches clamped to exactly zero
+    from the Hermitian nullity of ``H``.  This prevents non-normal
+    eigensolver noise at Goldstone points from leaking into the
+    ``A_q / omega_q`` normal contraction.
+    """
+    H = np.asarray(H)
+    single = H.ndim == 2
+    blocks = H[None, :, :] if single else H
+    n = blocks.shape[-1] // 2
+    I = np.eye(n)
+    g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
+
+    Hh = 0.5 * (blocks + blocks.swapaxes(-1, -2).conj())
+    h_values = np.linalg.eigvalsh(Hh)
+    h_scale = np.maximum(np.abs(h_values).max(axis=-1), 1e-30)
+    h_tol = np.maximum(_METRIC_IMAG_ATOL, _STABILITY_TOL * h_scale)
+    h_min = h_values[..., 0]
+    non_psd = h_min < -h_tol
+    zero_count = (np.abs(h_values) <= h_tol[..., None]).sum(axis=-1)
+
+    values = np.linalg.eigvals(g @ blocks)
+    imag = np.abs(values.imag)
+    # At an exact Goldstone point the metric dynamical matrix is
+    # non-normal and all of its eigenvalues are zero, so its own
+    # roundoff-scale spectrum cannot set a meaningful relative
+    # threshold.  Compare against the Hermitian BdG energy scale.
+    complex_block = (
+        imag
+        > np.maximum(
+            _METRIC_IMAG_ATOL,
+            _METRIC_IMAG_RTOL * h_scale[..., None],
+        )
+    ).any(axis=-1)
+
+    positive = np.sort(values.real, axis=-1)[..., n:]
+    zero_columns = np.arange(n) < np.minimum(zero_count, n)[..., None]
+    positive = np.where(zero_columns, 0.0, positive)
+    invalid = non_psd | complex_block
+    marker = -np.maximum(imag.max(axis=-1), np.maximum(-h_min, h_tol))
+    result = np.where(invalid[..., None], marker[..., None], positive)
+    return result[0] if single else result
+
+
 def _paraunitary_eigenvalues(H: np.ndarray) -> np.ndarray:
     """Positive-mode eigenvalues of bosonic BdG matrices via Cholesky/metric."""
     n = H.shape[-1] // 2
     I = np.eye(n)
-    K = np.linalg.cholesky(H)
     g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
-    eig_matrix = K.swapaxes(-1, -2).conj() @ g @ K
-    return np.linalg.eigvalsh(eig_matrix)[:, n:]
+    try:
+        K = np.linalg.cholesky(H)
+        eig_matrix = K.swapaxes(-1, -2).conj() @ g @ K
+        return np.linalg.eigvalsh(eig_matrix)[..., n:]
+    except np.linalg.LinAlgError:
+        # Exactly singular (positive semi-definite) BdG blocks carrying
+        # Goldstone modes cannot be Cholesky-factorized; the metric
+        # spectrum is identical for stable blocks and well defined
+        # there.  Indefinite blocks (omega^2 < 0) fail the reality gate
+        # inside the fallback and come back as negative markers.
+        return _metric_positive_modes(H)
 
 
 def build_thermal_spin_model(

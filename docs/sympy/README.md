@@ -15,6 +15,7 @@ python 01_heisenberg_hp_lswt.py
 | `01_heisenberg_hp_lswt.py/.md` | Spin algebra, Heisenberg model, Holstein–Primakoff transformation, linear spin-wave theory (FM + 2-sublattice AFM), Bogoliubov diagonalization | from scratch; paper Eq. HP |
 | `02_rpa_callen_tc.py/.md` | Green's-function equation of motion, RPA (Tyablikov) decoupling, Callen decoupling, Callen magnetization formula, Tc expressions, self-consistent finite-T dispersions | from scratch; arXiv:2405.00477 Sec. II |
 | `03_anisotropy_multisite_conventions.py/.md` | Single-ion anisotropy & anisotropic exchange in HP/RPA/CD, operator ordering, multi-site dynamical matrices, bridge to TB2J `magnon3.py` conventions | from scratch; arXiv:2405.00477 Sec. II.G + Appendix |
+| `04_afm_nambu.py/.md` | Local-frame Nambu LSWT/RPA for collinear bipartite AFMs: BdG structure, normal/anomalous contractions, staggered order, weighted K_0/eps_q^2 critical kernel for T_N, Goldstone regulation | from scratch; ADR 0004 |
 
 Primary method paper: arXiv:2405.00477 (source in `Refs/2405.00477/main.tex`).
 
