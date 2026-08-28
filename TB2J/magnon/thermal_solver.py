@@ -940,7 +940,7 @@ class ThermalMagnonSolver:
                 hi *= 1.5
                 if hi > 20.0 * guess:
                     return None
-            for _ in range(30):
+            for _ in range(14):
                 mid = 0.5 * (lo + hi)
                 if m_of_T(mid) < 0.0:
                     hi = mid
