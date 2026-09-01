@@ -175,6 +175,93 @@ def _apply_rotation(
 
 
 # ---------------------------------------------------------------------------
+# Supercell (periodic halo) rotation
+# ---------------------------------------------------------------------------
+
+
+def rotate_density_matrix_supercell(
+    dm,
+    blocks: Sequence[ShellBlock] = (),
+    theta: float | None = None,
+    phi: float | None = None,
+):
+    """Rotate a sisl SOC density matrix stored in the periodic-halo layout.
+
+    Applies the SAME orbital rotation R (unit-cell block-diagonal) and spin
+    rotation W to every periodic-image block of the DM:
+
+        rho'(R)_{ij} = R_i W rho(R)_{ij} W^dagger R_j^dagger
+
+    Values are written back into the original sparse pattern; any rotation
+    fill-in outside the pattern is discarded (its maximum magnitude is
+    reported and should be negligible for complete shell blocks).
+    """
+    no = dm.shape[0]
+    ncol = dm.shape[1]
+    if ncol == no:
+        return rotate_density_matrix(dm, blocks, theta=theta, phi=phi)
+
+    # ORB_INDX enumerates the periodic halo (supercell) orbitals; keep only
+    # the unit-cell shell blocks (image copies repeat the same indices +N).
+    blocks = [b for b in blocks if all(i < no for i in b.indices)]
+
+    R = orbital_rotation_matrix(no, blocks, theta=theta, phi=phi)
+    if theta is not None:
+        W = spin_rotation(theta, phi or 0.0)
+    else:
+        W = spin_rotation_90_y()
+    Wd = W.conj()
+
+    rows = np.array([int(r) for r, _ in dm.iter_nnz()])
+    cols = np.array([int(c) for _, c in dm.iter_nnz()])
+    uc = dm.geometry.osc2uc(cols, unique=False)
+    cells = dm.geometry.o2sc(cols - uc)
+    _, inverse = np.unique(cells, axis=0, return_inverse=True)
+
+    D = dm._csr._D  # (nnz, 9) component values in iteration order
+    out = dm.copy()  # identical pattern and entry order
+    new_vals = np.empty((len(rows), 9))
+    discarded = 0.0
+
+    comps = (
+        (dm.M11r, dm.M11i),
+        (dm.M12r, dm.M12i),
+        (dm.M21r, dm.M21i),
+        (dm.M22r, dm.M22i),
+    )
+    for k in range(int(inverse.max()) + 1):
+        sel = inverse == k
+        if not sel.any():
+            continue
+        rk, ck = rows[sel], uc[sel]
+        spinor = np.zeros((no, no, 2, 2), dtype=complex)
+        for (si, sj), (re, im) in zip(((0, 0), (0, 1), (1, 0), (1, 1)), comps):
+            spinor[rk, ck, si, sj] = D[sel, re] + 1j * D[sel, im]
+        rot = np.einsum(
+            "ia,su,abuv,jb,tv->ijst", R, W, spinor, R.conj(), Wd.conj(), optimize=True
+        )
+        vals = rot[rk, ck]
+        for (si, sj), (re, im) in zip(((0, 0), (0, 1), (1, 0), (1, 1)), comps):
+            new_vals[sel, re] = vals[:, si, sj].real
+            new_vals[sel, im] = vals[:, si, sj].imag
+        # fill-in outside the original pattern (within this cell block)
+        mask = np.zeros((no, no), dtype=bool)
+        mask[rk, ck] = True
+        fill = rot[~mask]
+        if fill.size:
+            discarded = max(discarded, float(np.abs(fill).max()))
+
+    if discarded > 1e-8:
+        print(
+            f"rotate_density_matrix_supercell: discarded fill-in "
+            f"outside sparse pattern, max |element| = {discarded:.3e}"
+        )
+    # iter_nnz yields entries in stored order; assign rotated values in place
+    out._csr._D[:] = new_vals
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -287,8 +374,10 @@ def rotate_file(
             angles = [0.0, 90.0, 0.0]  # default z→x
         output_dm = input_dm.spin_rotate(angles)
     else:
-        # Full orbital + spin rotation
-        output_dm = rotate_density_matrix(input_dm, blocks, theta=theta, phi=phi)
+        # Full orbital + spin rotation (supercell-aware)
+        output_dm = rotate_density_matrix_supercell(
+            input_dm, blocks, theta=theta, phi=phi
+        )
 
     output_dm.write(str(output_path))
 
