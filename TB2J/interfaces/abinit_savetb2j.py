@@ -1375,8 +1375,8 @@ load_abinit_savetb2j_projector = load_abinit_savetb2j
 def gen_exchange_abinit_projector(
     filename,
     output_path="TB2J_results_abinit",
-    Rmax=None,
-    Rcut=None,
+    Rcut=10.0,
+    Rpts=None,
     nz=30,
     smearing_eV=0.05,
     magnetic_elements=None,
@@ -1395,7 +1395,8 @@ def gen_exchange_abinit_projector(
         sites = [int(site) for site in index_magnetic_atoms]
     if sites is None:
         sites = list(range(len(data.site_nproj)))
-    Rpts = _R_grid_for_cutoff(data, sites, Rcut, Rmax)
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(data, sites, Rcut)
     local_operators = component_local_operators(
         data, operator_component, sites, "ABINIT savetb2j"
     )
@@ -1462,8 +1463,8 @@ def gen_exchange_abinit_projector(
 def gen_exchange_abinit_nc_pao(
     filename,
     output_path="TB2J_results_abinit_nc_pao",
-    Rmax=None,
-    Rcut=None,
+    Rcut=10.0,
+    Rpts=None,
     nz=30,
     smearing_eV=0.05,
     magnetic_elements=None,
@@ -1522,7 +1523,8 @@ def gen_exchange_abinit_nc_pao(
             emax_relative_to_fermi_eV=emax_relative_to_fermi_eV,
             n_empty=n_empty,
         )
-    Rpts = _R_grid_for_cutoff(data, sites, Rcut, Rmax)
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(data, sites, Rcut)
     if (
         operator_component == ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT
         and not data.has_operator_component(operator_component)

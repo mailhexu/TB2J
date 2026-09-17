@@ -437,8 +437,8 @@ def load_vasp_projector_xml(filename):
 def gen_exchange_vasp_projector_xml(
     filename,
     output_path="TB2J_results_vasp_xml",
-    Rmax=None,
-    Rcut=None,
+    Rcut=10.0,
+    Rpts=None,
     nz=30,
     smearing_eV=0.05,
     magnetic_elements=None,
@@ -538,9 +538,10 @@ def gen_exchange_vasp_projector_xml(
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
-    Rpts = _R_grid_for_cutoff(
-        data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
-    )
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(
+            data, sites or list(range(len(data.site_nproj))), Rcut
+        )
     local_operators = None
     operator_text = f"onsite operator basis {data.operator_basis}"
     if operator_component is not None:

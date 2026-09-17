@@ -461,7 +461,7 @@ def test_vasp_projector_xml_uses_delta_total_component_for_exchange(tmp_path):
     exchange_out, exchange_Jdict = gen_exchange_vasp_projector_xml(
         filename,
         output_path=tmp_path / "TB2J_results_vasp_xml",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=4,
         population_source="none",
     )
@@ -537,7 +537,7 @@ def test_vasp_projector_xml_selects_named_operator_component(tmp_path, monkeypat
     exchange_out, _ = gen_exchange_vasp_projector_xml(
         filename,
         output_path=tmp_path / "TB2J_results_vasp_xml",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         population_source="none",
         operator_component="mft_site_operator",
     )
@@ -559,7 +559,7 @@ def test_vasp_projector_xml_rejects_missing_operator_component(tmp_path):
     with pytest.raises(ValueError, match="operator component is unavailable: missing"):
         gen_exchange_vasp_projector_xml(
             filename,
-            Rmax=0,
+            Rpts=[(0, 0, 0)],
             population_source="none",
             operator_component="missing",
         )
@@ -626,7 +626,7 @@ def test_vasp_projector_xml_exchange_writes_qtot_populations(tmp_path):
     exchange_out, _ = gen_exchange_vasp_projector_xml(
         filename,
         output_path=tmp_path / "TB2J_results_vasp_xml",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=4,
         population_source="green",
     )
@@ -718,7 +718,7 @@ tot          0.010   0.020   0.470   0.500
     exchange_out, exchange_Jdict = gen_exchange_vasp_projector_xml(
         filename,
         output_path=tmp_path / "TB2J_results_vasp_xml",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=4,
         population_source="outcar",
         allow_basis_mismatch=True,
@@ -829,7 +829,7 @@ def test_vasp_projector_xml_exchange_rejects_isym_by_default(tmp_path):
         gen_exchange_vasp_projector_xml(
             filename,
             output_path=tmp_path / "TB2J_results_vasp_xml",
-            Rmax=0,
+            Rpts=[(0, 0, 0)],
             nz=4,
             population_source="none",
         )
@@ -891,7 +891,7 @@ def test_vasp_projector_xml_exchange_rejects_lprj_cdij_by_default(tmp_path):
         gen_exchange_vasp_projector_xml(
             filename,
             output_path=tmp_path / "TB2J_results_vasp_xml",
-            Rmax=0,
+            Rpts=[(0, 0, 0)],
             nz=4,
             population_source="none",
         )

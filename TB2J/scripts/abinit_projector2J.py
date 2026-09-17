@@ -30,15 +30,9 @@ def run_abinit_projector2J():
         "--output_path", default="TB2J_results_abinit", help="output directory"
     )
     parser.add_argument(
-        "--Rmax",
-        type=int,
-        default=1,
-        help="maximum integer lattice-vector component for the R grid",
-    )
-    parser.add_argument(
         "--Rcut",
         type=float,
-        default=None,
+        default=10.0,
         help="optional spin-pair distance cutoff in Angstrom",
     )
     parser.add_argument(
@@ -101,7 +95,6 @@ def run_abinit_projector2J():
     exchange_out, _ = gen_exchange_abinit_projector(
         args.input,
         output_path=args.output_path,
-        Rmax=args.Rmax,
         Rcut=args.Rcut,
         nz=args.nz,
         smearing_eV=args.smearing,

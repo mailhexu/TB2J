@@ -22,10 +22,10 @@ def run_gpaw_projector2J():
         "--output_path", default="TB2J_results", help="output directory"
     )
     parser.add_argument(
-        "--Rmax",
-        type=int,
-        default=1,
-        help="maximum integer lattice-vector component for the R grid",
+        "--Rcut",
+        type=float,
+        default=10.0,
+        help="spin-pair distance cutoff in Angstrom",
     )
     parser.add_argument(
         "--nz", type=int, default=30, help="number of continued-fraction poles"
@@ -66,7 +66,7 @@ def run_gpaw_projector2J():
     exchange_out, _ = gen_exchange_projector_netcdf(
         args.input,
         output_path=args.output_path,
-        Rmax=args.Rmax,
+        Rcut=args.Rcut,
         nz=args.nz,
         smearing_eV=args.smearing,
         magnetic_elements=args.elements,

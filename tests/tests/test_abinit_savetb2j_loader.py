@@ -356,7 +356,7 @@ def test_gen_exchange_abinit_nc_pao_accepts_spherical_window(tmp_path):
     exchange_out, exchange = gen_exchange_abinit_nc_pao(
         filename,
         output_path=output_path,
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=4,
         population_mode="projector",
         shell_charge_threshold=None,
@@ -381,7 +381,7 @@ def test_gen_exchange_abinit_nc_pao_rejects_spherical_diagnostic_component(tmp_p
         gen_exchange_abinit_nc_pao(
             filename,
             output_path=tmp_path / "unused",
-            Rmax=0,
+            Rpts=[(0, 0, 0)],
             nz=4,
             operator_component="delta_xc_spherical",
             population_mode="none",
@@ -639,7 +639,7 @@ def test_gen_exchange_abinit_projector_uses_delta_total_by_default(tmp_path):
     exchange_out, exchange = gen_exchange_abinit_projector(
         filename,
         output_path=output_path,
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=4,
         population_mode="none",
     )
@@ -661,7 +661,7 @@ def test_gen_exchange_abinit_projector_rejects_unavailable_component(tmp_path):
         gen_exchange_abinit_projector(
             filename,
             output_path=tmp_path / "unused",
-            Rmax=0,
+            Rpts=[(0, 0, 0)],
             nz=4,
             operator_component="missing_component",
             population_mode="none",
@@ -681,8 +681,8 @@ def test_abinit_projector2j_cli_writes_exchange(tmp_path, monkeypatch, capsys):
             str(filename),
             "--output_path",
             str(output_path),
-            "--Rmax",
-            "0",
+            "--Rcut",
+            "10.0",
             "--nz",
             "4",
         ],

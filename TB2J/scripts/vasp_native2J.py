@@ -36,7 +36,7 @@ def run_vasp_native2J():
     parser.add_argument(
         "--Rcut",
         type=float,
-        default=None,
+        default=10.0,
         help="spin-pair distance cutoff in Angstrom",
     )
     parser.add_argument(
@@ -63,6 +63,8 @@ def run_vasp_native2J():
     )
     args = parser.parse_args()
 
+    from ase.units import kB
+
     from TB2J.interfaces.gpaw_projector import (
         _R_grid_for_cutoff,
         write_projector_exchange_out,
@@ -73,7 +75,6 @@ def run_vasp_native2J():
         ProjectorGreen,
         projector_charge_moments_from_green,
     )
-    from ase.units import kB
 
     snapshot = read_vasp_native(args.input)
     data = build_projector_green_data(snapshot)
@@ -92,13 +93,11 @@ def run_vasp_native2J():
     if not magnetic_atoms:
         magnetic_atoms = list(range(len(snapshot.site_layout)))
 
-    rcut = args.Rcut if args.Rcut is not None else 10.0
-    Rpts = _R_grid_for_cutoff(data, magnetic_atoms, rcut, None)
+    rcut = args.Rcut
+    Rpts = _R_grid_for_cutoff(data, magnetic_atoms, rcut)
 
     contour = CFR2(nz=args.nz, T=args.smearing / kB)
-    population = projector_charge_moments_from_green(
-        ProjectorGreen(data), contour
-    )
+    population = projector_charge_moments_from_green(ProjectorGreen(data), contour)
 
     exchange_out, _ = write_projector_exchange_out(
         data,

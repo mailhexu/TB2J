@@ -753,8 +753,7 @@ def gen_exchange_abinit_paw(
     output_path: str = "TB2J_results_abinit_paw",
     nz: int = 30,
     smearing_eV: float = 0.05,
-    Rcut: float | None = None,
-    Rmax: int | None = None,
+    Rcut: float = 10.0,
     cell: np.ndarray | None = None,
     positions: np.ndarray | None = None,
     atomic_numbers: np.ndarray | None = None,
@@ -915,12 +914,7 @@ def gen_exchange_abinit_paw(
         magnetic_elements=magnetic_elements,
         index_magnetic_atoms=index_magnetic_atoms,
     )
-    rpts = _R_grid_for_cutoff(
-        data,
-        sites,
-        Rcut=Rcut,
-        Rmax=Rmax,
-    )
+    rpts = _R_grid_for_cutoff(data, sites, Rcut)
 
     if description is None:
         description = (
@@ -1005,9 +999,8 @@ def run_gen_exchange_abinit_paw() -> None:
         "--smearing_eV", type=float, default=0.05, help="smearing temperature in eV"
     )
     parser.add_argument(
-        "--Rcut", type=float, default=None, help="real-space cutoff (Å)"
+        "--Rcut", type=float, default=10.0, help="real-space cutoff (Å)"
     )
-    parser.add_argument("--Rmax", type=int, default=None, help="max R-grid shell")
     parser.add_argument(
         "--delta_unit",
         default=None,
@@ -1047,7 +1040,6 @@ def run_gen_exchange_abinit_paw() -> None:
         nz=args.nz,
         smearing_eV=args.smearing_eV,
         Rcut=args.Rcut,
-        Rmax=args.Rmax,
         delta_unit=args.delta_unit,
         snapshot_cache=args.snapshot_cache,
         write_snapshot_cache=args.write_snapshot_cache,

@@ -22,16 +22,10 @@ def run_vasp_projector2J():
         "--output_path", default="TB2J_results_vasp_xml", help="output directory"
     )
     parser.add_argument(
-        "--Rmax",
-        type=int,
-        default=None,
-        help="optional maximum integer lattice-vector component for the R grid",
-    )
-    parser.add_argument(
         "--Rcut",
         type=float,
-        default=None,
-        help="optional spin-pair distance cutoff in Angstrom",
+        default=10.0,
+        help="spin-pair distance cutoff in Angstrom",
     )
     parser.add_argument(
         "--nz", type=int, default=30, help="number of continued-fraction poles"
@@ -94,7 +88,6 @@ def run_vasp_projector2J():
     exchange_out, _ = gen_exchange_vasp_projector_xml(
         args.input,
         output_path=args.output_path,
-        Rmax=args.Rmax,
         Rcut=args.Rcut,
         nz=args.nz,
         smearing_eV=args.smearing,

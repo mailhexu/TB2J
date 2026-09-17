@@ -614,24 +614,16 @@ def _R_grid(nmax=1):
     )
 
 
-def _R_grid_for_cutoff(data, sites, Rcut=None, Rmax=None):
-    if Rmax is None:
-        if Rcut is None:
-            Rmax = 1
-        else:
-            cell_lengths = np.linalg.norm(np.asarray(data.cell, dtype=float), axis=1)
-            positions = np.asarray(data.positions, dtype=float)
-            max_pair = 0.0
-            for i in sites:
-                for j in sites:
-                    max_pair = max(
-                        max_pair, float(np.linalg.norm(positions[j] - positions[i]))
-                    )
-            Rmax = int(np.ceil((float(Rcut) + max_pair) / np.min(cell_lengths)))
-    Rpts = _R_grid(nmax=Rmax)
-    if Rcut is None:
-        return Rpts
-
+def _R_grid_for_cutoff(data, sites, Rcut):
+    """Build the lattice-vector grid needed to cover all pairs within Rcut."""
+    cell_lengths = np.linalg.norm(np.asarray(data.cell, dtype=float), axis=1)
+    positions = np.asarray(data.positions, dtype=float)
+    max_pair = 0.0
+    for i in sites:
+        for j in sites:
+            max_pair = max(max_pair, float(np.linalg.norm(positions[j] - positions[i])))
+    nmax = int(np.ceil((float(Rcut) + max_pair) / np.min(cell_lengths)))
+    Rpts = _R_grid(nmax=nmax)
     selected = set()
     for R in Rpts:
         for sign in (1, -1):
@@ -956,8 +948,8 @@ def write_projector_exchange_out(
 def gen_exchange_projector_netcdf(
     filename,
     output_path="TB2J_results",
-    Rmax=None,
-    Rcut=None,
+    Rcut=10.0,
+    Rpts=None,
     nz=30,
     smearing_eV=0.05,
     magnetic_elements=None,
@@ -969,9 +961,10 @@ def gen_exchange_projector_netcdf(
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
-    Rpts = _R_grid_for_cutoff(
-        data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
-    )
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(
+            data, sites or list(range(len(data.site_nproj))), Rcut
+        )
     if operator_component is None and data.has_operator_component("delta_total"):
         operator_component = "delta_total"
     if operator_component is not None:
@@ -1009,8 +1002,7 @@ def gen_exchange_gpaw(
     magnetic_elements=None,
     index_magnetic_atoms=None,
     operator_component=None,
-    Rmax=None,
-    Rcut=None,
+    Rcut=10.0,
     nz=30,
     smearing_eV=0.05,
     save_netcdf=None,
@@ -1039,15 +1031,12 @@ def gen_exchange_gpaw(
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
-    Rpts = _R_grid_for_cutoff(
-        data, sites or list(range(len(data.site_nproj))), Rcut, Rmax
-    )
+    Rpts = _R_grid_for_cutoff(data, sites or list(range(len(data.site_nproj))), Rcut)
     return write_projector_exchange_out(
         data,
         path=output_path,
         Rpts=Rpts,
         nz=nz,
-        smearing_eV=smearing_eV,
         magnetic_elements=magnetic_elements,
         index_magnetic_atoms=index_magnetic_atoms,
         Rcut=Rcut,
