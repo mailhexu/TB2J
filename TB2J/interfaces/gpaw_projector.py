@@ -949,7 +949,7 @@ def write_projector_exchange_out(
         exchange_Jdict=exchange_Jdict,
         description=description,
     )
-    output.write_txt(path=path)
+    output.write_all(path=path)
     return Path(path) / "exchange.out", exchange_Jdict
 
 
