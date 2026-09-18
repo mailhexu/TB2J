@@ -28,9 +28,15 @@ one NetCDF file whose name is the dataset output prefix followed by
 
 .. code-block:: bash
 
-   abinit_projector2J.py --input run_SAVETB2J.nc \
-       --output_path TB2J_results_abinit --elements Fe --Rmax 1 --nz 30 \
+   abinit2J.py savetb2j --input run_SAVETB2J.nc \
+       --output_path TB2J_results_abinit --elements Fe --Rcut 10.0 --nz 30 \
        --smearing 0.05
+
+The ``savetb2j`` subcommand auto-detects the backend from the file's
+``schema_name`` attribute: ``abinit.savetb2j.projector`` files (this schema)
+take the PAW option set, while norm-conserving PAO and spherical-window
+exports are routed to the NC backend with its shell-filter and overlap
+options.  Options that do not apply to the detected backend are rejected.
 
 TB2J uses ``operator_components/delta_total`` by default.  In version 1 this is
 the exchange-ready spin-up minus spin-down PAW onsite operator in the native

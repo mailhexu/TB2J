@@ -164,7 +164,7 @@ the CLI:
 .. code-block:: bash
 
    gpaw_projector2J.py --input gpaw_bcc_fe_projector_green.nc \
-       --output_path TB2J_results --elements Fe --Rmax 1 --nz 30 --smearing 0.05
+       --output_path TB2J_results --elements Fe --Rcut 10.0 --nz 30 --smearing 0.05
 
 For cubic SrMnO3 with Mn as the only magnetic site:
 
@@ -172,7 +172,7 @@ For cubic SrMnO3 with Mn as the only magnetic site:
 
    gpaw_projector2J.py --input gpaw_cubic_srmno3_projector_green.nc \
        --output_path TB2J_results_srmno3 --index_magnetic_atoms 2 \
-       --Rmax 1 --nz 30 --smearing 0.05
+       --Rcut 10.0 --nz 30 --smearing 0.05
 
 The CLI reads the NetCDF file, reconstructs ``G(R,E)`` at the continued-fraction
 energy points, contracts the controlled projector trace, and writes the standard
@@ -223,8 +223,8 @@ After ABINIT produces the file, run:
 
 .. code-block:: bash
 
-   abinit_projector2J.py --input run_SAVETB2J.nc \
-       --output_path TB2J_results_abinit --elements Fe --Rmax 1 --nz 30 \
+   abinit2J.py savetb2j --input run_SAVETB2J.nc \
+       --output_path TB2J_results_abinit --elements Fe --Rcut 10.0 --nz 30 \
        --smearing 0.05
 
 The ABINIT interface uses the exported ``delta_total`` operator component by
@@ -259,7 +259,7 @@ are rejected for exchange calculations.
 
 The intended validation inputs are scalar norm-conserving, collinear
 ``nsppol=2`` calculations with ``nspinor=1``, no SOC, and PAOs available from the
-pseudopotential data.  Use ``abinit_nc_pao2J.py`` for exchange calculations from
+pseudopotential data.  Use ``abinit2J.py savetb2j`` for exchange calculations from
 validated schema-v2 files.  The CLI can apply PAO shell filtering with
 ``--shell_charge_threshold`` and ``--shell_moment_threshold`` and can restrict the
 spectral sum with ``--emax``, ``--emax_relative_to_fermi``, or a fixed number of
