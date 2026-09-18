@@ -980,7 +980,7 @@ def test_abinit_nc_pao_diagnostics_report_summarizes_selection(tmp_path):
     gen_exchange_abinit_nc_pao(
         filename,
         output_path=tmp_path / "TB2J_results",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=2,
         report_path=report_path,
     )
@@ -993,7 +993,7 @@ def test_abinit_nc_pao_diagnostics_report_summarizes_selection(tmp_path):
     gen_exchange_abinit_nc_pao(
         filename,
         output_path=tmp_path / "TB2J_results_disabled_filter",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=2,
         shell_charge_threshold=None,
         shell_moment_threshold=None,
@@ -1015,7 +1015,7 @@ def test_abinit_nc_pao_report_handles_disabled_filter_without_shell_metadata(tmp
     gen_exchange_abinit_nc_pao(
         filename,
         output_path=tmp_path / "TB2J_results",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=2,
         shell_charge_threshold=None,
         shell_moment_threshold=None,
@@ -1118,7 +1118,7 @@ def test_abinit_nc_pao_hs_v2_full_bz_exchange_smoke(tmp_path):
     )
 
     exchange_out, jdict = gen_exchange_abinit_nc_pao(
-        filename, output_path=tmp_path / "TB2J_results", Rmax=0, nz=2
+        filename, output_path=tmp_path / "TB2J_results", Rpts=[(0, 0, 0)], nz=2
     )
 
     assert exchange_out.is_file()
@@ -1182,7 +1182,7 @@ def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
     exchange_out, jdict = gen_exchange_abinit_nc_pao(
         filename,
         output_path=output_path,
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=2,
         smearing_eV=0.1,
         overlap_mode="svd",
@@ -1202,7 +1202,7 @@ def test_abinit_nc_pao_exchange_projector_population_uses_dual_metric(tmp_path):
     exchange_out, _ = gen_exchange_abinit_nc_pao(
         filename,
         output_path=tmp_path / "TB2J_results_projector_population",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=2,
         population_mode="projector",
     )
@@ -1223,7 +1223,7 @@ def test_abinit_nc_pao_exchange_rejects_ibz_schema_v2(tmp_path):
 
 
 def test_abinit_nc_pao_cli_writes_exchange_out(tmp_path, monkeypatch):
-    from TB2J.scripts.abinit_nc_pao2J import run_abinit_nc_pao2J
+    from TB2J.scripts.abinit2J import run_abinit2J
 
     filename = tmp_path / "abinit_nc_pao_savetb2j.nc"
     output_path = tmp_path / "TB2J_cli_results"
@@ -1232,13 +1232,12 @@ def test_abinit_nc_pao_cli_writes_exchange_out(tmp_path, monkeypatch):
         sys,
         "argv",
         [
-            "abinit_nc_pao2J.py",
+            "abinit2J.py",
+            "savetb2j",
             "--input",
             str(filename),
             "--output_path",
             str(output_path),
-            "--Rmax",
-            "0",
             "--nz",
             "2",
             "--no_shell_filter",
@@ -1247,7 +1246,7 @@ def test_abinit_nc_pao_cli_writes_exchange_out(tmp_path, monkeypatch):
         ],
     )
 
-    run_abinit_nc_pao2J()
+    run_abinit2J()
 
     assert (output_path / "exchange.out").is_file()
 
@@ -1407,7 +1406,7 @@ def test_abinit_nc_pao_green_population_matches_occupations(tmp_path, monkeypatc
     abinit_savetb2j.gen_exchange_abinit_nc_pao(
         filename,
         output_path=tmp_path / "TB2J_results",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=30,
         smearing_eV=0.05,
         population_mode="green",
@@ -1548,7 +1547,7 @@ def test_bundled_nio_nc_pao_exchange_smoke(tmp_path):
     exchange_out, jdict = gen_exchange_abinit_nc_pao(
         _NIO_NC_PAO_FIXTURE,
         output_path=tmp_path / "TB2J_results",
-        Rmax=0,
+        Rpts=[(0, 0, 0)],
         nz=2,
         operator_component="spectral_spin_split",
     )
@@ -1615,7 +1614,7 @@ def test_real_abinit_nc_pao_fixture_exchange_smoke(tmp_path):
         exchange_out, jdict = gen_exchange_abinit_nc_pao(
             _NC_PAO_FIXTURE,
             output_path=tmp_path / "TB2J_results",
-            Rmax=0,
+            Rpts=[(0, 0, 0)],
             nz=2,
             operator_component="spectral_spin_split",
         )

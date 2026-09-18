@@ -77,11 +77,9 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "tbupy2J.py" = "TB2J.scripts.tbupy2J:main"
 "gpaw_projector2J.py" = "TB2J.scripts.gpaw_projector2J:run_gpaw_projector2J"
 "vasp_projector2J.py" = "TB2J.scripts.vasp_projector2J:run_vasp_projector2J"
-"abinit_projector2J.py" = "TB2J.scripts.abinit_projector2J:run_abinit_projector2J"
-"abinit_nc_pao2J.py" = "TB2J.scripts.abinit_nc_pao2J:run_abinit_nc_pao2J"
-"sprkkr2magnon.py" = "TB2J.scripts.sprkkr2magnon:main"
-"abinit_paw2J.py" = "TB2J.interfaces.abinit_paw:run_gen_exchange_abinit_paw"
-"vasp_native2J.py" = "TB2J.scripts.vasp_native2J:run_vasp_native2J"
+"abinit2J.py" = "TB2J.scripts.abinit2J:run_abinit2J"
+ "sprkkr2magnon.py" = "TB2J.scripts.sprkkr2magnon:main"
+ "vasp_native2J.py" = "TB2J.scripts.vasp_native2J:run_vasp_native2J"
 
 
 [tool.setuptools]

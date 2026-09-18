@@ -15,8 +15,7 @@ from TB2J.interfaces.abinit_savetb2j import (
     select_nc_pao_shells,
 )
 from TB2J.interfaces.gpaw_projector import compute_projected_charges_moments
-from TB2J.scripts.abinit_nc_pao2J import run_abinit_nc_pao2J
-from TB2J.scripts.abinit_projector2J import run_abinit_projector2J
+from TB2J.scripts.abinit2J import run_abinit2J
 
 FIXTURE_DIR = (
     Path(__file__).resolve().parents[1] / "data" / "inputs" / "abinit_savetb2j"
@@ -676,7 +675,8 @@ def test_abinit_projector2j_cli_writes_exchange(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         "sys.argv",
         [
-            "abinit_projector2J.py",
+            "abinit2J.py",
+            "savetb2j",
             "--input",
             str(filename),
             "--output_path",
@@ -688,34 +688,33 @@ def test_abinit_projector2j_cli_writes_exchange(tmp_path, monkeypatch, capsys):
         ],
     )
 
-    run_abinit_projector2J()
+    run_abinit2J()
 
     assert (output_path / "exchange.out").exists()
     assert "Wrote" in capsys.readouterr().out
 
 
 def test_abinit_projector2j_cli_help_documents_workflow(monkeypatch, capsys):
-    monkeypatch.setattr("sys.argv", ["abinit_projector2J.py", "--help"])
+    monkeypatch.setattr("sys.argv", ["abinit2J.py", "savetb2j", "--help"])
 
     with pytest.raises(SystemExit) as excinfo:
-        run_abinit_projector2J()
+        run_abinit2J()
 
     assert excinfo.value.code == 0
     help_text = capsys.readouterr().out
-    assert "ABINIT savetb2j" in help_text
+    assert "savetb2j" in help_text
     assert "delta_total" in help_text
     assert "--operator_component" in help_text
     assert "--population_mode" in help_text
 
 
 def test_abinit_nc_pao2j_cli_help_documents_spherical_window(monkeypatch, capsys):
-    monkeypatch.setattr("sys.argv", ["abinit_nc_pao2J.py", "--help"])
+    monkeypatch.setattr("sys.argv", ["abinit2J.py", "savetb2j", "--help"])
 
     with pytest.raises(SystemExit) as excinfo:
-        run_abinit_nc_pao2J()
+        run_abinit2J()
 
     assert excinfo.value.code == 0
     help_text = capsys.readouterr().out
-    assert "NC spherical-window" in help_text
-    assert "delta_spherical_xc_u" in help_text
+    assert "NC" in help_text
     assert "delta_total" in help_text

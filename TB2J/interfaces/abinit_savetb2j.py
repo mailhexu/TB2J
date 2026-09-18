@@ -44,6 +44,35 @@ ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT = "spectral_spin_split"
 ABINIT_NC_PAO_ACTIVE_SHELL_OPERATOR_COMPONENT = "spectral_spin_split_active_shell"
 
 
+_NC_SCHEMA_NAMES = {
+    ABINIT_NC_PAO_SCHEMA_NAME,
+    ABINIT_NC_PAO_HS_SCHEMA_NAME,
+    ABINIT_NC_SPHERICAL_SCHEMA_NAME,
+}
+
+
+def abinit_netcdf_kind(filename):
+    """Classify an ABINIT NetCDF export as the PAW or NC-PAO backend.
+
+    Returns ``"paw_savetb2j"`` for the PAW ``abinit.savetb2j.projector``
+    schema and ``"nc_pao"`` for the norm-conserving PAO / spherical-window
+    schemas. Raises ``ValueError`` for anything else.
+    """
+    import netCDF4 as nc
+
+    with nc.Dataset(filename, "r") as dataset:
+        schema = str(getattr(dataset, "schema_name", "")).strip()
+    if schema == ABINIT_SAVETB2J_SCHEMA_NAME:
+        return "paw_savetb2j"
+    if schema in _NC_SCHEMA_NAMES:
+        return "nc_pao"
+    raise ValueError(
+        f"Unrecognized ABINIT NetCDF schema_name {schema!r}; expected "
+        f"{ABINIT_SAVETB2J_SCHEMA_NAME!r} (PAW savetb2j) or one of "
+        f"{sorted(_NC_SCHEMA_NAMES)} (NC PAO)"
+    )
+
+
 def _attr_text(variable, name):
     return str(getattr(variable, name, "")).lower()
 
