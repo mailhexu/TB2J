@@ -25,6 +25,7 @@ Welcome to TB2J's documentation!
 
    src/install.rst
    src/convention.rst
+   src/symmetrization.md
    src/tutorial.rst
    src/applications.rst
    src/magnon_theory.md
