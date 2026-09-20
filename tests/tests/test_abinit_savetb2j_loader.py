@@ -638,7 +638,7 @@ def test_gen_exchange_abinit_projector_uses_delta_total_by_default(tmp_path):
     exchange_out, exchange = gen_exchange_abinit_projector(
         filename,
         output_path=output_path,
-        Rpts=[(0, 0, 0)],
+        Rpts=[(1, 0, 0), (-1, 0, 0)],
         nz=4,
         population_mode="none",
     )

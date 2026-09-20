@@ -1118,7 +1118,10 @@ def test_abinit_nc_pao_hs_v2_full_bz_exchange_smoke(tmp_path):
     )
 
     exchange_out, jdict = gen_exchange_abinit_nc_pao(
-        filename, output_path=tmp_path / "TB2J_results", Rpts=[(0, 0, 0)], nz=2
+        filename,
+        output_path=tmp_path / "TB2J_results",
+        Rpts=[(1, 0, 0), (-1, 0, 0)],
+        nz=2,
     )
 
     assert exchange_out.is_file()
@@ -1182,7 +1185,7 @@ def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
     exchange_out, jdict = gen_exchange_abinit_nc_pao(
         filename,
         output_path=output_path,
-        Rpts=[(0, 0, 0)],
+        Rpts=[(1, 0, 0), (-1, 0, 0)],
         nz=2,
         smearing_eV=0.1,
         overlap_mode="svd",

@@ -920,7 +920,8 @@ def write_projector_exchange_out(
             - atoms.positions[site_i]
         )
         distance = float(np.linalg.norm(vector))
-        if Rcut is None or distance < float(Rcut):
+        is_onsite = i == j and not np.any(np.asarray(R))
+        if not is_onsite and (Rcut is None or distance < float(Rcut)):
             distance_dict[(R, i, j)] = (vector, distance)
             filtered_exchange_Jdict[(R, i, j)] = exchange_Jdict[(R, i, j)]
     exchange_Jdict = filtered_exchange_Jdict

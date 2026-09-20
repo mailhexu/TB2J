@@ -461,7 +461,7 @@ def test_vasp_projector_xml_uses_delta_total_component_for_exchange(tmp_path):
     exchange_out, exchange_Jdict = gen_exchange_vasp_projector_xml(
         filename,
         output_path=tmp_path / "TB2J_results_vasp_xml",
-        Rpts=[(0, 0, 0)],
+        Rpts=[(1, 0, 0), (-1, 0, 0)],
         nz=4,
         population_source="none",
     )
@@ -476,7 +476,8 @@ def test_vasp_projector_xml_uses_delta_total_component_for_exchange(tmp_path):
         data.get_operator_component("delta_u_paw_aug", site=0), [[0.5]]
     )
     assert exchange_out.exists()
-    assert ((0, 0, 0), 0, 0) in exchange_Jdict
+    assert ((1, 0, 0), 0, 0) in exchange_Jdict
+    assert ((0, 0, 0), 0, 0) not in exchange_Jdict
 
 
 def test_vasp_projector_xml_selects_named_operator_component(tmp_path, monkeypatch):
@@ -718,14 +719,15 @@ tot          0.010   0.020   0.470   0.500
     exchange_out, exchange_Jdict = gen_exchange_vasp_projector_xml(
         filename,
         output_path=tmp_path / "TB2J_results_vasp_xml",
-        Rpts=[(0, 0, 0)],
+        Rpts=[(1, 0, 0), (-1, 0, 0)],
         nz=4,
         population_source="outcar",
         allow_basis_mismatch=True,
     )
 
     assert exchange_out.exists()
-    assert ((0, 0, 0), 0, 0) in exchange_Jdict
+    assert ((1, 0, 0), 0, 0) in exchange_Jdict
+    assert ((0, 0, 0), 0, 0) not in exchange_Jdict
     text = exchange_out.read_text()
     assert "VASP XML" in text
     assert "vasp_cdij_paw_hamiltonian" in text
