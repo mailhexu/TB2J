@@ -650,6 +650,234 @@ def test_symmetrize_exchange_with_target_structure():
 
 
 # ---------------------------------------------------------------------------
+# additional coverage: noncollinear MSG, SIA sublattices, zero_tol, monoclinic
+
+
+def test_magnetic_noncollinear_spinat_axial(capsys):
+    """Noncollinear-form spinat (3-vectors, SpinIO colinear=False): the
+    moments go to spglib as axial vectors, the primed half-translation is
+    still found, and the sublattice-exchanging DMI is killed while J^ani is
+    preserved."""
+    atoms = _afm_cell()
+    spinat = np.array(
+        [[0.0, 0.0, 2.5], [0.0, 0.0, -2.5], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+    )
+    Jdict, Ddict, Janidict = _afm_exchange(np.random.default_rng(23))
+    keys = list(Jdict)
+    exc = SpinIO(
+        atoms,
+        spinat,
+        [0] * 4,
+        [0, 1, 2, 3],
+        colinear=False,
+        distance_dict=_distance_dict(atoms, [0, 1, 2, 3], keys),
+        exchange_Jdict=Jdict,
+        dmi_ddict=Ddict,
+        Jani_dict=Janidict,
+    )
+    sym = TB2JSymmetrizer(exc, verbose=True, magnetic=True)
+    sym.symmetrize_J()
+    assert "magnetic space group" in capsys.readouterr().out
+    ne = sym.new_exc
+    for R in [(0, 0, 0), (-1, 0, 0), (0, -1, 0), (-1, -1, 0)]:
+        assert np.all(ne.dmi_ddict[(R, 0, 1)] == 0.0)
+        assert np.allclose(
+            ne.Jani_dict[(R, 0, 1)], np.diag([0.2, 0.2, -0.4]), atol=1e-10
+        )
+
+
+def test_magnetic_sia_respects_sublattice_moments():
+    """Ferrimagnetic cell: the crystallographic group merges the Fe0/Fe1 site
+    orbits through the centering translation and wrongly averages their SIA
+    tensors; the magnetic space group keeps them apart."""
+    atoms = _afm_cell()
+    spinat = [[0, 0, 2.5], [0, 0, -2.0], [0, 0, 0], [0, 0, 0]]
+    Jdict = {((0, 0, 1), 0, 0): 1.0, ((0, 0, -1), 0, 0): 1.0}
+    sia = {0: np.diag([0.3, 0.0, -0.3]), 1: np.diag([0.6, 0.0, -0.6])}
+    exc = _make_spinio(atoms, spinat, dict(Jdict), sia_tensor=dict(sia))
+    sym = TB2JSymmetrizer(exc, verbose=False, magnetic=True)
+    sym.symmetrize_J()
+    ne = sym.new_exc
+    # Fe0 sits on the 4-fold axis: xx == yy is forced within each sublattice,
+    # but the two sublattices must stay distinct (no op maps one to the other)
+    K0, K1 = ne.sia_tensor[0], ne.sia_tensor[1]
+    assert K0[0, 0] == pytest.approx(K0[1, 1], abs=1e-12)
+    assert K0[2, 2] == pytest.approx(-0.3, abs=1e-12)
+    assert K1[0, 0] == pytest.approx(K1[1, 1], abs=1e-12)
+    assert K1[2, 2] == pytest.approx(-0.6, abs=1e-12)
+    assert abs(K0[0, 0] - K1[0, 0]) > 0.1
+
+    # crystallographic path merges the sublattices through the centering
+    exc2 = _make_spinio(atoms, spinat, dict(Jdict), sia_tensor=dict(sia))
+    sym2 = TB2JSymmetrizer(exc2, verbose=False, magnetic=False)
+    sym2.symmetrize_J()
+    assert np.allclose(
+        sym2.new_exc.sia_tensor[0], sym2.new_exc.sia_tensor[1], atol=1e-12
+    )
+
+
+def test_zero_tol_keeps_allowed_and_snaps_forbidden_dmi():
+    """P4 cell with D_z allowed: the default zero_tol leaves the surviving
+    D_z untouched, while zero_tol=0.5 snaps the whole vector to exact zero
+    and leaves the isotropic J untouched."""
+    atoms = _make_atoms(
+        "Fe6",
+        np.diag([3.0, 3.0, 3.7]),
+        [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.3],
+            [0.31, 0.17, 0.6],
+            [0.83, 0.31, 0.6],
+            [0.69, 0.83, 0.6],
+            [0.17, 0.69, 0.6],
+        ],
+    )
+    Rs = [(1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0)]
+
+    def build():
+        Jdict, Ddict = {}, {}
+        for R in Rs:
+            Rrev = tuple(-np.array(R))
+            Jdict[(R, 0, 1)] = 1.5
+            Jdict[(Rrev, 1, 0)] = 1.5
+            Ddict[(R, 0, 1)] = np.array([0.1, 0.2, 0.3])
+            Ddict[(Rrev, 1, 0)] = -Ddict[(R, 0, 1)]
+        return _make_spinio(atoms, [[0, 0, 2.0]] * 6, Jdict, dmi_ddict=Ddict)
+
+    sym = TB2JSymmetrizer(build(), verbose=False)
+    sym.symmetrize_J()
+    D = sym.new_exc.dmi_ddict[((1, 0, 0), 0, 1)]
+    assert np.all(D[:2] == 0.0)
+    assert D[2] == pytest.approx(0.3, abs=1e-12)
+
+    sym2 = TB2JSymmetrizer(build(), verbose=False, zero_tol=0.5)
+    sym2.symmetrize_J()
+    D2 = sym2.new_exc.dmi_ddict[((1, 0, 0), 0, 1)]
+    assert np.all(D2 == 0.0)
+    assert sym2.new_exc.exchange_Jdict[((1, 0, 0), 0, 1)] == pytest.approx(1.5)
+
+
+def test_cli_end_to_end_magnetic(tmp_path):
+    """Full CLI pass: write a TB2J results directory, run the CLI with
+    --magnetic/--zero-tol, reload the output and check the MSG-forced zeros."""
+    ind = tmp_path / "in"
+    outd = tmp_path / "out"
+    atoms = _afm_cell()
+    spinat = [[0, 0, 2.5], [0, 0, -2.5], [0, 0, 0], [0, 0, 0]]
+    Jdict, Ddict, Janidict = _afm_exchange(np.random.default_rng(31))
+    _make_spinio(atoms, spinat, Jdict, dmi_ddict=Ddict, Jani_dict=Janidict).write_all(
+        path=str(ind)
+    )
+    argv = sys.argv
+    sys.argv = [
+        "TB2J_symmetrize.py",
+        "-i",
+        str(ind),
+        "-o",
+        str(outd),
+        "--magnetic",
+        "--zero-tol",
+        "1e-6",
+    ]
+    try:
+        from TB2J.symmetrize_J import symmetrize_J_cli
+
+        symmetrize_J_cli()
+    finally:
+        sys.argv = argv
+    loaded = SpinIO.load_pickle(path=str(outd))
+    for R in [(0, 0, 0), (-1, 0, 0), (0, -1, 0), (-1, -1, 0)]:
+        assert np.all(loaded.dmi_ddict[(R, 0, 1)] == 0.0)
+        assert np.allclose(
+            loaded.Jani_dict[(R, 0, 1)], np.diag([0.2, 0.2, -0.4]), atol=1e-10
+        )
+
+
+def test_monoclinic_p21c_tensor_invariance():
+    """C2/m monoclinic cell with beta = 100 deg: the cartesian rotation W_c is
+    non-diagonal and the operations carry centering translation parts.  With a
+    bond-distance-cutoff seed (closed under all operations, as real TB2J data
+    is), the symmetrized tensors must map exactly onto each other under every
+    operation."""
+    beta = np.radians(100.0)
+    cell = [
+        [3.0, 0.0, 0.0],
+        [0.0, 4.0, 0.0],
+        [5.0 * np.cos(beta), 0.0, 5.0 * np.sin(beta)],
+    ]
+    atoms = _make_atoms("Fe2", cell, [[0.0, 0.0, 0.0], [0.0, 0.5, 0.5]])
+    ops = crystal_symmetry_ops(atoms, symprec=1e-5)
+    assert len(ops) > 1  # genuine C2/m, not P1
+
+    # bond-cutoff seed set, pair-complete, closed under all operations
+    xA = np.zeros(3)
+    xB = np.array([0.0, 0.5, 0.5])
+    dcut = 3.4
+    R01 = sorted(
+        tuple(int(v) - 4 for v in R)
+        for R in np.ndindex(9, 9, 9)
+        if np.linalg.norm(xB + (np.array(R) - 4) - xA) <= dcut
+    )
+    rng = np.random.default_rng(11)
+    Jdict, Ddict, Janidict = {}, {}, {}
+    for R in R01:
+        Rrev = tuple(-np.array(R))
+        Jdict[(R, 0, 1)] = 1.0
+        Jdict[(Rrev, 1, 0)] = 1.0
+        Ddict[(R, 0, 1)] = rng.normal(size=3)
+        Ddict[(Rrev, 1, 0)] = -Ddict[(R, 0, 1)]
+        M = rng.normal(size=(3, 3))
+        Janidict[(R, 0, 1)] = 0.5 * (M + M.T)
+        Janidict[(Rrev, 1, 0)] = Janidict[(R, 0, 1)]
+    exc = _make_spinio(
+        atoms, [[0, 0, 2.0]] * 2, Jdict, dmi_ddict=Ddict, Jani_dict=Janidict
+    )
+    sym = TB2JSymmetrizer(exc, verbose=False)
+    sym.symmetrize_J()
+    ne = sym.new_exc
+
+    xfrac = np.asarray(atoms.get_scaled_positions(), dtype=float)
+    cella = np.asarray(atoms.get_cell().array, dtype=float)
+    smaps = _build_site_maps(xfrac, cella, ops, 1e-5)
+    keyset = {(R, i, j) for (R, i, j) in ne.exchange_Jdict}
+    cell_inv = np.linalg.inv(cella)
+    nops_closed = 0
+    nchecked = 0
+    for W, smap in zip(ops.rotations, smaps):
+        Wc = cella @ np.asarray(W, dtype=float) @ cell_inv
+        images = {}
+        closed = True
+        for R, i, j in keyset:
+            ia, ja = ne.iatom(i), ne.iatom(j)
+            ia2, ja2 = int(smap[ia]), int(smap[ja])
+            d = xfrac[ja] + np.asarray(R, dtype=float) - xfrac[ia]
+            diff = np.asarray(W, dtype=float) @ d - (xfrac[ja2] - xfrac[ia2])
+            R2 = np.round(diff)
+            if np.max(np.abs(diff - R2)) > 1e-6:
+                closed = False
+                break
+            images[(R, i, j)] = (tuple(int(x) for x in R2), ia2, ja2)
+        if not closed:
+            continue
+        nops_closed += 1
+        for (R, i, j), (R2, i2, j2) in images.items():
+            G1 = combine_tensor(
+                ne.exchange_Jdict[(R, i, j)],
+                ne.dmi_ddict[(R, i, j)],
+                ne.Jani_dict[(R, i, j)],
+            )
+            G2 = combine_tensor(
+                ne.exchange_Jdict[(R2, i2, j2)],
+                ne.dmi_ddict[(R2, i2, j2)],
+                ne.Jani_dict[(R2, i2, j2)],
+            )
+            assert np.allclose(G2, Wc @ G1 @ Wc.T, atol=1e-7)
+            nchecked += 1
+    assert nops_closed == len(ops)  # cutoff seed is closed under the group
+    assert nchecked > len(ops)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 
 
