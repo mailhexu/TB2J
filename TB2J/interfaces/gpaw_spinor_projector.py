@@ -315,6 +315,8 @@ def write_spinor_projector_exchange_out(
     for (R, i, j), entry in exchange.items():
         vector = np.asarray(R) @ data.cell + atoms.positions[j] - atoms.positions[i]
         distance = float(np.linalg.norm(vector))
+        if distance < 1e-6:
+            continue  # onsite pair: excluded (collinear-path cutover)
         if Rcut is not None and distance >= float(Rcut):
             continue
         key = (tuple(int(x) for x in R), site_to_spin[i], site_to_spin[j])

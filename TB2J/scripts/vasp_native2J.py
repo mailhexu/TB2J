@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import argparse
 
+import numpy as np
+from sisl import Atom
+
 from TB2J.interfaces.vasp_native import read_vasp_native
 from TB2J.versioninfo import print_license
 
@@ -75,6 +78,39 @@ def run_vasp_native2J():
         ProjectorGreen,
         projector_charge_moments_from_green,
     )
+
+    with open(args.input, "rb") as f:
+        f.seek(4)
+        _ver = int(np.frombuffer(f.read(4), dtype="<i4")[0])
+    if _ver == 7:
+        from TB2J.interfaces.gpaw_spinor_projector import (
+            write_spinor_projector_exchange_out,
+        )
+        from TB2J.interfaces.vasp_native import read_vasp_native_spinor
+
+        data = read_vasp_native_spinor(args.input)
+        magnetic_atoms = None
+        if args.index_magnetic_atoms is not None:
+            magnetic_atoms = [i - 1 for i in args.index_magnetic_atoms]
+        elif args.elements is not None:
+            symbols = {s_.strip().capitalize() for s_ in args.elements}
+            magnetic_atoms = [
+                i
+                for i, z in enumerate(data.atomic_numbers)
+                if Atom(Z=z).symbol.capitalize() in symbols
+            ]
+        if not magnetic_atoms:
+            magnetic_atoms = list(range(len(data.site_nproj)))
+        out, _ = write_spinor_projector_exchange_out(
+            data,
+            path=args.output_path,
+            Rcut=args.Rcut,
+            nz=args.nz,
+            smearing_eV=args.smearing,
+            index_magnetic_atoms=(None if magnetic_atoms is None else magnetic_atoms),
+        )
+        print(f"Wrote {out}")
+        return
 
     snapshot = read_vasp_native(args.input)
     data = build_projector_green_data(snapshot)

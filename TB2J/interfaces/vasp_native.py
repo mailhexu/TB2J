@@ -17,8 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from sisl import Atom
 import numpy as np
+from sisl import Atom
 
 from TB2J.paw_projector import (
     PawOperatorComponent,
@@ -27,6 +27,7 @@ from TB2J.paw_projector import (
     PawProjectorSnapshot,
     PawSiteLayout,
 )
+
 
 @dataclass(frozen=True)
 class VaspIbzExpansionPlan:
@@ -48,10 +49,14 @@ class VaspIbzExpansionPlan:
         Conjugate parent coefficients before applying the action.
     projector_actions : ndarray (nspin, nkpt_bz, nproj, nproj) complex128
         Dense physical-projector transformation (target = action @ source).
+        For v7 spinor plans the action is dense in (spinor x projector):
+        (1, nkpt_bz, 2*nproj, 2*nproj).
     symmetry_operation : ndarray (nkpt_bz,) intp
         VASP operation index (audit only).
     spinflip : ndarray (nkpt_bz,) bool
         VASP ``SPINFLIP`` audit flag.
+    rssymop : ndarray (nkpt_bz, 2, 2) complex128 or None
+        VASP per-BZ-k SU(2) spin rotation (audit; v7 only).
     """
 
     kpoint_storage_mode: int
@@ -62,10 +67,11 @@ class VaspIbzExpansionPlan:
     projector_actions: np.ndarray
     symmetry_operation: np.ndarray
     spinflip: np.ndarray
+    rssymop: np.ndarray | None = None
 
 
 def _read_v6_expansion_plan(
-    f, nspin: int, nproj_physical: int, nkpt_ibz: int
+    f, nspin: int, nproj_physical: int, nkpt_ibz: int, nrspinors: int = 1
 ) -> VaspIbzExpansionPlan:
     """Decode the v6 IBZ expansion section from an open binary stream.
 
@@ -100,9 +106,7 @@ def _read_v6_expansion_plan(
     if parent_ibz.size != nkpt_bz:
         raise ValueError("truncated v6 parent_ibz array")
     if np.any(parent_ibz < 0) or np.any(parent_ibz >= nkpt_ibz):
-        raise ValueError(
-            f"v6 parent_ibz indices out of range [0, {nkpt_ibz})"
-        )
+        raise ValueError(f"v6 parent_ibz indices out of range [0, {nkpt_ibz})")
 
     source_spin = (
         np.frombuffer(f.read(nspin * nkpt_bz * 4), dtype="<i4")
@@ -112,28 +116,26 @@ def _read_v6_expansion_plan(
     if np.any(source_spin < 0) or np.any(source_spin >= nspin):
         raise ValueError(f"v6 source_spin indices out of range [0, {nspin})")
 
-    conjugate_raw = (
-        np.frombuffer(f.read(nspin * nkpt_bz * 4), dtype="<i4")
-        .reshape(nspin, nkpt_bz, order="F")
+    conjugate_raw = np.frombuffer(f.read(nspin * nkpt_bz * 4), dtype="<i4").reshape(
+        nspin, nkpt_bz, order="F"
     )
     if np.any((conjugate_raw != 0) & (conjugate_raw != 1)):
         raise ValueError("v6 conjugate flags must be 0 or 1")
     conjugate = conjugate_raw.astype(bool)
 
-    action_count = nproj_physical * nproj_physical * nspin * nkpt_bz
-    projector_actions = np.frombuffer(
-        f.read(action_count * 16), dtype="<c16"
-    ).reshape(nproj_physical, nproj_physical, nspin, nkpt_bz, order="F")
-    # Transpose to (nspin, nkpt_bz, nproj, nproj)
+    nproj_action = nproj_physical * nrspinors
+    action_count = nproj_action * nproj_action * nspin * nkpt_bz
+    projector_actions = np.frombuffer(f.read(action_count * 16), dtype="<c16").reshape(
+        nproj_action, nproj_action, nspin, nkpt_bz, order="F"
+    )
+    # Transpose to (nspin, nkpt_bz, nproj_action, nproj_action)
     projector_actions = np.ascontiguousarray(
         np.transpose(projector_actions, (2, 3, 0, 1))
     )
     if not np.all(np.isfinite(projector_actions)):
         raise ValueError("v6 projector_actions contain non-finite entries")
 
-    symmetry_operation = np.frombuffer(
-        f.read(nkpt_bz * 4), dtype="<i4"
-    ).astype(np.intp)
+    symmetry_operation = np.frombuffer(f.read(nkpt_bz * 4), dtype="<i4").astype(np.intp)
     if symmetry_operation.size != nkpt_bz:
         raise ValueError("truncated v6 symmetry_operation array")
 
@@ -144,6 +146,16 @@ def _read_v6_expansion_plan(
         raise ValueError("v6 spinflip flags must be 0 or 1")
     spinflip = spinflip_raw.astype(bool)
 
+    rssymop = None
+    if nrspinors == 2:
+        rssymop = np.ascontiguousarray(
+            np.frombuffer(f.read(4 * nkpt_bz * 16), dtype="<c16")
+            .reshape(2, 2, nkpt_bz, order="F")
+            .transpose(2, 0, 1)
+        )
+        if not np.all(np.isfinite(rssymop)):
+            raise ValueError("v7 rssymop contains non-finite entries")
+
     return VaspIbzExpansionPlan(
         kpoint_storage_mode=kpoint_storage_mode,
         bz_kpoints=vkpt_bz,
@@ -153,7 +165,9 @@ def _read_v6_expansion_plan(
         projector_actions=projector_actions,
         symmetry_operation=symmetry_operation,
         spinflip=spinflip,
+        rssymop=rssymop,
     )
+
 
 def _validate_v6_expansion_plan(
     plan: VaspIbzExpansionPlan, nspin: int, nproj: int, nkpt_ibz: int
@@ -179,14 +193,14 @@ def _validate_v6_expansion_plan(
         raise ValueError("v6 BZ mesh is incomplete; not a Cartesian grid")
 
     # Action unitarity: every action must satisfy A @ A† ≈ I.
-    identity = np.eye(nproj, dtype=complex)
+    nproj_a = plan.projector_actions.shape[-1]
+    identity = np.eye(nproj_a, dtype=complex)
     for sigma in range(nspin):
         for K in range(nkpt_bz):
             A = plan.projector_actions[sigma, K]
             if not np.allclose(A @ A.conj().T, identity, atol=1e-8):
                 raise ValueError(
-                    f"v6 projector action is not unitary (spin={sigma}, "
-                    f"kpt={K})"
+                    f"v6 projector action is not unitary (spin={sigma}, " f"kpt={K})"
                 )
 
     # Parent coverage: every declared IBZ parent must appear at least once.
@@ -236,6 +250,8 @@ def _expand_vasp_native_ibz(
             coefficients[sigma, K] = (action @ coeff_parent).T
 
     return eigenvalues, occupations, coefficients
+
+
 HARTREE_TO_EV = 27.211386245988
 
 
@@ -250,8 +266,8 @@ def read_vasp_native(filename: str | Path) -> PawProjectorSnapshot:
         if raw_ver.size == 0:
             raise ValueError("truncated VASP export header")
         version = raw_ver[0]
-        if version not in {4, 5, 6}:
-            raise ValueError(f"unsupported version {version}; need v4, v5, or v6")
+        if version not in {4, 5, 6, 7}:
+            raise ValueError(f"unsupported version {version}; need v4, v5, v6, or v7")
 
         nspin = np.frombuffer(f.read(4), dtype="<i4")[0]
         ncdij = np.frombuffer(f.read(4), dtype="<i4")[0]
@@ -291,11 +307,19 @@ def read_vasp_native(filename: str | Path) -> PawProjectorSnapshot:
             ).reshape(lmax_max, lmax_max, ntyp, order="F")
         else:
             lps_typ = qtot_typ = None
-        zval_typ = np.frombuffer(f.read(ntyp * 8), dtype="<f8")
+        _zval_typ = np.frombuffer(f.read(ntyp * 8), dtype="<f8")
         type_labels = np.frombuffer(f.read(ntyp * 2), dtype="S2")
+        if version >= 7:
+            nrspinors = np.frombuffer(f.read(4), dtype="<i4")[0]
+        else:
+            nrspinors = 1
         v6_plan = None
         if version >= 6:
-            v6_plan = _read_v6_expansion_plan(f, nspin, nprod, nkpt)
+            if version == 7 and nrspinors != 2:
+                raise ValueError(f"v7 file with nrspinors={nrspinors}")
+            v6_plan = _read_v6_expansion_plan(
+                f, nspin, nprod, nkpt, nrspinors=nrspinors if version == 7 else 1
+            )
         vkpt = (
             np.frombuffer(f.read(nkpt * 3 * 8), dtype="<f8")
             .reshape(3, nkpt, order="F")
@@ -476,9 +500,7 @@ def read_vasp_native(filename: str | Path) -> PawProjectorSnapshot:
         "kpoint_storage": "ibz" if v6_plan is not None else "full_bz",
         "expanded_by": "tb2j.vasp_native" if v6_plan is not None else None,
         "nkpt_ibz": int(nkpt) if v6_plan is not None else None,
-        "nkpt_bz": (
-            int(len(v6_plan.parent_ibz)) if v6_plan is not None else None
-        ),
+        "nkpt_bz": (int(len(v6_plan.parent_ibz)) if v6_plan is not None else None),
     }
 
     return PawProjectorSnapshot(
@@ -503,3 +525,204 @@ def read_vasp_native(filename: str | Path) -> PawProjectorSnapshot:
             "VASP PAW AE partial-wave overlap QTOT" if qtot_typ is not None else None
         ),
     )
+
+
+def read_vasp_native_spinor(filename: str | Path):
+    """Read a VASP v7 spinor native export into spinor ProjectorGreenData.
+
+    Layout mirrors the Fortran exporter (patch tb2j_export.F, version 7):
+    header (with nrspinors=2), static metadata, the v6/v7 expansion plan
+    with dense spinor actions SL x conjg(RSSYMOP) and the rssymop audit
+    array, IBZ spectral arrays with spinor-packed CPROJ (spinor-major
+    halves), the Pauli CDIJ, and the converted 2x2 spin-matrix CDIJ.
+    """
+    from TB2J.projector_green import (
+        SPINOR_OPERATOR_DEFINITION,
+        ProjectorGreenData,
+    )
+
+    filename = Path(filename)
+    with open(filename, "rb") as f:
+        magic = np.frombuffer(f.read(4), dtype="<i4")[0]
+        if magic != 20260812:
+            raise ValueError(f"invalid magic number: {magic}")
+        version = np.frombuffer(f.read(4), dtype="<i4")[0]
+        if version != 7:
+            raise ValueError(
+                f"read_vasp_native_spinor requires version 7, got {version}"
+            )
+        nrspinors = np.frombuffer(f.read(4), dtype="<i4")[0]
+        if nrspinors != 2:
+            raise ValueError(f"v7 file with nrspinors={nrspinors}")
+        nspin = np.frombuffer(f.read(4), dtype="<i4")[0]
+        ncdij = np.frombuffer(f.read(4), dtype="<i4")[0]
+        nkpt = np.frombuffer(f.read(4), dtype="<i4")[0]
+        nband = np.frombuffer(f.read(4), dtype="<i4")[0]
+        nprod_stream = np.frombuffer(f.read(4), dtype="<i4")[0]
+        nions = np.frombuffer(f.read(4), dtype="<i4")[0]
+        ntyp = np.frombuffer(f.read(4), dtype="<i4")[0]
+        lmdim_max = np.frombuffer(f.read(4), dtype="<i4")[0]
+        lmax_max = np.frombuffer(f.read(4), dtype="<i4")[0]
+
+        lattice = np.frombuffer(f.read(9 * 8), dtype="<f8").reshape(3, 3, order="F")
+        posion = (
+            np.frombuffer(f.read(nions * 3 * 8), dtype="<f8")
+            .reshape(3, nions, order="F")
+            .T
+        )
+        ion_offset = np.frombuffer(f.read(nions * 4), dtype="<i4")
+        ion_nproj = np.frombuffer(f.read(nions * 4), dtype="<i4")
+        ion_ityp = np.frombuffer(f.read(nions * 4), dtype="<i4")
+        nprod = int(ion_nproj.sum())
+        if 2 * nprod > nprod_stream:
+            raise ValueError("v7 CPROJ stream shorter than 2x scalar projector layout")
+        _lmmax_typ = np.frombuffer(f.read(ntyp * 4), dtype="<i4")
+        lps_typ = np.frombuffer(f.read(lmax_max * ntyp * 4), dtype="<i4").reshape(
+            lmax_max, ntyp, order="F"
+        )
+        _qtot_typ = np.frombuffer(f.read(lmax_max * lmax_max * ntyp * 8), dtype="<f8")
+        _zval_typ = np.frombuffer(f.read(ntyp * 8), dtype="<f8")
+        type_labels = np.frombuffer(f.read(ntyp * 2), dtype="S2")
+
+        plan = _read_v6_expansion_plan(f, nspin, nprod, nkpt, nrspinors=2)
+
+        _vkpt_ibz = (
+            np.frombuffer(f.read(nkpt * 3 * 8), dtype="<f8")
+            .reshape(3, nkpt, order="F")
+            .T
+        )
+        _wtkpt = np.frombuffer(f.read(nkpt * 8), dtype="<f8")
+        efermi = np.frombuffer(f.read(8), dtype="<f8")[0]
+        celtot = np.frombuffer(f.read(nband * nkpt * nspin * 8), dtype="<f8").reshape(
+            nband, nkpt, nspin, order="F"
+        )
+        fertot = np.frombuffer(f.read(nband * nkpt * nspin * 8), dtype="<f8").reshape(
+            nband, nkpt, nspin, order="F"
+        )
+        cproj = np.frombuffer(
+            f.read(nprod_stream * nband * nkpt * nspin * 16), dtype="<c16"
+        ).reshape(nprod_stream, nband, nkpt, nspin, order="F")
+        _cdij_pauli = np.frombuffer(
+            f.read(lmdim_max * lmdim_max * nions * ncdij * 16), dtype="<c16"
+        )
+        cdij_spinor = np.frombuffer(
+            f.read(lmdim_max * lmdim_max * nions * 4 * 16), dtype="<c16"
+        ).reshape(lmdim_max, lmdim_max, nions, 4, order="F")
+
+    if nspin != 1:
+        raise ValueError(f"v7 spinor file must carry nspin=1, got {nspin}")
+    _validate_v6_expansion_plan(plan, nspin, nprod, nkpt)
+
+    nkpt_bz = len(plan.parent_ibz)
+    eigenvalues = np.empty((1, nkpt_bz, nband), dtype=float)
+    occupations = np.empty((1, nkpt_bz, nband), dtype=float)
+    coefficients = np.empty((1, nkpt_bz, nband, 2, nprod), dtype=complex)
+    for K in range(nkpt_bz):
+        parent = int(plan.parent_ibz[K])
+        src_spin = int(plan.source_spin[0, K])
+        action = plan.projector_actions[0, K]  # (2*nprod, 2*nprod)
+        eigenvalues[0, K] = celtot[:, parent, src_spin]
+        occupations[0, K] = fertot[:, parent, src_spin]
+        coeff_parent = cproj[: 2 * nprod, :, parent, src_spin]
+        if plan.conjugate[0, K]:
+            coeff_parent = coeff_parent.conj()
+        expanded = action @ coeff_parent  # (2*nprod, nband)
+        coefficients[0, K, :, 0, :] = expanded[:nprod].T
+        coefficients[0, K, :, 1, :] = expanded[nprod : 2 * nprod].T
+
+    # Bloch phase conversion (identical to the collinear path)
+    for ion, (offset, nproj_ion) in enumerate(zip(ion_offset, ion_nproj)):
+        phase = np.exp(2j * np.pi * (plan.bz_kpoints @ posion[ion]))
+        coefficients[..., int(offset) : int(offset + nproj_ion)] *= phase[
+            None, :, None, None, None
+        ]
+
+    # Site metadata
+    site_nproj = ion_nproj.astype(int)
+    nmax = int(site_nproj.max())
+    site_projector_indices = np.full((nions, nmax), -1, dtype=int)
+    projector_site = np.repeat(np.arange(nions), site_nproj)
+    projector_l = []
+    projector_m = []
+    projector_radial = []
+    for ion in range(nions):
+        ityp = int(ion_ityp[ion]) - 1
+        start = int(ion_offset[ion])
+        radial_by_l = {}
+        for li in lps_typ[:, ityp]:
+            li = int(li)
+            if li < 0:
+                continue
+            radial = radial_by_l.get(li, 0)
+            for m in range(-li, li + 1):
+                projector_l.append(li)
+                projector_m.append(m)
+                projector_radial.append(radial)
+            radial_by_l[li] = radial + 1
+        site_projector_indices[ion, : site_nproj[ion]] = np.arange(
+            start, start + site_nproj[ion]
+        )
+
+    # 2x2 spin operator from the converted CDIJ blocks
+    spinor_operator = np.zeros((nions, nmax, nmax, 2, 2), dtype=complex)
+    for ion in range(nions):
+        nproj_ion = int(site_nproj[ion])
+        block = spinor_operator[ion, :nproj_ion, :nproj_ion]
+        block[:, :, 0, 0] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 0]
+        block[:, :, 0, 1] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 1]
+        block[:, :, 1, 0] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 2]
+        block[:, :, 1, 1] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 3]
+        herm = 0.5 * (block + block.transpose(1, 0, 3, 2).conj())
+        spinor_operator[ion, :nproj_ion, :nproj_ion] = herm
+
+    symbols = [
+        bytes(type_labels[int(ion_ityp[i]) - 1]).decode("ascii").strip()
+        for i in range(nions)
+    ]
+    atomic_numbers = np.array([Atom(symbol).Z for symbol in symbols], dtype=int)
+    positions = (posion @ lattice.T).copy()
+
+    data = ProjectorGreenData(
+        kpoints=plan.bz_kpoints,
+        weights=np.full(nkpt_bz, 1.0 / nkpt_bz),
+        eigenvalues=eigenvalues,
+        coefficients=coefficients,
+        efermi=float(efermi),
+        projector_site=projector_site,
+        projector_atom=projector_site.copy(),
+        cell=lattice.T.copy(),
+        positions=positions,
+        atomic_numbers=atomic_numbers,
+        occupations=occupations,
+        projector_l=np.array(projector_l, dtype=int),
+        projector_m=np.array(projector_m, dtype=int),
+        projector_radial=np.array(projector_radial, dtype=int),
+        site_nproj=site_nproj,
+        site_projector_indices=site_projector_indices,
+        nspinor=2,
+        spinor_operator=spinor_operator,
+        spinor_operator_definition=SPINOR_OPERATOR_DEFINITION,
+        coefficient_source="vasp.CPROJ_spinor_packed",
+        coefficient_projector="native_paw_projector",
+        channel_interpretation="paw_projector_channel",
+        operator_basis="vasp CDIJ Pauli->2x2 (v7)",
+        metadata={
+            "nspinor": 2,
+            "code": "vasp",
+            "source_version": "6.4.1",
+            "native_version": 7,
+            "kpoint_storage": "ibz_with_expansion_plan",
+            "expanded_by": "tb2j.vasp_native_spinor",
+            "nkpt_ibz": int(nkpt),
+            "nkpt_bz": int(nkpt_bz),
+            "units": {
+                "cell": "Angstrom",
+                "positions": "Angstrom",
+                "eigenvalues": "eV",
+                "efermi": "eV",
+                "spinor_operator": "eV",
+            },
+        },
+    )
+    data.validate(exchange_ready=True)
+    return data
