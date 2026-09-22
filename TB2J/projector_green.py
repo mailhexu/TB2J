@@ -9,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
+from TB2J.Jtensor import decompose_J_tensor
+
 SCHEMA_NAME = "tb2j.projector_green"
 SCHEMA_VERSION = "1.0"
 COMPLEX_COMPONENT = ["real", "imag"]
@@ -25,6 +27,16 @@ SUPPORTED_HIJ_EXCHANGE_DEFINITIONS = (
     "spin-splitting matrix in VASP LOCPROJ trial-function basis",
     "spin-dependent projector hamiltonian matrix",
     "spin-dependent projector potential matrix",
+    "spinor 2x2 local operator (j-averaged basis)",
+)
+SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
+PAULI_MATRICES = np.array(
+    [
+        [[0, 1], [1, 0]],
+        [[0, -1j], [1j, 0]],
+        [[1, 0], [0, -1]],
+    ],
+    dtype=complex,
 )
 
 
@@ -209,6 +221,9 @@ class ProjectorGreenData:
     schema_name: str = SCHEMA_NAME
     schema_version: str = SCHEMA_VERSION
     efermi_spin: np.ndarray | None = None
+    nspinor: int = 1
+    spinor_operator: np.ndarray | None = None
+    spinor_operator_definition: str | None = None
 
     def __post_init__(self):
         self.kpoints = np.asarray(self.kpoints, dtype=float)
@@ -223,6 +238,12 @@ class ProjectorGreenData:
             if self.efermi_spin.shape == ():
                 self.efermi_spin = self.efermi_spin.reshape(1)
             self.efermi = float(np.mean(self.efermi_spin))
+
+        self.nspinor = int(self.nspinor)
+        if self.nspinor not in (1, 2):
+            raise ValueError("nspinor must be 1 or 2")
+        if self.spinor_operator is not None:
+            self.spinor_operator = np.asarray(self.spinor_operator, dtype=complex)
 
         if self.cell is not None:
             self.cell = np.asarray(self.cell, dtype=float)
@@ -317,7 +338,7 @@ class ProjectorGreenData:
 
     @property
     def nproj(self):
-        return self.coefficients.shape[3]
+        return self.coefficients.shape[-1]
 
     def validate(self, exchange_ready=False):
         if self.schema_name != SCHEMA_NAME:
@@ -335,11 +356,27 @@ class ProjectorGreenData:
             raise ValueError("efermi_spin must have shape (nspin,)")
         if nkpt != self.kpoints.shape[0]:
             raise ValueError("eigenvalues and kpoints have inconsistent nkpt")
-        if self.coefficients.ndim != 4:
-            raise ValueError("coefficients must have shape (nspin, nkpt, nband, nproj)")
-        if self.coefficients.shape[:3] != (nspin, nkpt, nband):
-            raise ValueError("coefficients must have shape (nspin, nkpt, nband, nproj)")
-        nproj = self.coefficients.shape[3]
+        if self.nspinor == 2:
+            if nspin != 1:
+                raise ValueError("spinor data requires a single spin channel")
+            if (
+                self.coefficients.ndim != 5
+                or self.coefficients.shape[:3] != (1, nkpt, nband)
+                or self.coefficients.shape[3] != 2
+            ):
+                raise ValueError(
+                    "spinor coefficients must have shape (1, nkpt, nband, 2, nproj)"
+                )
+        else:
+            if self.coefficients.ndim != 4:
+                raise ValueError(
+                    "coefficients must have shape (nspin, nkpt, nband, nproj)"
+                )
+            if self.coefficients.shape[:3] != (nspin, nkpt, nband):
+                raise ValueError(
+                    "coefficients must have shape (nspin, nkpt, nband, nproj)"
+                )
+        nproj = self.coefficients.shape[-1]
         if self.projector_site.shape != (nproj,):
             raise ValueError("projector_site must have shape (nproj,)")
         if self.projector_atom.shape != (nproj,):
@@ -388,14 +425,17 @@ class ProjectorGreenData:
             self._validate_hij()
         if self.operator_components is not None:
             self._validate_operator_components()
+        if self.spinor_operator is not None:
+            self._validate_spinor_operator()
         if (
             exchange_ready
+            and self.spinor_operator is None
             and self.hij is None
             and not self.has_operator_component("delta_total")
         ):
             raise ValueError(
-                "exchange-ready projector data requires spin-resolved hij "
-                "or delta_total operator component"
+                "exchange-ready projector data requires spin-resolved hij, "
+                "delta_total operator component, or a spinor operator"
             )
         return True
 
@@ -434,6 +474,33 @@ class ProjectorGreenData:
             raise ValueError("hij nsite does not match site_nproj")
         if self.site_nproj is not None and np.any(self.site_nproj > self.hij.shape[2]):
             raise ValueError("hij nproj_site_max is smaller than site_nproj")
+
+    def _validate_spinor_operator(self):
+        if self.nspinor != 2:
+            raise ValueError("spinor_operator requires nspinor=2")
+        if self.spinor_operator_definition != SPINOR_OPERATOR_DEFINITION:
+            raise ValueError(
+                "unsupported spinor_operator_definition: "
+                f"{self.spinor_operator_definition!r}"
+            )
+        if self.site_nproj is None or self.site_projector_indices is None:
+            raise ValueError(
+                "spinor_operator requires site_nproj and site_projector_indices"
+            )
+        if (
+            self.spinor_operator.ndim != 5
+            or self.spinor_operator.shape[0] != self.site_nproj.shape[0]
+            or self.spinor_operator.shape[1] != self.spinor_operator.shape[2]
+            or self.spinor_operator.shape[3:] != (2, 2)
+        ):
+            raise ValueError(
+                "spinor_operator must have shape "
+                "(nsite, nproj_site_max, nproj_site_max, 2, 2)"
+            )
+        if np.any(self.site_nproj > self.spinor_operator.shape[1]):
+            raise ValueError(
+                "spinor_operator nproj_site_max is smaller than site_nproj"
+            )
 
     def _validate_operator_components(self):
         if self.site_nproj is None or self.site_projector_indices is None:
@@ -1054,6 +1121,76 @@ class ProjectorGreen:
             Gk_all = self.get_Gk_all(energy, ispin=ispin)
         return self.compute_GR(Rpts, self.kpts, Gk_all)
 
+    @property
+    def is_spinor(self):
+        return self.data.nspinor == 2
+
+    def get_Gk_spinor(self, ik, energy):
+        """Spinor Green block G[p, q, s, t] at one k point."""
+        if not self.is_spinor:
+            raise ValueError("spinor Green functions require nspinor=2 data")
+        evals = self.data.eigenvalues[0, ik]
+        coeff = self.data.coefficients[0, ik]  # (nband, 2, nproj)
+        if self.data.band_mask is not None:
+            mask = self.data.band_mask[0, ik]
+            evals = evals[mask]
+            coeff = coeff[mask]
+        inv_denom = 1.0 / (energy + self.efermi - evals)
+        Gk = np.einsum("nsp,ntq,n->pqst", coeff, coeff.conj(), inv_denom)
+        if self.data.overlap_k is None or self.overlap_mode == "plain":
+            return Gk
+        Sinv = self._inverse_overlap(self.get_Sk(ik), ik)
+        return np.einsum("pa,qb,abst->pqst", Sinv, Sinv, Gk)
+
+    def get_Gk_all_spinor(self, energy):
+        """Spinor Green blocks for all k: (nkpt, nproj, nproj, 2, 2)."""
+        if not self.is_spinor:
+            raise ValueError("spinor Green functions require nspinor=2 data")
+        if self.data.band_mask is not None or (
+            self.data.overlap_k is not None and self.overlap_mode != "plain"
+        ):
+            return np.asarray(
+                [self.get_Gk_spinor(ik, energy) for ik in range(self.data.nkpt)],
+                dtype=complex,
+            )
+        evals = self.data.eigenvalues[0]
+        coeff = self.data.coefficients[0]
+        inv_denom = 1.0 / (energy + self.efermi - evals)
+        return np.einsum(
+            "knsp,kntq,kn->kpqst", coeff, coeff.conj(), inv_denom, optimize="optimal"
+        )
+
+    def get_GR_spinor(self, Rpts, energy, Gk_all=None):
+        """Fourier-transformed spinor Green blocks: (nR, nproj, nproj, 2, 2)."""
+        if Gk_all is None:
+            Gk_all = self.get_Gk_all_spinor(energy)
+        Rvecs = np.asarray(Rpts, dtype=float)
+        phase = np.exp(self.k2Rfactor * np.einsum("ri,ki->rk", Rvecs, self.kpts))
+        phase = phase * self.kweights[None, :]
+        return np.einsum("kpqst,rk->rpqst", Gk_all, phase, optimize="optimal")
+
+    def get_site_block_spinor(self, matrix, iatom, jatom):
+        """Spinor block connecting two sites: (nproj_i, nproj_j, 2, 2)."""
+        matrix = np.asarray(matrix)
+        if matrix.shape[0] != self.nbasis or matrix.shape[1] != self.nbasis:
+            raise ValueError("matrix must have leading shape (nproj, nproj, 2, 2)")
+        iproj = self.get_site_projectors(iatom)
+        jproj = self.get_site_projectors(jatom)
+        return matrix[np.ix_(iproj, jproj)]
+
+    def get_local_operator_spinor(self, site):
+        """Site-local 2x2-in-spin operator block: (nproj, nproj, 2, 2)."""
+        if self.data.spinor_operator is None:
+            raise ValueError("spinor exchange requires spinor_operator data")
+        site = int(site)
+        nproj = self.data.site_nproj[site]
+        return self.data.spinor_operator[site, :nproj, :nproj, :, :]
+
+    def get_local_operators_spinor(self, sites=None):
+        if sites is None:
+            sites = self.get_sites()
+        return {int(site): self.get_local_operator_spinor(site) for site in sites}
+
     def get_site_projectors(self, site):
         site = int(site)
         if self.data.site_projector_indices is not None:
@@ -1288,4 +1425,101 @@ def projector_charge_moments_from_green(green, contour, sites=None):
             if population_metric is not None
             else "projector_green_contour_diagonal"
         ),
+    }
+
+
+def _spinor_dense_block(block):
+    """(nproj_i, nproj_j, 2, 2) -> spin-major dense (2*ni, 2*nj)."""
+    ni, nj = block.shape[0], block.shape[1]
+    return block.transpose(2, 0, 3, 1).reshape(2 * ni, 2 * nj)
+
+
+def spinor_projector_exchange_trace(
+    green,
+    Rpts,
+    energy,
+    local_operators=None,
+    sites=None,
+):
+    """Compute the spinor projector exchange tensor for one energy.
+
+    Evaluates, per (R, i, j), the sympy-pinned object
+    J^{ab} = -Tr[(sigma_a Delta_i) G_ij(R) (sigma_b Delta_j) G_ji(-R)]
+    (docs/sympy/spinor_projector_green.md), takes the real part per the
+    TB2J tensor convention, applies the collinear 1/(4*pi) normalization,
+    and decomposes via TB2J.Jtensor.decompose_J_tensor into J_iso, DMI,
+    and anisotropic exchange.
+
+    Note (sympy-pinned, docs/sympy/spinor_projector_green.md): at single
+    energy the raw J^{zz} carries the same-spin-channel piece
+    -z_i z_j (g_up h_up + g_dn h_dn); the physical exchange contour
+    prescription removes it (collinear reduction: J_iso = (J_xx+J_yy)/2 =
+    the two cross-channel terms of the collinear kernel).
+    """
+    for method in (
+        "get_GR_spinor",
+        "get_site_block_spinor",
+        "get_local_operators_spinor",
+        "get_site_projectors",
+    ):
+        if not callable(getattr(green, method, None)):
+            raise TypeError(f"spinor exchange backend requires {method}()")
+    Rpts = np.asarray(Rpts, dtype=int)
+    if Rpts.ndim != 2 or Rpts.shape[1] != 3:
+        raise ValueError("Rpts must have shape (nR, 3)")
+    Rkeys = [tuple(int(x) for x in R) for R in Rpts]
+    R_index = {R: i for i, R in enumerate(Rkeys)}
+    missing_negative = [R for R in Rkeys if tuple(-x for x in R) not in R_index]
+    if missing_negative:
+        raise ValueError("Rpts must include each negative R vector")
+
+    if sites is None:
+        sites = green.get_sites()
+    sites = [int(site) for site in sites]
+    if local_operators is None:
+        local_operators = green.get_local_operators_spinor(sites=sites)
+    local_operators = {
+        int(site): np.asarray(op) for site, op in local_operators.items()
+    }
+
+    GR = green.get_GR_spinor(Rpts, energy)
+    tensors = {}
+    decompositions = {}
+    for iR, R in enumerate(Rkeys):
+        iRm = R_index[tuple(-x for x in R)]
+        for iatom in sites:
+            for jatom in sites:
+                Delta_i = local_operators[iatom]
+                Delta_j = local_operators[jatom]
+                Gij = green.get_site_block_spinor(GR[iR], iatom, jatom)
+                Gji = green.get_site_block_spinor(GR[iRm], jatom, iatom)
+                dense_Gij = _spinor_dense_block(Gij)
+                dense_Gji = _spinor_dense_block(Gji)
+                dense_Di = _spinor_dense_block(Delta_i)
+                dense_Dj = _spinor_dense_block(Delta_j)
+                Jtens = np.empty((3, 3), dtype=float)
+                for a in range(3):
+                    Oi = (
+                        np.kron(PAULI_MATRICES[a], np.eye(dense_Di.shape[0] // 2))
+                        @ dense_Di
+                    )
+                    for b in range(3):
+                        Oj = (
+                            np.kron(PAULI_MATRICES[b], np.eye(dense_Dj.shape[0] // 2))
+                            @ dense_Dj
+                        )
+                        value = -np.trace(Oi @ dense_Gij @ Oj @ dense_Gji)
+                        Jtens[a, b] = value.real / (4.0 * np.pi)
+                key = (R, iatom, jatom)
+                tensors[key] = Jtens
+                decompositions[key] = decompose_J_tensor(Jtens)
+    return {
+        "tensor": tensors,
+        "decomposition": decompositions,
+        "Jiso": {k: v[0] for k, v in decompositions.items()},
+        "dmi": {k: v[1] for k, v in decompositions.items()},
+        "jani": {k: v[2] for k, v in decompositions.items()},
+        "method": "spinor_projector_exchange_trace",
+        "normalization": "1/(4*pi)",
+        "operator": "spinor_2x2",
     }
