@@ -69,3 +69,29 @@ with $J_\mathrm{ani}$ symmetric and traceless, and
 1. Kernel entry point: compute $J^{\alpha\beta}(E)$ for $\alpha,\beta\in\{x,y,z\}$ from spinor Green blocks and 2x2 site operators, take Re, decompose via `TB2J.Jtensor.decompose_J_tensor`.
 2. Collinear ($nspinor=1$) data feeds the same formula with $\Delta = z\,\sigma_z$ and diagonal $G$; $J^{xx}=J^{yy}$ reproduce the existing channel sum — the bitwise-stability requirement should instead pin the *existing* collinear path unchanged and route spinor data through the new path.
 3. The $J^{zz}$ same-channel piece is excluded by prescription; implement the contour with the standard imaginary-part/contour scheme as in the collinear kernel.
+
+
+## Correction (2026-09-23): Pauli placement and channel mapping
+
+The originally pinned arrangement `J^{ab} = -Tr[(sigma_a Delta_i) G_ij
+(sigma_b Delta_j) G_ji]/(4 pi)` is **identically zero** for
+block-diagonal (collinear) G: the spin-flip factors make the two
+operator products nilpotent.  The Pauli matrices must decompose the
+Green function, not multiply Delta.  The implementation now uses the
+ExchangeNCL channel matrix
+
+    A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji] / pi,
+    G^(u) = T^u (x) sigma_u  (Pauli components of the spinor G block)
+
+with the mapping `J_iso = Im(A00 - Axx - Ayy - Azz)/8`,
+`DMI_i = Re(A0i - Ai0)/8`, `Jani[i,j] = Im(A^{ij}(R) + A^{ij}(-R))/8`.
+The identity `(T^0)^2 - (T^z)^2 = G_up G_down` makes the A00-Azz
+contraction the algebraic cross-channel (both operator orderings,
+hence the extra factor 2 absorbed in the 1/8), so the collinear
+reduction reproduces the collinear kernel
+`Im integral Tr[Delta G_up Delta G_down]/(4 pi)` exactly.  The same
+kernel defect class included a conjugation error in the spinor overlap
+dressing (`S^-1 G (S^-1)^T` instead of `S^-1 G S^-1`), which broke the
+cubic symmetry of symmetry-equivalent exchange vectors.  Validation:
+bccFe at the validated projector-exchange settings reproduces the
+collinear reference shell-by-shell (TB2J commit 5281218).
