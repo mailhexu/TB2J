@@ -396,3 +396,34 @@ Representative SrMnO3 ``exchange.out`` excerpt:
       Mn1   Mn1   (  0,   0,   1) -17.1433   ( 0.000,  0.000,  3.800)  3.800
 
 These GPAW examples require ``gpaw`` and ``gpaw-data``.
+
+Spinor Projector Green Data
+----------------------------
+
+Spinor files set ``nspinor=2`` and use a single spectral channel. The coefficient array has shape ``(1, nkpt, nband, 2, nproj)``; the spinor axis is between band and projector. A local spinor operator has shape ``(nsite, nproj_site_max, nproj_site_max, 2, 2)`` and is stored in eV. Its site-projector indices use the same global projector order.
+
+The spinor exchange trace is
+
+.. math::
+
+   J^{ab}(E) = -\operatorname{Tr}[ (\sigma_a\Delta_i)G_{ij}(E) (\sigma_b\Delta_j)G_{ji}(E) ],
+
+with the contour prescription and ``1/(4*pi)`` normalization defined in ``docs/sympy/spinor_projector_green.md``. The output decomposes the tensor as ``J = J_iso I + DMI_antisymmetric + J_ani_symmetric``. Onsite pairs are excluded from the reported exchange table.
+
+GPAW noncollinear export uses native ``P_ani[n, s, i]`` spinor projectors and the Pauli vector ``dH_asii[x:y:z]``. Use ``save_gpaw_spinor_projector_netcdf`` followed by ``gpaw_projector2J.py``; the CLI auto-detects ``nspinor=2``.
+
+ABINIT NC export is provided by ``abinao.spinor_export``:
+
+.. code-block:: python
+
+   from abinao.spinor_export import gen_exchange_abinit_nc_spinor
+
+   gen_exchange_abinit_nc_spinor(
+       "o_WFK.nc", "o_VXC.nc", ["Fe.upf", "O.upf"],
+       output_path="TB2J_results_abinit_spinor",
+       index_magnetic_atoms=[0], Rcut=10.0, nz=30,
+   )
+
+ABINIT ``nspden=4`` VXC components are packed as ``(V11, V22, Re V12, Im V12)``. The exporter reconstructs the Pauli field as ``Bx=c3``, ``By=-c4``, ``Bz=(c1-c2)/2`` and stores ``2*B.sigma`` so its collinear limit is the existing ``V_up-V_down`` NC-PAO operator. ABINIT spinor WFK input currently requires ``istwfk=1``; the unpinned spinor time-reversal component-exchange expansion is rejected rather than silently applying a scalar conjugation.
+
+VASP native v7 export writes spinor-major CPROJ halves, dense ``SL (x) conjg(RSSYMOP)`` expansion actions, the per-k ``RSSYMOP`` audit array, and the 2x2 CDIJ matrices. It requires the ``ncl`` build (the ``std`` binary contains ``-DNGZhalf``). ``vasp_native2J.py`` auto-detects v7.
