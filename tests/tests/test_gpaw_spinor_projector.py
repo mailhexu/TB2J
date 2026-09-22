@@ -75,3 +75,26 @@ def test_spinor_kernel_consumes_export():
     assert np.isfinite(Jiso)
     assert np.isfinite(D).all()
     assert np.isfinite(Jani).all()
+
+
+def test_symmetry_forced_off_for_sc_noncollinear():
+    """Story 005: GPAW itself refuses symmetry for SC noncollinear PW runs
+    (gpaw/new/builder.py assertion), so the native export path needs no
+    unfolding; the exporter guards against symmetrized k-weights."""
+    import pytest as _pytest
+    from ase import Atoms
+    from gpaw import GPAW, PW
+
+    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[6, 6, 6], pbc=True)
+    calc = GPAW(
+        mode=PW(200),
+        xc="LDA",
+        kpts=(2, 2, 2),
+        soc=True,
+        magmoms=[[0, 0, 3.0]],
+        txt=None,
+        convergence={"energy": 1e-3},
+    )
+    atoms.calc = calc
+    with _pytest.raises(AssertionError):
+        atoms.get_potential_energy()

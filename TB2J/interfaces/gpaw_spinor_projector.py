@@ -67,6 +67,19 @@ def gpaw_spinor_calc_to_projector_green_data(calc) -> ProjectorGreenData:
     kpt_kc = np.asarray(ibz.kpt_kc, dtype=float)
     weight_k = np.asarray(ibz.weight_k, dtype=float)
     nkpt = len(kpt_kc)
+
+    # GPAW forces symmetry off for SC noncollinear PW runs
+    # (gpaw/new/builder.py asserts identity-only symmetry without time
+    # reversal), so the stored k-set must be the complete BZ grid. Guard
+    # against partially symmetrized data from other modes: every weight
+    # must be a whole multiple of 1/nkpt for a complete unsymmetrized grid.
+    grid_weight = 1.0 / nkpt
+    if not np.allclose(weight_k / grid_weight, np.round(weight_k / grid_weight)):
+        raise ValueError(
+            "spinor export requires a complete (unsymmetrized) BZ k-point "
+            "set; GPAW SC noncollinear calculations are symmetry-forced "
+            "off, so symmetrized k-weights indicate an unsupported mode"
+        )
     nbands = wfs.nbands
 
     setups = dft.setups
