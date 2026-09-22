@@ -234,24 +234,71 @@ def compute_spinor_projector_exchange(
             green, Rpts, energy=energy, local_operators=local_operators, sites=sites
         )
         for key in values:
-            values[key].append(trace["tensor_complex"][key])
-
-    from TB2J.Jtensor import decompose_J_tensor
+            values[key].append(trace["A_ijR"][key])
 
     result = {}
+    [tuple(int(x) for x in R) for R in Rpts]
     for key, vals in values.items():
         R, i, j = key
+        Rm = tuple(-x for x in R)
         integrated = np.asarray(
             [
                 [
                     contour.integrate_values(np.asarray([v[a, b] for v in vals]))
+                    for b in range(4)
+                ]
+                for a in range(4)
+            ]
+        )
+        sgn = signs[i] * signs[j]
+        # ExchangeNCL channel mapping (A^{uv} = Tr[Delta G^(u) Delta G^(v)]/pi):
+        # J_iso = Im(A00 - Axx - Ayy - Azz), DMI_i = Re(A0i - Ai0),
+        # Jani[i,j] = Im(A^{ij}(R) + A^{ij}(-R)).  The 1/4 prefactor pins the
+        # collinear reduction exactly to the collinear kernel
+        # Im integral Tr[Delta G_up Delta G_down]/(4 pi).
+        Jiso = (
+            float(
+                np.imag(
+                    integrated[0, 0]
+                    - integrated[1, 1]
+                    - integrated[2, 2]
+                    - integrated[3, 3]
+                )
+            )
+            / 8.0
+            * sgn
+        )
+        D = np.array(
+            [
+                float(np.real(integrated[0, i + 1] - integrated[i + 1, 0])) / 8.0 * sgn
+                for i in range(3)
+            ]
+        )
+        valm = np.asarray(
+            [
+                [
+                    contour.integrate_values(
+                        np.asarray([v[a, b] for v in values[(Rm, j, i)]])
+                    )
+                    for b in range(4)
+                ]
+                for a in range(4)
+            ]
+        )
+        Jani = np.asarray(
+            [
+                [
+                    float(np.imag(integrated[a + 1, b + 1] + valm[a + 1, b + 1]))
+                    / 8.0
+                    * sgn
                     for b in range(3)
                 ]
                 for a in range(3)
             ]
         )
-        Jtens = np.imag(integrated) * signs[i] * signs[j]
-        Jiso, D, Jani = decompose_J_tensor(Jtens)
+        Jtens = Jiso * np.eye(3)
+        Jtens += 0.5 * (np.asarray(D)[:, None] - np.asarray(D)[None, :])
+        Jtens += 0.5 * (Jani + Jani.T)
         result[key] = {"Jiso": Jiso, "dmi": D, "jani": Jani, "tensor": Jtens}
     return result
 

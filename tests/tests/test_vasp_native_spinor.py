@@ -150,7 +150,7 @@ def test_v7_kernel_consumes(tmp_path):
     green = ProjectorGreen(data)
     Rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
     result = spinor_projector_exchange_trace(green, Rpts, energy=0.05)
-    J = result["tensor"][((0, 0, 0), 0, 1)]
+    J = result["A_ijR"][((0, 0, 0), 0, 1)]
     assert np.isfinite(J).all()
 
 

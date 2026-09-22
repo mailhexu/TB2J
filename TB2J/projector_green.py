@@ -9,8 +9,6 @@ from pathlib import Path
 
 import numpy as np
 
-from TB2J.Jtensor import decompose_J_tensor
-
 SCHEMA_NAME = "tb2j.projector_green"
 SCHEMA_VERSION = "1.0"
 COMPLEX_COMPONENT = ["real", "imag"]
@@ -30,6 +28,13 @@ SUPPORTED_HIJ_EXCHANGE_DEFINITIONS = (
     "spinor 2x2 local operator (j-averaged basis)",
 )
 SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
+PAULI_IDENTITY_AND_MATRICES = (
+    np.eye(2, dtype=complex),
+    np.array([[0, 1], [1, 0]], dtype=complex),
+    np.array([[0, -1j], [1j, 0]], dtype=complex),
+    np.array([[1, 0], [0, -1]], dtype=complex),
+)
+
 PAULI_MATRICES = np.array(
     [
         [[0, 1], [1, 0]],
@@ -1187,7 +1192,7 @@ class ProjectorGreen:
         if self.data.overlap_k is None or self.overlap_mode == "plain":
             return Gk
         Sinv = self._inverse_overlap(self.get_Sk(ik), ik)
-        return np.einsum("pa,qb,abst->pqst", Sinv, Sinv, Gk)
+        return np.einsum("pa,abst,bq->pqst", Sinv, Gk, Sinv)
 
     def get_Gk_all_spinor(self, energy):
         """Spinor Green blocks for all k: (nkpt, nproj, nproj, 2, 2)."""
@@ -1530,9 +1535,7 @@ def spinor_projector_exchange_trace(
     }
 
     GR = green.get_GR_spinor(Rpts, energy)
-    tensors = {}
-    tensors_complex = {}
-    decompositions = {}
+    A_ijR = {}
     for iR, R in enumerate(Rkeys):
         iRm = R_index[tuple(-x for x in R)]
         for iatom in sites:
@@ -1541,37 +1544,44 @@ def spinor_projector_exchange_trace(
                 Delta_j = local_operators[jatom]
                 Gij = green.get_site_block_spinor(GR[iR], iatom, jatom)
                 Gji = green.get_site_block_spinor(GR[iRm], jatom, iatom)
-                dense_Gij = _spinor_dense_block(Gij)
-                dense_Gji = _spinor_dense_block(Gji)
                 dense_Di = _spinor_dense_block(Delta_i)
                 dense_Dj = _spinor_dense_block(Delta_j)
-                Jcplx = np.empty((3, 3), dtype=complex)
-                Jtens = np.empty((3, 3), dtype=float)
-                for a in range(3):
-                    Oi = (
-                        np.kron(PAULI_MATRICES[a], np.eye(dense_Di.shape[0] // 2))
-                        @ dense_Di
-                    )
-                    for b in range(3):
-                        Oj = (
-                            np.kron(PAULI_MATRICES[b], np.eye(dense_Dj.shape[0] // 2))
-                            @ dense_Dj
+                # ExchangeNCL channel structure: A^{uv} = Tr[Delta_i
+                # T^u_ij Delta_j T^v_ji]/pi with T^u the Pauli components of
+                # the spinor Green block (u, v in {0, x, y, z}).  Pauli
+                # matrices must decompose G (NOT multiply Delta on the
+                # outside): Tr[(sigma_a Delta) G (sigma_b Delta) G] is
+                # identically zero for block-diagonal (collinear) G, while
+                # (T^0)^2 - (T^z)^2 = G_up G_down gives the LKAG
+                # cross-channel algebraically.
+                # Pauli components of the spinor Green blocks (orbital
+                # matrices), then the u-th spinor component G^(u) = kron(sig_u,
+                # T^u).  A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji]/pi.
+                T_ijs = [
+                    0.5 * np.einsum("pqst,st->pq", Gij, SIG)
+                    for SIG in PAULI_IDENTITY_AND_MATRICES
+                ]
+                T_jis = [
+                    0.5 * np.einsum("pqst,st->pq", Gji, SIG)
+                    for SIG in PAULI_IDENTITY_AND_MATRICES
+                ]
+                G_u = [
+                    np.kron(PAULI_IDENTITY_AND_MATRICES[u], T_ijs[u]) for u in range(4)
+                ]
+                G_v = [
+                    np.kron(PAULI_IDENTITY_AND_MATRICES[v], T_jis[v]) for v in range(4)
+                ]
+                A = np.empty((4, 4), dtype=complex)
+                for u in range(4):
+                    for v in range(4):
+                        A[u, v] = (
+                            np.trace(dense_Di @ G_u[u] @ dense_Dj @ G_v[v]) / np.pi
                         )
-                        value = -np.trace(Oi @ dense_Gij @ Oj @ dense_Gji)
-                        Jcplx[a, b] = value / (4.0 * np.pi)
-                        Jtens[a, b] = value.real / (4.0 * np.pi)
                 key = (R, iatom, jatom)
-                tensors[key] = Jtens
-                tensors_complex[key] = Jcplx
-                decompositions[key] = decompose_J_tensor(Jtens)
+                A_ijR[key] = A
     return {
-        "tensor": tensors,
-        "tensor_complex": tensors_complex,
-        "decomposition": decompositions,
-        "Jiso": {k: v[0] for k, v in decompositions.items()},
-        "dmi": {k: v[1] for k, v in decompositions.items()},
-        "jani": {k: v[2] for k, v in decompositions.items()},
+        "A_ijR": A_ijR,
         "method": "spinor_projector_exchange_trace",
-        "normalization": "1/(4*pi)",
+        "normalization": "A^{uv}=Tr[Delta T^u Delta T^v]/pi (ExchangeNCL channels)",
         "operator": "spinor_2x2",
     }
