@@ -958,6 +958,21 @@ def gen_exchange_projector_netcdf(
 ):
     """Python interface for projector-NetCDF exchange calculation."""
     data = ProjectorGreenData.load_netcdf(filename)
+    if getattr(data, "nspinor", 1) == 2:
+        from TB2J.interfaces.gpaw_spinor_projector import (
+            gen_exchange_gpaw_spinor_netcdf,
+        )
+
+        return gen_exchange_gpaw_spinor_netcdf(
+            filename,
+            output_path=output_path,
+            Rcut=Rcut,
+            Rpts=Rpts,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            magnetic_elements=magnetic_elements,
+            index_magnetic_atoms=index_magnetic_atoms,
+        )
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]

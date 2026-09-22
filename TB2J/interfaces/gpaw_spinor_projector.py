@@ -17,7 +17,10 @@ used as stored (run with ``symmetry='off'`` or via the unfolding adapter).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+from ase.units import kB
 
 from TB2J.projector_green import (
     SPINOR_OPERATOR_DEFINITION,
@@ -179,3 +182,190 @@ def save_gpaw_spinor_projector_netcdf(calc, filename, metadata=None):
         data.metadata.update(metadata)
     data.save_netcdf(filename)
     return data
+
+
+def _site_magnetization_sign(operator_block):
+    """Sign of the z-projector trace (majority-spin direction)."""
+    block = np.asarray(operator_block)
+    ztrace = float(np.real(np.trace(block[:, :, 0, 0] - block[:, :, 1, 1])))
+    return 1.0 if ztrace >= 0.0 else -1.0
+
+
+def compute_spinor_projector_exchange(
+    data,
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    sites=None,
+    overlap_mode=None,
+    overlap_rcond=None,
+):
+    """Contour-integrated spinor exchange tensor per (R, i, j).
+
+    Integrates the sympy-pinned J^{ab}(E) object over the fermion contour;
+    the imaginary-part prescription removes the same-spin-channel piece,
+    so the collinear reduction J_iso = (J_xx+J_yy)/2 holds. Returns
+    {(R, i, j): {"Jiso", "dmi", "jani", "tensor"}} with the ExchangeNCL
+    (TB2J.Jtensor) decomposition.
+    """
+    from TB2J.mycfr import CFR
+    from TB2J.projector_green import ProjectorGreen, spinor_projector_exchange_trace
+
+    if data.nspinor != 2:
+        raise ValueError("spinor exchange requires nspinor=2 data")
+    if Rpts is None:
+        from TB2J.interfaces.gpaw_projector import _R_grid
+
+        Rpts = _R_grid(nmax=1)
+    Rpts = np.asarray(Rpts, dtype=int)
+    if sites is None:
+        sites = list(range(len(data.site_nproj)))
+    sites = [int(site) for site in sites]
+    green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
+    local_operators = green.get_local_operators_spinor(sites=sites)
+    signs = {site: _site_magnetization_sign(op) for site, op in local_operators.items()}
+
+    contour = CFR(nz=nz, T=smearing_eV / kB)
+    values = {
+        (tuple(int(x) for x in R), i, j): [] for R in Rpts for i in sites for j in sites
+    }
+    for energy in contour.path:
+        trace = spinor_projector_exchange_trace(
+            green, Rpts, energy=energy, local_operators=local_operators, sites=sites
+        )
+        for key in values:
+            values[key].append(trace["tensor_complex"][key])
+
+    from TB2J.Jtensor import decompose_J_tensor
+
+    result = {}
+    for key, vals in values.items():
+        R, i, j = key
+        integrated = np.asarray(
+            [
+                [
+                    contour.integrate_values(np.asarray([v[a, b] for v in vals]))
+                    for b in range(3)
+                ]
+                for a in range(3)
+            ]
+        )
+        Jtens = np.imag(integrated) * signs[i] * signs[j]
+        Jiso, D, Jani = decompose_J_tensor(Jtens)
+        result[key] = {"Jiso": Jiso, "dmi": D, "jani": Jani, "tensor": Jtens}
+    return result
+
+
+def write_spinor_projector_exchange_out(
+    data,
+    path="TB2J_results",
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+    description=None,
+    charges=None,
+    spinat=None,
+    Rcut=None,
+    overlap_mode=None,
+    overlap_rcond=None,
+):
+    """Write standard TB2J outputs (noncollinear SpinIO) from spinor data."""
+    from ase import Atoms
+
+    from TB2J.interfaces.gpaw_projector import _magnetic_sites, _R_grid_for_cutoff
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    atoms = Atoms(
+        numbers=data.atomic_numbers,
+        positions=data.positions,
+        cell=data.cell,
+        pbc=True,
+    )
+    sites = _magnetic_sites(
+        data,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+    )
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(data, sites, Rcut if Rcut is not None else 10.0)
+    exchange = compute_spinor_projector_exchange(
+        data,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        sites=sites,
+        overlap_mode=overlap_mode,
+        overlap_rcond=overlap_rcond,
+    )
+    if charges is None:
+        charges = np.zeros(len(atoms), dtype=float)
+    if spinat is None:
+        spinat = np.zeros((len(atoms), 3), dtype=float)
+    index_spin = [-1] * len(atoms)
+    site_to_spin = {}
+    for ispin, site in enumerate(sites):
+        index_spin[site] = ispin
+        site_to_spin[site] = ispin
+    exchange_Jdict = {}
+    dmi_ddict = {}
+    Jani_dict = {}
+    distance_dict = {}
+    for (R, i, j), entry in exchange.items():
+        vector = np.asarray(R) @ data.cell + atoms.positions[j] - atoms.positions[i]
+        distance = float(np.linalg.norm(vector))
+        if Rcut is not None and distance >= float(Rcut):
+            continue
+        key = (tuple(int(x) for x in R), site_to_spin[i], site_to_spin[j])
+        distance_dict[key] = (vector, distance)
+        exchange_Jdict[key] = float(entry["Jiso"])
+        dmi_ddict[key] = np.asarray(entry["dmi"], dtype=float)
+        Jani_dict[key] = np.asarray(entry["jani"], dtype=float)
+    if description is None:
+        description = (
+            "Spinor projector Green workflow using GPAW noncollinear+SOC "
+            "projections and the dH_asii Pauli-decomposed 2x2 site operator. "
+            "J_iso, DMI, and anisotropic exchange from the sympy-pinned "
+            "spinor exchange tensor (docs/sympy/spinor_projector_green.md).\n"
+        )
+    output = SpinIO(
+        atoms=atoms,
+        charges=charges,
+        spinat=spinat,
+        index_spin=index_spin,
+        colinear=False,
+        distance_dict=distance_dict,
+        exchange_Jdict=exchange_Jdict,
+        dmi_ddict=dmi_ddict,
+        Jani_dict=Jani_dict,
+        description=description,
+    )
+    output.write_all(path=path)
+    return Path(path) / "exchange.out", exchange_Jdict
+
+
+def gen_exchange_gpaw_spinor_netcdf(
+    filename,
+    output_path="TB2J_results",
+    Rcut=10.0,
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+):
+    """Python interface for spinor projector-NetCDF exchange calculation."""
+    from TB2J.projector_green import ProjectorGreenData
+
+    data = ProjectorGreenData.load_netcdf(filename)
+    return write_spinor_projector_exchange_out(
+        data,
+        path=output_path,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+        Rcut=Rcut,
+    )

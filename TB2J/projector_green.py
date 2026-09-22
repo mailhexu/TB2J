@@ -1531,6 +1531,7 @@ def spinor_projector_exchange_trace(
 
     GR = green.get_GR_spinor(Rpts, energy)
     tensors = {}
+    tensors_complex = {}
     decompositions = {}
     for iR, R in enumerate(Rkeys):
         iRm = R_index[tuple(-x for x in R)]
@@ -1544,6 +1545,7 @@ def spinor_projector_exchange_trace(
                 dense_Gji = _spinor_dense_block(Gji)
                 dense_Di = _spinor_dense_block(Delta_i)
                 dense_Dj = _spinor_dense_block(Delta_j)
+                Jcplx = np.empty((3, 3), dtype=complex)
                 Jtens = np.empty((3, 3), dtype=float)
                 for a in range(3):
                     Oi = (
@@ -1556,12 +1558,15 @@ def spinor_projector_exchange_trace(
                             @ dense_Dj
                         )
                         value = -np.trace(Oi @ dense_Gij @ Oj @ dense_Gji)
+                        Jcplx[a, b] = value / (4.0 * np.pi)
                         Jtens[a, b] = value.real / (4.0 * np.pi)
                 key = (R, iatom, jatom)
                 tensors[key] = Jtens
+                tensors_complex[key] = Jcplx
                 decompositions[key] = decompose_J_tensor(Jtens)
     return {
         "tensor": tensors,
+        "tensor_complex": tensors_complex,
         "decomposition": decompositions,
         "Jiso": {k: v[0] for k, v in decompositions.items()},
         "dmi": {k: v[1] for k, v in decompositions.items()},
