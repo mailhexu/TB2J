@@ -565,6 +565,9 @@ class ProjectorGreenData:
         with Dataset(Path(filename), "w") as nc:
             nspin, nkpt, nband = self.eigenvalues.shape
             nproj = self.nproj
+            if self.nspinor == 2:
+                nc.createDimension("nspinor", 2)
+                nc.nspinor = 2
             nc.createDimension("nspin", nspin)
             nc.createDimension("nkpt", nkpt)
             nc.createDimension("nband", nband)
@@ -618,9 +621,16 @@ class ProjectorGreenData:
                 projectors.channel_interpretation = self.channel_interpretation
             if self.population_metric is not None:
                 projectors.population_metric = self.population_metric
-            projectors.createVariable(
-                "coefficients", "f8", ("nspin", "nkpt", "nband", "nproj", "complex")
-            )[:] = encode_complex(self.coefficients)
+            if self.nspinor == 2:
+                projectors.createVariable(
+                    "coefficients",
+                    "f8",
+                    ("nspin", "nkpt", "nband", "nspinor", "nproj", "complex"),
+                )[:] = encode_complex(self.coefficients)
+            else:
+                projectors.createVariable(
+                    "coefficients", "f8", ("nspin", "nkpt", "nband", "nproj", "complex")
+                )[:] = encode_complex(self.coefficients)
             projectors.createVariable("projector_site", "i4", ("nproj",))[:] = (
                 self.projector_site
             )
@@ -671,7 +681,11 @@ class ProjectorGreenData:
                     "site_projector_indices", "i4", ("nsite", "nproj_site_max")
                 )[:] = self.site_projector_indices
 
-            if self.hij is not None or self.operator_components is not None:
+            if (
+                self.hij is not None
+                or self.operator_components is not None
+                or self.spinor_operator is not None
+            ):
                 operators = nc.createGroup("operators")
 
             if self.hij is not None:
@@ -723,6 +737,28 @@ class ProjectorGreenData:
                             name, {}
                         ).items():
                             setattr(variable, key, value)
+
+            if self.spinor_operator is not None:
+                if "nsite" not in nc.dimensions:
+                    nc.createDimension("nsite", self.spinor_operator.shape[0])
+                if "nproj_site_max" not in nc.dimensions:
+                    nc.createDimension("nproj_site_max", self.spinor_operator.shape[1])
+                spin = operators.createVariable(
+                    "spinor_operator",
+                    "f8",
+                    (
+                        "nsite",
+                        "nproj_site_max",
+                        "nproj_site_max",
+                        "nspinor",
+                        "nspinor",
+                        "complex",
+                    ),
+                )
+                spin[:] = encode_complex(self.spinor_operator)
+                spin.definition = self.spinor_operator_definition
+                if self.operator_basis is not None:
+                    spin.operator_basis = self.operator_basis
 
     @staticmethod
     def _write_optional_projector_array(group, name, value):
@@ -806,11 +842,18 @@ class ProjectorGreenData:
             site_projector_indices = cls._optional_var(
                 projectors, "site_projector_indices"
             )
+            operator_basis = metadata.get("operator_basis")
+            operators = nc.groups.get("operators")
             hij = hij_definition = hij_units = hij_source = hij_projection = None
             operator_components = None
             operator_component_metadata = None
-            operator_basis = metadata.get("operator_basis")
-            operators = nc.groups.get("operators")
+            spinor_operator = None
+            spinor_operator_definition = None
+            if operators is not None and "spinor_operator" in operators.variables:
+                spin_var = operators.variables["spinor_operator"]
+                spinor_operator = decode_complex(spin_var[:])
+                spinor_operator_definition = getattr(spin_var, "definition", None)
+                operator_basis = getattr(spin_var, "operator_basis", operator_basis)
             if operators is not None and "hij" in operators.variables:
                 hij_var = operators.variables["hij"]
                 hij = decode_complex(hij_var[:])
@@ -828,6 +871,7 @@ class ProjectorGreenData:
                     operator_component_metadata[name] = {
                         key: getattr(variable, key) for key in variable.ncattrs()
                     }
+            nspinor = int(getattr(nc, "nspinor", 1))
             return cls(
                 kpoints=kgrp.variables["kpoints"][:],
                 weights=kgrp.variables["weights"][:],
@@ -864,6 +908,9 @@ class ProjectorGreenData:
                 population_metric=population_metric,
                 operator_basis=operator_basis,
                 metadata=metadata,
+                nspinor=nspinor,
+                spinor_operator=spinor_operator,
+                spinor_operator_definition=spinor_operator_definition,
             )
 
     @staticmethod
