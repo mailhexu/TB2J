@@ -602,10 +602,15 @@ def read_vasp_native_spinor(filename: str | Path):
         cproj = np.frombuffer(
             f.read(nprod_stream * nband * nkpt * nspin * 16), dtype="<c16"
         ).reshape(nprod_stream, nband, nkpt, nspin, order="F")
-        _cdij_pauli = np.frombuffer(
+        # Raw VASP CDIJ components.  VASP stores CDIJ in the SPINOR
+        # representation (D_uu, D_ud, D_du, D_dd) after US_FLIP (us.F
+        # SETDIJ_): D_uu = (C00+Cz)/2 etc., each an energy-like eV matrix.
+        _cdij_raw = np.frombuffer(
             f.read(lmdim_max * lmdim_max * nions * ncdij * 16), dtype="<c16"
-        )
-        cdij_spinor = np.frombuffer(
+        ).reshape(lmdim_max, lmdim_max, nions, ncdij, order="F")
+        # The exporter's converted stream (built from an incorrect Pauli
+        # reading of these components) is read and discarded.
+        _cdij_spinor_converted = np.frombuffer(
             f.read(lmdim_max * lmdim_max * nions * 4 * 16), dtype="<c16"
         ).reshape(lmdim_max, lmdim_max, nions, 4, order="F")
 
@@ -663,17 +668,31 @@ def read_vasp_native_spinor(filename: str | Path):
             start, start + site_nproj[ion]
         )
 
-    # 2x2 spin operator from the converted CDIJ blocks
+    # 2x2 spin operator from the raw VASP CDIJ spinor components
+    # (D_uu, D_ud, D_du, D_dd), each in eV.
     spinor_operator = np.zeros((nions, nmax, nmax, 2, 2), dtype=complex)
     for ion in range(nions):
         nproj_ion = int(site_nproj[ion])
         block = spinor_operator[ion, :nproj_ion, :nproj_ion]
-        block[:, :, 0, 0] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 0]
-        block[:, :, 0, 1] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 1]
-        block[:, :, 1, 0] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 2]
-        block[:, :, 1, 1] = cdij_spinor[:nproj_ion, :nproj_ion, ion, 3]
+        block[:, :, 0, 0] = _cdij_raw[:nproj_ion, :nproj_ion, ion, 0]
+        block[:, :, 0, 1] = _cdij_raw[:nproj_ion, :nproj_ion, ion, 1]
+        block[:, :, 1, 0] = _cdij_raw[:nproj_ion, :nproj_ion, ion, 2]
+        block[:, :, 1, 1] = _cdij_raw[:nproj_ion, :nproj_ion, ion, 3]
         herm = 0.5 * (block + block.transpose(1, 0, 3, 2).conj())
-        spinor_operator[ion, :nproj_ion, :nproj_ion] = herm
+        # Convert to the kernel Delta convention: drop the scalar (identity)
+        # channel and double the Pauli coefficients, so the zz element is the
+        # full spin splitting (uu - dd = 2*Cz), matching the collinear
+        # path's D_up - D_down operator (pinned on the ABINIT spinor path).
+        mx = 0.5 * (herm[..., 0, 1] + herm[..., 1, 0])
+        my = -0.5j * (herm[..., 0, 1] - herm[..., 1, 0])
+        mz = 0.5 * (herm[..., 0, 0] - herm[..., 1, 1])
+        # Delta = 2 * (mx sigx + my sigy + mz sigz): the zz element is the
+        # full spin splitting D_uu - D_dd (eV), matching the collinear
+        # path's D_up - D_down operator.
+        spinor_operator[ion, :nproj_ion, :nproj_ion, 0, 0] = 2 * mz
+        spinor_operator[ion, :nproj_ion, :nproj_ion, 0, 1] = 2 * (mx + 1j * my)
+        spinor_operator[ion, :nproj_ion, :nproj_ion, 1, 0] = 2 * (mx - 1j * my)
+        spinor_operator[ion, :nproj_ion, :nproj_ion, 1, 1] = -2 * mz
 
     symbols = [
         bytes(type_labels[int(ion_ityp[i]) - 1]).decode("ascii").strip()

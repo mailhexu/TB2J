@@ -65,15 +65,17 @@ def _make_v7_file(path, rng, nkpt_bz=4, nions=2, nproj_per_ion=2, nband=3):
     cproj[: 2 * nproj] = rng.normal(
         size=(2 * nproj, nband, nkpt_ibz, 1)
     ) + 1j * rng.normal(size=(2 * nproj, nband, nkpt_ibz, 1))
-    cdij_pauli = np.zeros((lmdim, lmdim, nions, 4), dtype=complex)
-    cdij_spinor = np.zeros((lmdim, lmdim, nions, 4), dtype=complex)
+    # Raw VASP CDIJ stream: SPINOR representation (D_uu, D_ud, D_du, D_dd)
+    # with US_FLIP's factor 1/2 (D_uu = (C00+Cz)/2, ...).
+    cdij_raw = np.zeros((lmdim, lmdim, nions, 4), dtype=complex)
+    cdij_converted = np.zeros((lmdim, lmdim, nions, 4), dtype=complex)
     for ion in range(nions):
         c00 = np.diag([0.2, 0.1]).astype(complex)
         cz = np.diag([0.5, -0.5]).astype(complex) * (1 if ion == 0 else -1)
-        cdij_pauli[:, :, ion, 0] = c00
-        cdij_pauli[:, :, ion, 3] = cz
-        cdij_spinor[:, :, ion, 0] = c00 + cz
-        cdij_spinor[:, :, ion, 3] = c00 - cz
+        cdij_raw[:, :, ion, 0] = 0.5 * (c00 + cz)
+        cdij_raw[:, :, ion, 3] = 0.5 * (c00 - cz)
+        cdij_converted[:, :, ion, 0] = c00 + cz
+        cdij_converted[:, :, ion, 3] = c00 - cz
 
     buf = b""
 
@@ -98,7 +100,7 @@ def _make_v7_file(path, rng, nkpt_bz=4, nions=2, nproj_per_ion=2, nband=3):
     buf += _w(vkpt_ibz.T, "<f8") + _w(wtkpt, "<f8") + _w(efermi, "<f8")
     buf += _w(celtot, "<f8") + _w(fertot, "<f8")
     buf += _w(cproj, "<c16")
-    buf += _w(cdij_pauli, "<c16") + _w(cdij_spinor, "<c16")
+    buf += _w(cdij_raw, "<c16") + _w(cdij_converted, "<c16")
     path.write_bytes(buf)
 
     expected = {}
@@ -131,13 +133,23 @@ def test_v7_roundtrip(tmp_path):
                 data.coefficients[0, k, :, s, :], exp[s], atol=1e-10
             )
 
-    # Hermitian spinor operator
+    # Hermitian spinor operator in the Delta convention: identity dropped,
+    # zz elements are +/- the full spin splitting (D_uu - D_dd = cz).
     block = data.spinor_operator[0]
     np.testing.assert_allclose(block, block.transpose(1, 0, 3, 2).conj(), atol=1e-12)
-    # spins along z (cz diagonal): zz block difference sign per ion
     np.testing.assert_allclose(
-        data.spinor_operator[0, :, :, 0, 0] - data.spinor_operator[0, :, :, 1, 1],
-        np.diag([1.0, -1.0]),
+        data.spinor_operator[0, :, :, 0, 0] + data.spinor_operator[0, :, :, 1, 1],
+        np.zeros((2, 2)),
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        data.spinor_operator[0, :, :, 0, 0],
+        np.diag([0.5, -0.5]),
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        data.spinor_operator[1, :, :, 0, 0],
+        np.diag([-0.5, 0.5]),
         atol=1e-12,
     )
 
