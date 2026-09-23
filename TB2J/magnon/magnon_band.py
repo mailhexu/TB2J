@@ -81,7 +81,7 @@ class MagnonBand:
                 for band in segment_bands:
                     ax.plot(
                         x,
-                        band[start_idx : start_idx + nbands] + shift,
+                        band + shift,
                         linewidth=linewidth,
                         color=color,
                         linestyle=linestyle,
