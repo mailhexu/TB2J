@@ -6,6 +6,7 @@ import pytest
 gpaw = pytest.importorskip("gpaw")
 
 from TB2J.interfaces.gpaw_spinor_projector import (  # noqa: E402
+    compute_spinor_projector_exchange,
     gpaw_spinor_calc_to_projector_green_data,
 )
 from TB2J.projector_green import (  # noqa: E402
@@ -68,13 +69,28 @@ def test_spinor_kernel_consumes_export():
     data = gpaw_spinor_calc_to_projector_green_data(calc)
     green = ProjectorGreen(data)
     Rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
+    # Corrected kernel contract (docs/sympy/spinor_projector_green.md
+    # correction 2026-09-23): the kernel returns the ExchangeNCL channel
+    # matrix A^{uv} = Tr[Delta_i G^(u) Delta_j G^(v)]/pi; the J_iso/DMI/Jani
+    # decomposition lives in compute_spinor_projector_exchange.
     result = spinor_projector_exchange_trace(green, Rpts, energy=0.05)
-    J = result["tensor"][((0, 0, 0), 0, 0)]
-    assert np.isfinite(J).all()
-    Jiso, D, Jani = result["decomposition"][((0, 0, 0), 0, 0)]
-    assert np.isfinite(Jiso)
-    assert np.isfinite(D).all()
-    assert np.isfinite(Jani).all()
+    A = result["A_ijR"][((0, 0, 0), 0, 0)]
+    assert A.shape == (4, 4)
+    assert np.isfinite(A).all()
+
+    exchange = compute_spinor_projector_exchange(
+        data, Rpts=Rpts, nz=6, smearing_eV=0.05, sites=[0]
+    )
+    for key, entry in exchange.items():
+        assert np.isfinite(entry["Jiso"])
+        assert np.isfinite(entry["dmi"]).all()
+        assert np.isfinite(entry["jani"]).all()
+    # Cubic symmetry of a single-site bcc-like box: exchange is even in R
+    # and DMI vanishes.
+    j_r = exchange[((1, 0, 0), 0, 0)]["Jiso"]
+    j_mr = exchange[((-1, 0, 0), 0, 0)]["Jiso"]
+    assert j_r == pytest.approx(j_mr, rel=1e-6)
+    assert exchange[((1, 0, 0), 0, 0)]["dmi"] == pytest.approx(np.zeros(3), abs=1e-6)
 
 
 def test_symmetry_forced_off_for_sc_noncollinear():

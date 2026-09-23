@@ -6,10 +6,18 @@ contract (``nspinor=2``):
 
 - coefficients ``P_ani[n, s, i]`` (spinor axis from GPAW's noncollinear
   projections, shape ``(nband, 2, nproj)``) -> ``(1, nkpt, nband, 2, nproj)``;
+- eigenvalues ``myeig_n * Ha`` (GPAW new-API ``wfs.eig_n`` is Hartree,
+  gpaw/new/ibzwfs.py) -> eV, matching the eV ``efermi``;
 - site operator from ``dH_asii`` whose 4 components are the Pauli vector
-  ``(v, x, y, z)`` (gpaw/new/potential.py:45, stored transposed), with the
-  spin-dependent part packed as the 2x2 matrix
-  ``Delta = x*sigma_x + y*sigma_y + z*sigma_z``.
+  ``(v, x, y, z)`` (gpaw/new/potential.py:45, stored transposed), i.e.
+  ``H_2x2 = v*I + x*sx + y*sy + z*sz`` with spin splitting
+  ``V_up - V_down = 2*z``.  The spin-dependent part is packed as the 2x2
+  matrix ``Delta = 2*Ha*(x*sigma_x + y*sigma_y + z*sigma_z)`` — the FULL
+  splitting with the identity part dropped.  The factor ``Ha`` matches the
+  GPAW collinear producer's ``delta_total``/``hij`` operator convention
+  (gpaw_projector stores GPAW operators times Ha), so the spinor exchange
+  reproduces the collinear exchange shell by shell on collinear data
+  (docs/sympy/spinor_projector_green.md validation note).
 
 Symmetry-unfolding (story 005) is not applied here: the k-point set is
 used as stored (run with ``symmetry='off'`` or via the unfolding adapter).
@@ -20,7 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from ase.units import kB
+from ase.units import Ha, kB
 
 from TB2J.projector_green import (
     SPINOR_OPERATOR_DEFINITION,
@@ -106,7 +114,11 @@ def gpaw_spinor_calc_to_projector_green_data(calc) -> ProjectorGreenData:
     eigenvalues = np.empty((1, nkpt, nbands), dtype=float)
     occupations = np.empty((1, nkpt, nbands), dtype=float)
     for ik, w in entries:
-        eig_n = np.asarray(w.myeig_n, dtype=float)
+        # GPAW new-API wfs.eig_n/myeig_n are Hartree (gpaw/new/ibzwfs.py:206
+        # multiplies by Ha to expose eV); the ProjectorGreen denominator
+        # 1/(energy + efermi - evals) works in eV like the collinear exporter
+        # (gpaw_projector.py stores kpt.eps_n * Ha).
+        eig_n = np.asarray(w.myeig_n, dtype=float) * Ha
         occ_n = np.asarray(w.myocc_n, dtype=float)
         if eig_n.shape != (nbands,):
             raise ValueError(f"k-point {ik}: eigenvalue shape {eig_n.shape}")
@@ -126,14 +138,24 @@ def gpaw_spinor_calc_to_projector_green_data(calc) -> ProjectorGreenData:
         occupations[0, ik] = occ_n
 
     # Site operator: dH_asii components (v, x, y, z), stored transposed
-    # (gpaw/new/potential.py unpacks with .T).
+    # (gpaw/new/potential.py unpacks with .T).  GPAW's noncollinear
+    # Hamiltonian is H_2x2 = v*I + x*sx + y*sy + z*sz (potential.py deltaH:
+    # up gets v+z, down v-z), so the spin splitting V_up - V_down = 2*z.
+    # The spinor kernel contract (SPINOR_OPERATOR_DEFINITION) requires the
+    # FULL splitting as a Pauli operator, identity dropped:
+    # Delta = 2*(x*sx + y*sy + z*sz) — the abinao.spinor_export convention.
+    # The extra *Ha matches the GPAW collinear producer, which stores
+    # delta_total / hij as GPAW operators times Ha
+    # (gpaw_projector._collect_delta_xc_paw_xc / _collect_hij); the collinear
+    # reduction of the spinor kernel then reproduces the collinear exchange
+    # shell by shell (docs/sympy/spinor_projector_green.md validation note).
     dH_asii = dft.potential.dH_asii
     nproj_max = int(site_nproj.max())
     spinor_operator = np.zeros((natoms, nproj_max, nproj_max, 2, 2), dtype=complex)
     for atom in range(natoms):
         ni = int(site_nproj[atom])
         comps = [np.asarray(dH_asii[atom][i]).T for i in range(4)]
-        block = np.einsum("aij,ast->ijst", np.asarray(comps[1:]), SIGMA)
+        block = 2.0 * Ha * np.einsum("aij,ast->ijst", np.asarray(comps[1:]), SIGMA)
         spinor_operator[atom, :ni, :ni] = block
 
     atoms = dft.atoms
@@ -157,7 +179,7 @@ def gpaw_spinor_calc_to_projector_green_data(calc) -> ProjectorGreenData:
         coefficient_source="gpaw.noncollinear_P_ani",
         coefficient_projector="native_paw_projector",
         channel_interpretation="paw_projector_channel",
-        operator_basis="gpaw.dH_asii pauli (v,x,y,z)",
+        operator_basis="gpaw.dH_asii pauli (v,x,y,z), Delta=2*Ha*(x,y,z).sigma",
         metadata={
             "nspinor": 2,
             "code": "gpaw",
