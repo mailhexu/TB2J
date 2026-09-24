@@ -18,14 +18,12 @@ Conventions and findings documented by these tests
   perturbed eigenvalues); on this fixture the offset is 1.1e-4, so the
   anchor is asserted at ``q0_anchor_tol = 5e-4``.  With genuinely frozen
   occupations the FD agrees with the kernel to 9e-7 (h = 2e-4).
-* LKAG anchor: the spiral-path J and the collinear ExchangeCL2 J stand in
-  the exact ratio 2 (measured 2.001-2.016 across shells; the deviation
-  from 2 is the frozen-occupation vs CFR Matsubara smearing floor).  The
-  factor is flagged for the story-004/005 owners: the normative
-  ``j(R) = -M(0,R)`` identification (transverse curvature with Bf = dU/2
-  operators) yields twice the Liechtenstein pair exchange
-  ``Tr[D G^up D G^down]`` (verified against exact second-order
-  perturbation theory on the same chain).
+* LKAG anchor: the spiral-path J and the collinear ExchangeCL2 J AGREE
+  (ratio 1 to ~1%; deviation is the frozen-occupation vs CFR Matsubara
+  smearing floor).  Adjudicated 2026-09-25: the normative pair-once
+  curvature J^spiral = -C^dd (E = -sum_{a<b} J e.e) is exactly twice the
+  ordered-pair TB2J exchange_Jdict convention, so the SpinIO write now
+  halves it; without the halving the measured ratio was 2.000-2.016.
 * Toth-Lake flat-screw gate: zeros at k = 0, +-q hold on the written
   tensors.  The multiband assembly is validated against the normative
   scalar machinery (agreement 2e-12 on the Néel ring).
@@ -242,15 +240,16 @@ def _lkag_reference_exchange(q0_bundle, tmp_path):
     return SpinIO.load_pickle(path=out).exchange_Jdict
 
 
-def test_q0_lkag_anchor_exactly_factor_two(tmp_path, q0_bundle):
+def test_q0_lkag_anchor_matches_collinear(tmp_path, q0_bundle):
     """q=0 anchor: the spiral path reproduces the collinear LKAG exchange.
 
     Second-order identity class; the comparison is limited by the two
     evaluation routes' smearing treatment (frozen-occupation curvature vs
-    CFR Matsubara contour).  Measured on this fixture: J_spiral(q=0) =
-    (2.000 +/- 0.008) x J_LKAG with the deviation concentrated in the
-    smearing floor; the ratio-2 normalization itself is flagged to the
-    story-004/005 owners (see module docstring).
+    CFR Matsubara contour).  The SpinIO write halves the normative
+    pair-once J^spiral into the ordered-pair exchange_Jdict convention
+    (adjudicated; see module docstring), so J_spiral(q=0) == J_LKAG on
+    the dominant shells to ~1%, with the deviation concentrated in the
+    smearing floor.
     """
     calc, report = _run_spiral(q0_bundle, q0_anchor_tol=5e-4)
     assert report["gates"]["q0_anchor"]["passed"]
@@ -266,12 +265,10 @@ def test_q0_lkag_anchor_exactly_factor_two(tmp_path, q0_bundle):
     dominant = [k for k in common if abs(j_lkag[k]) >= 0.1 * j_max]
     assert len(dominant) >= 4
     for key in dominant:
-        np.testing.assert_allclose(
-            j_spiral[key], 2.0 * j_lkag[key], rtol=0.02, atol=2e-4
-        )
+        np.testing.assert_allclose(j_spiral[key], j_lkag[key], rtol=0.02, atol=1e-4)
     # weak shells: the absolute route difference stays at the smearing floor
     for key in common:
-        assert abs(j_spiral[key] - 2.0 * j_lkag[key]) <= 0.02 * j_max + 2e-3
+        assert abs(j_spiral[key] - j_lkag[key]) <= 0.02 * j_max + 1e-3
 
 
 # ---------------------------------------------------------------------------

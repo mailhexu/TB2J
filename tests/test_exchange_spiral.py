@@ -193,7 +193,7 @@ def test_mapping_recovers_known_j_from_curvature():
         ai, mi, aj, mj = calc._pair_sites[key]
         expected_raw = -Cdd[ai * norb + mi, aj * norb + mj]
         assert raw.exchange_Jdict[key] == pytest.approx(expected_raw)
-        assert val == pytest.approx(expected_raw / sgn)
+        assert val == pytest.approx(expected_raw / (2.0 * sgn))
     assert report["gates"]["diag_consistency"]["passed"]
     for key in raw.dmi_ddict:
         assert np.allclose(raw.dmi_ddict[key], 0.0)
@@ -241,7 +241,7 @@ def test_known_j_ring_recovery():
         else:
             ai, aj = -d, 0
         sgn = float(np.sign(np.dot(calc.moms[ai, mi], calc.moms[aj, mj])) or 1.0)
-        expected = -Cdd[ai * norb + mi, aj * norb + mj] / sgn
+        expected = -Cdd[ai * norb + mi, aj * norb + mj] / (2.0 * sgn)
         assert val == pytest.approx(expected, abs=1e-5 * max(1.0, abs(expected)))
 
     # ring inversion symmetry: J(R, i, j) == J(-R, j, i) and J(R, i, i) == J(-R, i, i)
@@ -267,7 +267,7 @@ def test_ring_translation_consistency_of_pairs():
                 continue
             si, sj = ai * norb + mi, aj * norb + mj
             sgn = float(np.sign(np.dot(calc.moms[ai, mi], calc.moms[aj, mj])) or 1.0)
-            assert val == pytest.approx(-Cdd[si, sj] / sgn, abs=1e-9)
+            assert val == pytest.approx(-Cdd[si, sj] / (2.0 * sgn), abs=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +289,8 @@ def test_afm_normalization_phi_pi():
     # every stored J equals the raw one divided by sgn(S_i . S_j)
     for key, val in calc.exchange_Jdict.items():
         sgn = _pair_sign(calc, key)
-        assert val == pytest.approx(raw[key] / sgn, abs=1e-14)
+        # ordered-pair halving of the normative pair-once J at the write
+        assert val == pytest.approx(raw[key] / (2.0 * sgn), abs=1e-14)
 
     # rung pair (R = 0, sublattices 0 and 1): reference moments antiparallel
     key = ((0, 0, 0), 0, 1)

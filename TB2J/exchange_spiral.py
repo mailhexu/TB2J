@@ -487,13 +487,19 @@ class ExchangeSpiral:
             key: _pair_sign(self.moms, *self._pair_sites[key])
             for key in self._pair_sites
         }
+        # TB2J exchange_Jdict is the ordered-pair convention (both
+        # (R,i,j) and (-R,j,i) are stored; the magnon/J(q) sums run over
+        # all R), while the normative pair-once curvature gives
+        # J^spiral_ab = -C^dd_ab for E = -sum_{a<b} J e_a.e_b.  The write
+        # therefore carries half the pair-once value (adjudicated against
+        # the ExchangeCL2 LKAG anchor: exact ratio 2 without the halving).
         self.exchange_Jdict = {
-            key: val / sgn[key] for key, val in raw.exchange_Jdict.items()
+            key: val / (2.0 * sgn[key]) for key, val in raw.exchange_Jdict.items()
         }
         self.dmi_ddict = dict(raw.dmi_ddict)
         self.Jani_dict = dict(raw.Jani_dict)
         self.biquadratic_Jdict = {
-            key: (jprime / sgn[key], b)
+            key: (jprime / (2.0 * sgn[key]), b / 2.0)
             for key, (jprime, b) in raw.biquadratic_Jdict.items()
         }
 
