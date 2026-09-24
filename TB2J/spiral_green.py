@@ -232,7 +232,7 @@ class SpiralGreen:
     unfolding to real-space spin blocks.
     """
 
-    def __init__(self, state: SpiralState, kmesh, kweights=None):
+    def __init__(self, state: SpiralState, kmesh, kweights=None, assembler=None):
         state.validate()
         kmesh = np.asarray(kmesh, dtype=float)
         if kmesh.ndim != 2 or kmesh.shape[1] != 3:
@@ -250,10 +250,12 @@ class SpiralGreen:
         self.kweights = kweights
         self.norb = state.norb
         self.n = 2 * self.norb
+        if assembler is None:
+            assembler = assemble_folded_pencil
         Hq = np.empty((nk, self.n, self.n), dtype=complex)
         Sq = np.empty((nk, self.n, self.n), dtype=complex)
         for ik, k in enumerate(kmesh):
-            Hq[ik], Sq[ik] = assemble_folded_pencil(state, k)
+            Hq[ik], Sq[ik] = assembler(state, k)
         self.Hq = Hq
         self.Sq = Sq
         # Standardized pencil eigenbasis, batched over k: S = L L^dag,
