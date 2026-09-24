@@ -30,6 +30,7 @@ Welcome to TB2J's documentation!
    src/magnon_theory.md
    src/magnon_band.rst
    src/projector_green.rst
+   src/spiral.rst
    src/abinit_savetb2j_schema.rst
    src/sprkkr_magnon.md
    src/edit.md
