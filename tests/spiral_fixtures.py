@@ -21,6 +21,16 @@ Two bundle families:
 tbupy multi-sublattice assembler (single source of truth) plus the
 interleaved local field and ``V_U``; :func:`supercell_spiral` is the
 independent docs-convention supercell reference used by the tests.
+
+Story-006 consolidation adds:
+
+* :func:`dimer_classes`: the two-site dimer (``N = 2`` ring);
+* known-J chains :func:`j1j2_chain` with the Toth-Lake flat-screw
+  construction :func:`flat_screw_jk` / :func:`toth_lake_dynamical`
+  (normative from ``docs/sympy/spiral_state_mft.py``);
+* :func:`sharp_filling` / :func:`q_star_ring`: the force-theorem
+  filling protocol and the grid-minimizing non-torque-free pitch
+  (torque-free vs non-torque-free q pair) as shared builders.
 """
 
 from __future__ import annotations
@@ -36,12 +46,18 @@ __all__ = [
     "ring_kmesh",
     "ring_hopping_classes",
     "degenerate_ring_classes",
+    "dimer_classes",
     "make_ring_state",
     "random_hermitian",
     "supercell_spiral",
     "twist_unitary",
     "rebuild_hq_sq",
     "pencil_eigenvalues",
+    "j1j2_chain",
+    "flat_screw_jk",
+    "toth_lake_dynamical",
+    "sharp_filling",
+    "q_star_ring",
 ]
 
 
@@ -88,6 +104,18 @@ def degenerate_ring_classes(t: float = 0.35, eps0: float = 0.2):
         classes.append((copy, copy, 1, t))
         classes.append((copy, copy, -1, t))
     return classes, [eps0, eps0]
+
+
+def dimer_classes(t: float = 0.55, eps0: float = 0.1):
+    """Two-site dimer (``N = 2`` ring): single orbital, hopping ``t``.
+
+    Both ``+1`` and ``-1`` shells are stored, matching the even-``N``
+    self-conjugate-shell convention of :func:`ring_hopping_classes`; on
+    the two-cell ring they land on the same bond, giving the symmetric
+    dimer Hamiltonian ``eps0 + B/2`` / ``eps0 - B/2`` split by the local
+    field and a hopping of ``2 t`` per spin channel.
+    """
+    return [(0, 0, 1, t), (0, 0, -1, t)], [eps0]
 
 
 def _arrays_from_classes(classes, eps_list, overlap: bool):
@@ -292,3 +320,162 @@ def pencil_eigenvalues(H: np.ndarray, S: np.ndarray) -> np.ndarray:
     Li = np.linalg.inv(L)
     A = Li @ H @ Li.conj().T
     return np.linalg.eigvalsh(0.5 * (A + A.conj().T))
+
+
+# ---------------------------------------------------------------------------
+# known-J chains and the Toth-Lake flat-screw construction (story 006)
+# ---------------------------------------------------------------------------
+
+
+def j1j2_chain(j1: float, j2: float) -> dict:
+    """Known-J Heisenberg chain ``{(R,): J_R}`` with shells ``+-1, +-2``.
+
+    Derivation-script convention (``docs/sympy/spiral_force_theorem_J.py``):
+    positive ``J`` is ferromagnetic and the classical flat-spiral energy is
+    ``E(q)/N = -Re J~(q)``, so the spiral pitch maximizes ``Re J~(k)``.
+    """
+    return {(1,): float(j1), (-1,): float(j1), (2,): float(j2), (-2,): float(j2)}
+
+
+def flat_screw_jk(j_r: dict, kgrid) -> np.ndarray:
+    """Fourier transform of a known-J chain, ``J~(k) = sum_R J(R) e^{-2 pi i k R}``.
+
+    ``j_r`` maps ``(R,)`` integer tuples (or ``(R, i, j)`` /
+    ``((R0, R1, R2), i, j)`` :meth:`ExchangeSpiral.exchange_Jdict`-style
+    keys) to real or complex couplings; the first integer component of
+    every key is the ``e_1`` cell offset.  All entries are summed - the
+    caller is responsible for selecting the ``(i, j)`` channel.
+    """
+    kgrid = np.asarray(kgrid, dtype=float)
+    jk = np.zeros(kgrid.shape, dtype=complex)
+    for key, val in j_r.items():
+        r = float(np.asarray(key).ravel()[0])
+        jk += complex(val) * np.exp(-2j * np.pi * r * kgrid)
+    return jk
+
+
+def toth_lake_dynamical(j_r: dict, kgrid, q: float, s: float = 1.0) -> dict:
+    """Toth-Lake local-frame flat-screw magnon construction from ``J(R)``.
+
+    Normative from ``docs/sympy/spiral_state_mft.py``
+    (``check_toth_lake_flat_screw``) with ``J~(q)`` the ``J~`` maximum:
+
+    * out-of-plane stiffness ``A_k = J~(q) - (J~(k+q) + J~(k-q))/2``
+      (Goldstone at ``k = 0``: ``A_0 = 0`` identically),
+    * in-plane stiffness ``C_k = J~(q) - J~(k)``
+      (Goldstone at ``k = +-q``: ``C_{+-q} = 0`` identically),
+    * magnon energy ``omega(k) = s sqrt(A_k C_k)``.
+
+    The local-frame dynamical matrix is the bosonic (Bogoliubov-de Gennes)
+    form ``[[h_k, gamma_k], [-gamma_k, -h_k]]`` built from the number
+    conserving block ``h_k = J~(q) - (J~(k) + M_k)/2`` and the anomalous
+    block ``gamma_k = (J~(k) - M_k)/2`` with ``M_k = (J~(k+q)+J~(k-q))/2``;
+    its eigenvalues are ``+- s sqrt(A_k C_k)`` (``(h+gamma)(h-gamma) =
+    A_k C_k``).  ``J~(k+-q)`` is evaluated from the R-space data, so
+    incommensurate pitches need no grid shift.
+    """
+    kgrid = np.asarray(kgrid, dtype=float)
+    jk = flat_screw_jk(j_r, kgrid)
+    jkp = flat_screw_jk(j_r, kgrid + q)
+    jkm = flat_screw_jk(j_r, kgrid - q)
+    jq = complex(flat_screw_jk(j_r, np.array([float(q)]))[0])
+    m_k = 0.5 * (jkp + jkm)
+    a_k = jq - m_k
+    c_k = jq - jk
+    h_k = jq - 0.5 * (jk + m_k)
+    gamma_k = 0.5 * (jk - m_k)
+    nk = kgrid.shape[0]
+    dynamical = np.empty((nk, 2, 2), dtype=complex)
+    dynamical[:, 0, 0] = h_k
+    dynamical[:, 0, 1] = gamma_k
+    dynamical[:, 1, 0] = -gamma_k
+    dynamical[:, 1, 1] = -h_k
+    radicand = a_k * c_k
+    omega = s * np.sqrt(radicand.astype(complex))
+    return {
+        "Jk": jk,
+        "M": m_k,
+        "A": a_k,
+        "C": c_k,
+        "h": h_k,
+        "gamma": gamma_k,
+        "dynamical": dynamical,
+        "omega": omega,
+        "radicand": radicand,
+    }
+
+
+# ---------------------------------------------------------------------------
+# torque-free / non-torque-free q-pair fixtures (story 006 consolidation)
+# ---------------------------------------------------------------------------
+
+
+def sharp_filling(state: SpiralState, ncell: int, width: float = 5e-3) -> SpiralState:
+    """Centre ``efermi`` in the largest lab-supercell gap, sharp filling.
+
+    The force-theorem protocol of the normative derivation script: the
+    frozen occupations are sharp (no partially filled levels), so the
+    masked trace, the resolvent contour, and the exact FD coincide.
+    Uses the explicit supercell spectrum (valid at any q).
+    """
+    from TB2J.spiral_kernels import lab_supercell
+
+    h_mat, s_mat = lab_supercell(state, ncell)
+    if s_mat is None:
+        ev = np.linalg.eigvalsh(h_mat)
+    else:
+        ev = pencil_eigenvalues(h_mat, s_mat)
+    ev = np.sort(ev)
+    gaps = ev[1:] - ev[:-1]
+    cand = [i for i, g in enumerate(gaps) if g > 0.2]
+    i0 = max(cand or range(len(gaps)), key=lambda i: gaps[i])
+    mu = float(0.5 * (ev[i0] + ev[i0 + 1]))
+    meta = json.loads(state.metadata_json)
+    meta["width"] = width
+    return dataclasses.replace(state, efermi=mu, metadata_json=json.dumps(meta))
+
+
+def q_star_ring(
+    ncell: int = 6,
+    seed: int = 71,
+    b_local: float = 1.5,
+    torqued: float = None,
+) -> SpiralState:
+    """Bundle at the grid-minimizing (non-torque-free) pitch ``q*``.
+
+    Coarse-grid minimization of the frozen band energy over ``q`` (the
+    story-004 probe); ``q*`` is a stationary point of the frozen energy
+    but not the symmetry-protected torque-free pitch, so its curvature
+    violates the torque gate.  ``torqued``, if given, records that
+    residual in ``torque_norms`` so gate violations are *flagged* in the
+    report instead of raised (documented-diagnostic path).
+    """
+    classes, eps = ring_hopping_classes(ncell, seed)
+    base = make_ring_state(
+        ncell, classes, eps, q=1.0 / 6.0, b_local=(b_local,), width=0.2
+    )
+
+    def e_of_q(qv: float) -> float:
+        st = dataclasses.replace(base, q_frac=np.array([qv, 0.0, 0.0]))
+        from TB2J.spiral_kernels import lab_supercell
+
+        h_mat, s_mat = lab_supercell(st, ncell)
+        if s_mat is None:
+            ev = np.linalg.eigvalsh(h_mat)
+        else:
+            ev = pencil_eigenvalues(h_mat, s_mat)
+        mu = float(np.quantile(ev, 0.5))
+        f = 1.0 / (1.0 + np.exp((ev - mu) / 0.05))
+        return float(np.sum(ev * f))
+
+    grid = np.linspace(0.0, 1.0, 241, endpoint=False)
+    q_star = float(grid[int(np.argmin([e_of_q(qv) for qv in grid]))])
+    state = make_ring_state(
+        ncell, classes, eps, q=q_star, b_local=(b_local,), width=0.2
+    )
+    state = sharp_filling(state, ncell)
+    if torqued is not None:
+        state = dataclasses.replace(
+            state, torque_norms=np.full(state.norb, float(torqued))
+        )
+    return state
