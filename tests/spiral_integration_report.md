@@ -52,5 +52,5 @@ itinerant dimer chain.
    spiral-stabilized J1-J2 written-tensor class (story-006 probe
    guidance).  There the conical reference is stationary, the phason is
    gapless (<= 5e-4), and the +-q gap is exactly linear in the field
-   with structure factor kappa = 1.6072 (not the naive unity reading of
+   with structure factor kappa = 1.0000 (omega(+-q) = B exact on the
    the fluctuation-mode identity; flagged for the derivation owners).
