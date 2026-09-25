@@ -27,14 +27,12 @@ Conventions and findings documented by these tests
 * Toth-Lake flat-screw gate: zeros at k = 0, +-q hold on the written
   tensors.  The multiband assembly is validated against the normative
   scalar machinery (agreement 2e-12 on the Néel ring).
-* Cone gate: on the spiral-stabilized J1-J2 written-tensor class the
-  conical rebuild has an exactly gapless phason; the +-q gap is exactly
-  LINEAR in the field with a documented structure factor
-  kappa = 1.6072 (not the naive unity reading of the fluctuation-mode
-  identity; flagged for the derivation owners).  The dimer fixture's
-  classical model is FM-favouring, so its conical rebuild collapses to
-  the field-aligned state - the cone gate therefore runs on the
-  spiral-stabilized class, per the story-006 probe guidance.
+* Cone gate: an independent, hand-specified spiral-stabilized J1-J2
+  analytic oracle (not the dimer chain's written tensors) has a
+  gapless phason and a +-q gap equal to the applied field within the
+  numerical tolerance. The dimer fixture's classical model is
+  FM-favouring, so its conical rebuild collapses to the field-aligned
+  state; this gate uses the J1-J2 oracle instead.
 """
 
 from __future__ import annotations
@@ -328,11 +326,11 @@ def test_cblock_consistency_on_torque_free_references(spiral_bundle_path, q0_bun
 
 
 def test_cone_gate_on_spiral_stabilized_tensors():
-    """Cone gate: rebuild the reference with a small field B along the
-    spiral axis.  On the spiral-stabilized J1-J2 written-tensor class the
-    conical reference is stationary (self-consistent cone angle), the
-    phason is gapless, and the +-q gap is exactly linear in the field with
-    the documented structure factor kappa = 1.6072 (see module docstring).
+    """Cone gate on an independent J1-J2 analytic oracle in a field B.
+
+    The stationary cone retains a gapless phason; the +-q excitation
+    equals B within numerical tolerance. This model is hand-specified,
+    not the electronic dimer-chain tensor written by ExchangeSpiral.
     """
     ncell = 24
     q = 5.0 / 24.0  # commensurate pitch inside the stable J1-J2 window
@@ -354,5 +352,5 @@ def test_cone_gate_on_spiral_stabilized_tensors():
     kappa_1 = gaps[0.025] / 0.025
     kappa_2 = gaps[0.05] / 0.05
     assert abs(kappa_1 - kappa_2) <= 1e-3 * kappa_1  # exact linearity in B
-    # the structure factor is documented; unity is not recovered
+    assert abs(kappa_2 - 1.0) <= 1e-3  # cone excitation equals the field
     print(f"[cone] kappa = {kappa_2:.6f}")
