@@ -184,7 +184,10 @@ def build_abinit_paw_snapshot(
                     f"k-point {ik} spin {spin}: coefficient shape {values.shape} "
                     f"!= ({nproj_total}, {nband})"
                 )
-            coefficients[spin, ik] = values.T
+            # Consumer contract: ProjectorGreenData coefficients are
+            # <psi|~p> (GPAW P_ani convention); abinao cprj are <~p|psi>.
+            # Conjugate on ingest (same seam as the spinor-exporter fix).
+            coefficients[spin, ik] = np.conj(values.T)
     nmax = max(
         site.projector_slice.stop - site.projector_slice.start for site in layout
     )
