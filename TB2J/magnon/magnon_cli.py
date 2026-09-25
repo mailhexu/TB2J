@@ -1,6 +1,7 @@
 """Unified CLI for magnon band and DOS calculations."""
 
 import argparse
+import sys
 import warnings
 
 from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
@@ -27,6 +28,21 @@ def create_parser() -> argparse.ArgumentParser:
         "--dos",
         action="store_true",
         help="Plot magnon density of states",
+    )
+    parser.add_argument(
+        "--view-modes",
+        action="store_true",
+        help=(
+            "Compute the magnon band structure with wavefunctions and launch "
+            "the interactive viewer: click a point on the band structure to "
+            "view the corresponding magnon mode (spin-wave animation)"
+        ),
+    )
+    parser.add_argument(
+        "--viewer-port",
+        type=int,
+        default=8501,
+        help="Port for the interactive mode viewer (default: 8501)",
     )
     parser.add_argument(
         "--animate",
@@ -216,7 +232,11 @@ def main():
             render_scene(scene)
         return
 
-    if not args.bands and not args.dos:
+    if args.view_modes:
+        args.bands = True
+        args.save_wavefunctions = True
+        args.export_format = ["json"]
+    elif not args.bands and not args.dos:
         parser.error("Please specify at least one of --bands or --dos")
 
     window = None
@@ -224,6 +244,9 @@ def main():
         params = MagnonParameters.from_toml(args.config)
         if params.window is not None:
             window = params.window
+        if args.view_modes:
+            params.export_formats = ["json"]
+            params.save_wavefunctions = True
     else:
         if args.window is not None:
             window = tuple(args.window)
@@ -273,6 +296,32 @@ def main():
         )
         plot_magnon_bands_from_TB2J(band_params)
 
+    if args.view_modes:
+        import os
+        import subprocess
+
+        export_prefix = args.export_prefix or args.band_output.rsplit(".", 1)[0]
+        data_file = os.path.abspath(export_prefix + ".json")
+        if not os.path.isfile(data_file):
+            parser.error(f"expected eigenstate export {data_file} was not written")
+        print(f"Launching interactive mode viewer for {data_file}")
+        import TB2J.magnon.streamlit_viewer as streamlit_viewer
+
+        env = os.environ.copy()
+        env["TB2J_MAGNON_VIEWER_FILE"] = data_file
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                streamlit_viewer.__file__,
+                "--server.port",
+                str(args.viewer_port),
+            ],
+            check=True,
+            env=env,
+        )
     if args.dos:
         dos_params = MagnonParameters(
             path=params.path,
