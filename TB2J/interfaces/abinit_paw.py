@@ -184,10 +184,12 @@ def build_abinit_paw_snapshot(
                     f"k-point {ik} spin {spin}: coefficient shape {values.shape} "
                     f"!= ({nproj_total}, {nband})"
                 )
-            # Consumer contract: ProjectorGreenData coefficients are
-            # <psi|~p> (GPAW P_ani convention); abinao cprj are <~p|psi>.
-            # Conjugate on ingest (same seam as the spinor-exporter fix).
-            coefficients[spin, ik] = np.conj(values.T)
+            # RAW cprj, NO conjugation: ProjectorGreenData coefficients must
+            # stay the producer's <~p|psi>.  Conjugating flips the dataset's
+            # k-gauge (conj(c) is the -k projection set) and the Im-prescription
+            # kernels are not invariant under it (abinao abe4152; this seam
+            # briefly conjugated in TB2J commit 42f4dfc — reverted).
+            coefficients[spin, ik] = values.T
     nmax = max(
         site.projector_slice.stop - site.projector_slice.start for site in layout
     )

@@ -171,6 +171,25 @@ def _run_orbitals(args):
 
 
 def _run_pawlog(args):
+    if args.spinor:
+        from TB2J.interfaces.abinit_paw_spinor import gen_exchange_abinit_paw_spinor
+
+        exchange_out, _ = gen_exchange_abinit_paw_spinor(
+            wfk_path=args.wfk,
+            paw_xml_path=args.paw_xml,
+            log_path=args.log,
+            projected_data_path=args.projected_data,
+            magnetic_elements=args.elements,
+            index_magnetic_atoms=_indices(args),
+            output_path=args.output_path or "TB2J_results_abinit_paw_spinor",
+            nz=args.nz,
+            smearing_eV=args.smearing,
+            Rcut=args.Rcut,
+            delta_unit=args.delta_unit,
+        )
+        print(f"Wrote {exchange_out}")
+        return
+
     from TB2J.interfaces.abinit_paw import gen_exchange_abinit_paw
 
     exchange_out, _ = gen_exchange_abinit_paw(
@@ -337,6 +356,16 @@ def build_parser():
         nargs="+",
         required=True,
         help="PAW-XML pseudopotential per species",
+    )
+    p.add_argument(
+        "--spinor",
+        action="store_true",
+        help=(
+            "spinor channel (story 011): nspinor=2 WFK + nspden=4 pawprt D_ij "
+            "(four 'Component up-up/dwn-dwn/up-dwn/dwn-up' blocks per atom), "
+            "Pauli-decomposed into Delta=2*B.sigma and run through the "
+            "ExchangeNCL spinor kernel (J_iso/DMI/Jani)"
+        ),
     )
     p.add_argument(
         "--projected_data", default=None, help="precomputed abinao projection NetCDF"
