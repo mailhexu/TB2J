@@ -34,6 +34,9 @@ from TB2J.projector_green import (
     SPINOR_OPERATOR_DEFINITION,
     ProjectorGreenData,
 )
+from TB2J.projector_green import (
+    site_magnetization_sign as _site_magnetization_sign,
+)
 
 SIGMA = np.array(
     [
@@ -206,13 +209,6 @@ def save_gpaw_spinor_projector_netcdf(calc, filename, metadata=None):
     return data
 
 
-def _site_magnetization_sign(operator_block):
-    """Sign of the z-projector trace (majority-spin direction)."""
-    block = np.asarray(operator_block)
-    ztrace = float(np.real(np.trace(block[:, :, 0, 0] - block[:, :, 1, 1])))
-    return 1.0 if ztrace >= 0.0 else -1.0
-
-
 def compute_spinor_projector_exchange(
     data,
     Rpts=None,
@@ -231,7 +227,11 @@ def compute_spinor_projector_exchange(
     (TB2J.Jtensor) decomposition.
     """
     from TB2J.mycfr import CFR
-    from TB2J.projector_green import ProjectorGreen, spinor_projector_exchange_trace
+    from TB2J.projector_green import (
+        ProjectorGreen,
+        spinor_channels_to_exchange_tensor,
+        spinor_projector_exchange_trace,
+    )
 
     if data.nspinor != 2:
         raise ValueError("spinor exchange requires nspinor=2 data")
@@ -259,7 +259,6 @@ def compute_spinor_projector_exchange(
             values[key].append(trace["A_ijR"][key])
 
     result = {}
-    [tuple(int(x) for x in R) for R in Rpts]
     for key, vals in values.items():
         R, i, j = key
         Rm = tuple(-x for x in R)
@@ -270,30 +269,6 @@ def compute_spinor_projector_exchange(
                     for b in range(4)
                 ]
                 for a in range(4)
-            ]
-        )
-        sgn = signs[i] * signs[j]
-        # ExchangeNCL channel mapping (A^{uv} = Tr[Delta G^(u) Delta G^(v)]/pi):
-        # J_iso = Im(A00 - Axx - Ayy - Azz), DMI_i = Re(A0i - Ai0),
-        # Jani[i,j] = Im(A^{ij}(R) + A^{ij}(-R)).  The 1/4 prefactor pins the
-        # collinear reduction exactly to the collinear kernel
-        # Im integral Tr[Delta G_up Delta G_down]/(4 pi).
-        Jiso = (
-            float(
-                np.imag(
-                    integrated[0, 0]
-                    - integrated[1, 1]
-                    - integrated[2, 2]
-                    - integrated[3, 3]
-                )
-            )
-            / 8.0
-            * sgn
-        )
-        D = np.array(
-            [
-                float(np.real(integrated[0, i + 1] - integrated[i + 1, 0])) / 8.0 * sgn
-                for i in range(3)
             ]
         )
         valm = np.asarray(
@@ -307,21 +282,9 @@ def compute_spinor_projector_exchange(
                 for a in range(4)
             ]
         )
-        Jani = np.asarray(
-            [
-                [
-                    float(np.imag(integrated[a + 1, b + 1] + valm[a + 1, b + 1]))
-                    / 8.0
-                    * sgn
-                    for b in range(3)
-                ]
-                for a in range(3)
-            ]
+        result[key] = spinor_channels_to_exchange_tensor(
+            integrated, valm, signs[i] * signs[j]
         )
-        Jtens = Jiso * np.eye(3)
-        Jtens += 0.5 * (np.asarray(D)[:, None] - np.asarray(D)[None, :])
-        Jtens += 0.5 * (Jani + Jani.T)
-        result[key] = {"Jiso": Jiso, "dmi": D, "jani": Jani, "tensor": Jtens}
     return result
 
 

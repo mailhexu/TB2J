@@ -1486,6 +1486,97 @@ def _spinor_dense_block(block):
     return block.transpose(2, 0, 3, 1).reshape(2 * ni, 2 * nj)
 
 
+def site_magnetization_sign(operator_block):
+    """Sign of the z-projector trace (majority-spin direction)."""
+    block = np.asarray(operator_block)
+    ztrace = float(np.real(np.trace(block[:, :, 0, 0] - block[:, :, 1, 1])))
+    return 1.0 if ztrace >= 0.0 else -1.0
+
+
+def spinor_pair_channels(delta_i, g_ij, delta_j, g_ji):
+    """ExchangeNCL channel matrix A^{uv} for one (R, i, j) pair.
+
+    A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji] / pi with T^u the Pauli
+    components of the spinor Green block and G^(u) = kron(sigma_u, T^u)
+    (u, v in {0, x, y, z}).  ``delta_i``/``delta_j`` are site-local spinor
+    operators (nproj_i, nproj_i, 2, 2)/(nproj_j, nproj_j, 2, 2);
+    ``g_ij``/``g_ji`` the spinor Green site blocks (nproj_i, nproj_j, 2, 2)
+    and (nproj_j, nproj_i, 2, 2).
+
+    Pauli matrices decompose G (NOT multiply Delta on the outside):
+    Tr[(sigma_a Delta) G (sigma_b Delta) G] is identically zero for
+    block-diagonal (collinear) G, while (T^0)^2 - (T^z)^2 = G_up G_down
+    gives the LKAG cross-channel algebraically
+    (docs/sympy/spinor_projector_green.md).
+    """
+    dense_di = _spinor_dense_block(delta_i)
+    dense_dj = _spinor_dense_block(delta_j)
+    t_ijs = [
+        0.5 * np.einsum("pqst,st->pq", g_ij, SIG) for SIG in PAULI_IDENTITY_AND_MATRICES
+    ]
+    t_jis = [
+        0.5 * np.einsum("pqst,st->pq", g_ji, SIG) for SIG in PAULI_IDENTITY_AND_MATRICES
+    ]
+    a = np.empty((4, 4), dtype=complex)
+    for u in range(4):
+        g_u = np.kron(PAULI_IDENTITY_AND_MATRICES[u], t_ijs[u])
+        for v in range(4):
+            g_v = np.kron(PAULI_IDENTITY_AND_MATRICES[v], t_jis[v])
+            a[u, v] = np.trace(dense_di @ g_u @ dense_dj @ g_v) / np.pi
+    return a
+
+
+def spinor_channels_to_exchange_tensor(integrated, integrated_reverse, sign):
+    """Map contour-integrated channel matrices to the exchange tensor.
+
+    ``integrated`` is the 4x4 channel matrix integrated over the contour at
+    (R, i, j); ``integrated_reverse`` the same at (-R, j, i).  ExchangeNCL
+    channel mapping (A^{uv} = Tr[Delta G^(u) Delta G^(v)]/pi):
+    J_iso = Im(A00 - Axx - Ayy - Azz)/8, DMI_i = Re(A0i - Ai0)/8,
+    Jani[i,j] = Im(A^{ij}(R) + A^{ij}(-R))/8.  The 1/4 prefactor pins the
+    collinear reduction exactly to the collinear kernel
+    Im integral Tr[Delta G_up Delta G_down]/(4 pi); ``sign`` is the
+    site-magnetization product (see :func:`site_magnetization_sign`).
+    """
+    integrated = np.asarray(integrated, dtype=complex)
+    integrated_reverse = np.asarray(integrated_reverse, dtype=complex)
+    jiso = (
+        float(
+            np.imag(
+                integrated[0, 0]
+                - integrated[1, 1]
+                - integrated[2, 2]
+                - integrated[3, 3]
+            )
+        )
+        / 8.0
+        * sign
+    )
+    dmi = np.array(
+        [
+            float(np.real(integrated[0, i + 1] - integrated[i + 1, 0])) / 8.0 * sign
+            for i in range(3)
+        ]
+    )
+    jani = np.asarray(
+        [
+            [
+                float(
+                    np.imag(integrated[a + 1, b + 1] + integrated_reverse[a + 1, b + 1])
+                )
+                / 8.0
+                * sign
+                for b in range(3)
+            ]
+            for a in range(3)
+        ]
+    )
+    tensor = jiso * np.eye(3)
+    tensor += 0.5 * (dmi[:, None] - dmi[None, :])
+    tensor += 0.5 * (jani + jani.T)
+    return {"Jiso": jiso, "dmi": dmi, "jani": jani, "tensor": tensor}
+
+
 def spinor_projector_exchange_trace(
     green,
     Rpts,
@@ -1540,45 +1631,12 @@ def spinor_projector_exchange_trace(
         iRm = R_index[tuple(-x for x in R)]
         for iatom in sites:
             for jatom in sites:
-                Delta_i = local_operators[iatom]
-                Delta_j = local_operators[jatom]
                 Gij = green.get_site_block_spinor(GR[iR], iatom, jatom)
                 Gji = green.get_site_block_spinor(GR[iRm], jatom, iatom)
-                dense_Di = _spinor_dense_block(Delta_i)
-                dense_Dj = _spinor_dense_block(Delta_j)
-                # ExchangeNCL channel structure: A^{uv} = Tr[Delta_i
-                # T^u_ij Delta_j T^v_ji]/pi with T^u the Pauli components of
-                # the spinor Green block (u, v in {0, x, y, z}).  Pauli
-                # matrices must decompose G (NOT multiply Delta on the
-                # outside): Tr[(sigma_a Delta) G (sigma_b Delta) G] is
-                # identically zero for block-diagonal (collinear) G, while
-                # (T^0)^2 - (T^z)^2 = G_up G_down gives the LKAG
-                # cross-channel algebraically.
-                # Pauli components of the spinor Green blocks (orbital
-                # matrices), then the u-th spinor component G^(u) = kron(sig_u,
-                # T^u).  A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji]/pi.
-                T_ijs = [
-                    0.5 * np.einsum("pqst,st->pq", Gij, SIG)
-                    for SIG in PAULI_IDENTITY_AND_MATRICES
-                ]
-                T_jis = [
-                    0.5 * np.einsum("pqst,st->pq", Gji, SIG)
-                    for SIG in PAULI_IDENTITY_AND_MATRICES
-                ]
-                G_u = [
-                    np.kron(PAULI_IDENTITY_AND_MATRICES[u], T_ijs[u]) for u in range(4)
-                ]
-                G_v = [
-                    np.kron(PAULI_IDENTITY_AND_MATRICES[v], T_jis[v]) for v in range(4)
-                ]
-                A = np.empty((4, 4), dtype=complex)
-                for u in range(4):
-                    for v in range(4):
-                        A[u, v] = (
-                            np.trace(dense_Di @ G_u[u] @ dense_Dj @ G_v[v]) / np.pi
-                        )
                 key = (R, iatom, jatom)
-                A_ijR[key] = A
+                A_ijR[key] = spinor_pair_channels(
+                    local_operators[iatom], Gij, local_operators[jatom], Gji
+                )
     return {
         "A_ijR": A_ijR,
         "method": "spinor_projector_exchange_trace",
