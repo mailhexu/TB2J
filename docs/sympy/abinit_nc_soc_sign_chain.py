@@ -242,7 +242,17 @@ def ls_complex_matrix() -> np.ndarray:
 def _toy_w(
     so_eso: float, k_pt: np.ndarray, g_vecs: np.ndarray, tau: np.ndarray, l_val: int = 1
 ) -> dict:
-    """Assemble the single-site l-channel W both ways plus negative controls."""
+    """Assemble the single-site l-channel W both ways plus negative controls.
+
+    Phase chain (source-pinned): m_nonlop_pl.F90 documents phkxred =
+    exp(2*pi*kpt.xred) and ph3din/ph3dout as per-atom, per-plane-wave
+    structure factors (lines 127-131); the IN pass builds gxa from
+    ffnlin + ph3din + vectin with sign=+1 (lines ~525-547), the OUT pass
+    contracts gxafac with ffnlout + ph3dout + vectout with sign=-1
+    (lines ~1199-1229): the ket (G) side carries e^{+i2pi(k+G).tau} and the
+    bra (G') side its conjugate, i.e. element phase e^{+i2pi(G-G').tau}
+    (same +i projector phase as abinao/paw_projection.py:4-14).
+    """
     n_g = len(g_vecs)
     kg = k_pt[None, :] + g_vecs
     q_norm = np.linalg.norm(kg, axis=1)
@@ -265,11 +275,12 @@ def _toy_w(
             for ig in range(n_g)
         ]
     )
-    phase = np.exp(2j * np.pi * (kg @ tau))
+    phase = np.exp(2j * np.pi * (kg @ tau))  # e^{+i2pi(k+G).tau}
 
     def w_assemble(
-        t_ket: np.ndarray, t_bra: np.ndarray, weight: float, operator: np.ndarray
+        t_gprime: np.ndarray, t_g: np.ndarray, weight: float, operator: np.ndarray
     ) -> np.ndarray:
+        """W[(G's'),(Gs)] = sum t_gprime[G',iy1] op[iy1,iy2,s',s] t_g[G,iy2]."""
         w_mat = np.zeros((2 * n_g, 2 * n_g), dtype=complex)
         for igp in range(n_g):
             for ig in range(n_g):
@@ -279,9 +290,9 @@ def _toy_w(
                         for iy1 in range(2 * l_val + 1):
                             for iy2 in range(2 * l_val + 1):
                                 acc += (
-                                    t_bra[igp, iy1]
+                                    t_gprime[igp, iy1]
                                     * operator[iy1, iy2, sp, s]
-                                    * t_ket[ig, iy2]
+                                    * t_g[ig, iy2]
                                 )
                         w_mat[2 * igp + sp, 2 * ig + s] = weight * acc
         return w_mat
@@ -290,94 +301,107 @@ def _toy_w(
     # (x, y, z); the tesseral m values of the p channel are m(+1)=x, m(-1)=y,
     # m(0)=z (pypao real_sph_harm), so slot iy holds m = m_of_cart[iy].
     m_of_cart = (1, -1, 0)
-    ket_r = np.array(
-        [
-            [
-                (1j) ** l_val
-                * f_q[ig]
-                * y_r[ig, m_vals.index(m_of_cart[iy])]
-                * phase[ig]
-                for iy in range(2 * l_val + 1)
-            ]
-            for ig in range(n_g)
-        ]
+    # ABINIT separable element: conj on the bra (G') side (real tensors are
+    # self-conjugate, so the placement shows up only through the phases).
+    t_g_r = (
+        (1j) ** l_val
+        * f_q[:, None]
+        * np.column_stack(
+            [y_r[:, m_vals.index(m_of_cart[c])] for c in range(2 * l_val + 1)]
+        )
+        * phase[:, None]
     )
-    bra_r = np.conj(ket_r)
-    ket_c = np.array(
-        [
-            [
-                (1j) ** l_val * f_q[ig] * y_c[ig, im] * phase[ig]
-                for im in range(2 * l_val + 1)
-            ]
-            for ig in range(n_g)
-        ]
-    )
-    # pinned chain: the complex-conjugated tensor belongs to the KET (G) side
-    bra_c = np.conj(ket_c)
-    bra_c_wrong_phase = ket_c * (phase / np.conj(phase))[:, None] ** 2
-    ket_c_wrong_il = ((-1j) ** l_val) * f_q[:, None] * y_c * phase[:, None]
+    t_gprime_r = np.conj(t_g_r)
+
+    # pinned complex-Y form (QM overlaps <G'|B> and <B|G>):
+    #   G' (bra/row) side: (-i)^l f Y_c(g') e^{-i2pi(k+G').tau}   (plain Y)
+    #   G  (ket/col) side: conj of the same construction = (i)^l f Y_c*(g) e^{+i...}
+    # element phase e^{+i2pi(G-G').tau}, matching the ABINIT side.
+    t_gprime_c = ((-1j) ** l_val) * f_q[:, None] * y_c * np.conj(phase)[:, None]
+    t_g_c = np.conj(t_gprime_c)
 
     ls_ordered = ls_mat.reshape(3, 2, 3, 2).transpose(0, 2, 1, 3)  # [m1, m2, s', s]
 
+    # negative controls (non-degenerate at tau != 0):
+    #  naive: note-2.1 as literally written — full projector tensor conjugated
+    #  on the G' side (Y* on g', +i^l): angular sandwich is the conjugate of
+    #  the pinned one;
+    #  ket atomic-phase conjugation flipped (e^{+i phi} -> e^{-i phi} on the
+    #  conjugated G-side tensor): degenerate at tau=0, fires at tau != 0;
+    #  ABINIT side with flipped atomic phase.
+    t_c = ((1j) ** l_val) * f_q[:, None] * y_c * phase[:, None]
+    naive_gprime, naive_g = np.conj(t_c), t_c
+    t_g_c_bad_phase = (
+        ((1j) ** l_val) * f_q[:, None] * np.conj(y_c) * np.conj(phase)[:, None]
+    )
+    t_g_r_bad = (
+        (1j) ** l_val
+        * f_q[:, None]
+        * np.column_stack(
+            [y_r[:, m_vals.index(m_of_cart[c])] for c in range(2 * l_val + 1)]
+        )
+        * np.conj(phase)[:, None]
+    )
+
     return {
-        # ABINIT: conj on the bra (G') tensor
-        "abinit": w_assemble(ket_r, bra_r, wt, amat),
-        # pinned complex-Y form: conj on the KET (G) tensor
-        "complex": w_assemble(bra_c, ket_c, wt, ls_ordered),
-        "wrong_bra_conj": w_assemble(ket_c, bra_c, wt, ls_ordered),
-        "wrong_phase": w_assemble(bra_c_wrong_phase, ket_c, wt, ls_ordered),
-        "wrong_ket_il": w_assemble(np.conj(ket_c_wrong_il), ket_c, wt, ls_ordered),
+        "abinit": w_assemble(t_gprime_r, t_g_r, wt, amat),
+        "complex": w_assemble(t_gprime_c, t_g_c, wt, ls_ordered),
+        "naive_conj": w_assemble(naive_gprime, naive_g, wt, ls_ordered),
+        "wrong_ket_phase": w_assemble(t_gprime_c, t_g_c_bad_phase, wt, ls_ordered),
+        "wrong_abinit_phase": w_assemble(np.conj(t_g_r_bad), t_g_r_bad, wt, amat),
     }
 
 
 def check_toy_g_space_contraction() -> None:
-    """Assertion 3: ABINIT-side W == complex-harmonic W; Hermitian; traceless."""
+    """Assertion 3: ABINIT-side W == complex-harmonic W at tau=0 AND tau!=0."""
     n_g = 6
     k_pt = _RNG.normal(size=3) * 0.3
     g_vecs = _RNG.normal(size=(n_g, 3))
     g_vecs /= np.linalg.norm(g_vecs, axis=1)[:, None]
     eso = 0.37
 
-    w1 = _toy_w(eso, k_pt, g_vecs, np.array([0.0, 0.0, 0.0]))
-    w_abinit, w_cplx = w1["abinit"], w1["complex"]
-    scale = max(np.abs(w_abinit).max(), np.abs(w_cplx).max())
-    dev = np.abs(w_abinit - w_cplx).max()
-    assert dev < TOL * scale, f"toy contraction mismatch: {dev} (scale {scale})"
-    print(
-        f"  ABINIT (real-tensor/amet) W == complex-Ylm kernel W  (dev {dev:.1e}, scale {scale:.1f})"
-    )
+    taus = {
+        "tau=0": np.zeros(3),
+        "tau!=0": np.array([0.13, -0.22, 0.31]),
+        "tau!=0 (2nd)": _RNG.normal(size=3) * 0.4,
+    }
+    for label, tau in taus.items():
+        w = _toy_w(eso, k_pt, g_vecs, tau)
+        w_abinit, w_cplx = w["abinit"], w["complex"]
+        scale = max(np.abs(w_abinit).max(), np.abs(w_cplx).max())
+        dev = np.abs(w_abinit - w_cplx).max()
+        assert (
+            dev < TOL * scale
+        ), f"toy contraction mismatch ({label}): {dev} (scale {scale})"
+        herm = np.abs(w_abinit - w_abinit.conj().T).max()
+        assert herm < TOL * scale, f"W not Hermitian ({label}): {herm}"
+        blocks = w_abinit.reshape(n_g, 2, n_g, 2)
+        tr_sum = sum(np.trace(blocks[g, :, g, :]) for g in range(n_g))
+        assert np.abs(tr_sum) < TOL * scale, f"L.S spin trace non-zero: {tr_sum}"
+        print(
+            f"  {label}: ABINIT W == complex-Y W (dev {dev:.1e}, scale {scale:.1f});"
+            f" Hermitian (dev {herm:.1e}); spin trace 0 (|tr| {abs(tr_sum):.1e})"
+        )
 
-    herm = np.abs(w_abinit - w_abinit.conj().T).max()
-    assert herm < TOL * scale, f"W not Hermitian: {herm}"
-    blocks = w_abinit.reshape(n_g, 2, n_g, 2)
-    tr_sum = sum(np.trace(blocks[g, :, g, :]) for g in range(n_g))
-    assert np.abs(tr_sum) < TOL * scale, f"L.S spin trace non-zero: {tr_sum}"
-    print(
-        f"  W Hermitian (dev {herm:.1e}); per-G spin trace of L.S = 0 (|tr| {abs(tr_sum):.1e})"
-    )
+        # negative controls, asserted at tau != 0 (non-degenerate there)
+        if label != "tau=0":
+            for key in ("naive_conj", "wrong_ket_phase", "wrong_abinit_phase"):
+                dev = np.abs(w[key] - w_cplx).max()
+                assert (
+                    dev > 1e-3 * scale
+                ), f"negative control {key} did not trigger ({label}): {dev}"
+                print(f"  {label}: negative control {key} fires (dev {dev:.1e})")
 
-    tau2 = np.array([0.13, -0.22, 0.31])
-    w_t2 = _toy_w(eso, k_pt, g_vecs, tau2)["abinit"]
-    w_t3 = _toy_w(eso, k_pt, g_vecs, -tau2)["abinit"]
     # all-atom coverage: the total W_SO is the SUM of per-site separable
     # terms; each term is Hermitian, so the site-sum is a valid operator.
-    herm2 = np.abs(w_t2 - w_t2.conj().T).max()
-    assert herm2 < TOL * scale, f"per-site W not Hermitian: {herm2}"
+    w_t2 = _toy_w(eso, k_pt, g_vecs, taus["tau!=0"])["abinit"]
+    w_t3 = _toy_w(eso, k_pt, g_vecs, taus["tau!=0 (2nd)"])["abinit"]
     w_sum = w_t2 + w_t3
     w_sum_herm = np.abs(w_sum - w_sum.conj().T).max()
+    scale = np.abs(w_sum).max()
     assert w_sum_herm < TOL * scale, f"two-site W not Hermitian: {w_sum_herm}"
-    print(
-        f"  per-site W Hermitian (dev {herm2:.1e}); two-site sum Hermitian (dev {w_sum_herm:.1e})"
-    )
+    print(f"  two-site sum Hermitian (dev {w_sum_herm:.1e})")
     print("  => W_SO additive over all sites (ligands included), each Hermitian")
-
-    # negative controls: conjugation on the bra (G') side instead of the ket
-    # (G) side — the naive note-2.1 placement — must break the match; so must
-    # a flipped ket atomic-phase conjugation or a flipped ket i^l sign.
-    for key in ("wrong_bra_conj", "wrong_phase", "wrong_ket_il"):
-        dev = np.abs(w1[key] - w_cplx).max()
-        assert dev > 1e-3 * scale, f"negative control {key} did not trigger: {dev}"
-        print(f"  negative control {key}: match broken (dev {dev:.1e})")
 
 
 def main() -> None:

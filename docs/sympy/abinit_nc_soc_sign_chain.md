@@ -41,34 +41,45 @@ Applying `amet(1)` to `g` and `amet(2)` to `i·g` (the m_nonlop_pl branch
 structure, any `gprimd`) equals direct multiplication by the complex matrix
 `−i·amet0` (dev 4.4e-16, scale 2.4).
 
-## Finite toy G-space contraction — the pinned chain (dev 8.4e-17)
+## Finite toy G-space contraction — the pinned chain (dev ≤ 8.8e-17 at τ=0 AND τ≠0)
 
-Single l = 1 channel, 6 random G, random k, weight `4π(2l+1)·eso/V`:
+Single l = 1 channel, 6 random G, random k, weight `4π(2l+1)·eso/V`, asserted
+at τ = 0 and two nonzero τ:
 
 - ABINIT side:
   `W[(G'σ'),(Gσ)] = Σ_{iy1,iy2} t*[G',iy1]·amet[iy1,iy2,σ',σ]·t[G,iy2]`,
   `t[G,iy] = i^l f(q) Y^R_{l,m(iy)}(ĝ) e^{+i2π(k+G)τ}` (m(iy) = (+1,−1,0) for
-  cart (x,y,z)).
-- Python complex-Y form (pinned):
-  `W = Σ_{m'm} Y_{m'}(ĝ')·[L·S]^c_{m'm}·Y*_m(ĝ)·(i^l)(−i)^l·f'f·e^{+i2π(G'−G)τ}`.
+  cart (x,y,z)) — element phase `e^{+i2π(G−G')τ}`.
+- Python complex-Y form (pinned, QM overlaps `⟨G'|B⟩` and `⟨B|G⟩`):
+  `W = Σ_{m'm} Y_{m'}(ĝ')·[L·S]^c_{m'm}·Y*_m(ĝ)·(−i)^l(i)^l·f'f·e^{+i2π(G−G')τ}` —
+  the **plain** (unconjugated) Y sits with `⟨G'|B⟩ = (−i)^l f Y e^{−i2π(k+G')τ}`
+  and the **conjugated** Y with `⟨B|G⟩ = (i)^l f Y* e^{+i2π(k+G)τ}`, so the
+  element phase is `e^{+i2π(G−G')τ}`, matching the ABINIT side at finite τ.
 
-**The complex conjugation belongs to the KET (G-side) tensor.** The naive
+**The complex conjugation belongs to the KET (G-side) value.** The naive
 placement — `Y*(ĝ')` on the bra (G') side, as written in research-note §2.1 —
-produces the complex conjugate operator (asserted to differ; e.g. element
-+0.609i vs −0.609i in an axis-aligned case). This is the CrI3
-conjugation-convention incident class, now pinned with teeth.
+produces the complex-conjugate operator (asserted to differ at τ≠0; e.g.
+element +0.609i vs −0.609i in an axis-aligned case). This is the CrI3
+conjugation-convention incident class, now pinned with teeth at finite τ.
 
-Structure asserts: W Hermitian (dev 0.0), per-G spin trace of L·S zero (0.0),
-per-site terms Hermitian and the two-site sum Hermitian ⇒ **W_SO additive over
-all sites (ligands included)**.
+Phase-chain source pins: `m_nonlop_pl.F90:127-131` (`phkxred = exp(2π kpt·xred)`;
+`ph3din/ph3dout` = per-atom, per-plane-wave structure factors); IN pass builds
+`gxa` from `ffnlin + ph3din + vectin` with `sign=+1` (~lines 525-547); OUT pass
+contracts `gxafac` with `ffnlout + ph3dout + vectout` with `sign=-1`
+(~lines 1199-1229); same `+i` projector phase as
+`abinao/src/abinao/paw_projection.py:4-14`.
 
-## Negative controls (all asserted to break the match)
+Structure asserts (at every τ): W Hermitian (dev 0.0), per-G spin trace of
+L·S zero (0.0), per-site terms Hermitian and the two-site sum Hermitian ⇒
+**W_SO additive over all sites (ligands included)**.
+
+## Negative controls (asserted to break the match at τ≠0, non-degenerate)
 
 | control | deviation (scale 0.48) |
 |---|---|
-| conjugation on the bra (G') side instead of the ket (G) side | 0.35 |
-| ket atomic-phase conjugation flipped (`e^{−iφ}` → `e^{+iφ}`) | 0.41 |
-| ket `i^l` sign flipped (`i` → `−i`) | 0.41 |
+| conjugation on the bra (G') side of the complex-Y form (note-2.1 literal) | 0.35 |
+| ket atomic-phase conjugation flipped (`e^{+iφ}` → `e^{−iφ}` on the conjugated G-side tensor) | 0.41 |
+| ABINIT side atomic phase flipped | 0.30 |
 
 ## Consequences for implementation
 

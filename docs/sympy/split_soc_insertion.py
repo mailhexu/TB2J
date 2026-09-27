@@ -16,7 +16,8 @@ Asserted identities:
      d2G/dlambda2|_0 = 2 G0 W G0 W G0
    exact in sympy on symbolic rational matrices; numerically via the
    independent defining equations A0 G' = W G0, A0 G'' = 2 W G' (A0 = zS-H0,
-   solved without reusing G0), plus complex-step differentiation.
+   solved without reusing G0), plus a central-difference Richardson
+   finite-difference corroboration.
 2. Two-vertex insertion topologies:
      d/dlambda Tr[V_a G V_b G]|_0 = Tr[V_a G0 W G0 V_b G0] + Tr[V_a G0 V_b G0 W G0]
    exactly the two orderings; SOC appears only sandwiched between propagators
@@ -134,7 +135,7 @@ def _random_complex_hermitian(n: int, rng: np.random.Generator) -> np.ndarray:
 
 
 def check_resolvent_derivative_numeric() -> None:
-    """Assertion 1 (numeric 1e-14): independent linear-solve + complex-step."""
+    """Assertion 1 (numeric 1e-14): independent linear-solve + FD corroboration."""
     for s_nonunit in (False, True):
         n = 4
         rng = np.random.default_rng(31 + s_nonunit)
@@ -184,7 +185,7 @@ def check_resolvent_derivative_numeric() -> None:
 
 
 def check_two_vertex_topologies_numeric() -> None:
-    """Assertion 2: the two insertion topologies, complex-step vs algebra."""
+    """Assertion 2: the two insertion topologies, central-difference FD vs algebra."""
     n = 4
     rng = np.random.default_rng(47)
     z = 1.9 + 2.1j
@@ -198,27 +199,29 @@ def check_two_vertex_topologies_numeric() -> None:
 
     a0 = z * s_mat - h0
     g0 = np.linalg.inv(a0)
-    trace0 = np.trace(v_a @ g0 @ v_b @ g0)
-
     # algebraic first-order coefficient from the two topologies
     topo = np.trace(v_a @ g0 @ w_mat @ g0 @ v_b @ g0) + np.trace(
         v_a @ g0 @ v_b @ g0 @ w_mat @ g0
     )
 
-    # finite-difference trace derivative with Richardson extrapolation
-    # (independent of the topology algebra)
+    # central-difference derivative with true Richardson extrapolation
+    # (independent of the topology algebra): D(h) = O(h^2); R = (4D(h)-D(2h))/3
     hh, hh2 = 1e-4, 2e-4
 
-    def d_trace(h_step: float) -> complex:
-        g_h = np.linalg.inv(a0 - h_step * w_mat)
-        return (np.trace(v_a @ g_h @ v_b @ g_h) - trace0) / h_step
+    def d_central(h_step: float) -> complex:
+        g_p = np.linalg.inv(a0 - h_step * w_mat)
+        g_m = np.linalg.inv(a0 + h_step * w_mat)
+        return (np.trace(v_a @ g_p @ v_b @ g_p) - np.trace(v_a @ g_m @ v_b @ g_m)) / (
+            2.0 * h_step
+        )
 
-    d_fd = (2.0 * d_trace(hh) - d_trace(hh2)) / 1.0  # O(hh^2) extrapolation
+    d_rich = (4.0 * d_central(hh) - d_central(hh2)) / 3.0
     scale = max(1.0, abs(topo))
-    dev = abs(d_fd - topo)
-    assert dev < 1e-8 * scale, f"topology sum != dTr: {dev} (scale {scale})"
+    dev = abs(d_rich - topo)
+    assert dev < 1e-10 * scale, f"topology sum != dTr: {dev} (scale {scale})"
     print(
-        f"  two-vertex topologies == FD dTr (Richardson, dev {dev:.1e}, scale {scale:.1f})"
+        "  two-vertex topologies == central-difference Richardson dTr"
+        f" (dev {dev:.1e}, scale {scale:.1f})"
     )
 
     # each topology alone is NOT the full derivative (both required)

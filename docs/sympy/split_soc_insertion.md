@@ -54,7 +54,8 @@ d/dλ Tr[V_a G_λ V_b G_λ]|_0
    = Tr[V_a G0 W G0 V_b G0] + Tr[V_a G0 V_b G0 W G0]
 ```
 
-- Richardson finite-difference corroboration (dev 3.8e-9, scale 1.0);
+- central-difference derivative with true Richardson extrapolation
+  `(4D(h) - D(2h))/3` (dev 4.7e-13, scale 1.0);
 - each topology alone is not the derivative (gap 8.1e-2): **both orderings
   required**;
 - SOC appears only sandwiched between propagators — never fused into a

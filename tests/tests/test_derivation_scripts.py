@@ -2,7 +2,9 @@
 
 The assertion-checked derivations under ``docs/sympy`` are the single source of
 truth for the split-SOC gauge/sign conventions pinned by story 001
-(sympy-pinned gauge and sign chains before any cross-backend implementation):
+(assertion-pinned gauge and sign chains before any cross-backend
+implementation; `split_soc_insertion.py` is sympy-executed, the other two
+are numpy-asserted):
 
 - ``split_soc_gauge``            GPAW psi/chi gauge, Wigner-D projections, tensor map
 - ``abinit_nc_soc_sign_chain``   ABINIT NC ``i^l`` / ``amet(-i)`` / conjugation chain

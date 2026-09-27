@@ -1,4 +1,4 @@
-"""Split-SOC gauge conventions: sympy/numeric-verified derivation.
+"""Split-SOC gauge conventions: assertion-checked (numpy) derivation.
 
 Story 001 of the split-SOC KS-band spec
 (Projects/TB2J/specs/split-soc-ks/stories/story-001-sympy-conventions.md).
@@ -8,7 +8,8 @@ Pins, with assertion checks on random complex matrices (deviations asserted at
 
 1. Spin rotation and axis map.  The GPAW (theta, phi) spinor basis matrix
    C(theta, phi) (gpaw/spinorbit.py:380-383, 26.7.0) equals the standard active
-   SU(2) rotation exp(-i phi sz/2) exp(-i theta sy/2); it is unitary and
+   SU(2) rotation exp(-i phi sz/2) exp(-i theta sy/2) (asserted via
+   scipy.linalg.expm); it is unitary and
      C sigma_z C^dag = n(theta, phi) . sigma .
    The TB2J axis map ``rotation_matrix(theta, phi)``
    (TB2J/mathutils/rotate_spin.py:31-41) satisfies the same axis identity
@@ -18,12 +19,14 @@ Pins, with assertion checks on random complex matrices (deviations asserted at
 
 2. ``add_soc`` tensordot chain.  The verbatim GPAW chain
        H = tensordot(C, H, (0, 1)); H = tensordot(C.T.conj(), H, (1, 1))
-   computes H <- C^dag H C^T (asserted; NOT C^dag H C).  It coincides with
-   C^dag (sigma.L) C only at C = I (the z leg); for real C (x leg) it is
-   C^dag H C^dag, and for generic complex C it differs from both (asserted).
-   The gauge theorem below therefore uses the analytic form
-   C^dag (sigma.L) C; verbatim-GPAW fidelity needs C^dag H C^T (flagged for
-   the GPAW adapter story).
+   (gpaw/spinorbit.py:74-75) computes the standard
+     H <- C^dag (sigma.L) C
+   at every leg (asserted against per-(i,j) plain matrix products, on both the
+   packed sigma.L toy and general non-packed spin-leg data; negative control:
+   C^dag H C^T differs).  An earlier draft of this script mislabeled its own
+   einsum target and claimed C^dag H C^T — the operand-label trap documented
+   here so it is not repeated: einsum('as,stij,bt', C^dag, H, C.T) is
+   C^dag H C, because operand C.T with labels (b, t) contributes C[t, b].
 
 3. Gauge theorem (psi/chi pictures).  With
      H_psi = h0 (x) 1 + Delta_diag (x) sigma_z + sum_v W_v (x) C^dag sigma_v C
@@ -122,6 +125,15 @@ def o_of(c_mat: np.ndarray) -> np.ndarray:
 
 def check_spin_rotation_and_axis_maps() -> None:
     """Assertions 1: C unitary, C sigma_z C^dag = n.sigma; same axis map in TB2J."""
+    from scipy.linalg import expm
+
+    # C equals the standard active SU(2) rotation (asserted, three legs)
+    for theta, phi in ((0.9, 1.3), (np.pi / 2, np.pi / 2), (0.7, -0.4)):
+        want = expm(-1j * phi * SZ / 2) @ expm(-1j * theta * SY / 2)
+        dev = np.abs(c_gpaw(theta, phi) - want).max()
+        assert dev < TOL, f"C != expm rotation at ({theta},{phi}): {dev}"
+    print("  C(theta,phi) == expm(-i phi sz/2) expm(-i theta sy/2)  (dev < 1e-15)")
+
     for theta, phi in [
         (0.9, 1.3),
         (np.pi / 2, 0.0),
@@ -155,7 +167,11 @@ def check_spin_rotation_and_axis_maps() -> None:
 
 
 def check_add_soc_tensordot_chain() -> None:
-    """Assertion 2: verbatim GPAW chain == C^dag H C^T; equals C^dag H C only at C=I."""
+    """Assertion 2: verbatim GPAW chain == C^dag (sigma.L) C at every leg.
+
+    Comparison targets use per-(i,j) plain matrix products (no einsum
+    operand-label traps): target[:, :, i, j] = C^dag @ M @ C.
+    """
     ni = 3
     l_vec = [_random_hermitian(ni, ni) for _ in range(3)]
     h_soc = np.zeros((2, 2, ni, ni), dtype=complex)
@@ -164,45 +180,43 @@ def check_add_soc_tensordot_chain() -> None:
     h_soc[1, 0] = l_vec[0] + 1j * l_vec[1]
     h_soc[1, 1] = -l_vec[2]
 
-    def gpaw_chain(c_mat: np.ndarray) -> np.ndarray:
-        # verbatim gpaw/spinorbit.py:83-85 chain
-        out = np.tensordot(c_mat, h_soc, (0, 1))
+    def gpaw_chain(c_mat: np.ndarray, h_arr: np.ndarray) -> np.ndarray:
+        # verbatim gpaw/spinorbit.py:74-75 chain
+        out = np.tensordot(c_mat, h_arr, (0, 1))
         return np.tensordot(c_mat.T.conj(), out, (1, 1))
 
-    def conj_form(c_mat: np.ndarray) -> np.ndarray:
-        return np.einsum("as,stij,bt->abij", c_mat.conj().T, h_soc, c_mat)
+    def conj_form(c_mat: np.ndarray, h_arr: np.ndarray) -> np.ndarray:
+        out = np.empty_like(h_arr)
+        for i in range(h_arr.shape[2]):
+            for j in range(h_arr.shape[3]):
+                out[:, :, i, j] = c_mat.conj().T @ h_arr[:, :, i, j] @ c_mat
+        return out
 
-    for theta, phi in [(0.9, 1.3), (np.pi / 2, 0.0)]:
-        c_mat = c_gpaw(theta, phi)
-        dev = np.abs(
-            gpaw_chain(c_mat)
-            - np.einsum("as,stij,bt->abij", c_mat.conj().T, h_soc, c_mat.T)
-        ).max()
-        assert dev < TOL, f"GPAW chain != C^dag H C^T at ({theta},{phi}): {dev}"
-        print(f"  chain({theta:.3f},{phi:.3f}) == C^dag (sigma.L) C^T  (dev {dev:.1e})")
+    # packed sigma.L toy AND general non-packed spin-leg data
+    h_gen = _RNG.normal(size=(2, 2, ni, ni)) + 1j * _RNG.normal(size=(2, 2, ni, ni))
+    for name, h_arr in (("packed sigma.L", h_soc), ("general spin-leg H", h_gen)):
+        for theta, phi in ((0.9, 1.3), (np.pi / 2, 0.0), (np.pi / 2, np.pi / 2)):
+            c_mat = c_gpaw(theta, phi)
+            dev = np.abs(gpaw_chain(c_mat, h_arr) - conj_form(c_mat, h_arr)).max()
+            assert (
+                dev < TOL
+            ), f"chain != C^dag H C ({name}, {theta:.2f},{phi:.2f}): {dev}"
+        print(
+            f"  {name}: verbatim chain == C^dag (sigma.L) C at all legs (dev < 1e-15)"
+        )
 
-    # z leg: C = I, all forms coincide
-    c_z = c_gpaw(0.0, 0.0)
-    dev = np.abs(gpaw_chain(c_z) - conj_form(c_z)).max()
-    assert dev < TOL, f"z-leg chain != C^dag (sigma.L) C: {dev}"
-    print(f"  z leg (C=I): chain == C^dag (sigma.L) C  (dev {dev:.1e})")
-
-    # real C (x leg): C^T == C^dag, so the chain is C^dag H C^dag (not C^dag H C)
-    c_x = c_gpaw(np.pi / 2, 0.0)
-    dev = np.abs(gpaw_chain(c_x) - conj_form(c_x)).max()
-    assert dev > 1e-3, f"x-leg chain unexpectedly equals C^dag H C: {dev}"
-    print(f"  x leg (real C): chain = C^dag H C^dag != C^dag H C (gap {dev:.3f})")
-
-    # generic complex C: the chain differs from the analytic C^dag H C form
-    c_cplx = c_gpaw(0.9, 1.3)
-    dev = np.abs(gpaw_chain(c_cplx) - conj_form(c_cplx)).max()
-    assert dev > 1e-3, f"expected chain != C^dag H C for complex C, got {dev}"
+    # negative control: C^dag H C^T is NOT what the chain computes
+    c_mat = c_gpaw(0.9, 1.3)
+    wrong = np.empty_like(h_soc)
+    for i in range(ni):
+        for j in range(ni):
+            wrong[:, :, i, j] = c_mat.conj().T @ h_soc[:, :, i, j] @ c_mat.T
+    dev = np.abs(gpaw_chain(c_mat, h_soc) - wrong).max()
+    assert dev > 1.0, f"chain unexpectedly equals C^dag H C^T: {dev}"
+    print(f"  negative control: chain != C^dag H C^T (gap {dev:.2f})")
     print(
-        f"  generic leg: chain != C^dag (sigma.L) C (gap {dev:.3f}; analytic form used in the theorem)"
-    )
-    print("  => the gauge theorem below uses the analytic C^dag (sigma.L) C operator;")
-    print(
-        "     GPAW-verbatim fidelity requires C^dag H C^T (flagged for the adapter story)"
+        "  => GPAW's add_soc rotation is the standard C^dag (sigma.L) C;"
+        " no adapter correction needed"
     )
 
 
