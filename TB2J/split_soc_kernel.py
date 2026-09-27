@@ -38,9 +38,9 @@ import numpy as np
 
 from TB2J.projector_green import (
     ProjectorGreen,
-    _spinor_dense_block,
     site_magnetization_sign,
     spinor_channels_to_exchange_tensor,
+    spinor_dense_block,
     spinor_pair_channels,
     spinor_projector_exchange_trace,
 )
@@ -154,6 +154,15 @@ def split_soc_provenance(
     frame/spinaxis, Pauli order, band-window definition, magnetic-only
     vertices, and merge mode.  Adapters merge backend-specific fields via
     ``soc_operator``/``strength0_reference``/``frame``/``extra``.
+
+    Attestation semantics (fields the kernel cannot verify from its
+    inputs): ``all_atom_coverage`` and ``soc_operator.coverage`` are
+    *adapter-attested* — the backend must guarantee that ``W_SO`` covers
+    all SOC-bearing atoms (ligands included) before claiming them;
+    ``band_window.convergence_study`` starts as ``None`` and MUST be
+    attached by the adapter from
+    :func:`band_window_convergence_report` (or an equivalent study)
+    before the output is published.
     """
     meta = {
         "schema": PROVENANCE_SCHEMA,
@@ -170,6 +179,7 @@ def split_soc_provenance(
         "soc_operator": {
             "units": SOC_UNITS,
             "coverage": "all_atoms",
+            "coverage_attestation": "adapter-attested (not verifiable by the kernel)",
             "site_decomposition": False,
             **dict(soc_operator or {}),
         },
@@ -249,11 +259,14 @@ def _validated_sites(data, sites):
 
 
 def _validated_rpts(Rpts):
-    arr = (
-        np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
-        if Rpts is None
-        else np.asarray(Rpts, dtype=int)
-    )
+    if Rpts is None:
+        # same default as the existing spinor kernel
+        # (compute_spinor_projector_exchange): the full nmax=1 grid
+        from TB2J.interfaces.gpaw_projector import _R_grid
+
+        arr = _R_grid(nmax=1)
+    else:
+        arr = np.asarray(Rpts, dtype=int)
     if arr.ndim != 2 or arr.shape[1] != 3:
         raise ValueError("Rpts must have shape (nR, 3)")
     keys = [tuple(int(x) for x in r) for r in arr]
@@ -271,7 +284,7 @@ def _validated_rpts(Rpts):
 # ---------------------------------------------------------------------------
 
 
-def first_order_insertion_channels(data, w_soc, Rpts, energies, lam=1.0, sites=None):
+def first_order_insertion_channels(data, w_soc, Rpts, energies, sites=None):
     """Analytic first-order SOC insertion at explicit complex energies.
 
     Builds ``G0(z,k)`` from the strength-0 eigenvalues and the insertion
@@ -284,7 +297,9 @@ def first_order_insertion_channels(data, w_soc, Rpts, energies, lam=1.0, sites=N
         d/dlam Tr[V_a G V_b G]|_0
             = Tr[v_a dG_ij v_b G0_ji] + Tr[v_a G0_ij v_b dG_ji]
 
-    through the shared :func:`spinor_pair_channels` kernel.
+    through the shared :func:`spinor_pair_channels` kernel.  This is the
+    *derivative at lam = 0*: ``dA`` is ``d/dlam`` of the channel matrix and
+    ``pair_trace`` of the pair trace — no SOC scaling is applied here.
 
     Returns ``{"energies", "A0", "dA", "pair_trace0", "pair_trace"}`` with
     ``(nE, 4, 4)`` channel arrays and ``(nE,)`` pair traces — the dense
@@ -304,6 +319,7 @@ def first_order_insertion_channels(data, w_soc, Rpts, energies, lam=1.0, sites=N
     eps = data.eigenvalues[0]  # (nkpt, N)
     coeff = data.coefficients[0]  # (nkpt, N, 2, nproj)
     ops = green.get_local_operators_spinor(sites=sites)
+    dense_ops = {site: spinor_dense_block(op) for site, op in ops.items()}
     phase = np.exp(green.k2Rfactor * np.einsum("ri,ki->rk", rpts, green.kpts))
     phase = phase * green.kweights[None, :]
 
@@ -324,7 +340,9 @@ def first_order_insertion_channels(data, w_soc, Rpts, energies, lam=1.0, sites=N
         for ir, r in enumerate(rkeys):
             irm = r_index[tuple(-x for x in r)]
             for i in sites:
+                dense_i = dense_ops[i]
                 for j in sites:
+                    dense_j = dense_ops[j]
                     g0ij = green.get_site_block_spinor(gr0[ir], i, j)
                     g0ji = green.get_site_block_spinor(gr0[irm], j, i)
                     dgij = green.get_site_block_spinor(dgr[ir], i, j)
@@ -339,33 +357,29 @@ def first_order_insertion_channels(data, w_soc, Rpts, energies, lam=1.0, sites=N
                     # its strength-0 partner.  Note pi*sum(A^{uv}) is NOT
                     # this trace: the pinned channel construction
                     # reconstructs the spin-transposed Green block.
-                    dense_i = _spinor_dense_block(ops[i])
-                    dense_j = _spinor_dense_block(ops[j])
                     tr[key][ie] = np.trace(
                         dense_i
-                        @ _spinor_dense_block(dgij)
+                        @ spinor_dense_block(dgij)
                         @ dense_j
-                        @ _spinor_dense_block(g0ji)
+                        @ spinor_dense_block(g0ji)
                     ) + np.trace(
                         dense_i
-                        @ _spinor_dense_block(g0ij)
+                        @ spinor_dense_block(g0ij)
                         @ dense_j
-                        @ _spinor_dense_block(dgji)
+                        @ spinor_dense_block(dgji)
                     )
                     tr0[key][ie] = np.trace(
                         dense_i
-                        @ _spinor_dense_block(g0ij)
+                        @ spinor_dense_block(g0ij)
                         @ dense_j
-                        @ _spinor_dense_block(g0ji)
+                        @ spinor_dense_block(g0ji)
                     )
-    pair0 = tr0
-    pair = tr
     return {
         "energies": energies,
         "A0": a0,
         "dA": da,
-        "pair_trace0": pair0,
-        "pair_trace": pair,
+        "pair_trace0": tr0,
+        "pair_trace": tr,
     }
 
 
@@ -413,16 +427,22 @@ def compute_ks_split_soc_exchange(
         All-atom SOC operator in the band window, ``W^K_SO_nm(k)`` (eV),
         Hermitian at every k.  Complex Hermitian is fully supported.
     lam : float
-        Dimensionless SOC scaling.
+        Dimensionless SOC scaling.  Only meaningful for the
+        second-variation mode; the insertion mode *returns the
+        lam-derivative at the strength-0 reference* and rejects any
+        other value.
     mode : str
         ``"second_variation"`` (production: diagonalize ``E + lam W``,
         rotate the spectral coefficients, replay the existing spinor
         kernel — all orders of lam in-window) or
         ``"first_order_insertion"`` (diagnostic: analytic ``G0 W G0``
         insertion with both trace-line topologies; outputs are lam
-        *derivatives* of the tensors).
-    Rpts : (nR, 3) array_like of int
-        Lattice vectors; each negative R must be present.
+        *derivatives* of the tensors and of the channel matrix
+        ``A_ijR``).
+    Rpts : (nR, 3) array_like of int, optional
+        Lattice vectors; each negative R must be present.  Defaults to
+        the same ``_R_grid(nmax=1)`` full grid as the existing spinor
+        kernel.
     sites : list[int]
         Magnetic sites carrying vertices (magnetic-only gating); default
         all sites.
@@ -450,6 +470,12 @@ def compute_ks_split_soc_exchange(
         raise ValueError(
             f"unsupported split-SOC kernel mode: {mode!r} (expected one of "
             f"{SPLIT_SOC_MODES})"
+        )
+    if mode == MODE_FIRST_ORDER_INSERTION and float(lam) != 1.0:
+        raise ValueError(
+            "the first-order insertion mode returns the lam-derivative of the "
+            "exchange at the strength-0 reference; it takes no SOC scaling "
+            f"(lam must be 1.0, got {lam})"
         )
     sites = _validated_sites(data, sites)
     rpts, rkeys = _validated_rpts(Rpts)
@@ -489,18 +515,30 @@ def compute_ks_split_soc_exchange(
                 values[key].append(trace["A_ijR"][key])
     else:
         insertion = first_order_insertion_channels(
-            data, w, Rpts=rpts, energies=contour.path, lam=lam, sites=sites
+            data, w, Rpts=rpts, energies=contour.path, sites=sites
         )
-        values = {key: list(np.asarray(a)) for key, a in insertion["dA"].items()}
+        values = {key: np.asarray(a) for key, a in insertion["dA"].items()}
+
+    # contour-integrate each pair's channels exactly once (the reverse
+    # (R, j, i) entry is needed by the Jani mapping of (R, i, j))
+    integrated_channels = {
+        key: _integrate_channels(vals, contour) for key, vals in values.items()
+    }
+    insertion_traces = (
+        {
+            key: _integrate_traces(trace, contour)
+            for key, trace in insertion["pair_trace"].items()
+        }
+        if mode == MODE_FIRST_ORDER_INSERTION
+        else {}
+    )
 
     signs = {site: site_magnetization_sign(op) for site, op in ops.items()}
     exchange = {}
-    for key, vals in values.items():
+    for key in values:
         r, i, j = key
-        integrated = _integrate_channels(vals, contour)
-        integrated_rev = _integrate_channels(
-            values[(tuple(-x for x in r), j, i)], contour
-        )
+        integrated = integrated_channels[key]
+        integrated_rev = integrated_channels[(tuple(-x for x in r), j, i)]
         entry = spinor_channels_to_exchange_tensor(
             integrated, integrated_rev, signs[i] * signs[j]
         )
@@ -511,9 +549,7 @@ def compute_ks_split_soc_exchange(
             # first_order_insertion_channels); not recoverable from the
             # channel matrix, whose Pauli sum reconstructs the
             # spin-transposed Green block.
-            entry["pair_trace"] = complex(
-                _integrate_traces(insertion["pair_trace"][key], contour)
-            )
+            entry["pair_trace"] = complex(insertion_traces[key])
         exchange[key] = entry
 
     extra = dict(metadata or {})

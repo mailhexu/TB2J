@@ -1480,7 +1480,7 @@ def projector_charge_moments_from_green(green, contour, sites=None):
     }
 
 
-def _spinor_dense_block(block):
+def spinor_dense_block(block):
     """(nproj_i, nproj_j, 2, 2) -> spin-major dense (2*ni, 2*nj)."""
     ni, nj = block.shape[0], block.shape[1]
     return block.transpose(2, 0, 3, 1).reshape(2 * ni, 2 * nj)
@@ -1509,20 +1509,20 @@ def spinor_pair_channels(delta_i, g_ij, delta_j, g_ji):
     gives the LKAG cross-channel algebraically
     (docs/sympy/spinor_projector_green.md).
     """
-    dense_di = _spinor_dense_block(delta_i)
-    dense_dj = _spinor_dense_block(delta_j)
+    dense_di = spinor_dense_block(delta_i)
+    dense_dj = spinor_dense_block(delta_j)
     t_ijs = [
         0.5 * np.einsum("pqst,st->pq", g_ij, SIG) for SIG in PAULI_IDENTITY_AND_MATRICES
     ]
     t_jis = [
         0.5 * np.einsum("pqst,st->pq", g_ji, SIG) for SIG in PAULI_IDENTITY_AND_MATRICES
     ]
+    g_u = [np.kron(PAULI_IDENTITY_AND_MATRICES[u], t_ijs[u]) for u in range(4)]
+    g_v = [np.kron(PAULI_IDENTITY_AND_MATRICES[v], t_jis[v]) for v in range(4)]
     a = np.empty((4, 4), dtype=complex)
     for u in range(4):
-        g_u = np.kron(PAULI_IDENTITY_AND_MATRICES[u], t_ijs[u])
         for v in range(4):
-            g_v = np.kron(PAULI_IDENTITY_AND_MATRICES[v], t_jis[v])
-            a[u, v] = np.trace(dense_di @ g_u @ dense_dj @ g_v) / np.pi
+            a[u, v] = np.trace(dense_di @ g_u[u] @ dense_dj @ g_v[v]) / np.pi
     return a
 
 

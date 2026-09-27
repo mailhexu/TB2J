@@ -58,7 +58,7 @@ def _brute_force_A(green, Rpts, energy, operators):
     """Independent O(n^4) reference for the ExchangeNCL channel matrix
     A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji]/pi with G^(u) the u-th
     Pauli component of the spinor Green block."""
-    from TB2J.projector_green import PAULI_IDENTITY_AND_MATRICES, _spinor_dense_block
+    from TB2J.projector_green import PAULI_IDENTITY_AND_MATRICES, spinor_dense_block
 
     GR = green.get_GR_spinor(Rpts, energy)
     out = {}
@@ -70,8 +70,8 @@ def _brute_force_A(green, Rpts, energy, operators):
             for jatom in range(2):
                 Gij = green.get_site_block_spinor(GR[iR], iatom, jatom)
                 Gji = green.get_site_block_spinor(GR[iRm], jatom, iatom)
-                Di = _spinor_dense_block(operators[iatom])
-                Dj = _spinor_dense_block(operators[jatom])
+                Di = spinor_dense_block(operators[iatom])
+                Dj = spinor_dense_block(operators[jatom])
                 T_ij = [
                     0.5 * np.einsum("pqst,st->pq", Gij, SIG)
                     for SIG in PAULI_IDENTITY_AND_MATRICES
