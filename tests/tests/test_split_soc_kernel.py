@@ -28,8 +28,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-RNG = np.random.default_rng(20260927)
-
 PAULI = (
     np.eye(2, dtype=complex),
     np.array([[0, 1], [1, 0]], dtype=complex),
@@ -93,15 +91,16 @@ def _make_ks_data(nsite=2, nstate=6, nproj_per_site=2, nkpt=5, seed=11):
 
 
 def _random_w_soc(data, rng, ncomp=None):
-    """All-atom W_SO^K(k): (nkpt, nstate, nstate) complex Hermitian, optionally
-    given as an additive sum over ``ncomp`` site components."""
+    """All-atom W_SO^K(k): (nkpt, nstate, nstate) complex Hermitian,
+    k-dependent (independent Hermitian draw per k point), optionally given
+    as an additive sum over ``ncomp`` site components."""
     nkpt, nstate = data.nkpt, data.nband
     if ncomp is None:
-        w = _random_hermitian(nstate, rng)
-        return np.asarray([w for _ in range(nkpt)])
+        ncomp = 1
     w = np.zeros((nkpt, nstate, nstate), dtype=complex)
-    for _ in range(ncomp):
-        w += _random_hermitian(nstate, rng)
+    for ik in range(nkpt):
+        for _ in range(ncomp):
+            w[ik] += _random_hermitian(nstate, rng)
     return w
 
 
@@ -177,13 +176,10 @@ def test_insertion_matches_sympy_lambdified_topologies():
     data.weights[...] = 1.0
     rng = np.random.default_rng(47)
     w_soc = _random_w_soc(data, rng)
-    lam = 0.7
     z = 1.9 + 2.1j
     rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
 
-    channels = first_order_insertion_channels(
-        data, w_soc, Rpts=rpts, energies=[z], lam=lam
-    )
+    channels = first_order_insertion_channels(data, w_soc, Rpts=rpts, energies=[z])
 
     # --- story-001 topology expression, built and lambdified with sympy ---
     n = nstate
@@ -220,7 +216,7 @@ def test_insertion_matches_sympy_lambdified_topologies():
         np.dot(data.weights, [band_topology(ik) for ik in range(data.nkpt)])
     )
     scale = max(1.0, abs(topo_ref))
-    assert abs(kernel_val - topo_ref) <= 1e-12 * scale, (kernel_val, topo_ref)
+    assert abs(kernel_val - topo_ref) <= 1e-14 * scale, (kernel_val, topo_ref)
 
     # strength-0 partner trace matches the embedded identity line too
     def band_trace0(ik):
@@ -234,7 +230,7 @@ def test_insertion_matches_sympy_lambdified_topologies():
         np.dot(data.weights, [band_trace0(ik) for ik in range(data.nkpt)])
     )
     kernel_trace0 = complex(np.asarray(channels["pair_trace0"][key])[0])
-    assert abs(kernel_trace0 - trace0_ref) <= 1e-12 * max(1.0, abs(trace0_ref))
+    assert abs(kernel_trace0 - trace0_ref) <= 1e-14 * max(1.0, abs(trace0_ref))
 
     # each topology alone is NOT the derivative (story-001 assertion)
     g0_k = np.diag(1.0 / (z + data.efermi - data.eigenvalues[0, 0]))
@@ -498,7 +494,7 @@ def test_ligand_soc_enters_dmi_but_not_vertices():
     data = _make_ks_data(nsite=3, nstate=6, nproj_per_site=2, nkpt=4, seed=31)
     rng = np.random.default_rng(77)
     w_mag = _random_w_soc(data, rng, ncomp=2)
-    w_all = w_mag + _random_w_soc(data, rng)[0:1] * np.ones((data.nkpt, 1, 1))
+    w_all = w_mag + _random_w_soc(data, rng)
     rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
 
     kw = dict(lam=1.0, mode=MODE_SECOND_VARIATION, Rpts=rpts, nz=24, smearing_eV=0.05)
@@ -808,6 +804,17 @@ def test_kernel_input_validation():
 
     with pytest.raises(ValueError, match="mode"):
         compute_ks_split_soc_exchange(data, w_ok, mode="finite_difference", **kw)
+
+    # insertion mode returns the lam-derivative at the strength-0
+    # reference: no SOC scaling accepted (SPEC-NB4)
+    with pytest.raises(ValueError, match="derivative"):
+        compute_ks_split_soc_exchange(
+            data,
+            w_ok,
+            lam=0.5,
+            mode="first_order_insertion",
+            **kw,
+        )
 
     with pytest.raises(ValueError, match="band_mask"):
         compute_ks_split_soc_exchange(

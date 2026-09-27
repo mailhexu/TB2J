@@ -33,9 +33,7 @@ from ase.units import Ha, kB
 from TB2J.projector_green import (
     SPINOR_OPERATOR_DEFINITION,
     ProjectorGreenData,
-)
-from TB2J.projector_green import (
-    site_magnetization_sign as _site_magnetization_sign,
+    site_magnetization_sign,
 )
 
 SIGMA = np.array(
@@ -245,7 +243,7 @@ def compute_spinor_projector_exchange(
     sites = [int(site) for site in sites]
     green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
     local_operators = green.get_local_operators_spinor(sites=sites)
-    signs = {site: _site_magnetization_sign(op) for site, op in local_operators.items()}
+    signs = {site: site_magnetization_sign(op) for site, op in local_operators.items()}
 
     contour = CFR(nz=nz, T=smearing_eV / kB)
     values = {
