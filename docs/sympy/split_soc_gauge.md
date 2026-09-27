@@ -89,6 +89,18 @@ exchanged (leg-frame ↔ lattice). The pinned invariants are: `O ∈ SO(3)`,
 output to lattice components must use `T_lattice = O_d T_leg O_dᵀ`.**
 (SPEC-001: the AC/ADR-4/FR-011/note formula text is being amended centrally.)
 
+## Symbolic layer (exact sympy, added rev. 3)
+
+`check_symbolic_frame_law` — exact symbolic equalities with real symbols
+θ, φ and symbolic H entries (no numeric substitution):
+
+- `C` unitary; `C σ_z C† == n̂(θ,φ)·σ⃗`;
+- `O == ½Tr[σ_w C σ_v C†]` satisfies `O Oᵀ == I` (trigsimp-fu), `det O == 1`,
+  `O e_z == n̂`;
+- `U_TB2J† σ_z U_TB2J == n̂·σ⃗`;
+- the verbatim tensordot **index algebra** (replicated term-by-term) equals
+  `C† H C` for symbolic H entries — the exact-algebra settlement of SPEC-002.
+
 ## Verification summary
 
 - `C` == expm rotation: dev < 1e-15 (three legs); unitary/axis: dev ≤ 1.6e-16.

@@ -1,4 +1,5 @@
-"""ABINIT NC split-SOC sign chain: i^l f_l Y_lm / amet(-i) / conjugation.
+"""ABINIT NC split-SOC sign chain: i^l f_l Y_lm / amet(-i) / conjugation
+(exact sympy layer + numeric source-oracle checks).
 
 Story 001 of the split-SOC KS-band spec; pins the operator convention of
 research-supporting/split-soc-abinit-nc-pypao.md (sections 1.3, 2.1, 3)
@@ -17,7 +18,10 @@ Source-pinned references (ABINIT tree branch `savetb2j`):
   with real tesseral harmonics (pypao/spherical_harmonics.py: scipy lpmv,
   Condon-Shortley phase, ABINIT ordering l^2+l+m).
 
-Asserted chains (all on random complex data, 1e-14 against O(1) scale):
+Asserted chains — first the exact sympy layer (check_symbolic_phase_and_signs:
+abstract-tau q-phase identity, Hermitian conjugate q_G/q_G', Re/Im swap == -i,
+LS spinor block signs via the exact tesseral transform), then numeric
+source-oracle checks on random complex data, 1e-14 against O(1) scale:
 
 1. metric_so internals: the pre-swap
    amet0 = sum_n (sigma_n/2) (x) A^(n) is real, and the final Re/Im swap
@@ -52,6 +56,7 @@ from __future__ import annotations
 from math import factorial
 
 import numpy as np
+import sympy as sp
 from scipy.special import lpmv
 
 TOL = 1.0e-14
@@ -284,17 +289,17 @@ def _toy_w(
         w_mat = np.zeros((2 * n_g, 2 * n_g), dtype=complex)
         for igp in range(n_g):
             for ig in range(n_g):
-                for sp in range(2):
+                for spin_p in range(2):
                     for s in range(2):
                         acc = 0.0 + 0.0j
                         for iy1 in range(2 * l_val + 1):
                             for iy2 in range(2 * l_val + 1):
                                 acc += (
                                     t_gprime[igp, iy1]
-                                    * operator[iy1, iy2, sp, s]
+                                    * operator[iy1, iy2, spin_p, s]
                                     * t_g[ig, iy2]
                                 )
-                        w_mat[2 * igp + sp, 2 * ig + s] = weight * acc
+                        w_mat[2 * igp + spin_p, 2 * ig + s] = weight * acc
         return w_mat
 
     # real-tensor tensors: the ABINIT metric index iy is CARTESIAN-ordered
@@ -404,8 +409,126 @@ def check_toy_g_space_contraction() -> None:
     print("  => W_SO additive over all sites (ligands included), each Hermitian")
 
 
+def check_symbolic_phase_and_signs() -> None:
+    """Exact sympy assertions: q_G/q_G' phases, LS spinor block signs.
+
+    Discharges the AGENTS.md sympy requirement for the derived ABINIT
+    phase/sign chain: every identity is exact symbolic equality.
+    """
+    # 1. q-phase identity with abstract nonzero tau:
+    #    conj(q(k+g')) q(k+g) == exp(2*pi*I (g-g').tau)
+    kx, ky, kz = sp.symbols("kx ky kz", real=True)
+    gx, gy, gz = sp.symbols("gx gy gz", real=True)
+    hx, hy, hz = sp.symbols("hx hy hz", real=True)
+    tx, ty, tz = sp.symbols("tau_x tau_y tau_z", real=True)
+    k, g_v, g_p, tau = (kx, ky, kz), (gx, gy, gz), (hx, hy, hz), (tx, ty, tz)
+
+    def q_phase(w):
+        return sp.exp(2 * sp.I * sp.pi * sum(w[i] * tau[i] for i in range(3)))
+
+    lhs = sp.conjugate(q_phase([k[i] + g_p[i] for i in range(3)])) * q_phase(
+        [k[i] + g_v[i] for i in range(3)]
+    )
+    rhs = sp.exp(2 * sp.I * sp.pi * sum((g_v[i] - g_p[i]) * tau[i] for i in range(3)))
+    assert sp.expand(lhs - rhs) == 0
+    print(
+        "  symbolic: conj(q(k+g')) q(k+g) == exp(2 pi I (g-g').tau)  (exact, abstract tau)"
+    )
+
+    # 2. Hermitian conjugate q_G / q_G': with abstract phases and a symbolic
+    #    Hermitian operator block, the separable element satisfies
+    #    W[g',g] == conj(W[g,g']) exactly.
+    m11 = sp.Symbol("m11", real=True)
+    m12 = sp.Symbol("m12", complex=True)
+    mu = {(0, 0): m11, (0, 1): m12, (1, 0): sp.conjugate(m12), (1, 1): m11}
+    qa, qb = (
+        q_phase([k[i] + g_v[i] for i in range(3)]),
+        q_phase([k[i] + g_p[i] for i in range(3)]),
+    )
+    for a, b in ((0, 1), (1, 0)):
+        w_gp_g = sp.conjugate(qb) * mu[(a, b)] * qa  # pinned placement
+        w_g_gp = sp.conjugate(qa) * mu[(b, a)] * qb
+        assert sp.simplify(sp.expand_complex(w_gp_g - sp.conjugate(w_g_gp))) == 0
+    print(
+        "  symbolic: W[g',g] == conj(W[g,g']) for Hermitian block, abstract q phases (exact)"
+    )
+
+    # 3. Re/Im swap == -i multiplication (exact, symbolic real matrix)
+    mr = sp.Matrix(2, 2, lambda i, j: sp.Symbol(f"re{i}{j}", real=True))
+    mi = sp.Matrix(2, 2, lambda i, j: sp.Symbol(f"im{i}{j}", real=True))
+    pre = mr + sp.I * mi
+    swapped = sp.Matrix(mi.tolist()) - sp.I * mr  # amet(1)<-amet(2); amet(2)<--amet(1)
+    assert sp.simplify(swapped - (-sp.I) * pre) == sp.zeros(2)
+    print("  symbolic: metric_so Re/Im swap == -i multiplication (exact)")
+
+    # 4. LS spinor block signs: the complex-m operator transported by the
+    #    exact tesseral transform equals the -i-epsilon (x) sigma/2 form.
+    sqrt2 = sp.sqrt(2)
+    u_rc = sp.Matrix(
+        [[sp.I / sqrt2, 0, 1 / sqrt2], [0, 1, 0], [sp.I / sqrt2, 0, -1 / sqrt2]]
+    )
+    assert sp.simplify(u_rc.T.conjugate() * u_rc - sp.eye(3)) == sp.zeros(3)
+    mv = (-1, 0, 1)
+    ls_c = sp.zeros(6, 6)
+    sm = sp.Matrix([[0, 0], [1, 0]])  # S- = Sx - iSy: up -> dn
+    spm = sp.Matrix([[0, 1], [0, 0]])  # S+ = Sx + iSy: dn -> up
+    szh = sp.Matrix([[sp.Rational(1, 2), 0], [0, -sp.Rational(1, 2)]])
+    for m in mv:
+        for a in range(2):
+            for b in range(2):
+                ls_c[2 * mv.index(m) + a, 2 * mv.index(m) + b] += m * szh[a, b]
+        for lp, smat in ((1, sm), (-1, spm)):
+            mo = m + lp
+            if abs(mo) > 1:
+                continue
+            coeff = sp.sqrt(2 - m * mo)
+            for a in range(2):
+                for b in range(2):
+                    ls_c[2 * mv.index(mo) + a, 2 * mv.index(m) + b] += (
+                        sp.Rational(1, 2) * coeff * smat[a, b]
+                    )
+    # -i epsilon (x) sigma/2 in the Cartesian (x, y, z) slots
+    perm3 = {
+        (0, 1, 2): 1,
+        (1, 2, 0): 1,
+        (2, 0, 1): 1,
+        (0, 2, 1): -1,
+        (2, 1, 0): -1,
+        (1, 0, 2): -1,
+    }
+    sig_half = (
+        sp.Matrix([[0, sp.Rational(1, 2)], [sp.Rational(1, 2), 0]]),
+        sp.Matrix([[0, -sp.I / 2], [sp.I / 2, 0]]),
+        sp.Matrix([[sp.Rational(1, 2), 0], [0, -sp.Rational(1, 2)]]),
+    )
+    ls_r = sp.zeros(6, 6)
+    for n in range(3):
+        lm = sp.Matrix(3, 3, lambda a, b, n=n: -sp.I * perm3.get((n, a, b), 0))
+        for iy1 in range(3):
+            for iy2 in range(3):
+                for s1 in range(2):
+                    for s2 in range(2):
+                        ls_r[2 * iy1 + s1, 2 * iy2 + s2] += (
+                            lm[iy1, iy2] * sig_half[n][s1, s2]
+                        )
+    # reorder real-basis slots: cart (x,y,z) <- m-slot (+1,-1,0) = slots (2,0,1)
+    order = [2 * p + s for p in (2, 0, 1) for s in range(2)]
+    u2 = sp.zeros(6, 6)
+    for a in range(3):
+        for b in range(3):
+            for s1 in range(2):
+                u2[2 * a + s1, 2 * b + s1] = u_rc[a, b]
+    transport = u2.H * ls_c * u2
+    diff = sp.expand(ls_r - transport.extract(order, order))
+    assert diff == sp.zeros(6, 6)
+    print(
+        "  symbolic: LS spinor block signs == amet form via the exact tesseral transform (exact)"
+    )
+
+
 def main() -> None:
     print("abinit_nc_soc_sign_chain: ABINIT NC SOC operator convention (story-001)")
+    check_symbolic_phase_and_signs()
     check_amet_minus_i(np.eye(3))
     check_amet_spinaxis()
     check_two_branch_contraction()

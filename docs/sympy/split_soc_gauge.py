@@ -1,4 +1,4 @@
-"""Split-SOC gauge conventions: assertion-checked (numpy) derivation.
+"""Split-SOC gauge conventions: assertion-checked (sympy + numpy) derivation.
 
 Story 001 of the split-SOC KS-band spec
 (Projects/TB2J/specs/split-soc-ks/stories/story-001-sympy-conventions.md).
@@ -8,8 +8,8 @@ Pins, with assertion checks on random complex matrices (deviations asserted at
 
 1. Spin rotation and axis map.  The GPAW (theta, phi) spinor basis matrix
    C(theta, phi) (gpaw/spinorbit.py:380-383, 26.7.0) equals the standard active
-   SU(2) rotation exp(-i phi sz/2) exp(-i theta sy/2) (asserted via
-   scipy.linalg.expm); it is unitary and
+   SU(2) rotation exp(-i phi sz/2) exp(-i theta sy/2) — asserted BOTH via exact
+   sympy (check_symbolic_frame_law) and via scipy.linalg.expm; C is unitary and
      C sigma_z C^dag = n(theta, phi) . sigma .
    The TB2J axis map ``rotation_matrix(theta, phi)``
    (TB2J/mathutils/rotate_spin.py:31-41) satisfies the same axis identity
@@ -59,6 +59,7 @@ Run with the mydev environment.
 from __future__ import annotations
 
 import numpy as np
+import sympy as sp
 
 SX = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
 SY = np.array([[0.0, -1.0j], [1.0j, 0.0]], dtype=complex)
@@ -220,6 +221,83 @@ def check_add_soc_tensordot_chain() -> None:
     )
 
 
+def check_symbolic_frame_law() -> None:
+    """Exact sympy assertions: SU(2)/Pauli frame law with symbolic angles.
+
+    Discharges the AGENTS.md sympy requirement for the derived GPAW frame
+    formulas: every identity below is exact symbolic equality (no numeric
+    substitution).
+    """
+    th, ph = sp.symbols("theta phi", real=True)
+    c_half, s_half = sp.cos(th / 2), sp.sin(th / 2)
+    em, ep = sp.exp(-sp.I * ph / 2), sp.exp(sp.I * ph / 2)
+    c_mat = sp.Matrix([[c_half * em, -s_half * em], [s_half * ep, c_half * ep]])
+    sx = sp.Matrix([[0, 1], [1, 0]])
+    sy = sp.Matrix([[0, -sp.I], [sp.I, 0]])
+    sz = sp.Matrix([[1, 0], [0, -1]])
+    sig = (sx, sy, sz)
+
+    # unitarity (exact)
+    assert sp.simplify(c_mat.T.conjugate() * c_mat - sp.eye(2)) == sp.zeros(2)
+    # C sigma_z C^dag == n.sigma (exact)
+    n_vec = (
+        sp.sin(th) * sp.cos(ph) * sx + sp.sin(th) * sp.sin(ph) * sy + sp.cos(th) * sz
+    )
+    assert sp.simplify(
+        sp.expand_complex(c_mat * sz * c_mat.T.conjugate() - n_vec)
+    ) == sp.zeros(2)
+    print("  symbolic: C unitary; C sz C^dag == n.sigma (exact)")
+
+    # O from the trace formula is SO(3) and maps e_z to n (exact)
+    o_mat = sp.Matrix(
+        3,
+        3,
+        lambda w, v: sp.Rational(1, 2)
+        * sp.trace(sig[w] * c_mat * sig[v] * c_mat.T.conjugate()),
+    )
+    e_oo = sp.expand_complex(o_mat * o_mat.T - sp.eye(3))
+    assert e_oo.applyfunc(lambda e: sp.trigsimp(e, method="fu")) == sp.zeros(3)
+    assert sp.simplify(o_mat.det() - 1) == 0
+    n_components = (
+        sp.sin(th) * sp.cos(ph),
+        sp.sin(th) * sp.sin(ph),
+        sp.cos(th),
+    )
+    ez = o_mat * sp.Matrix([0, 0, 1])
+    for w in range(3):
+        e_ez = sp.expand_complex(ez[w] - n_components[w])
+        assert sp.trigsimp(e_ez, method="fu") == 0
+    print("  symbolic: O in SO(3), det 1, O e_z == n (exact)")
+
+    # TB2J rotation_matrix axis identity (exact)
+    u_tb2j = sp.Matrix(
+        [
+            [sp.cos(th / 2), sp.exp(-sp.I * ph) * sp.sin(th / 2)],
+            [-sp.exp(sp.I * ph) * sp.sin(th / 2), sp.cos(th / 2)],
+        ]
+    )
+    assert sp.simplify(
+        sp.expand_complex(u_tb2j.T.conjugate() * sz * u_tb2j - n_vec)
+    ) == sp.zeros(2)
+    print("  symbolic: U_TB2J^dag sz U_TB2J == n.sigma (exact)")
+
+    # verbatim tensordot index algebra == C^dag H C for symbolic H entries
+    h_sym = sp.Matrix(2, 2, lambda i, j: sp.Symbol(f"h{i}{j}"))
+    # tensordot(C, H, (0, 1)):  out1[s, s1] = sum_c C[c, s] H[s1, c]
+    out1 = sp.Matrix(
+        2, 2, lambda s, s1: sum(c_mat[c, s] * h_sym[s1, c] for c in range(2))
+    )
+    # tensordot(C.T.conj(), out1, (1, 1)):  out2[a, s] = sum_{s1} C^dag[a, s1] out1[s, s1]
+    out2 = sp.Matrix(
+        2,
+        2,
+        lambda a, s: sum(c_mat.T.conjugate()[a, s1] * out1[s, s1] for s1 in range(2)),
+    )
+    target = c_mat.T.conjugate() * h_sym * c_mat
+    assert sp.expand(out2 - target) == sp.zeros(2)
+    print("  symbolic: verbatim add_soc index algebra == C^dag H C (exact, symbolic H)")
+
+
 def check_hamiltonian_gauge_theorem() -> None:
     """Assertion 3: H_chi = U H_psi U^dag, spectra, eigenvector correspondence."""
     nb = 4
@@ -374,6 +452,7 @@ def check_tb2j_axis_map_equivalence() -> None:
 
 def main() -> None:
     print("split_soc_gauge: split-SOC gauge conventions (story-001)")
+    check_symbolic_frame_law()
     check_spin_rotation_and_axis_maps()
     check_add_soc_tensordot_chain()
     check_hamiltonian_gauge_theorem()

@@ -41,6 +41,19 @@ Applying `amet(1)` to `g` and `amet(2)` to `i·g` (the m_nonlop_pl branch
 structure, any `gprimd`) equals direct multiplication by the complex matrix
 `−i·amet0` (dev 4.4e-16, scale 2.4).
 
+## Symbolic layer (exact sympy, added rev. 3)
+
+`check_symbolic_phase_and_signs` — exact symbolic equalities (abstract
+nonzero-τ phases, no numeric substitution):
+
+- `conj(q(k+g')) q(k+g) == exp(2πi (g−g')·τ)` for abstract k, g, g', τ;
+- Hermitian conjugate `q_G/q_G'`: with a symbolic Hermitian block and abstract
+  phases, `W[g',g] == conj(W[g,g'])` exactly;
+- the `metric_so` Re/Im swap == multiplication by `−i` (symbolic real matrix);
+- LS spinor block signs: the complex-m operator transported by the exact
+  tesseral transform `U_RC` (entries ±1/√2, ±i/√2) equals the
+  `−iε⊗σ/2` Cartesian form — exact 6×6 equality.
+
 ## Finite toy G-space contraction — the pinned chain (dev ≤ 8.8e-17 at τ=0 AND τ≠0)
 
 Single l = 1 channel, 6 random G, random k, weight `4π(2l+1)·eso/V`, asserted
