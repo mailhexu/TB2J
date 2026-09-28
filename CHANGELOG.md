@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Split-SOC documentation and examples
+
+- Documented the per-backend split-SOC workflows: a shared strength-zero
+  overview in `projector_green.rst`, a new GPAW page with the CLI reference,
+  MAE comparison how-to and provenance contract, and a new ABINIT PAW page
+  covering the schema-1.1 `soc_pauli` recipe, loader orientation, driver
+  usage, `spinat` sign rules and physical anchors.
+- Added `examples/projector_green/abinit_paw_fe_split_soc.py`: runs the
+  three-leg PAW driver on a real schema-1.1 export and closes the lam=0
+  SOC-off anchor against the collinear `delta_total` exchange, rejecting
+  vacuous Gamma-only baselines.
+
 ### GPAW split-SOC exchange and MAE
 
 - Added `gpaw_split_soc2J.py`: one old-API collinear no-SOC GPAW checkpoint

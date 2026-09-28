@@ -208,64 +208,49 @@ the explicit XC-only field, while ``"delta_total"`` is the GPAW converged
 ``dH_asp`` spin difference for supported +U exports (and ABINIT's complete PAW
 operator).  ``"hij"`` remains a spin-resolved fallback.
 
-GPAW split-SOC from one collinear checkpoint
---------------------------------------------
+Split-SOC exchange from one strength-zero run
+---------------------------------------------
 
-``gpaw_split_soc2J.py`` reads a converged **old-API**, spin-polarized,
-SOC-free GPAW ``.gpw`` with PAW density and wavefunctions saved. It does not
-rerun SCF. The three x/y/z second-variational directions reuse that density;
-``projected=True`` and pre-existing SOC in the reference are not accepted.
+The split-SOC workflows reconstruct magnetic exchange, DMI and symmetric
+anisotropy from a *single* collinear, spin-orbit-free reference calculation.
+The frozen density is never recomputed with SOC. Each magnetization direction
+is obtained by applying the code's second-variational strength-one SOC
+operator to the same strength-zero bands, so the all-atom SOC operator
+:math:`W_{SO}` enters only the KS-band propagator, while the PAW exchange
+vertex stays collinear on the selected magnetic sites. Each leg tensor is
+rotated into the lattice frame, :math:`T_\chi = O T_\mathrm{leg} O^T` with
+:math:`O\mathbf e_z = \mathbf n_\chi`, and the three legs are merged into the
+standard rank-six ``TB2J.io_merge`` reconstruction.
 
-.. code-block:: bash
+All backends share one provenance contract: every leg records the
+strength-zero reference (input path and SHA-256), the SOC operator source and
+coverage, the spin frame, a real band-window convergence study with an
+explicit ``converged`` flag, and the merge mode. These blocks are embedded in
+each leg ``TB2J.pickle``, ``exchange.out`` and ``Multibinit/exchange.xml``,
+kept as three distinct leg records in the merged artifacts (the generic
+``TB2J_merge.py`` retains them too, keyed by input path), and mirrored in the
+JSON provenance report. A false ``converged`` flag is an unresolved error
+bar, **not** a convergence certificate.
 
-   gpaw_split_soc2J.py --input fe_collinear.gpw \
-       --output_path TB2J_results_gpaw_split_soc --Rcut 3 \
-       --nz 30 --smearing 0.05 --index_magnetic_atoms 1 2
+Per-backend recipes with the full option reference, output layout and
+diagnostics:
 
-The CLI writes ``x/``, ``y/``, ``z/``, and ``merged/`` exchange outputs plus
-``split_soc_report.json``. The leg angles in degrees are (90,0), (90,90),
-and (0,0); the spin moments stored in each leg follow that direction.
-The PAW exchange vertex remains collinear in the ``psi`` gauge, while the
-all-atom SOC operator enters the KS-band propagator. Leg tensors rotate
-by ``O T_leg O.T`` into the lattice frame before the standard rank-six
-``TB2J.io_merge`` reconstruction. ``--scale`` scales both the GPAW SOC
-band-energy MAE and the exchange propagator; no second SOC SCF is used.
+* **GPAW** — ``gpaw_split_soc2J.py`` runs the three second-variational legs
+  and the MAE comparison from one old-API ``.gpw`` checkpoint:
 
-For each direction the report records GPAW
-``BZWaveFunctions.calculate_band_energy()`` (the exact band-energy MAE),
-the independent second-order contour insertion
-``-Im int Tr[(G0 W_SO)^2]/(2*pi)``, their difference relative to z, and
-whether that residual is within ``--mae-contour-tolerance`` (default
-5e-6 eV). A failed comparison is reported, not silently passed; it can
-reflect higher-order SOC, k-mesh, band-window, occupation, or contour error.
-Check convergence in ``--nz``, ``--smearing``, the GPAW band count and k mesh
-before assigning a physical error bar. The saved per-leg metadata includes
-the strength-zero reference, PAW operator source, band window, spin frame,
-and merge mode.
+  .. code-block:: bash
 
-The contour resolvent is referenced to the strength-zero Fermi energy
-(``G0(z) = [z + mu - H0]**-1``); a nonzero GPAW Fermi level cannot be
-omitted. Each leg records an actual two-window, paired-band prefix study
-at the production k mesh, R grid, contour, and smearing, with a measured
-change and explicit ``converged`` flag. The study may report **not converged**
-and must not be read as a convergence certificate. The SHA-256, operator
-coverage, frame, and study are embedded in each leg
-``TB2J.pickle``, ``exchange.out``, ``Multibinit/exchange.xml``, and in the
-merged artifacts as three distinct leg records; the JSON report mirrors them.
+     gpaw_split_soc2J.py --input fe_collinear.gpw \
+         --output_path TB2J_results_gpaw_split_soc --Rcut 3 \
+         --nz 30 --smearing 0.05 --index_magnetic_atoms 1 2
 
-Rerunning ``TB2J_merge.py`` on these same leg directories retains every
-input provenance block, keyed by its input path. It does not inherit the
-last leg's frame as if that frame described the merged tensor.
+  See :doc:`split_soc_gpaw` for the strength-zero recipe, the MAE
+  comparison how-to and the fcc Ni gate example.
 
-The input checkpoint path and SHA-256 are recorded when invoked from a file.
-The executable fcc Ni example also generates that file when ``--build`` is
-specified and asserts rank-six merging, inversion-odd DMI nulls, cubic
-anisotropy nulls, and a shell-resolved J spread:
-
-.. code-block:: bash
-
-   python examples/projector_green/gpaw_fcc_ni_split_soc.py --build \
-       --input ni_fcc_pbe_nosoc.gpw --output TB2J_results_ni_split_soc
+* **ABINIT PAW** — one schema-1.1 ``savetb2j`` export
+  (``savetb2j 1`` with ``savetb2j_soc 1``) feeds
+  ``gen_exchange_abinit_paw_split_soc``; see :doc:`split_soc_abinit_paw`
+  and the file contract in :doc:`abinit_savetb2j_schema`.
 
 
 ABINIT PAW Export
@@ -292,6 +277,10 @@ default.  That component is the spin-up minus spin-down onsite PAW operator in
 the ABINIT native PAW projector basis.  Advanced users may select another
 component with ``--operator_component`` only when the file marks that component
 as complete and exchange-ready.
+
+The same export, written with ``savetb2j_soc 1`` (schema 1.1, ``soc_pauli``
+component), is also the input of the ABINIT PAW split-SOC workflow; see
+:doc:`split_soc_abinit_paw`.
 
 ABINIT NC PAO Export (Experimental)
 -----------------------------------
