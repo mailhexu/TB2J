@@ -10,6 +10,25 @@
   tolerance-reported second-order contour comparison. The shared KS-band
   kernel uses all-atom SOC with magnetic-only exchange vertices.
 
+### ABINIT PAW split-SOC projector exchange
+
+- Read schema-1.1 ``soc_pauli`` in Hartree using the full projector-and-spin
+  transpose required by ABINIT cprj; validate all-atom, frozen-density
+  provenance and preserve the normalized spinor block in NetCDF round-trips.
+- Added a three-leg PAW KS-band SOC driver: balanced up/down band prefixes,
+  all-atom SOC and explicitly magnetic-only signed vertices, tensor rotation
+  and merge, real window-convergence diagnostics in each leg and merged
+  ``SpinIO`` artifacts. Insertion derivatives cannot be written as exchange.
+- Real Fe 2x2x2 full-BZ fixture verifies a nonzero 34-meV SOC-off exchange
+  shell against schema 1.0; iodine 5p pins complex matrix-element orientation.
+  The Fe 22→24 window study reports a ~2.25e-4 change and is not certified
+  converged at 1e-6.
+- Matched native Fe spinor wavefunction solves at lambda=0 and 0.005
+  use the same fixed density; the exact loaded-component consumer path
+  reproduces all 8×24 eigenvalue responses to 0.886 meV maximum and
+  0.065 meV RMS. Physical Fe ``spinat`` uses the opposite sign of its
+  up-minus-down PAW potential trace, not the potential sign itself.
+
 
 ### Packaging
 

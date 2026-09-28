@@ -23,25 +23,8 @@ from TB2J.mycfr import CFR
 from TB2J.split_soc_kernel import (
     band_window_convergence_report,
     compute_ks_split_soc_exchange,
+    json_safe_provenance,
 )
-
-
-def _json_safe(value):
-    """Convert array values and R-tuple keys without discarding window data."""
-    if isinstance(value, dict):
-        return {
-            json.dumps(key, separators=(",", ":"))
-            if isinstance(key, tuple)
-            else str(key): _json_safe(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, np.ndarray):
-        return _json_safe(value.tolist())
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, (tuple, list)):
-        return [_json_safe(item) for item in value]
-    return value
 
 
 def _magnetic_sites(calc, indices):
@@ -223,8 +206,10 @@ def gen_exchange_gpaw_split_soc(
             smearing_eV=smearing_eV,
             sites=sites,
         )
-        result["metadata"]["band_window"]["convergence_study"] = _json_safe(study)
-        leg_metadata = _json_safe(result["metadata"])
+        result["metadata"]["band_window"]["convergence_study"] = json_safe_provenance(
+            study
+        )
+        leg_metadata = json_safe_provenance(result["metadata"])
         leg_path = output / direction
         _write_leg(
             leg_path,

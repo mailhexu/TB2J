@@ -32,6 +32,7 @@ psi/chi frame choice and any output-frame rotation belong to the adapters.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace as dataclass_replace
 
 import numpy as np
@@ -200,6 +201,24 @@ def split_soc_provenance(
     if extra:
         meta.update(extra)
     return meta
+
+
+def json_safe_provenance(value):
+    """Retain numeric FR-050 studies while encoding R-tuple keys for JSON."""
+    if isinstance(value, dict):
+        return {
+            json.dumps(key, separators=(",", ":"))
+            if isinstance(key, tuple)
+            else str(key): json_safe_provenance(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, np.ndarray):
+        return json_safe_provenance(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (tuple, list)):
+        return [json_safe_provenance(item) for item in value]
+    return value
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,9 @@ from TB2J.projector_green import (
 
 ABINIT_SAVETB2J_SCHEMA_NAME = "abinit.savetb2j.projector"
 ABINIT_SAVETB2J_SCHEMA_VERSION = "1.0"
+ABINIT_SAVETB2J_SCHEMA_VERSIONS = ("1.0", "1.1")
+ABINIT_PAULI_SPIN_TREATMENT = "pauli_2x2"
+ABINIT_SOC_PAULI_UNITS = "Hartree"
 ABINIT_OPERATOR_BASIS = "abinit_native_paw_projector"
 ABINIT_COEFFICIENT_SOURCE = "abinit.cprj"
 ABINIT_SPIN_CHANNEL_ORDER = "up,down"
@@ -605,7 +608,7 @@ def _root_metadata(nc):
 
     if metadata["schema_name"] != ABINIT_SAVETB2J_SCHEMA_NAME:
         raise ValueError("unsupported ABINIT savetb2j schema_name")
-    if metadata["schema_version"] != ABINIT_SAVETB2J_SCHEMA_VERSION:
+    if metadata["schema_version"] not in ABINIT_SAVETB2J_SCHEMA_VERSIONS:
         raise ValueError("unsupported ABINIT savetb2j schema_version")
     if metadata["source_code"] != "abinit":
         raise ValueError("ABINIT savetb2j source_code must be 'abinit'")
@@ -660,6 +663,84 @@ def _projector_metadata(projectors):
     )
 
 
+def _variable_attr(variable, name, default=None):
+    """Read a NetCDF attribute without colliding with Variable methods."""
+    if name in variable.ncattrs():
+        return variable.getncattr(name)
+    return default
+
+
+def _pauli_component_provenance(variable, metadata):
+    """Validate the schema-1.1 soc_pauli provenance attributes (ADR-5)."""
+    name = variable.name
+    if metadata["units"] != ABINIT_SOC_PAULI_UNITS:
+        raise ValueError(
+            f"ABINIT savetb2j {name} units must be Hartree "
+            f"(pauli_2x2 export convention), got {metadata['units']!r}"
+        )
+    if metadata["completeness"] != "complete":
+        raise ValueError(
+            f"ABINIT savetb2j component {name} (pauli_2x2) requires "
+            f"completeness='complete', got {metadata['completeness']!r}"
+        )
+    soc_strength = str(_variable_attr(variable, "soc_strength", "")).strip()
+    if soc_strength != "1.0":
+        raise ValueError(
+            f"ABINIT savetb2j component {name} must export the unit-strength "
+            f"SOC operator (soc_strength='1.0'), got {soc_strength!r}"
+        )
+    spinaxis = str(_variable_attr(variable, "spinaxis", "")).strip()
+    try:
+        axis = tuple(float(v) for v in spinaxis.split())
+    except ValueError:
+        axis = None
+    if axis != (0.0, 0.0, 1.0):
+        raise ValueError(
+            f"ABINIT savetb2j component {name} must be exported in the "
+            f"lattice frame with spinaxis='0 0 1', got {spinaxis!r}"
+        )
+    zora_class = str(_variable_attr(variable, "zora_term_class", "")).strip()
+    if not zora_class:
+        raise ValueError(
+            f"ABINIT savetb2j component {name} is missing the required "
+            "'zora_term_class' provenance attribute"
+        )
+    if zora_class != "soc_only":
+        raise ValueError(
+            f"ABINIT savetb2j component {name} must contain the SOC term "
+            f"only (zora_term_class='soc_only'), got {zora_class!r}; "
+            "spin-dipole/Fermi-contact terms are not spnorbscl-scaled"
+        )
+    for attr, expected in (
+        ("quantization", "lattice_frame"),
+        ("covers", "all_atoms"),
+        ("reference", "strength_zero_frozen_density"),
+    ):
+        value = str(_variable_attr(variable, attr, "")).strip()
+        if value != expected:
+            raise ValueError(
+                f"ABINIT savetb2j component {name} provenance attribute "
+                f"{attr!r} must be {expected!r}, got {value!r}"
+            )
+    if not str(_variable_attr(variable, "pauli_component_order", "")).strip():
+        raise ValueError(
+            f"ABINIT savetb2j component {name} is missing the required "
+            "'pauli_component_order' provenance attribute"
+        )
+    for attr in (
+        "soc_strength",
+        "spinaxis",
+        "zora_term_class",
+        "quantization",
+        "covers",
+        "reference",
+        "pauli_component_order",
+    ):
+        if (value := _variable_attr(variable, attr)) is not None:
+            metadata[attr] = value
+    return metadata
+
+
 def _component_metadata(variable):
     metadata = {}
     for name in ("source", "units", "operator_basis", "spin_treatment", "completeness"):
@@ -677,6 +758,8 @@ def _component_metadata(variable):
         raise ValueError(
             f"ABINIT savetb2j component {variable.name} operator_basis mismatch"
         )
+    if metadata["spin_treatment"] == ABINIT_PAULI_SPIN_TREATMENT:
+        return _pauli_component_provenance(variable, metadata)
     if metadata["units"] != "eV":
         raise ValueError(f"ABINIT savetb2j component {variable.name} units must be eV")
     if metadata["spin_treatment"] not in {
@@ -703,7 +786,52 @@ def _component_metadata(variable):
     return metadata
 
 
-def _operator_data(operators):
+def _validate_pauli_soc_blocks(values, name):
+    """Validate the dense Pauli structure of an exported soc_pauli component.
+
+    The ABINIT packer (m_paw_savetb2j_soc/paw_savetb2j_soc_pack) writes the
+    dense Hermitian block with the L·S packing relations
+    ``dd = -uu`` and ``du = -conjg(ud)``; the generic Hermitian unpacker
+    relations must NOT be accepted for the spin-offdiagonal components.
+    """
+    values = np.asarray(values, dtype=complex)
+    if values.ndim != 5 or values.shape[3:] != (2, 2):
+        raise ValueError(
+            f"ABINIT savetb2j component {name} must have shape "
+            f"(nsite, nproj_site_max, nproj_site_max, nspinor, nspinor) with "
+            f"nspinor=2, got shape {values.shape}"
+        )
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f"ABINIT savetb2j component {name} has non-finite values")
+    scale = max(1.0, float(np.abs(values).max(initial=0.0)))
+    tol = 1.0e-8 * scale
+    for site in range(values.shape[0]):
+        block = values[site]
+        dense = block.transpose(2, 0, 3, 1).reshape(2 * block.shape[0], -1)
+        hermiticity = float(np.max(np.abs(dense - dense.conj().T), initial=0.0))
+        if hermiticity > tol:
+            raise ValueError(
+                f"ABINIT savetb2j component {name} site {site} is not "
+                f"Hermitian (max deviation {hermiticity:.3e}); the soc_pauli "
+                "blocks violate the ABINIT packing convention"
+            )
+        uu, dd = block[..., 0, 0], block[..., 1, 1]
+        ud, du = block[..., 0, 1], block[..., 1, 0]
+        if float(np.max(np.abs(dd + uu), initial=0.0)) > tol:
+            raise ValueError(
+                f"ABINIT savetb2j component {name} site {site} violates the "
+                "ABINIT soc_pauli packing convention (dd = -uu is required)"
+            )
+        if float(np.max(np.abs(du + np.conj(ud)), initial=0.0)) > tol:
+            raise ValueError(
+                f"ABINIT savetb2j component {name} site {site} violates the "
+                "ABINIT soc_pauli packing convention (du = -conjg(ud) is "
+                "required; the generic Hermitian unpacker must not be used "
+                "for the spin-offdiagonal components)"
+            )
+
+
+def _operator_data(operators, root_metadata=None):
     hij = hij_definition = hij_units = hij_source = hij_projection = None
     operator_basis = ABINIT_OPERATOR_BASIS
     if "hij" in operators.variables:
@@ -725,10 +853,56 @@ def _operator_data(operators):
 
     operator_components = {}
     operator_component_metadata = {}
+    schema_version = (root_metadata or {}).get("schema_version") or (
+        root_metadata or {}
+    ).get("abinit_schema_version")
+    units = (root_metadata or {}).get("units") or {}
     for name, variable in components_group.variables.items():
         values = _decode_complex_var(components_group, name, "operator_components")
         metadata = _component_metadata(variable)
-        if metadata["spin_treatment"] not in {"spin_difference", "up_minus_down"}:
+        if metadata["spin_treatment"] == ABINIT_PAULI_SPIN_TREATMENT:
+            if schema_version == "1.0":
+                raise ValueError(
+                    f"ABINIT savetb2j component {name} (pauli_2x2) requires "
+                    "schema_version 1.1; found schema_version 1.0"
+                )
+            stored_units = units.get(name)
+            if stored_units is not None and stored_units != ABINIT_SOC_PAULI_UNITS:
+                raise ValueError(
+                    f"ABINIT savetb2j units_json entry for {name} must be "
+                    f"{ABINIT_SOC_PAULI_UNITS!r}, got {stored_units!r}"
+                )
+            _validate_pauli_soc_blocks(values, name)
+            # ABINIT packed-pair orientation: the stored value for the pair
+            # (i<=j) of Pauli component (s,t) is the composite transpose of
+            # the operator matrix element, stored D = (xi L.S)^T in the
+            # combined (projector, spin) index -- machine-exact on the
+            # iodine 5p export (.tmp/research2/soc-pauli-orientation-verdict.md).
+            # With the cprj convention cp = <p|psi>, the band-space operator
+            # is W_nm = c_n^dag D.T c_m, so the loader normalizes the
+            # component to the operator orientation O[p,q,s,t] =
+            # D[q,p,t,s] = <p_p s|W_SO|p_q t> by transposing BOTH the
+            # projector and the spin index pairs (no conjugation; for the
+            # Hermitian stored block the full transpose equals the
+            # elementwise conjugate, which is why spectra and Hermiticity
+            # checks are transpose-blind and the orientation is pinned by
+            # the complex off-diagonal element oracle in the test suite).
+            values = np.ascontiguousarray(values.transpose(0, 2, 1, 4, 3))
+            values = values * HARTREE_TO_EV
+            metadata = {
+                **metadata,
+                "units": "eV",
+                "source_units": ABINIT_SOC_PAULI_UNITS,
+                "orientation": "operator",
+                "source_orientation": (
+                    "abinit_packed_pair (stored(i<=j) = <p_j|W_SO|p_i>)"
+                ),
+                "band_space_contraction": (
+                    "W_nm(k) = sum_a sum_pq conj(c_np) O_pq c_mq with "
+                    "c = cprj <p|psi> and O the normalized component"
+                ),
+            }
+        elif metadata["spin_treatment"] not in {"spin_difference", "up_minus_down"}:
             raise ValueError(
                 "ABINIT savetb2j v1 loader only normalizes spin_difference components"
             )
@@ -1318,7 +1492,10 @@ def _validate_loaded_data(data):
                 data.site_projector_indices.shape[1],
                 data.site_projector_indices.shape[1],
             )
-            if value.shape != expected_shape:
+            metadata = (data.operator_component_metadata or {}).get(name, {})
+            if metadata.get("spin_treatment") == ABINIT_PAULI_SPIN_TREATMENT:
+                expected_shape = expected_shape + (2, 2)
+            if value.shape != tuple(expected_shape):
                 raise ValueError(f"ABINIT savetb2j component {name} has invalid shape")
     return data
 
@@ -1345,7 +1522,7 @@ def load_abinit_savetb2j(filename):
             channel_interpretation,
             projector_operator_basis,
         ) = _projector_metadata(projectors)
-        operator_data = _operator_data(operators)
+        operator_data = _operator_data(operators, metadata)
         if operator_data["operator_basis"] != projector_operator_basis:
             raise ValueError("ABINIT savetb2j operator_basis metadata mismatch")
 

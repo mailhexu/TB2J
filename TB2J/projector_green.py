@@ -514,7 +514,13 @@ class ProjectorGreenData:
         nmax = self.site_projector_indices.shape[1]
         nproj = self.coefficients.shape[-1]
         for name, value in self.operator_components.items():
-            if value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
+            if value.ndim == 5:
+                if value.shape != (nsite, nmax, nmax, 2, 2):
+                    raise ValueError(
+                        f"operator component {name!r} must have shape "
+                        "(nsite, nproj_site_max, nproj_site_max, 2, 2)"
+                    )
+            elif value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
                 raise ValueError(
                     f"operator component {name!r} must have shape "
                     "(nsite, nproj_site_max, nproj_site_max) or (nproj, nproj)"
@@ -729,12 +735,24 @@ class ProjectorGreenData:
                             nc.createDimension("nsite", component.shape[0])
                         if "nproj_site_max" not in nc.dimensions:
                             nc.createDimension("nproj_site_max", component.shape[1])
-                        dimensions = (
-                            "nsite",
-                            "nproj_site_max",
-                            "nproj_site_max",
-                            "complex",
-                        )
+                        if component.ndim == 5:
+                            if "operator_spinor" not in nc.dimensions:
+                                nc.createDimension("operator_spinor", 2)
+                            dimensions = (
+                                "nsite",
+                                "nproj_site_max",
+                                "nproj_site_max",
+                                "operator_spinor",
+                                "operator_spinor",
+                                "complex",
+                            )
+                        else:
+                            dimensions = (
+                                "nsite",
+                                "nproj_site_max",
+                                "nproj_site_max",
+                                "complex",
+                            )
                     variable = components.createVariable(name, "f8", dimensions)
                     variable[:] = encode_complex(component)
                     if self.operator_component_metadata is not None:
