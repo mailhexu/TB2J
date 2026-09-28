@@ -234,8 +234,8 @@ Consequences measured on the real FeO fixture:
   against the driver's consistency gate;
 * **rank-nine gate**: the merged FeO design matrix has rank 9 on every
   pair, i.e. the three SAXIS references are genuinely independent;
-* **anchor**: the merged nearest-neighbour :math:`J_{iso}` is 7.3836 meV
-  against the SOC-off extraction's 7.3856 meV on the same retained data.
+* **anchor**: the merged nearest-neighbour :math:`J_{iso}` is 8.0381 meV
+  against the SOC-off extraction's 8.0402 meV on the same retained data.
 
 Ligand SOC versus magnetic vertices
 -----------------------------------
@@ -278,13 +278,16 @@ Fe–Fe pair:
    * - FR (LSORBIT native, full-SCF SOC)
      - :math:`+5.138676`
    * - split, merged rank-nine (three SAXIS runs, ``lam=1``)
-     - :math:`+7.3836`
+     - :math:`+8.0381`
    * - SOC-off anchor (same native, no SOC)
-     - :math:`+7.3856`
+     - :math:`+8.0402`
    * - merged repeated-diagonal invariance (rank-9 gate)
      - spread :math:`2.9\times10^{-5}` eV
 
-The raw FR−split gap is an **upper bound** on the method difference: the
+An earlier recording quoted 7.3836/7.3856 meV for this pair; that value
+could not be reproduced on the retained fixtures with driver defaults
+(all merge diagnostics reproduce exactly) and is withdrawn — use the
+numbers below.  The raw FR−split gap is an **upper bound** on the method difference: the
 FR leg's :math:`J_{iso}` flows through the shared projector channel
 primitives that the rank-9 cutover reworked, so the FR number above must
 be re-produced on the cutover core before it is quoted (story-013
@@ -298,7 +301,7 @@ Gates, safeguards and the nonconverged window
 
 * **SOC-off anchor**: ``--lam 0`` replays the collinear limit; on the
   retained FeO legs the merged nearest-neighbour :math:`J_{iso}` is
-  7.3836 meV against the SOC-off extraction's 7.3856 meV (table above),
+  8.0381 meV against the SOC-off extraction's 8.0402 meV (table above),
   with the merged repeated-diagonal rows closing to
   :math:`2.9\times10^{-5}` eV.
 * **Run-identity + COCC gates**: always on (pairing section); they fail
@@ -418,7 +421,7 @@ dump format dispatch, provenance fields, k-weight normalization, the
 exact strength-0 :math:`E_{soc} = 0` oracle, CSO Hermiticity, the
 run-identity pairing, the COCC reconstruction gate, the all-atom
 :math:`W_{SO}` Hermiticity, and — on the real FeO three-run set — the
-merged nn :math:`J_{iso}` = 7.3836 meV anchor of the frame section.
+merged nn :math:`J_{iso}` = 8.0381 meV anchor of the frame section.
 Merged DMI/Jani decompositions are **not** certified as physical
 predictions until the FR full-exchange cross-validation (story-013
 cross-code gate) lands.
