@@ -80,6 +80,7 @@ Issues = "https://github.com/mailhexu/TB2J/issues"
 "abinit2J.py" = "TB2J.scripts.abinit2J:run_abinit2J"
  "sprkkr2magnon.py" = "TB2J.scripts.sprkkr2magnon:main"
  "vasp_native2J.py" = "TB2J.scripts.vasp_native2J:run_vasp_native2J"
+ "vasp_split_soc2J.py" = "TB2J.scripts.vasp_split_soc2J:run_vasp_split_soc2J"
 
 
 [tool.setuptools]

@@ -413,6 +413,7 @@ def compute_ks_split_soc_exchange(
     overlap_mode=None,
     overlap_rcond=None,
     metadata=None,
+    site_signs=None,
 ):
     """KS-band split-SOC exchange tensor per (R, i, j) (ADR-1).
 
@@ -446,6 +447,14 @@ def compute_ks_split_soc_exchange(
     sites : list[int]
         Magnetic sites carrying vertices (magnetic-only gating); default
         all sites.
+    site_signs : dict, optional
+        Frame-invariant site-magnetization signs (``+1``/``-1``) used for
+        the collinear reduction of the channel mapping.  Defaults to the
+        z-trace probe of each site's vertex
+        (:func:`TB2J.projector_green.site_magnetization_sign`), which is
+        only meaningful when the vertices are z-diagonal; adapters whose
+        legs conjugate the vertices into a rotated frame MUST pass the
+        signs probed in the un-conjugated frame.
     metadata : dict, optional
         Backend provenance merged into the FR-050 block
         (``strength0_reference``, ``soc_operator_source``, ``frame``,
@@ -533,7 +542,13 @@ def compute_ks_split_soc_exchange(
         else {}
     )
 
-    signs = {site: site_magnetization_sign(op) for site, op in ops.items()}
+    if site_signs is None:
+        signs = {site: site_magnetization_sign(op) for site, op in ops.items()}
+    else:
+        signs = {int(site): float(site_signs[site]) for site in ops}
+        for site in sites:
+            if site not in signs:
+                raise ValueError(f"site_signs missing magnetic site {site}")
     exchange = {}
     for key in values:
         r, i, j = key

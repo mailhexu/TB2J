@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### VASP split-SOC adapter (ADR-7, story 011)
+
+- New `TB2J/interfaces/vasp_split_soc.py`: three-direction split-SOC
+  exchange from one collinear strength-0 VASP run.  The leg frame
+  re-expresses band spinor components and magnetic vertices by
+  `M = U_leg^dag U_saxis` (VASP EULER/ROTMAT parameterization) while
+  `W_SO` stays the frame-independent state-space matrix; legs agree in
+  the lattice frame to ~1e-17 on the covariant channels.  The
+  SOC-off (lam=0) anchor reproduces the existing collinear v5/v6
+  exchange, and the strength-0 anchor is cross-SAXIS covariant.
+- COCC reconstruction convention pinned to the real FeO dump
+  (`CRHODE(LP,L) = conj(CPROJ(LP)) CPROJ(L)`, fast_aug order); the
+  driver fails fast when `tb2j_cso.bin` and `tb2j_native.bin` come from
+  different runs (COCC-vs-CPROJ integrity gate).
+- New CLI `vasp_split_soc2J.py` (`--native-input`, `--cso-dump`,
+  `--elements`/`--index_magnetic_atoms`, `--lam`, `--mode`, `--legs`)
+  writing per-leg TB2J results plus `split_soc_provenance.json`
+  (per-leg O maps with `O e_z = leg axis`, kernel metadata).
+- Quarantine: the shared A-channel Jani/DMI mapping is invalid
+  (cross-story projector_green finding); per-leg Jani/DMI outputs and
+  the io_merge stage are retained but flagged pending the transverse
+  tangent core replacement (per-leg `J_leg` + rank-9 raw-tensor merge).
+
 ### Packaging
 
 - `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao
