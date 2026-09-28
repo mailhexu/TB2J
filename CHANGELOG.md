@@ -60,14 +60,20 @@
   pre-cutover "tangent gate passes at 7.1 meV" recording described the
   retired scalar merge and is superseded.
 - Documented the VASP split-SOC workflow (`split_soc_vasp.rst`, registered
-  in the toctree): `tb2j_cso.bin` v1-v3 contract with **v3 now current**
-  (patch commit `0f9f073`: runtime `FELECT`/`INVMC2`/`AUTOA` plus per-ion
-  `POTAE_XCUPDATED`, gated on a committed native export; bit-identical
-  patch-vs-installer files, no sidecar left behind on native `OPEN`
-  failure), the `E_soc` identity oracle, run-identity + COCC pairing
-  gates, all-atom `W_SO` vs magnetic-only vertices, and explicit
-  non-claims: merged DMI/Jani await the Story-011 full-exchange
-  cross-validation.
+  in the toctree): **three independent strength-0 SAXIS runs, one per
+  x/y/z leg** (`--leg x=RUN_DIR` x3 on `vasp_split_soc2J.py`, with
+  `--lam`/`--mode`/`--merge_consistency_atol`/`--no-band-window-study`);
+  one run determines only its own transverse plane.  `tb2j_cso.bin`
+  v1-v3 contract with **v3 now current** (patch commit `0f9f073`: runtime
+  `FELECT`/`INVMC2`/`AUTOA` plus per-ion `POTAE_XCUPDATED`, gated on a
+  committed native export; bit-identical patch-vs-installer files, no
+  sidecar left behind on native `OPEN` failure), the `E_soc` identity
+  oracle, per-leg run-identity + COCC pairing gates, all-atom `W_SO` vs
+  magnetic-only vertices, per-leg `split_soc_leg.npz` with schema-2.0
+  provenance, and explicit non-claims: merged DMI/Jani await the FR
+  full-exchange cross-validation (story-013 cross-code gate).  Real-FeO gate: merged
+  rank-nine, repeated-diagonal spread 2.9e-5 eV, nn `Jiso` 7.3836 meV vs
+  SOC-off 7.3856 meV.
 
 ### GPAW split-SOC exchange and MAE
 
