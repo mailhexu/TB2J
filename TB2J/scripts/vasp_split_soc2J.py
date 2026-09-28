@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """CLI for the VASP KS-basis split-SOC exchange workflow (story 011).
 
-Consumes the two artifacts of one collinear strength-0 VASP run patched
-with the story-010 dump hooks — ``tb2j_native.bin`` (v5/v6 collinear
+Consumes the artifacts of THREE independent collinear strength-0 VASP
+runs patched with the story-010 dump hooks — one per SAXIS reference
+axis (x, y, z), each providing ``tb2j_native.bin`` (v5/v6 collinear
 native export) and ``tb2j_cso.bin`` (one-center CSO operator + COCC) —
-runs the three-direction (x, y, z) split-SOC legs through the shared
-KS-band kernel, merges them, and persists per-leg provenance.
+measures each reference's transverse block through the shared tangent
+kernel, rotates the blocks into the lattice frame, and merges them with
+the rank-nine raw-tensor solve.
 """
 
 from __future__ import annotations
 
 import argparse
 
-import numpy as np
-
-from TB2J.interfaces.vasp_split_soc import LEGS, gen_exchange_vasp_split_soc
+from TB2J.interfaces.vasp_split_soc import (
+    LEG_TAGS,
+    _parse_leg_argument,
+    gen_exchange_vasp_split_soc,
+)
 from TB2J.versioninfo import print_license
 
 
@@ -22,26 +26,29 @@ def run_vasp_split_soc2J():
     print_license()
     parser = argparse.ArgumentParser(
         description=(
-            "Calculate TB2J exchange from one collinear VASP strength-0 "
-            "run patched with the story-010 CSO dump: three-direction "
-            "(x, y, z) split-SOC legs from tb2j_native.bin + tb2j_cso.bin, "
-            "rotated to the lattice frame and merged."
+            "Calculate TB2J exchange from three collinear VASP strength-0 "
+            "runs patched with the story-010 CSO dump (SAXIS = 1 0 0 / "
+            "0 1 0 / 0 0 1): per-axis transverse legs through the tangent "
+            "kernel, lattice-frame rotation, and the rank-nine raw-tensor "
+            "merge."
         ),
         epilog=(
-            "Typical workflow: run patched collinear VASP (ISPIN=2, "
-            "LSORBIT=.FALSE., story-010 dump hooks) once, then pass the "
-            "two dumps to this command."
+            "Typical workflow: run the patched collinear VASP (ISPIN=2, "
+            "LSORBIT=.FALSE., story-010 dump hooks) three times with "
+            "SAXIS = 1 0 0, 0 1 0, 0 0 1, then pass the three run "
+            "directories to this command."
         ),
     )
     parser.add_argument(
-        "--native-input",
+        "--leg",
+        action="append",
         required=True,
-        help="VASP collinear native export (tb2j_native.bin, v5/v6)",
-    )
-    parser.add_argument(
-        "--cso-dump",
-        required=True,
-        help="story-010 CSO dump from the same run (tb2j_cso.bin)",
+        metavar="TAG=RUN_DIR",
+        help=(
+            "one reference per axis, TAG in x/y/z; RUN_DIR is a directory "
+            "containing tb2j_native.bin and tb2j_cso.bin (or an explicit "
+            "TAG=native_path:cso_path pair). Repeat for x, y and z."
+        ),
     )
     parser.add_argument(
         "--output_path",
@@ -90,24 +97,37 @@ def run_vasp_split_soc2J():
         help="split-SOC kernel mode (second_variation is production)",
     )
     parser.add_argument(
-        "--legs",
-        default="xyz",
-        help="leg axes as a string of x/y/z characters (default xyz)",
+        "--merge_consistency_atol",
+        type=float,
+        default=1.0e-8,
+        help=(
+            "tolerance for the repeated-diagonal consistency gate of the "
+            "rank-nine merge (eV)"
+        ),
+    )
+    parser.add_argument(
+        "--no-band-window-study",
+        action="store_true",
+        help="skip the ADR-8 band-window convergence report",
     )
     args = parser.parse_args()
 
-    legs = []
-    for char in args.legs:
-        axis = "xyz".index(char.lower())
-        direction = np.zeros(3)
-        direction[axis] = 1.0
-        legs.append(tuple(float(x) for x in direction))
-    if not legs:
-        parser.error("--legs must select at least one of x/y/z")
+    artifacts = {}
+    for spec in args.leg:
+        parsed = _parse_leg_argument(spec)
+        tag = next(iter(parsed))
+        if tag in artifacts:
+            parser.error(f"--leg {tag!r} given more than once")
+        artifacts.update(parsed)
+    missing = [tag for tag in LEG_TAGS if tag not in artifacts]
+    if missing:
+        parser.error(
+            "--leg must provide all three references %s; missing %s"
+            % (LEG_TAGS, missing)
+        )
 
     out = gen_exchange_vasp_split_soc(
-        native_input=args.native_input,
-        cso_dump=args.cso_dump,
+        artifacts,
         output_path=args.output_path,
         rcut=args.Rcut,
         nz=args.nz,
@@ -116,7 +136,8 @@ def run_vasp_split_soc2J():
         index_magnetic_atoms=args.index_magnetic_atoms,
         lam=args.lam,
         mode=args.mode,
-        legs=legs or LEGS,
+        merge_consistency_atol=args.merge_consistency_atol,
+        band_window_study=not args.no_band_window_study,
     )
     print(f"Split-SOC exchange written to {out}")
     print(f"Provenance: {out}/split_soc_provenance.json")

@@ -1,39 +1,48 @@
-"""VASP KS-basis split-SOC adapter (ADR-7, story 011).
+"""VASP KS-basis split-SOC adapter (ADR-7, story 011; tangent contract).
 
-Consumes two artifacts of one collinear strength-0 VASP run (patched with
-the story-010 dump hooks):
+Consumes the two artifacts of a collinear strength-0 VASP run patched with
+the story-010 dump hooks:
 
 - ``tb2j_native.bin`` (v5/v6 collinear native export; complex W%CPROJ,
   bands, occupations, CDIJ) read by :func:`read_vasp_native`;
 - ``tb2j_cso.bin`` (per-ion one-center SOC operator ``CSO``, augmentation
   occupations ``COCC``, spherical AE potential) read by the vendored
-  :mod:`TB2J.interfaces.vasp_cso_dump` reader.
+  :mod:`TB2J.interfaces.vasp_cso_dump` reader (format v1-v3).
+
+Each run is one *magnetic reference*: its ISPIN=2 collinear states are
+SAXIS-frame eigenstates and the dump CSO is the SAXIS-frame one-center
+operator, so the leg problem is already in the psi gauge — band spinor
+components, magnetic vertices ``Delta_a sigma_z`` and ``W_SO`` all live in
+the same (SAXIS) spin frame with the full splitting on the frame's
+``zz``.  The shared tangent kernel
+(:func:`TB2J.split_soc_kernel.compute_ks_split_soc_exchange`) measures,
+per pair, only the transverse 2x2 block of the reference's right-handed
+``(u, v, n)`` triad (``J_leg``, masked on the ``n`` row/column).
+
+One reference therefore never determines the full lattice tensor: the
+production driver consumes **three independent strength-0 runs** with
+``SAXIS = 1 0 0 / 0 1 0 / 0 0 1`` (the retained FeO campaign layout),
+rotates each leg's measured block into the lattice frame
+(``rotate_transverse_leg`` with ``O = SO3(ROTMAT(alpha, beta))``, the
+SO(3) map of the run's SAXIS frame), and solves the raw 3x3 exchange
+tensor from the 12 transverse constraints with
+:func:`TB2J.split_soc_kernel.merge_transverse_legs` (design-matrix rank 9,
+exact least squares; the legacy ``TB2J.io_merge`` scalar/traceless average
+is never used — its decomposition biases anisotropy).  The decomposition
+into Jiso/DMI/Jani is applied to the solved raw tensor
+(:func:`TB2J.Jtensor.decompose_J_tensor`, Levi-Civita DMI convention).
 
 The KS-band SOC operator follows the ``CALC_PAW_OVERLAP`` contraction
 pattern,
 
 .. math:: W^{\\mathcal K}_{SO}(k) = \\sum_a B_a(k)^\\dagger\\, CSO_a\\, B_a(k),
 
-with :math:`B_a` the rectangular projector map of atom ``a`` and the
-``(uu, ud, du, dd)`` spinor blocks of ``CSO_a`` in the SAXIS spin frame
-VASP uses for the dump.  The second variation and the three-direction
-rotate/merge follow the GPAW ADR-4 shape: each leg :math:`d \\in \\{x, y,
-z\\} re-expresses the *whole* strength-0 problem in the spin frame with
-quantization along :math:`d` through the frame map
-:math:`M = U_d^\\dagger U_{SAXIS}` — the band spinor components and the
-magnetic vertices (:math:`\\Delta_a M \\sigma_z M^\\dagger` — the
-physical SAXIS-axis splitting field in leg-frame components) are
-conjugated, while ``W_SO`` is the frame-independent *state-space* matrix
-``<psi|W_SO|psi'>`` and enters unchanged, so every leg is the same
-physical collinear reference seen from its own frame.  The kernel extracts the tensor in
-that leg frame, and the output rotates back with
-:math:`T_{lattice} = O\\, T_{leg}\\, O^T`, :math:`O e_z = d` (story-001
-corrected O map).  W_SO is all-atom (ligand SOC enters the DMI); the
-magnetic rotation vertices are site-local, magnetic-only, and carry the
-collinear spin splitting ``D_up - D_down``.
-
-No PROCAR weights and no LOCPROJ/CDIJ-mismatched SOC surrogate are used;
-the v7 spinor export remains the fully-relativistic comparison leg only.
+with :math:`B_a` the rectangular projector map of atom ``a``.  W_SO is
+all-atom (ligand SOC enters the DMI); the magnetic rotation vertices are
+site-local, magnetic-only, and carry the collinear spin splitting
+``D_up - D_down``.  No PROCAR weights and no LOCPROJ/CDIJ-mismatched SOC
+surrogate are used; the v7 spinor export remains the fully-relativistic
+comparison leg only.
 """
 
 from __future__ import annotations
@@ -55,9 +64,17 @@ from TB2J.split_soc_kernel import (
     MODE_SECOND_VARIATION,
     SPLIT_SOC_MODES,
     compute_ks_split_soc_exchange,
+    json_safe_provenance,
+    merge_transverse_legs,
+    rotate_transverse_leg,
 )
 
-LEGS = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+LEG_TAGS = ("x", "y", "z")
+LEG_DIRECTIONS = {
+    "x": (1.0, 0.0, 0.0),
+    "y": (0.0, 1.0, 0.0),
+    "z": (0.0, 0.0, 1.0),
+}
 
 _PAULI = (
     np.eye(2, dtype=complex),
@@ -67,8 +84,8 @@ _PAULI = (
 )
 
 _SOC_OPERATOR_SOURCE = (
-    "VASP tb2j_cso.bin v1 CSO (SPINORB_STRENGTH at the SAXIS Euler "
-    "angles; story-010 patch dump, collinear branch)"
+    "VASP tb2j_cso.bin CSO (SPINORB_STRENGTH at the SAXIS Euler angles; "
+    "story-010 patch dump, collinear branch, format v1-v3)"
 )
 _STRENGTH0_SOURCE = "VASP collinear v5/v6 native export (tb2j_native.bin)"
 
@@ -112,8 +129,8 @@ def so3_from_su2(u: np.ndarray) -> np.ndarray:
 
     Defined by ``u sigma_b u^dag = sum_a O[a, b] sigma_a`` (active
     convention), so ``O e_z`` is the physical spin direction of the
-    frame's positive basis spinor — the nominal quantization axis — and
-    the story-001 output map is ``T_lattice = O T_leg O^T``.
+    frame's positive basis spinor — the run's SAXIS axis — and the
+    lattice-frame leg rotation is ``J_lattice = O J_leg O^T``.
     """
     u = np.asarray(u, dtype=complex)
     r = np.empty((3, 3))
@@ -125,16 +142,13 @@ def so3_from_su2(u: np.ndarray) -> np.ndarray:
     return r
 
 
-def frame_overlap(leg_direction, dump: CsoDump) -> np.ndarray:
-    """Overlap ``M = U_leg^dag U_saxis`` of the dump and leg spin frames.
+def leg_rotation_map(dump: CsoDump) -> np.ndarray:
+    """SO(3) map of the run's SAXIS frame, ``O e_z = SAXIS`` direction.
 
-    ``M[t, s] = <chi_t(leg) | chi_s(SAXIS)>`` converts the collinear CPROJ
-    spin channels (SAXIS quantization) into leg-frame spinor components.
+    This is the rotation :func:`rotate_transverse_leg` needs to move the
+    leg's measured transverse block into the lattice frame.
     """
-    leg_alpha, leg_beta = euler_angles(leg_direction)
-    u_leg = vasp_spinor_frame(leg_alpha, leg_beta)
-    u_saxis = vasp_spinor_frame(dump.alpha, dump.beta)
-    return u_leg.conj().T @ u_saxis
+    return so3_from_su2(vasp_spinor_frame(float(dump.alpha), float(dump.beta)))
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +177,33 @@ def _check_consistency(snapshot: PawProjectorSnapshot, dump: CsoDump) -> None:
                 f"ion {ion}: export nproj={npj} != dump lmmax="
                 f"{dump.type_of(ion).lmmax}"
             )
+    if dump.provenance is not None:
+        # v2+ provenance: the dump must come from the SAME run as the
+        # native export (band/k/efermi identity; k stored in IBZ form)
+        prov = dump.provenance
+        if prov["ispin"] != snapshot.coefficients.shape[0]:
+            raise ValueError(
+                f"dump ispin={prov['ispin']} != native export "
+                f"nspin={snapshot.coefficients.shape[0]}"
+            )
+        if prov["nbands"] != snapshot.eigenvalues.shape[-1]:
+            raise ValueError(
+                f"dump nbands={prov['nbands']} != native export "
+                f"nband={snapshot.eigenvalues.shape[-1]}"
+            )
+        expected_nk = snapshot.provenance.get("nkpt_ibz")
+        if expected_nk is None:
+            expected_nk = snapshot.kpoints.shape[0]
+        if prov["nkpts"] != expected_nk:
+            raise ValueError(
+                f"dump nkpts={prov['nkpts']} != native export k count "
+                f"{expected_nk} (different runs?)"
+            )
+        if not np.isclose(prov["efermi"], snapshot.efermi, atol=1.0e-8, rtol=0.0):
+            raise ValueError(
+                f"dump efermi={prov['efermi']} != native export "
+                f"efermi={snapshot.efermi}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +221,7 @@ def build_w_soc(
     projections and ``CSO`` are SAXIS-frame objects); state indices are
     stacked spin-major, ``nu = spin * nband + band``.  ``skip_atoms``
     zeroes selected ions' one-center operator (ligand-SOC studies); W_SO
-    itself is all-atom by default.  The result is the frame-independent
-    *state-space* matrix ``<psi_nu|W_SO|psi_nu'>`` — legs re-express the
-    band spinor components and vertices, never W.
+    itself is all-atom by default.
 
     Returns the complex ``(nkpt, 2*nband, 2*nband)`` matrix in eV.
     """
@@ -252,36 +291,22 @@ def reconstruct_cocc(snapshot: PawProjectorSnapshot, dump: CsoDump) -> np.ndarra
 
 
 # ---------------------------------------------------------------------------
-# collinear snapshot -> spinor ProjectorGreenData (per leg)
+# collinear snapshot -> spinor ProjectorGreenData (psi-gauge leg)
 # ---------------------------------------------------------------------------
-def _site_splitting_operator(
-    snapshot: PawProjectorSnapshot,
-    frame_overlap_matrix: np.ndarray | None = None,
-) -> np.ndarray:
-    """Leg-frame magnetic vertices ``Delta_a = (D_up - D_down) sigma_z``.
+def _site_splitting_operator(snapshot: PawProjectorSnapshot) -> np.ndarray:
+    """Psi-gauge magnetic vertices ``Delta_a sigma_z`` (SAXIS frame).
 
     The collinear spin difference is the physical exchange splitting of
-    the strength-0 reference; the vertex is the physical field along the
-    SAXIS polarisation axis.  With ``frame_overlap_matrix`` ``M`` (the
-    :func:`frame_overlap` map into a leg frame), the vertex is conjugated
-    into that frame, ``Delta_a M sigma_z M^dag = Delta_a n^.sigma`` with
-    ``n^`` the SAXIS axis in leg-frame coordinates — so a SAXIS-polarised
-    collinear state sees its *full* splitting in every leg.  Without
-    ``M`` (SAXIS frame) the vertex is diagonal with the full splitting on
-    zz (pinned to the collinear reduction of the spinor kernel).  Units
-    eV.
+    the strength-0 reference; the run's states are SAXIS-frame
+    eigenstates, so the vertex is diagonal with the full splitting on
+    ``zz`` — exactly the z magnetic reference the tangent kernel's leg
+    frame expects.  Units eV.
     """
     components = {c.name: c for c in snapshot.operators.components}
     if "total" not in components:
         raise ValueError("the native export lacks the total CDIJ component")
     blocks = np.asarray(components["total"].values, dtype=complex) * HARTREE_TO_EV
-    if frame_overlap_matrix is None:
-        sz = _PAULI[3]
-    else:
-        m = np.asarray(frame_overlap_matrix, dtype=complex)
-        if m.shape != (2, 2):
-            raise ValueError("frame overlap must be a 2x2 unitary")
-        sz = m @ _PAULI[3] @ m.conj().T
+    sz = _PAULI[3]
     nions = len(snapshot.site_layout)
     nmax = max(
         site.projector_slice.stop - site.projector_slice.start
@@ -300,37 +325,29 @@ def _site_splitting_operator(
 def collinear_snapshot_to_spinor_data(
     snapshot: PawProjectorSnapshot,
     dump: CsoDump,
-    leg_direction=(0.0, 0.0, 1.0),
-    frame_overlap_matrix: np.ndarray | None = None,
 ) -> ProjectorGreenData:
-    """Build normalized no-SOC spinor band data in the leg frame.
+    """Build the psi-gauge no-SOC spinor band data of one strength-0 run.
 
-    States ``(band m, spin channel s)`` are stacked spin-major with the
-    spinor components rotated into the leg frame through
-    ``M = U_leg^dag U_saxis``; the magnetic vertices are conjugated by
-    the same map so the collinear splitting stays the physical SAXIS-axis
-    field ``Delta_a M sigma_z M^dag`` in leg-frame components.
+    States ``(band m, spin channel s)`` are stacked spin-major; the
+    collinear channels ARE the SAXIS-frame spinor components, so no frame
+    conjugation is applied: the magnetic vertices stay ``Delta_a sigma_z``
+    (full splitting on the frame z) and ``W_SO`` is the state-space matrix
+    in the same frame.  This is the z magnetic reference leg the tangent
+    kernel measures.
     """
     _check_consistency(snapshot, dump)
-    if frame_overlap_matrix is None:
-        frame_overlap_matrix = frame_overlap(leg_direction, dump)
-    m = np.asarray(frame_overlap_matrix, dtype=complex)
-    if m.shape != (2, 2):
-        raise ValueError("frame overlap must be a 2x2 unitary")
 
     coeffs = snapshot.coefficients
     occ = snapshot.occupations
     nspin, nkpt, nband, nproj = coeffs.shape
     nstate = nspin * nband
 
-    # components[k, (s, m), t, p] = coeffs[s, k, m, p] * M[t, s]
+    # components[k, (s, m), t, p] with t the spinor slot of channel s
     coeff_full = np.zeros((nkpt, nstate, 2, nproj), dtype=complex)
     for s in (0, 1):
-        coeff_full[:, s * nband : (s + 1) * nband, :, :] = np.einsum(
-            "kmp,t->kmtp", coeffs[s], m[:, s]
-        )
-    coefficients = coeff_full[None, ...]
+        coeff_full[:, s * nband : (s + 1) * nband, s, :] = coeffs[s]
 
+    coefficients = coeff_full[None, ...]
     eigenvalues = np.concatenate(
         [snapshot.eigenvalues[0], snapshot.eigenvalues[1]], axis=1
     )[None, ...]
@@ -377,7 +394,7 @@ def collinear_snapshot_to_spinor_data(
         site_nproj=site_nproj,
         site_projector_indices=site_indices,
         nspinor=2,
-        spinor_operator=_site_splitting_operator(snapshot, m),
+        spinor_operator=_site_splitting_operator(snapshot),
         spinor_operator_definition=SPINOR_OPERATOR_DEFINITION,
         coefficient_source="vasp.CPROJ_collinear_spinor_stacked",
         coefficient_projector="native_paw_projector",
@@ -389,7 +406,6 @@ def collinear_snapshot_to_spinor_data(
             "source_version": "6.4.1",
             "native_version": int(snapshot.provenance.get("native_version", 5)),
             "kpoint_storage": snapshot.provenance.get("kpoint_storage", "full_bz"),
-            "leg_direction": [float(x) for x in leg_direction],
             "units": {
                 "cell": "Angstrom",
                 "positions": "Angstrom",
@@ -404,12 +420,11 @@ def collinear_snapshot_to_spinor_data(
 
 
 # ---------------------------------------------------------------------------
-# single-leg exchange through the shared kernel
+# single-leg exchange through the shared tangent kernel
 # ---------------------------------------------------------------------------
 def compute_split_soc_exchange_leg(
     snapshot: PawProjectorSnapshot,
     dump: CsoDump,
-    leg_direction=(0.0, 0.0, 1.0),
     lam: float = 1.0,
     sites=None,
     rpts=None,
@@ -418,40 +433,32 @@ def compute_split_soc_exchange_leg(
     mode: str = MODE_SECOND_VARIATION,
     w_override: np.ndarray | None = None,
     skip_atoms: tuple[int, ...] = (),
-    site_signs: dict | None = None,
     metadata: dict | None = None,
 ):
-    """One leg: kernel exchange + story-001 O map into the lattice frame.
+    """One strength-0 run's raw leg through the tangent kernel.
 
-    The kernel returns the tensor in the leg frame (psi gauge, quantization
-    along ``leg_direction``); the entries are rotated with
-    ``T_lattice = O T_leg O^T``, ``O = SO3(U_leg)``, ``O e_z = leg axis``.
-    ``Jiso`` is rotationally invariant; DMI and Jani rotate as vectors and
-    rank-2 tensors.  The leg frame re-expresses the band spinor components
-    and the magnetic vertices by ``M = U_leg^dag U_saxis``; W_SO is the
-    frame-independent state-space matrix and enters unchanged.  The
-    site-magnetization signs are physical (SAXIS-frame splitting signs),
-    so they are computed once from the un-conjugated vertex and passed to
-    the kernel explicitly — the leg-frame vertex's z-trace vanishes for
-    transverse legs and must not be used as a sign probe.
+    The run is already in the psi gauge (vertices ``Delta sigma_z`` with
+    the full splitting on the frame z), so the kernel output is the
+    MEASURED transverse 2x2 of the run's ``(u, v, n)`` triad — ``J_leg``
+    masked on the ``n`` row/column, ``frame`` the detected leg frame,
+    ``mask_residual`` the longitudinal spurion size.  No lattice-frame
+    rotation is applied here: the driver maps the measured block with
+    :func:`rotate_transverse_leg` and ``leg_rotation_map(dump)``.
+
+    ``site_magnetization_sign`` is NOT passed to the kernel: the tangent
+    vertices carry the site collinearity themselves, and the kernel
+    derives the ``(u, v, n)`` frame from the measured splitting
+    directions.
     """
     if mode not in SPLIT_SOC_MODES:
         raise ValueError(f"unsupported split-SOC mode: {mode!r}")
-    leg_direction = np.asarray(leg_direction, dtype=float)
     w = (
         build_w_soc(snapshot, dump, skip_atoms=skip_atoms)
         if w_override is None
         else np.asarray(w_override)
     )
-    data = collinear_snapshot_to_spinor_data(snapshot, dump, leg_direction)
-    leg_alpha, leg_beta = euler_angles(leg_direction)
+    data = collinear_snapshot_to_spinor_data(snapshot, dump)
 
-    if site_signs is None:
-        saxis_operator = _site_splitting_operator(snapshot)
-        wanted = range(len(snapshot.site_layout)) if sites is None else sites
-        site_signs = {
-            int(site): site_magnetization_sign(saxis_operator[site]) for site in wanted
-        }
     extra = dict(metadata or {})
     extra.setdefault("soc_operator_source", _SOC_OPERATOR_SOURCE)
     extra.setdefault(
@@ -459,22 +466,20 @@ def compute_split_soc_exchange_leg(
         {
             "description": _STRENGTH0_SOURCE,
             "native_version": snapshot.provenance.get("native_version"),
+            "saxis": [float(x) for x in dump.saxis],
+            "saxis_alpha": float(dump.alpha),
+            "saxis_beta": float(dump.beta),
         },
     )
     extra.setdefault(
         "frame",
         {
-            "saxis": [float(x) for x in dump.saxis],
-            "saxis_alpha": float(dump.alpha),
-            "saxis_beta": float(dump.beta),
-            "leg_direction": [float(x) for x in leg_direction],
-            "frame_map": "T_lattice = O T_leg O^T with O = SO3(ROTMAT(alpha, beta)), O e_z = leg axis",
-            "leg_frame_conjugation": (
-                "band spinor components and magnetic vertices "
-                "(Delta M sigma_z M^dag) conjugated by M = U_leg^dag "
-                "U_saxis; W_SO is the frame-independent state-space "
-                "matrix (unchanged); site signs probed in the SAXIS frame"
+            "psi_gauge": (
+                "collinear states are SAXIS-frame eigenstates; vertices "
+                "Delta sigma_z with the full splitting on the frame z; "
+                "W_SO is the state-space matrix in the same frame"
             ),
+            "lattice_map": "J_lattice = O J_leg O^T with O = SO3(ROTMAT(alpha, beta)), O e_z = SAXIS",
             "pauli_order": "x,y,z",
         },
     )
@@ -491,27 +496,15 @@ def compute_split_soc_exchange_leg(
         nz=nz,
         smearing_eV=smearing_eV,
         sites=sites,
-        site_signs=site_signs,
         metadata=extra,
     )
-
-    o_map = so3_from_su2(vasp_spinor_frame(leg_alpha, leg_beta))
-    exchange = {}
-    for key, entry in res["exchange"].items():
-        tensor = np.asarray(entry["tensor"], dtype=float)
-        dmi = np.asarray(entry["dmi"], dtype=float)
-        jani = np.asarray(entry["jani"], dtype=float)
-        entry = dict(entry)
-        entry["tensor"] = o_map @ tensor @ o_map.T
-        entry["dmi"] = o_map @ dmi
-        entry["jani"] = o_map @ jani @ o_map.T
-        entry["tensor_leg_frame"] = tensor
-        exchange[key] = entry
     return {
-        "exchange": exchange,
+        "exchange": res["exchange"],
         "metadata": res["metadata"],
-        "o_map": o_map,
-        "leg_direction": leg_direction,
+        "o_map": leg_rotation_map(dump),
+        "saxis": np.asarray(dump.saxis, dtype=float),
+        "data": data,
+        "w_soc": w,
     }
 
 
@@ -540,57 +533,80 @@ def _resolve_magnetic_sites(
     return sites
 
 
-def _leg_tag(direction) -> str:
-    axis = int(np.argmax(np.abs(np.asarray(direction))))
-    return "xyz"[axis]
+def _write_leg_results(leg_result, sites, leg_tag, path):
+    """Persist one leg's raw measured block (npz) and provenance (json)."""
+    rotated = leg_result["rotated"]
+    keys = sorted(rotated)
+    np.savez_compressed(
+        Path(path) / "split_soc_leg.npz",
+        pair_keys=np.asarray([[*r, i, j] for r, i, j in keys], dtype=int),
+        J_leg=np.asarray([rotated[key]["J_leg"] for key in keys]),
+        axis=np.asarray(leg_result["saxis"], dtype=float),
+    )
+    provenance = json_safe_provenance(
+        {
+            **leg_result["metadata"],
+            "backend": "vasp",
+            "leg": leg_tag,
+            "merge_mode": "three_leg_rotate_merge",
+            "o_map": np.asarray(leg_result["o_map"], dtype=float).tolist(),
+            "saxis": [float(x) for x in leg_result["saxis"]],
+            "mask_residual_max": max(
+                (float(entry.get("mask_residual", 0.0)) for entry in rotated.values()),
+                default=0.0,
+            ),
+        }
+    )
+    (Path(path) / "split_soc_provenance.json").write_text(
+        json.dumps(provenance, indent=2, default=str) + "\n"
+    )
+    return provenance
 
 
-def _write_leg_results(
-    snapshot: PawProjectorSnapshot,
-    leg_result,
-    sites,
-    signs,
-    leg_direction,
-    path,
-    rpts,
-    description,
+def _write_merged_results(
+    snapshot, exchange, sites, path, description, saxis_axis, provenance
 ):
-    """Write one leg's TB2J results (noncollinear SpinIO pickle)."""
+    """Write the decomposed rank-nine exchange as TB2J results."""
     from ase import Atoms
 
     from TB2J.io_exchange.io_exchange import SpinIO
 
-    leg_direction = np.asarray(leg_direction, dtype=float)
     atoms = Atoms(
         numbers=snapshot.atomic_numbers,
         positions=snapshot.positions,
         cell=snapshot.cell,
         pbc=True,
     )
-    spinat = np.zeros((len(atoms), 3), dtype=float)
-    for site in sites:
-        spinat[site] = signs[site] * leg_direction
-
     index_spin = [-1] * len(atoms)
     site_to_spin = {}
     for ispin, site in enumerate(sites):
         index_spin[site] = ispin
         site_to_spin[site] = ispin
-
-    exchange_jdict = {}
+    exchange_Jdict = {}
     dmi_ddict = {}
-    jani_dict = {}
+    Jani_dict = {}
     distance_dict = {}
-    for (r, i, j), entry in leg_result["exchange"].items():
-        if i == j and not any(r):
-            continue  # onsite pair: excluded (collinear-path cutover)
-        key = (tuple(int(x) for x in r), site_to_spin[i], site_to_spin[j])
+    for (r, i, j), entry in exchange.items():
         vector = np.asarray(r) @ snapshot.cell + atoms.positions[j] - atoms.positions[i]
-        distance_dict[key] = (vector, float(np.linalg.norm(vector)))
-        exchange_jdict[key] = float(entry["Jiso"])
+        distance = float(np.linalg.norm(vector))
+        if distance < 1e-6:
+            continue  # onsite pair excluded (spinor-path convention)
+        key = (tuple(int(x) for x in r), site_to_spin[i], site_to_spin[j])
+        distance_dict[key] = (vector, distance)
+        exchange_Jdict[key] = float(entry["Jiso"])
         dmi_ddict[key] = np.asarray(entry["dmi"], dtype=float)
-        jani_dict[key] = np.asarray(entry["jani"], dtype=float)
-
+        Jani_dict[key] = np.asarray(entry["jani"], dtype=float)
+    # SpinAT direction: the run's SAXIS axis with the physical moment sign.
+    # Delta = D_up - D_down is a potential-like splitting; the majority-spin
+    # potential is LOWER on a positive-moment site, so the moment sign is
+    # the OPPOSITE of the vertex's z-trace sign (same PAW convention).
+    spinat = np.zeros((len(atoms), 3), dtype=float)
+    operator = _site_splitting_operator(snapshot)
+    for site in sites:
+        nproj = int(site_nproj_of(snapshot, site))
+        vertex = operator[site, :nproj, :nproj]
+        moment_sign = -site_magnetization_sign(vertex)
+        spinat[site] = moment_sign * np.asarray(saxis_axis, dtype=float)
     output = SpinIO(
         atoms=atoms,
         charges=np.zeros(len(atoms), dtype=float),
@@ -598,18 +614,25 @@ def _write_leg_results(
         index_spin=index_spin,
         colinear=False,
         distance_dict=distance_dict,
-        exchange_Jdict=exchange_jdict,
+        exchange_Jdict=exchange_Jdict,
         dmi_ddict=dmi_ddict,
-        Jani_dict=jani_dict,
-        description=description,
+        Jani_dict=Jani_dict,
+        description=description
+        + "\nsplit_soc_provenance: "
+        + json.dumps(provenance, sort_keys=True, default=str),
     )
-    output.write_all(path=path)
-    return path
+    output.split_soc_provenance = provenance
+    output.write_all(path=str(path))
+    return exchange_Jdict
+
+
+def site_nproj_of(snapshot: PawProjectorSnapshot, site: int) -> int:
+    sl = snapshot.site_layout[site].projector_slice
+    return sl.stop - sl.start
 
 
 def gen_exchange_vasp_split_soc(
-    native_input,
-    cso_dump,
+    leg_artifacts,
     output_path="TB2J_results_vasp_split_soc",
     rpts=None,
     rcut: float = 10.0,
@@ -619,149 +642,244 @@ def gen_exchange_vasp_split_soc(
     index_magnetic_atoms=None,
     lam: float = 1.0,
     mode: str = MODE_SECOND_VARIATION,
-    legs=LEGS,
+    merge_consistency_atol: float = 1.0e-8,
+    band_window_study: bool = True,
 ):
-    """Three-direction split-SOC exchange from one collinear VASP run.
+    """Three-reference split-SOC exchange from three collinear VASP runs.
 
-    Runs the kernel per leg (x, y, z), applies the corrected O map, writes
-    per-leg TB2J results, and merges them through :mod:`TB2J.io_merge`.
-    Returns the merged output directory.
+    ``leg_artifacts`` maps the leg tags ``x``/``y``/``z`` to that run's
+    two artifacts, ``{"native_input": tb2j_native.bin, "cso_dump":
+    tb2j_cso.bin}`` — three independent strength-0 references with
+    ``SAXIS = 1 0 0 / 0 1 0 / 0 0 1`` (one per tag; the dump's recorded
+    SAXIS must be parallel to the tag axis).  Each run measures the
+    transverse 2x2 of its own right-handed ``(u, v, n)`` triad through
+    the shared tangent kernel; the measured blocks are rotated into the
+    lattice frame and merged with the rank-nine raw-tensor solve
+    (:func:`TB2J.split_soc_kernel.merge_transverse_legs`), never through
+    the legacy ``TB2J.io_merge`` scalar/traceless average.
 
-    Note: the io_merge stage reconstructs Jani/DMI through the shared
-    A-channel mapping, which is invalid (cross-story projector_green
-    finding); the merged Jani/DMI are quarantined pending the rank-9
-    raw-tensor merge cutover.  The per-leg pickles and
-    ``split_soc_provenance.json`` are the authoritative outputs.
+    Writes, under ``output_path``:
+
+    - ``leg_<tag>/split_soc_leg.npz`` + ``leg_<tag>/split_soc_provenance.json``
+      per reference (raw rotated block + full kernel provenance);
+    - the merged TB2J results (Jiso/DMI/Jani of the solved raw tensor);
+    - ``split_soc_provenance.json`` with the merge diagnostics.
+
+    Returns the output directory.
     """
     if mode not in SPLIT_SOC_MODES:
         raise ValueError(f"unsupported split-SOC mode: {mode!r}")
-    snapshot = read_vasp_native(native_input)
-    dump = read_cso_dump(cso_dump)
-    _check_consistency(snapshot, dump)
+    if set(leg_artifacts) != set(LEG_TAGS):
+        raise ValueError(
+            f"leg_artifacts must cover exactly the tags {LEG_TAGS}, got "
+            f"{sorted(leg_artifacts)}"
+        )
 
-    # input integrity: COCC must reconstruct from the SAME run's CPROJ
-    # (catches mismatched native/cso artifact pairs before any physics)
-    recon = reconstruct_cocc(snapshot, dump)
-    for ion in range(dump.nions):
-        n = dump.type_of(ion).lmmax
-        for slot in (0, 3):
-            scale = max(1.0, float(np.abs(dump.cocc[ion, slot, :n, :n]).max()))
-            residual = float(
-                np.abs(recon[ion, slot, :n, :n] - dump.cocc[ion, slot, :n, :n]).max()
+    runs = {}
+    for tag in LEG_TAGS:
+        spec = leg_artifacts[tag]
+        if not isinstance(spec, dict) or not {"native_input", "cso_dump"} <= set(spec):
+            raise ValueError(
+                f"leg {tag!r} artifacts must be a mapping with "
+                "'native_input' and 'cso_dump'"
             )
-            if residual >= 1.0e-4 * scale:
-                raise ValueError(
-                    f"tb2j_cso.bin does not match tb2j_native.bin: ion {ion} "
-                    f"COCC slot {slot} residual {residual:.3e} >= "
-                    f"{1.0e-4 * scale:.3e} (different runs or corrupted dump)"
+        snapshot = read_vasp_native(spec["native_input"])
+        dump = read_cso_dump(spec["cso_dump"])
+        _check_consistency(snapshot, dump)
+        # the leg tag is the magnetic reference axis: the run's SAXIS must
+        # be parallel to it, or the lattice-frame rotation is meaningless
+        saxis = np.asarray(dump.saxis, dtype=float)
+        saxis = saxis / np.linalg.norm(saxis)
+        axis_vec = np.asarray(LEG_DIRECTIONS[tag], dtype=float)
+        if abs(abs(float(np.dot(saxis, axis_vec))) - 1.0) > 1.0e-6:
+            raise ValueError(
+                f"leg {tag!r}: dump SAXIS {saxis.tolist()} is not parallel "
+                f"to the reference axis {axis_vec.tolist()}"
+            )
+        # input integrity: COCC must reconstruct from the SAME run's CPROJ
+        # (catches mismatched native/cso artifact pairs before any physics)
+        recon = reconstruct_cocc(snapshot, dump)
+        for ion in range(dump.nions):
+            n = dump.type_of(ion).lmmax
+            for slot in (0, 3):
+                scale = max(1.0, float(np.abs(dump.cocc[ion, slot, :n, :n]).max()))
+                residual = float(
+                    np.abs(
+                        recon[ion, slot, :n, :n] - dump.cocc[ion, slot, :n, :n]
+                    ).max()
                 )
+                if residual >= 1.0e-4 * scale:
+                    raise ValueError(
+                        f"tb2j_cso.bin does not match tb2j_native.bin (leg "
+                        f"{tag!r}): ion {ion} COCC slot {slot} residual "
+                        f"{residual:.3e} >= {1.0e-4 * scale:.3e} (different "
+                        "runs or corrupted dump)"
+                    )
+        runs[tag] = (snapshot, dump)
 
-    sites = _resolve_magnetic_sites(snapshot, magnetic_elements, index_magnetic_atoms)
-    data_probe = collinear_snapshot_to_spinor_data(snapshot, dump)
+    reference_snapshot = runs["z"][0]
+    sites = _resolve_magnetic_sites(
+        reference_snapshot, magnetic_elements, index_magnetic_atoms
+    )
+    data_probe = collinear_snapshot_to_spinor_data(reference_snapshot, runs["z"][1])
     if rpts is None:
         from TB2J.interfaces.gpaw_projector import _R_grid_for_cutoff
 
         rpts = _R_grid_for_cutoff(data_probe, sites, rcut)
+    rpts = np.asarray(rpts, dtype=int)
+    nband = int(data_probe.eigenvalues.shape[-1])
+    if band_window_study and (nband < 4 or nband % 2):
+        raise ValueError(
+            "band-window study requires at least two paired spinor band "
+            f"windows (nband={nband}); disable band_window_study to skip"
+        )
     del data_probe
-
-    signs = {}
-    operator = _site_splitting_operator(snapshot)
-    for site in sites:
-        signs[site] = site_magnetization_sign(operator[site])
 
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
-    leg_paths = []
-    leg_records = {}
-    for leg_direction in legs:
+    leg_metadata = {}
+    leg_exchanges = {}
+    o_maps = {}
+    for tag in LEG_TAGS:
+        snapshot, dump = runs[tag]
         result = compute_split_soc_exchange_leg(
             snapshot,
             dump,
-            leg_direction=leg_direction,
             lam=lam,
             sites=sites,
             rpts=rpts,
             nz=nz,
             smearing_eV=smearing_eV,
             mode=mode,
-            site_signs=signs,
         )
-        tag = _leg_tag(leg_direction)
+        exchange = result["exchange"]
+        if not any(not (i == j and not any(r)) for (r, i, j) in exchange):
+            raise ValueError(
+                f"leg {tag!r}: no magnetic spin pairs within "
+                f"Rcut={rcut} A (empty exchange after excluding the onsite "
+                "pair). Increase Rcut."
+            )
+        if band_window_study:
+            pair = (sites[0], sites[1] if len(sites) > 1 else sites[0])
+            study = band_window_study_report(
+                result,
+                pair,
+                nband,
+                lam=lam,
+                mode=mode,
+                nz=nz,
+                smearing_eV=smearing_eV,
+                rpts=rpts,
+                sites=sites,
+            )
+            result["metadata"]["band_window"] = {"convergence_study": study}
+        rotated = rotate_transverse_leg(exchange, result["o_map"], LEG_TAGS.index(tag))
         leg_dir = output_path / f"leg_{tag}"
         leg_dir.mkdir(exist_ok=True)
-        _write_leg_results(
-            snapshot,
-            result,
-            sites,
-            signs,
-            leg_direction,
-            leg_dir,
-            rpts,
-            description=(
-                "VASP KS-basis split-SOC exchange (ADR-7, story 011): "
-                f"leg direction {tuple(float(x) for x in leg_direction)}, "
-                "second variation of the collinear strength-0 bands with "
-                "the patched one-center CSO operator; O map "
-                "T_lattice = O T_leg O^T.\n"
-            ),
+        leg_metadata[tag] = _write_leg_results(
+            {**result, "rotated": rotated}, sites, tag, leg_dir
         )
-        leg_paths.append(leg_dir)
-        leg_records[tag] = {
-            "leg_direction": [float(x) for x in result["leg_direction"]],
-            "o_map": np.asarray(result["o_map"], dtype=float).tolist(),
-            "kernel_metadata": result["metadata"],
-        }
-        if _leg_tag(legs[0]) == tag and not any(
-            not (i == j and not any(r)) for (r, i, j) in result["exchange"]
-        ):
-            raise ValueError(
-                f"no magnetic spin pairs within Rcut={rcut} A: the leg "
-                "exchange is empty after excluding the onsite pair.  "
-                "Increase Rcut."
-            )
+        leg_exchanges[tag] = {"exchange": rotated}
+        o_maps[tag] = np.asarray(result["o_map"], dtype=float)
 
-    _merge_leg_results(leg_paths, output_path)
-
-    provenance = {
-        "schema": "tb2j.vasp_split_soc_provenance/1.0",
+    merged = merge_transverse_legs(
+        leg_exchanges, consistency_atol=merge_consistency_atol
+    )
+    merged_provenance = {
+        "schema": "tb2j.vasp_split_soc_provenance/2.0",
         "backend": "vasp",
+        "merge_mode": "raw_rank_nine",
         "mode": mode,
         "lambda": float(lam),
-        "native_input": str(native_input),
-        "cso_dump": str(cso_dump),
-        "native_version": int(snapshot.provenance.get("native_version", 5)),
-        "saxis_frame": {
-            "saxis": [float(x) for x in dump.saxis],
-            "alpha": float(dump.alpha),
-            "beta": float(dump.beta),
-        },
+        "legs": leg_metadata,
+        "rotation": (
+            "J_lattice = O J_leg O^T with O = SO3(ROTMAT(alpha, beta)), "
+            "O e_z = the run's SAXIS axis"
+        ),
+        "merge_diagnostics": json_safe_provenance(merged["diagnostics"]),
+        "merge_consistency_atol_eV": float(merge_consistency_atol),
+        "leg_paths": [str(output_path / f"leg_{tag}") for tag in LEG_TAGS],
+        "o_maps": {tag: o_maps[tag].tolist() for tag in LEG_TAGS},
         "magnetic_sites": [int(s) for s in sites],
-        "site_species": [site.species for site in snapshot.site_layout],
-        "magnetic_signs": {str(s): float(signs[s]) for s in sites},
-        "rpts": np.asarray(rpts, dtype=int).tolist(),
+        "site_species": [site.species for site in reference_snapshot.site_layout],
+        "rpts": rpts.tolist(),
         "nz": int(nz),
         "smearing_eV": float(smearing_eV),
-        "legs": leg_records,
-        "leg_paths": [str(p) for p in leg_paths],
-        "merge": {
-            "inputs": [str(p) for p in leg_paths],
-            "write_path": str(output_path),
-        },
+        "units": "eV",
     }
-    with open(output_path / "split_soc_provenance.json", "w") as handle:
-        json.dump(provenance, handle, indent=2, default=str)
+    description = (
+        "VASP patched-collinear split-SOC exchange (ADR-7, story 011, "
+        "tangent contract): rank-nine raw tensor reconstructed from the "
+        "x/y/z SAXIS transverse measurements.\n"
+    )
+    _write_merged_results(
+        reference_snapshot,
+        merged["exchange"],
+        sites,
+        output_path,
+        description,
+        np.asarray(LEG_DIRECTIONS["z"], dtype=float),
+        merged_provenance,
+    )
+    (output_path / "split_soc_provenance.json").write_text(
+        json.dumps(merged_provenance, indent=2, default=str) + "\n"
+    )
     return output_path
 
 
-def _merge_leg_results(leg_paths, output_path):
-    """Merge the per-leg results into ``output_path``.
+def band_window_study_report(
+    leg_result,
+    pair,
+    nband,
+    lam=1.0,
+    mode=MODE_SECOND_VARIATION,
+    nz=30,
+    smearing_eV=0.05,
+    rpts=None,
+    sites=None,
+):
+    """ADR-8 band-window enlargement study for the leg's first pair."""
+    from TB2J.split_soc_kernel import band_window_convergence_report
 
-    Seam for the rank-9 raw-tensor merge cutover: currently the legacy
-    :func:`TB2J.io_merge.merge` (its Jani/DMI stage is invalid — see the
-    gen_exchange_vasp_split_soc quarantine note); it will be replaced by
-    ``TB2J.split_soc_kernel.merge_transverse_legs`` once the tangent-core
-    contract lands, with the raw per-leg tensors as inputs.
-    """
-    from TB2J.io_merge import merge
+    data = leg_result["data"]
+    return json_safe_provenance(
+        band_window_convergence_report(
+            data,
+            leg_result["w_soc"],
+            [nband - 2, nband],
+            pair=pair,
+            lam=lam,
+            mode=mode,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            Rpts=rpts,
+            sites=sites,
+        )
+    )
 
-    merge(*[str(p) for p in leg_paths], write_path=str(output_path))
+
+def _parse_leg_argument(value: str):
+    """Parse ``TAG=RUN_DIR`` or ``TAG=NATIVE_PATH:CSO_PATH``."""
+    tag, sep, rest = value.partition("=")
+    tag = tag.strip().lower()
+    if not sep or tag not in LEG_TAGS:
+        raise ValueError(
+            f"leg argument {value!r} must be TAG=RUN_DIR with TAG in " f"{LEG_TAGS}"
+        )
+    native, cso = None, None
+    if ":" in rest:
+        candidate_native, candidate_cso = rest.split(":", 1)
+        from pathlib import Path as _Path
+
+        if _Path(candidate_native).is_file() and _Path(candidate_cso).is_file():
+            native, cso = candidate_native, candidate_cso
+    if native is None:
+        run_dir = Path(rest)
+        native = run_dir / "tb2j_native.bin"
+        cso = run_dir / "tb2j_cso.bin"
+        if not (native.is_file() and cso.is_file()):
+            raise ValueError(
+                f"leg {tag!r}: {run_dir} must contain tb2j_native.bin and "
+                "tb2j_cso.bin (or pass TAG=native_path:cso_path)"
+            )
+    return {tag: {"native_input": str(native), "cso_dump": str(cso)}}

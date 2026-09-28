@@ -1,26 +1,29 @@
-"""Story 011 tests: VASP KS-basis split-SOC adapter, rotate/merge, CLI.
+"""Story 011 tests: VASP KS-basis split-SOC adapter (tangent contract).
 
 Covers:
 - TEST-001: assembled W^K_SO Hermiticity + independent CALC_PAW_OVERLAP
-  expected value + frame handling of the SAXIS dump representation
-  (strength-0 lam=0 covariance across input SAXIS; per-input three-leg
-  O-map consistency), with band spinor components and vertices
-  conjugated by M = U_leg^dag U_saxis and W_SO kept as the
-  frame-independent state-space matrix.
-- Leg cross-consistency: the x/y/z legs are frame re-expressions of one
-  physical reference, so their lattice-frame tensors coincide at lam=0
-  and lam=1 (observed ~1e-17).
+  expected value + SAXIS frame handling: each run is one psi-gauge
+  magnetic reference (states are SAXIS-frame eigenstates, vertices
+  ``Delta sigma_z``), so the tangent kernel's raw ``J_leg`` must be
+  identical across input SAXIS at lam=0 and — the fixture re-expresses
+  one physical CSO — match at lam=1 too, with the longitudinal row/
+  column exactly masked and ``mask_residual ~ 0``.
+- SOC-off anchor: at lam=0 the leg's measured transverse block reduces
+  to the isotropic collinear exchange (``J_leg[u,u] = J_leg[v,v] =
+  Jiso_collinear`` through the O map).
 - COCC reconstruction from the collinear CPROJ against the patch dump
   (CRHODE(LP,L) = conj(CPROJ(LP)) CPROJ(L) fast_aug order; the real-dump
   residual documents the patch's occupation-update skew).
-- All-atom ligand SOC influence: on the real centrosymmetric FeO dump the
-  ligand influence is gated on the W_SO operator and the Jiso channel; on
-  a non-centrosymmetric synthetic cell (off-center ligand) the allowed
-  Jiso channel shifts.  (The Jani/DMI channels of the shared A-channel
-  mapping are invalid — cross-story projector_green finding, replacement
-  under way per Main — and no Jani/DMI gate is booked.)
-- CLI/driver end-to-end with three-leg io_merge and persisted provenance
-  (per-leg O maps, O e_z = leg axis).
+- Dump format v1/v2/v3: v2 band/k provenance (dump-vs-native identity
+  gates against the real Ni/FeO story-010 dumps) and v3
+  reference-potential provenance (constants + ``potae_xcr``).
+- All-atom ligand SOC influence on the measured transverse block (real
+  centrosymmetric FeO dump and a non-centrosymmetric synthetic cell).
+- Driver/CLI end-to-end over THREE independent x/y/z SAXIS references:
+  lattice-frame rotation via ``rotate_transverse_leg`` and rank-nine
+  raw-tensor merge via ``merge_transverse_legs`` (never io_merge),
+  persisted provenance, and the real retained FeO campaign
+  (collinear_x/y/z v2 dump+native triples).
 """
 
 import json
@@ -30,7 +33,7 @@ import sys
 import numpy as np
 import pytest
 
-from TB2J.interfaces.vasp_cso_dump import MAGIC, VERSION, read_cso_dump
+from TB2J.interfaces.vasp_cso_dump import MAGIC, read_cso_dump
 from TB2J.interfaces.vasp_native import read_vasp_native
 
 FE_LPS = [2, 0]  # Fe: d radial, s radial -> 5 + 1 = 6 projectors
@@ -161,8 +164,20 @@ def _write_cso_dump(
     beta=0.0,
     lsorbit=0,
     symbols=("Fe", "O"),
+    version=1,
+    constants=None,
+    potae_xcr=None,
+    wtkpt=None,
 ):
-    """Serialize a tb2j_cso.bin v1 stream (test-side format writer)."""
+    """Serialize a tb2j_cso.bin stream (test-side format writer).
+
+    ``version=2`` adds the provenance block (ispin/nkpts/nbands/nb_tot/
+    efermi/native MAGIC+version) and the per-k vkpt/wtkpt arrays, exactly
+    as the story-010 v2 Fortran writer does.  ``version=3`` additionally
+    appends the reference-potential constants (felect, invmc2, autoa)
+    after the potae array and the per-ion ``potae_xcr`` grid, zero-padded
+    to ``nmax_max``.
+    """
     layout = _ion_layout(symbols)
     types = _ordered_types(symbols)
     lmdim_max = max(v["lmmax"] for v in layout)
@@ -179,7 +194,7 @@ def _write_cso_dump(
             f.write(np.asarray(value).astype("<c16").tobytes())
 
         wi(MAGIC)
-        wi(VERSION)
+        wi(version)
         wi(len(layout))  # nions
         wi(len(types))  # ntyp
         wi(lmdim_max)
@@ -188,6 +203,10 @@ def _write_cso_dump(
         wi(lsorbit)
         wr(np.asarray(saxis, dtype=float))
         wr([alpha, beta])
+        if version >= 2:
+            wi([2, NKPT, NBAND, NBAND])  # ispin, nkpts, nbands, nb_tot
+            wr(-1.5)  # efermi
+            wi([20260812, 5])  # companion native MAGIC/version
         for t in types:
             lay_lps = _LPS_BY_SYMBOL[t]
             lmmax = sum(2 * l + 1 for l in lay_lps)
@@ -198,16 +217,34 @@ def _write_cso_dump(
             f.write(t.ljust(2).encode("ascii"))
         wi([types.index(v["symbol"]) + 1 for v in layout])  # ityp
         wi([v["lmmax"] for v in layout])  # nmax_ion
+        if version >= 2:
+            kpts_3d = np.array(
+                [[i * 0.5, j * 0.5, 0.0] for i in range(2) for j in range(2)]
+            )
+            wr(kpts_3d.T)
+            wr(np.ones(NKPT) / NKPT if wtkpt is None else np.asarray(wtkpt))
         wstream(cso)
         wstream(cocc)
         if potae is None:
             potae = np.ones((nmax_max, len(layout)))
         f.write(np.ascontiguousarray(np.asarray(potae).T).tobytes())
+        if version >= 3:
+            if constants is None:
+                constants = {"felect": 0.5, "invmc2": 7.45596e-6, "autoa": 0.529177}
+            wr([constants["felect"], constants["invmc2"], constants["autoa"]])
+            if potae_xcr is None:
+                potae_xcr = 2.0 * np.ones((nmax_max, len(layout)))
+            f.write(np.ascontiguousarray(np.asarray(potae_xcr).T).tobytes())
     return path
 
 
 def _make_synthetic_system(
-    tmp_path, saxis=(0.0, 0.0, 1.0), seed=7, symbols=("Fe", "O"), positions=None
+    tmp_path,
+    saxis=(0.0, 0.0, 1.0),
+    seed=7,
+    symbols=("Fe", "O"),
+    positions=None,
+    cso_scale=1.0,
 ):
     """Build a synthetic collinear export + matching CSO dump.
 
@@ -271,8 +308,10 @@ def _make_synthetic_system(
                 n1, n2 = 2 * l1 + 1, 2 * l2 + 1
                 if l1 != l2 or l1 == 0:
                     continue
-                uu = _random_hermitian(n1, rng)
-                ud = rng.normal(size=(n1, n2)) + 1j * rng.normal(size=(n1, n2))
+                uu = _random_hermitian(n1, rng) * cso_scale
+                ud = (
+                    rng.normal(size=(n1, n2)) + 1j * rng.normal(size=(n1, n2))
+                ) * cso_scale
                 cso_z[ion, SLOT[(0, 0)], o1 : o1 + n1, o2 : o2 + n2] = uu
                 cso_z[ion, SLOT[(1, 1)], o1 : o1 + n1, o2 : o2 + n2] = -uu
                 cso_z[ion, SLOT[(0, 1)], o1 : o1 + n1, o2 : o2 + n2] = ud
@@ -290,9 +329,13 @@ def _make_synthetic_system(
         alpha = float(np.arctan2(saxis[1], saxis[0]))
         u = vasp_spinor_frame(alpha, beta)
         # spinor rotation mixes the (uu, ud, du, dd) slot index only:
-        # CSO'[a', b'] = sum_{a,b} conj(U[a', a]) U[b', b] CSO[a, b]
+        # the frame representation of one physical operator,
+        # CSO'[c, d] = sum_{a, b} conj(U[a, c]) U[b, d] CSO[a, b]
+        # (U columns are the frame basis spinors in z components), so the
+        # state-space W obeys W_n = (kron(U, I))^dag W_z (kron(U, I)) and
+        # every SAXIS run is an exact SU(2) image of the z reference.
         full = cso_z.reshape(nions, 2, 2, lmdim, lmdim)
-        rot = np.einsum("ca,db,iabpq->icdpq", u.conj(), u, full)
+        rot = np.einsum("ac,bd,iabpq->icdpq", u.conj(), u, full)
         cso = rot.reshape(nions, 4, lmdim, lmdim)
 
     # COCC from the CPROJ/occupations with the pinned weight convention:
@@ -390,85 +433,126 @@ def test_w_soc_hermitian_and_matches_independent_contraction(tmp_path):
 
 
 def test_leg_pipeline_saxis_covariant(tmp_path):
-    """Frame handling of the SAXIS dump representation.
+    """Frame handling of the SAXIS dump representation (psi-gauge legs).
 
-    At lam=0 the strength-0 problem is spin-rotation invariant, so the
-    per-leg lattice-frame tensors must be independent of the input SAXIS
-    (observed agreement ~7e-10 against a 1e-2 exchange scale; an
-    un-conjugated vertex in a transverse leg breaks this).  At lam=1 a
-    SAXIS change rotates the magnetization *relative to the
-    lattice-locked CSO* — that is the magnetocrystalline anisotropy
-    degree of freedom, not a symmetry — so no cross-SAXIS equality is
-    asserted there; instead each input's three legs must be internally
-    consistent (the O map T_lattice = O T_leg O^T with O e_z = leg axis).
+    Each run's collinear states are SAXIS-frame eigenstates (vertices
+    ``Delta sigma_z`` — a z magnetic reference for every run), and its
+    dump CSO is the state-space SOC operator re-expressed in that frame.
+    Two exact consequences are pinned:
+
+    1. lam=0: the strength-0 problem is W-independent and spin-rotation
+       invariant, so the RAW ``J_leg`` is identical across input SAXIS.
+    2. lam=1: a SAXIS run is the z reference with the SOC operator
+       conjugated into its frame (``W_n = U_n^dag W_z U_n``, the exact
+       VASP EULER/ROTMAT representation map), so its raw ``J_leg`` must
+       equal the z-reference leg computed with that ``W_soc`` override.
+
+    Every leg's longitudinal row/column is exactly masked with
+    ``mask_residual`` at the numerical noise level, and the detected leg
+    frame is the z reference with the positive Cartesian axis.
     """
-    from TB2J.interfaces.vasp_split_soc import (
-        compute_split_soc_exchange_leg,
-        so3_from_su2,
-        vasp_spinor_frame,
-    )
+    from TB2J.interfaces.vasp_split_soc import compute_split_soc_exchange_leg
 
-    entries = {}
-    for tag, saxis in (("z", (0.0, 0.0, 1.0)), ("n", (1.0, 2.0, 1.5))):
+    def build(tag):
         sub = tmp_path / tag
-        sub.mkdir()
-        _, _, snapshot, dump = _make_synthetic_system(sub, saxis=saxis)
-        per_leg = {}
-        for leg_dir in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
-            res = compute_split_soc_exchange_leg(
-                snapshot,
-                dump,
-                leg_direction=np.asarray(leg_dir),
-                lam=1.0,
-                sites=(0,),
-                rpts=RPTS,
-                nz=24,
-            )
-            key = ((1, 0, 0), 0, 0)
-            assert key in res["exchange"]
-            per_leg[leg_dir] = res["exchange"][key]
-        entries[tag] = (so3_from_su2(vasp_spinor_frame(dump.alpha, dump.beta)), per_leg)
+        sub.mkdir(exist_ok=True)
+        return _make_synthetic_system(
+            sub, saxis=(0.0, 0.0, 1.0) if tag == "z" else (1.0, 2.0, 1.5)
+        )
 
-    # lam=0: strength-0 spin-rotation invariance across input SAXIS frames
-    anchor = {}
-    for tag, saxis in (("z", (0.0, 0.0, 1.0)), ("n", (1.0, 2.0, 1.5))):
-        sub = tmp_path / f"{tag}-anchor"
-        sub.mkdir()
-        _, _, snapshot, dump = _make_synthetic_system(sub, saxis=saxis)
+    def raw_leg(snapshot, dump, lam, w_override=None):
         res = compute_split_soc_exchange_leg(
             snapshot,
             dump,
-            leg_direction=np.array([0.0, 0.0, 1.0]),
-            lam=0.0,
+            lam=lam,
             sites=(0,),
             rpts=RPTS,
             nz=24,
+            w_override=w_override,
         )
-        anchor[tag] = res["exchange"][((1, 0, 0), 0, 0)]["tensor"]
-    assert np.allclose(anchor["z"], anchor["n"], atol=1e-8)
+        entry = res["exchange"][((1, 0, 0), 0, 0)]
+        return res, entry
 
-    # lam=1: per-input leg consistency of the covariant channels (frame
-    # map, not cross-SAXIS symmetry).  Off-diagonal tensor channels are
-    # quarantined (cross-story projector_green finding).
-    for tag in ("z", "n"):
-        per_leg = entries[tag][1]
-        ref = per_leg[(0.0, 0.0, 1.0)]
-        for leg_dir, entry in per_leg.items():
-            assert np.isclose(entry["Jiso"], ref["Jiso"], atol=1e-10)
-            assert np.allclose(
-                np.diag(entry["tensor"]), np.diag(ref["tensor"]), atol=1e-10
+    for lam in (0.0, 1.0):
+        native_z, _, snapshot_z, dump_z = build("z")
+        del native_z
+        res_z, entry_z = raw_leg(snapshot_z, dump_z, lam)
+        native_n, _, snapshot_n, dump_n = build("n")
+        del native_n
+        res_n, entry_n = raw_leg(snapshot_n, dump_n, lam)
+        # both legs are z magnetic references on their own triad
+        for entry in (entry_z, entry_n):
+            frame = entry["frame"]
+            assert int(frame["n"]) == 2
+            assert np.allclose(frame["axis"], [0.0, 0.0, 1.0], atol=1e-12)
+            j_leg = np.asarray(entry["J_leg"], dtype=float)
+            assert j_leg[2, :].max() == 0.0 and j_leg[:, 2].max() == 0.0
+            # campaign pin (FR PAW real-data worst 3.3e-10)
+            assert float(entry["mask_residual"]) < 1e-8
+        # lam=0: W-independent strength-0 covariance across input SAXIS
+        if lam == 0.0:
+            diff = np.abs(
+                np.asarray(entry_z["J_leg"], dtype=float)
+                - np.asarray(entry_n["J_leg"], dtype=float)
+            ).max()
+            assert diff < 1e-10, diff
+        else:
+            # lam=1: the n-run is the z reference with W re-expressed
+            # (W_n = U_n^dag W_z U_n); its raw leg must reproduce the
+            # z-frame leg driven with that W_soc override
+            _, entry_z_with_wn = raw_leg(
+                snapshot_z, dump_z, lam, w_override=res_n["w_soc"]
             )
-    # the O map of the z leg is the identity (O e_z = z)
-    o_z = so3_from_su2(vasp_spinor_frame(0.0, 0.0))
-    assert np.allclose(o_z, np.eye(3), atol=1e-12)
+            diff = np.abs(
+                np.asarray(entry_n["J_leg"], dtype=float)
+                - np.asarray(entry_z_with_wn["J_leg"], dtype=float)
+            ).max()
+            assert diff < 1e-10, diff
+
+    # the representation map itself, at the dump slot level: the n-run's
+    # CSO is the z-reference operator re-expressed in the SAXIS frame,
+    # CSO_n[c, d] = sum_{a,b} conj(U[a, c]) U[b, d] CSO_z[a, b]
+    # (pinned channels: the collinear CPROJ entries are frame components,
+    # so no state-space conjugation is applied)
+    from TB2J.interfaces.vasp_split_soc import vasp_spinor_frame
+
+    native_z, _, snapshot_z, dump_z = build("z")
+    del native_z
+    native_n, _, snapshot_n, dump_n = build("n")
+    del native_n
+    u = vasp_spinor_frame(float(dump_n.alpha), float(dump_n.beta))
+    for ion in range(dump_z.nions):
+        lmm = dump_z.type_of(ion).lmmax
+        a = dump_z.cso[ion, :, :lmm, :lmm].reshape(2, 2, lmm, lmm)
+        expect = np.einsum("ac,bd,abpq->cdpq", u.conj(), u, a).reshape(4, lmm, lmm)
+        got = dump_n.cso[ion, :, :lmm, :lmm]
+        assert np.abs(got - expect).max() < 1e-12, ion
+
+    # each run's SO(3) map takes z to its own SAXIS direction
+    saxis_n = np.asarray(dump_n.saxis, dtype=float)
+    saxis_n /= np.linalg.norm(saxis_n)
+    res_z, _ = raw_leg(snapshot_z, dump_z, 0.0)
+    res_n, _ = raw_leg(snapshot_n, dump_n, 0.0)
+    assert np.allclose(res_n["o_map"] @ [0.0, 0.0, 1.0], saxis_n, atol=1e-12)
+    assert np.allclose(res_z["o_map"], np.eye(3), atol=1e-12)
 
 
 # ---------------------------------------------------------------------------
 # TEST-002: SOC-off anchor against the existing collinear v5/v6 kernel
 # ---------------------------------------------------------------------------
 def test_soc_off_anchor_matches_collinear_exchange(tmp_path):
+    """At lam=0 the measured transverse block is the isotropic collinear J.
+
+    The strength-0 problem is spin-rotation invariant, so the tangent
+    kernel's transverse 2x2 of the z reference must be ``J * I_2`` with
+    ``J`` the existing collinear v5/v6 scalar kernel's Jiso, and the
+    lattice-frame rotation must leave it invariant.
+    """
     from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
-    from TB2J.interfaces.vasp_split_soc import compute_split_soc_exchange_leg
+    from TB2J.interfaces.vasp_split_soc import (
+        compute_split_soc_exchange_leg,
+        rotate_transverse_leg,
+    )
     from TB2J.paw_projector import build_projector_green_data
 
     _, _, snapshot, dump = _make_synthetic_system(tmp_path)
@@ -476,19 +560,25 @@ def test_soc_off_anchor_matches_collinear_exchange(tmp_path):
     res = compute_split_soc_exchange_leg(
         snapshot,
         dump,
-        leg_direction=np.array([0.0, 0.0, 1.0]),
         lam=0.0,
         sites=(0, 1),
         rpts=RPTS,
         nz=24,
     )
+    rotated = rotate_transverse_leg(res["exchange"], res["o_map"], 2)
 
     data = build_projector_green_data(snapshot)
     jdict = compute_projector_exchange_jdict(
         data, Rpts=RPTS, nz=24, smearing_eV=0.05, sites=(0, 1)
     )
     for (r, i, j), jiso_collinear in jdict.items():
-        assert np.isclose(res["exchange"][(tuple(r), i, j)]["Jiso"], jiso_collinear)
+        entry = rotated[(tuple(r), i, j)]
+        j_leg = np.asarray(entry["J_leg"], dtype=float)
+        assert np.isclose(j_leg[0, 0], jiso_collinear, atol=1e-10)
+        assert np.isclose(j_leg[1, 1], jiso_collinear, atol=1e-10)
+        # transverse off-diagonals vanish at the contour-noise level
+        # (observed ~2.2e-10 eV; campaign pin < 1e-8)
+        assert np.abs(j_leg[0, 1]) < 1e-8 and np.abs(j_leg[1, 0]) < 1e-8
 
 
 # ---------------------------------------------------------------------------
@@ -567,7 +657,6 @@ def test_real_feo_ligand_soc_influence(tmp_path):
     dump = read_cso_dump(paths[1])
 
     kwargs = dict(
-        leg_direction=np.array([0.0, 0.0, 1.0]),
         sites=(0,),
         rpts=RPTS,
         nz=24,
@@ -584,106 +673,306 @@ def test_real_feo_ligand_soc_influence(tmp_path):
     )
     key = ((1, 0, 0), 0, 0)
     full, nolig = res_full["exchange"][key], res_nolig["exchange"][key]
-    # the translation self-pair of rocksalt FeO is inversion-symmetric, so
-    # its DMI is forbidden; and with same-axis collinear splitting vertices
-    # the shared channel mapping pins DMI to zero for any W (cross-story
-    # projector_green finding, under Main's core diagnosis) -- no DMI gate
-    # is booked here either way.
+    # the measured transverse scalar channel (uu of the z-leg triad)
+    # carries the ligand SOC influence
+    full_uu = float(np.asarray(full["J_leg"], dtype=float)[0, 0])
+    nolig_uu = float(np.asarray(nolig["J_leg"], dtype=float)[0, 0])
     # Ligand SOC measurably shifts the symmetry-allowed scalar channel
-    # (observed shift 2.0e-7 eV on Jiso ~ 7.4e-3 eV; noise floor ~1e-15).
-    assert abs(full["Jiso"] - nolig["Jiso"]) > 1e-9
+    # (observed shift 2.0e-7 eV on J ~ 7.4e-3 eV; noise floor ~1e-15).
+    assert abs(full_uu - nolig_uu) > 1e-9
     # magnetic vertices untouched: the strength-0 onsite splitting is the
     # same to the ligand's second-order correction
-    assert np.isclose(full["Jiso"], nolig["Jiso"], rtol=1e-4, atol=1e-7)
+    assert np.isclose(full_uu, nolig_uu, rtol=1e-4, atol=1e-7)
+
+
+# ---------------------------------------------------------------------------
+# v2 dump dispatch + dump/native identity
+# ---------------------------------------------------------------------------
+def test_cso_v2_synthetic_round_trip(tmp_path):
+    """v2 dumps carry the provenance block and k arrays; v1 fields intact."""
+    from TB2J.interfaces.vasp_cso_dump import read_cso_dump
+
+    sub_v1 = tmp_path / "v1"
+    sub_v1.mkdir()
+    _, _, _, dump_v1 = _make_synthetic_system(sub_v1)
+    sub = tmp_path / "v2"
+    sub.mkdir()
+    v2_path = sub / "tb2j_cso_v2.bin"
+    # the writer takes RAW (l1, l2, slot, ion) arrays as stored on disk;
+    # the reader output is the transposed view, so transpose back
+    _write_cso_dump(
+        v2_path,
+        cso=dump_v1.cso.transpose(0, 1, 3, 2),
+        cocc=dump_v1.cocc.transpose(0, 1, 3, 2),
+        saxis=tuple(float(x) for x in dump_v1.saxis),
+        alpha=dump_v1.alpha,
+        beta=dump_v1.beta,
+        symbols=("Fe", "O"),
+        version=2,
+    )
+    dump_v2 = read_cso_dump(v2_path)
+    assert dump_v2.provenance is not None
+    assert dump_v2.provenance["ispin"] == 2
+    assert dump_v2.provenance["nkpts"] == NKPT
+    assert dump_v2.provenance["nbands"] == NBAND
+    assert dump_v2.provenance["nb_tot"] == NBAND
+    assert dump_v2.provenance["efermi"] == -1.5
+    assert dump_v2.provenance["native_magic"] == 20260812
+    assert dump_v2.provenance["native_version"] == 5
+    assert dump_v2.provenance["vkpt"].shape == (NKPT, 3)
+    assert dump_v2.provenance["wtkpt"].shape == (NKPT,)
+    assert np.isclose(dump_v2.provenance["wtkpt"].sum(), 1.0)
+    assert np.abs(dump_v2.cso - dump_v1.cso).max() == 0.0
+    assert np.abs(dump_v2.cocc - dump_v1.cocc).max() == 0.0
+    assert dump_v1.provenance is None
+
+
+NISOC_V2_DUMP = "/home/hexu/projects/TB2J_dev/.tmp/story-010-ni/nisoc/tb2j_cso.bin"
+NISOC_V2_OUTCAR = "/home/hexu/projects/TB2J_dev/.tmp/story-010-ni/nisoc/OUTCAR"
+FEO_V2_Z_DUMP = (
+    "/home/hexu/projects/TB2J_dev/.tmp/story-010-feo-oracle/collinear_z/tb2j_cso.bin"
+)
+FEO_V2_Z_NATIVE = (
+    "/home/hexu/projects/TB2J_dev/.tmp/story-010-feo-oracle/collinear_z/tb2j_native.bin"
+)
+
+
+def test_real_v2_ni_soc_dump_esoc_oracle():
+    """Behavior gate: the real S10 Ni v2 dump reproduces the OUTCAR E_soc.
+
+    Certified by S10: dump -0.08188974 eV vs OUTCAR -0.0818897 eV.
+    """
+    from TB2J.interfaces.vasp_cso_dump import (
+        esoc_per_ion,
+        parse_outcar_esoc,
+        read_cso_dump,
+    )
+
+    if not os.path.exists(NISOC_V2_DUMP):
+        pytest.skip("real Ni v2 dump not available")
+    dump = read_cso_dump(NISOC_V2_DUMP)
+    assert dump.provenance is not None
+    assert dump.provenance["ispin"] == 1
+    assert dump.provenance["nkpts"] == 36
+    assert dump.provenance["native_version"] == 7
+    assert dump.label(0).strip() == "Ni"
+    assert dump.type_of(0).lmmax == 18
+    assert dump.type_of(0).lps == [2, 2, 0, 0, 1, 1]
+    assert np.isclose(dump.provenance["wtkpt"].sum(), 1.0, atol=1e-12)
+    esoc_dump = float(esoc_per_ion(dump)[0])
+    assert abs(esoc_dump - (-0.08188974)) < 1.0e-6
+    # and against the run's own OUTCAR block, parsed independently
+    esoc_outcar = parse_outcar_esoc(NISOC_V2_OUTCAR)[0]
+    assert abs(esoc_dump - esoc_outcar) < 1.0e-6
+
+
+def test_real_v2_feo_dump_native_identity():
+    """v2 FeO dump/native pair passes the consumer identity validation."""
+    from TB2J.interfaces.vasp_cso_dump import read_cso_dump
+    from TB2J.interfaces.vasp_split_soc import _check_consistency
+
+    if not (os.path.exists(FEO_V2_Z_DUMP) and os.path.exists(FEO_V2_Z_NATIVE)):
+        pytest.skip("real FeO v2 dump/native pair not available")
+    snapshot = read_vasp_native(FEO_V2_Z_NATIVE)
+    dump = read_cso_dump(FEO_V2_Z_DUMP)
+    # raises on any identity mismatch (ispin/nbands/nkpt-IBZ/efermi)
+    _check_consistency(snapshot, dump)
+    assert dump.provenance["nkpts"] == 20
+    assert snapshot.provenance["nkpt_ibz"] == 20
+    assert dump.provenance["nbands"] == snapshot.eigenvalues.shape[-1] == 32
+    assert dump.provenance["efermi"] == snapshot.efermi
+
+
+def _three_synthetic_runs(tmp_path, merge_consistency_atol=1.0e-8, **driver_kwargs):
+    """Build x/y/z SAXIS synthetic runs and run the full driver.
+
+    The synthetic CSO is scaled to 0.05 eV (real FeO one-center SOC is
+    ~0.1 eV on a ~1 eV band window): at physical scales the three-leg
+    transverse constraints are mutually consistent at the 1e-9 eV level,
+    while a full-strength random CSO on a 4-band window mixes bands at
+    O(1) and saturates the SOC-frame systematic the merge tolerates.
+    """
+    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
+
+    artifacts = {}
+    for tag in ("x", "y", "z"):
+        sub = tmp_path / f"run_{tag}"
+        sub.mkdir()
+        native, dump_path, _, _ = _make_synthetic_system(
+            sub,
+            saxis=np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]["xyz".index(tag)]
+            ),
+            cso_scale=0.05,
+        )
+        artifacts[tag] = {"native_input": str(native), "cso_dump": str(dump_path)}
+    out = gen_exchange_vasp_split_soc(
+        artifacts,
+        output_path=str(tmp_path / "results"),
+        rpts=RPTS,
+        nz=24,
+        merge_consistency_atol=merge_consistency_atol,
+        **driver_kwargs,
+    )
+    return out, artifacts
+
+
+def test_synthetic_driver_end_to_end(tmp_path):
+    """Three x/y/z SAXIS references merge through the rank-nine solve.
+
+    The three runs are exact SU(2) images of one physical problem (the
+    fixture re-expresses one CSO), so the transverse constraints are
+    mutually consistent and the strict merge tolerance must PASS: the
+    diagonals measured by two references agree to ~1e-10 eV.  The merged
+    decomposition is written as TB2J results with rank-9 diagnostics.
+    """
+    from TB2J.io_merge import read_pickle
+
+    out, _ = _three_synthetic_runs(tmp_path)
+    merged = read_pickle(str(out))
+    assert merged.exchange_Jdict
+    provenance = json.loads((out / "split_soc_provenance.json").read_text())
+    assert provenance["merge_mode"] == "raw_rank_nine"
+    diagnostics = provenance["merge_diagnostics"]
+    assert diagnostics["min_rank"] == 9
+    assert diagnostics["max_repeat_deviation"] < 1e-8
+    if diagnostics["max_reciprocity_residual"] is not None:
+        assert diagnostics["max_reciprocity_residual"] < 1e-10
+    for tag in ("x", "y", "z"):
+        leg_prov = json.loads(
+            (out / f"leg_{tag}" / "split_soc_provenance.json").read_text()
+        )
+        assert leg_prov["leg"] == tag
+        assert (out / f"leg_{tag}" / "split_soc_leg.npz").exists()
 
 
 def test_real_feo_driver_end_to_end(tmp_path):
-    paths = _feo_paths()
-    if paths is None:
-        pytest.skip("real FeO story-010 dump not available")
-    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
+    """The retained FeO campaign (collinear_x/y/z, v2) through the driver.
+
+    Real native fixture gate: the three independent SAXIS runs merge to a
+    rank-nine tensor whose transverse constraints are mutually consistent
+    (observed repeated-diagonal spread 2.9e-5 eV on the 63 s full driver),
+    the DMI/Jani channels of the inversion-symmetric (1,0,0) translation
+    pair stay at the numerical/SOC-systematic zero, and the scalar channel
+    reproduces the SOC-off collinear exchange of the same run (observed
+    SOC shift 2.0e-6 eV on Jiso = 7.386 meV).
+    """
     from TB2J.io_merge import read_pickle
 
+    campaign = os.environ.get(
+        "TB2J_FEO_SPLITSOC_CAMPAIGN",
+        "/home/hexu/projects/TB2J_dev/.tmp/story-010-feo-oracle",
+    )
+    artifacts = {}
+    for tag in ("x", "y", "z"):
+        run = os.path.join(campaign, f"collinear_{tag}")
+        native, dump = (
+            os.path.join(run, "tb2j_native.bin"),
+            os.path.join(run, "tb2j_cso.bin"),
+        )
+        if not (os.path.exists(native) and os.path.exists(dump)):
+            pytest.skip(f"real FeO collinear_{tag} artifacts not available")
+        artifacts[tag] = {"native_input": native, "cso_dump": dump}
+
+    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
+
     out = gen_exchange_vasp_split_soc(
-        native_input=paths[0],
-        cso_dump=paths[1],
+        artifacts,
         output_path=str(tmp_path / "TB2J_results_split_soc"),
         rpts=RPTS,
         nz=24,
         magnetic_elements=("Fe",),
+        merge_consistency_atol=1.0e-4,
     )
     merged = read_pickle(str(out))
     assert merged.index_spin[0] >= 0 and merged.index_spin[1] == -1
     assert len(merged.exchange_Jdict) >= 1
+    # symmetry gates: the pure-translation Fe-Fe pairs are
+    # inversion-symmetric, so DMI vanishes and the cubic local environment
+    # forbids single-ion exchange anisotropy up to the SOC-frame systematic
+    for key, dmi in merged.dmi_ddict.items():
+        assert np.abs(dmi).max() < 1e-6, (key, dmi)
+    for key, jani in merged.Jani_dict.items():
+        assert np.abs(jani).max() < 1e-4, (key, jani)
 
+    # SOC-off anchor: merged Jiso vs the collinear scalar kernel on the
+    # same z-run export (band window identical; SOC correction small)
+    from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
+    from TB2J.interfaces.vasp_native import read_vasp_native
+    from TB2J.paw_projector import build_projector_green_data
 
-def test_synthetic_driver_end_to_end(tmp_path):
-    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
-    from TB2J.io_merge import read_pickle
-
-    native, dump_path, _, _ = _make_synthetic_system(tmp_path)
-    out = gen_exchange_vasp_split_soc(
-        native_input=str(native),
-        cso_dump=str(dump_path),
-        output_path=str(tmp_path / "results"),
-        rpts=RPTS,
-        nz=24,
+    snapshot = read_vasp_native(artifacts["z"]["native_input"])
+    data = build_projector_green_data(snapshot)
+    jdict = compute_projector_exchange_jdict(
+        data, Rpts=RPTS, nz=24, smearing_eV=0.05, sites=(0,)
     )
-    merged = read_pickle(str(out))
-    assert merged.exchange_Jdict
+    for key, jiso_merged in merged.exchange_Jdict.items():
+        j0 = jdict.get((key[0], key[1], key[2]))
+        if j0 is None:
+            continue
+        assert abs(jiso_merged - j0) < 1e-5, (key, jiso_merged, j0)
 
 
-# ---------------------------------------------------------------------------
-# Leg cross-consistency (regression for the review round-1 frame blocker)
-# ---------------------------------------------------------------------------
-def test_three_legs_lattice_frame_consistency(tmp_path):
-    """The x/y/z legs are frame re-expressions of one physical reference.
+def test_driver_rejects_mistagged_saxis_reference(tmp_path):
+    """A leg tag must match the run's SAXIS axis (lattice map guard)."""
+    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
 
-    Band spinor components and vertices are conjugated by M = U_leg^dag
-    U_saxis while W_SO stays the frame-independent state-space matrix, so
-    the lattice-frame Jiso and the tensor diagonal must coincide across
-    legs at lam=0 and lam=1 (observed ~1e-17; a state-space W conjugation
-    or an un-conjugated vertex breaks this at the 1e-2 level).  The
-    off-diagonal tensor channels are NOT gated: the shared A-channel
-    mapping produces frame-dependent garbage there (cross-story
-    projector_green finding, replacement under way per Main).
-    """
-    from TB2J.interfaces.vasp_split_soc import compute_split_soc_exchange_leg
+    artifacts = {}
+    for tag in ("x", "y", "z"):
+        sub = tmp_path / f"run_{tag}"
+        sub.mkdir()
+        # the z-tag run is deliberately an x-SAXIS run
+        native, dump_path, _, _ = _make_synthetic_system(
+            sub,
+            saxis=(1.0, 0.0, 0.0) if tag == "z" else (0.0, 0.0, 1.0),
+        )
+        artifacts[tag] = {"native_input": str(native), "cso_dump": str(dump_path)}
+    with pytest.raises(ValueError, match="SAXIS.*not parallel"):
+        gen_exchange_vasp_split_soc(
+            artifacts,
+            output_path=str(tmp_path / "results"),
+            rpts=RPTS,
+            nz=24,
+            band_window_study=False,
+        )
 
-    _, _, snapshot, dump = _make_synthetic_system(tmp_path)
-    for lam in (0.0, 1.0):
-        per_leg = {}
-        for leg in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
-            res = compute_split_soc_exchange_leg(
-                snapshot,
-                dump,
-                leg_direction=np.asarray(leg, dtype=float),
-                lam=lam,
-                sites=(0, 1),
-                rpts=RPTS,
-                nz=24,
-            )
-            per_leg[leg] = res["exchange"]
-        for key in ((0, 0, 0), 0, 0), ((1, 0, 0), 0, 1), ((1, 0, 0), 1, 0):
-            ref = per_leg[(0.0, 0.0, 1.0)][key]
-            for ex in per_leg.values():
-                entry = ex[key]
-                assert np.isclose(entry["Jiso"], ref["Jiso"], atol=1e-10)
-                assert np.allclose(
-                    np.diag(entry["tensor"]),
-                    np.diag(ref["tensor"]),
-                    atol=1e-10,
-                )
+
+def test_rank_nine_merge_needs_three_references(tmp_path):
+    """Two references cannot determine the raw tensor (design rank 8)."""
+    import TB2J.split_soc_kernel as kernel
+    from TB2J.interfaces.vasp_split_soc import (
+        compute_split_soc_exchange_leg,
+        leg_rotation_map,
+    )
+
+    def leg(tag):
+        sub = tmp_path / f"run_{tag}"
+        sub.mkdir()
+        native, dump_path, snapshot, dump = _make_synthetic_system(
+            sub, saxis=np.eye(3)["xyz".index(tag)]
+        )
+        del native, dump_path
+        res = compute_split_soc_exchange_leg(
+            snapshot, dump, lam=0.0, sites=(0,), rpts=RPTS, nz=24
+        )
+        rotated = kernel.rotate_transverse_leg(
+            res["exchange"], leg_rotation_map(dump), "xyz".index(tag)
+        )
+        return {"exchange": rotated}
+
+    legs = {tag: leg(tag) for tag in ("x", "y")}
+    with pytest.raises(ValueError, match="rank|cannot determine"):
+        kernel.merge_transverse_legs(legs)
 
 
 def test_ligand_soc_shifts_allowed_channels(tmp_path):
-    """Ligand CSO shifts the symmetry-allowed Jiso of an allowed pair.
+    """Ligand CSO shifts the symmetry-allowed transverse scalar channel.
 
     Three-ion cell: Fe at the origin, Fe at (1/2,1/2,1/2), O off-center
     at (0.2,0.3,0.4) — inversion about the Fe-Fe bond midpoint maps the
     O to a vacancy, so the Fe-Fe pairs are not inversion-symmetric.  The
     ligand one-center CSO is part of the all-atom W_SO; dropping it
-    (skip_atoms) must shift the allowed Jiso channel.
+    (skip_atoms) must shift the allowed transverse scalar channel.
     """
     from TB2J.interfaces.vasp_split_soc import compute_split_soc_exchange_leg
 
@@ -694,7 +983,6 @@ def test_ligand_soc_shifts_allowed_channels(tmp_path):
         positions=[[0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0.2, 0.3, 0.4]],
     )
     kwargs = dict(
-        leg_direction=np.array([0.0, 0.0, 1.0]),
         sites=(0, 1),
         rpts=RPTS,
         nz=24,
@@ -704,93 +992,177 @@ def test_ligand_soc_shifts_allowed_channels(tmp_path):
         snapshot, dump, lam=1.0, skip_atoms=(2,), **kwargs
     )
     for key in (((0, 0, 0), 0, 1), ((1, 0, 0), 0, 1)):
-        full = res_full["exchange"][key]
-        nolig = res_nolig["exchange"][key]
-        j_scale = max(1.0e-3, abs(full["Jiso"]), abs(nolig["Jiso"]))
-        assert abs(full["Jiso"] - nolig["Jiso"]) > 1e-2 * j_scale
-    # No Jani/DMI gate: the shared A-channel tensor mapping is invalid
-    # (cross-story projector_green finding); its channels are quarantined
-    # until the common core replacement lands.
+        full = np.asarray(res_full["exchange"][key]["J_leg"], dtype=float)
+        nolig = np.asarray(res_nolig["exchange"][key]["J_leg"], dtype=float)
+        j_scale = max(1.0e-3, abs(full[0, 0]), abs(nolig[0, 0]))
+        assert abs(full[0, 0] - nolig[0, 0]) > 1e-2 * j_scale
 
 
 # ---------------------------------------------------------------------------
 # CLI + persisted provenance
 # ---------------------------------------------------------------------------
 def test_driver_persists_provenance_with_o_maps(tmp_path):
-    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
-
-    native, dump_path, _, _ = _make_synthetic_system(tmp_path)
-    out = gen_exchange_vasp_split_soc(
-        native_input=str(native),
-        cso_dump=str(dump_path),
-        output_path=str(tmp_path / "results"),
-        rpts=RPTS,
-        nz=24,
-    )
+    out, _ = _three_synthetic_runs(tmp_path)
     provenance = json.loads((out / "split_soc_provenance.json").read_text())
-    assert provenance["schema"] == "tb2j.vasp_split_soc_provenance/1.0"
-    assert set(provenance["legs"]) == {"x", "y", "z"}
-    axis_of = {"x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0], "z": [0.0, 0.0, 1.0]}
-    for tag, record in provenance["legs"].items():
-        o_map = np.asarray(record["o_map"], dtype=float)
-        # pinned frame invariants: O in SO(3), O e_z = leg axis
+    assert provenance["schema"] == "tb2j.vasp_split_soc_provenance/2.0"
+    assert set(provenance["o_maps"]) == {"x", "y", "z"}
+    for tag, record in provenance["o_maps"].items():
+        o_map = np.asarray(record, dtype=float)
+        # pinned frame invariants: O in SO(3), O e_z = the run's SAXIS axis
         assert np.allclose(o_map @ o_map.T, np.eye(3), atol=1e-12)
         assert np.isclose(np.linalg.det(o_map), 1.0, atol=1e-12)
-        assert np.allclose(o_map @ [0.0, 0.0, 1.0], axis_of[tag], atol=1e-12)
-        assert record["kernel_metadata"]["mode"] == "second_variation"
+        assert np.allclose(
+            o_map @ [0.0, 0.0, 1.0],
+            [1.0 if i == "xyz".index(tag) else 0.0 for i in range(3)],
+            atol=1e-12,
+        )
     assert provenance["leg_paths"] == [
-        str(out / "leg_x"),
-        str(out / "leg_y"),
-        str(out / "leg_z"),
+        str(out / f"leg_{tag}") for tag in ("x", "y", "z")
     ]
+    for tag in ("x", "y", "z"):
+        leg_prov = json.loads(
+            (out / f"leg_{tag}" / "split_soc_provenance.json").read_text()
+        )
+        assert leg_prov["mode"] == "second_variation"
+        assert leg_prov["backend"] == "vasp"
+        assert leg_prov["leg"] == tag
+        npz = np.load(out / f"leg_{tag}" / "split_soc_leg.npz")
+        assert npz["J_leg"].shape[1:] == (3, 3)
+        assert npz["pair_keys"].shape[0] == npz["J_leg"].shape[0]
 
 
 def test_cli_end_to_end(tmp_path, monkeypatch):
-    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
     from TB2J.io_merge import read_pickle
     from TB2J.scripts.vasp_split_soc2J import run_vasp_split_soc2J
 
-    native, dump_path, _, _ = _make_synthetic_system(tmp_path)
     out = tmp_path / "cli_results"
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "vasp_split_soc2J.py",
-            "--native-input",
-            str(native),
-            "--cso-dump",
-            str(dump_path),
-            "--output_path",
-            str(out),
-            "--nz",
-            "24",
-            "--Rcut",
-            "5.0",
-            "--elements",
-            "Fe",
-        ],
-    )
+    argv = [
+        "vasp_split_soc2J.py",
+        "--output_path",
+        str(out),
+        "--nz",
+        "24",
+        # the synthetic random projectors are not localized: restrict the
+        # cutoff so the pair set stays in the near-field physically-relevant
+        # R shell (real systems decay and can use the 10 A default)
+        "--Rcut",
+        "5.0",
+        "--elements",
+        "Fe",
+    ]
+    for tag in ("x", "y", "z"):
+        sub = tmp_path / f"run_{tag}"
+        sub.mkdir()
+        _make_synthetic_system(
+            sub,
+            saxis=np.eye(3)["xyz".index(tag)],
+            cso_scale=0.05,
+        )
+        argv += ["--leg", f"{tag}={sub}"]
+    monkeypatch.setattr(sys, "argv", argv)
     run_vasp_split_soc2J()
 
     merged = read_pickle(str(out))
     # --elements Fe selects only the iron site; O stays in the all-atom W_SO
     assert merged.index_spin[0] >= 0 and merged.index_spin[1] == -1
     assert len(merged.exchange_Jdict) >= 1
-    for tag in ("x", "y", "z"):
-        assert (out / f"leg_{tag}" / "TB2J.pickle").exists()
     provenance = json.loads((out / "split_soc_provenance.json").read_text())
     assert provenance["magnetic_sites"] == [0]
     assert provenance["site_species"][1] == "O"
     # CLI output must equal the direct driver call on the same inputs
+    from TB2J.interfaces.vasp_split_soc import gen_exchange_vasp_split_soc
+
     direct = gen_exchange_vasp_split_soc(
-        native_input=str(native),
-        cso_dump=str(dump_path),
+        {
+            tag: {
+                "native_input": str(tmp_path / f"run_{tag}" / "tb2j_native.bin"),
+                "cso_dump": str(tmp_path / f"run_{tag}" / "tb2j_cso.bin"),
+            }
+            for tag in ("x", "y", "z")
+        },
         output_path=str(tmp_path / "direct_results"),
         rcut=5.0,
         nz=24,
         magnetic_elements=("Fe",),
+        band_window_study=False,
     )
     direct_merged = read_pickle(str(direct))
     for key, value in direct_merged.exchange_Jdict.items():
         assert np.isclose(merged.exchange_Jdict[key], value, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# v3 dump dispatch: reference-potential provenance
+# ---------------------------------------------------------------------------
+def test_cso_v3_synthetic_round_trip(tmp_path):
+    """v3 dumps carry the constants block and potae_xcr; v2 fields intact."""
+    from TB2J.interfaces.vasp_cso_dump import read_cso_dump
+
+    sub_v1 = tmp_path / "v1"
+    sub_v1.mkdir()
+    _, _, _, dump_v1 = _make_synthetic_system(sub_v1)
+    sub = tmp_path / "v3"
+    sub.mkdir()
+    v3_path = sub / "tb2j_cso_v3.bin"
+    nmax_max = int(max(dump_v1.type_of(i).lmmax for i in range(dump_v1.nions)))
+    potae_xcr = (
+        2.0
+        * np.ones((nmax_max, dump_v1.nions))
+        * (np.arange(dump_v1.nions)[None, :] + 1.0)
+    )
+    # the writer takes RAW (l1, l2, slot, ion) arrays as stored on disk;
+    # the reader output is the transposed view, so transpose back
+    _write_cso_dump(
+        v3_path,
+        cso=dump_v1.cso.transpose(0, 1, 3, 2),
+        cocc=dump_v1.cocc.transpose(0, 1, 3, 2),
+        saxis=tuple(float(x) for x in dump_v1.saxis),
+        alpha=dump_v1.alpha,
+        beta=dump_v1.beta,
+        symbols=("Fe", "O"),
+        version=3,
+        constants={"felect": 0.25, "invmc2": 7.45596e-6, "autoa": 0.529177},
+        potae_xcr=potae_xcr,
+    )
+    dump_v3 = read_cso_dump(v3_path)
+    assert dump_v3.provenance is not None
+    assert dump_v3.provenance["native_version"] == 5
+    assert dump_v3.constants == {
+        "felect": 0.25,
+        "invmc2": 7.45596e-6,
+        "autoa": 0.529177,
+    }
+    assert dump_v3.potae_xcr is not None
+    assert dump_v3.potae_xcr.shape == potae_xcr.shape
+    assert np.abs(dump_v3.potae_xcr - potae_xcr).max() == 0.0
+    assert np.abs(dump_v3.cso - dump_v1.cso).max() == 0.0
+    assert np.abs(dump_v3.cocc - dump_v1.cocc).max() == 0.0
+    # v1 carries neither block
+    assert dump_v1.potae_xcr is None and dump_v1.constants is None
+
+
+def test_cso_v3_rejects_non_unit_k_weights(tmp_path):
+    """The reader fails closed on provenance weights that do not sum to 1."""
+    import pytest
+
+    from TB2J.interfaces.vasp_cso_dump import read_cso_dump
+
+    sub = tmp_path / "v3bad"
+    sub.mkdir()
+    _, _, _, dump_v1 = _make_synthetic_system(tmp_path)
+    v3_path = sub / "tb2j_cso_bad.bin"
+    bad_weights = np.full(NKPT, 1.0 / NKPT)
+    bad_weights[0] += 0.1
+    _write_cso_dump(
+        v3_path,
+        cso=dump_v1.cso.transpose(0, 1, 3, 2),
+        cocc=dump_v1.cocc.transpose(0, 1, 3, 2),
+        saxis=tuple(float(x) for x in dump_v1.saxis),
+        alpha=dump_v1.alpha,
+        beta=dump_v1.beta,
+        symbols=("Fe", "O"),
+        version=3,
+        wtkpt=bad_weights,
+    )
+    with pytest.raises(ValueError, match="weights sum"):
+        read_cso_dump(v3_path)

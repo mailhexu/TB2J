@@ -68,12 +68,12 @@ def _make_ks_data(nsite=2, nstate=6, nproj_per_site=2, nkpt=5, seed=11):
     projector_site = np.repeat(np.arange(nsite), nproj_per_site)
     site_nproj = np.full(nsite, nproj_per_site)
     site_projector_indices = np.arange(nproj).reshape(nsite, nproj_per_site)
-    spinor_operator = _random_hermitian(2, rng, 0.5)
+    sz = PAULI[3]
     ops = np.zeros((nsite, nproj_per_site, nproj_per_site, 2, 2), dtype=complex)
     for site in range(nsite):
         orbital = rng.normal(size=(nproj_per_site, nproj_per_site))
-        orbital = orbital + orbital.T
-        ops[site] = np.einsum("st,pq->pqst", spinor_operator, orbital)
+        orbital = orbital @ orbital.T + np.eye(nproj_per_site)
+        ops[site] = np.einsum("st,pq->pqst", sz, orbital)
     return ProjectorGreenData(
         kpoints=kpoints,
         weights=weights,
@@ -111,23 +111,13 @@ def _band_G(z_rel, efermi, eps_k, w_k, lam):
     return np.linalg.inv(a)
 
 
-def _pair_channels(di, gij, dj, gji):
-    """Independent ExchangeNCL channel matrix A^{uv} from full blocks.
-
-    A^{uv} = Tr[D_i kron(sig_u, T^u_ij) D_j kron(sig_v, T^v_ji)] / pi with
-    T^u the Pauli components of the spinor Green block (u, v in 0,x,y,z).
-    """
-    di_d = _dense_spinor_block(di)
-    dj_d = _dense_spinor_block(dj)
-    t_ij = [0.5 * np.einsum("pqst,st->pq", gij, s) for s in PAULI]
-    t_ji = [0.5 * np.einsum("pqst,st->pq", gji, s) for s in PAULI]
-    a = np.empty((4, 4), dtype=complex)
-    for u in range(4):
-        gu = np.kron(PAULI[u], t_ij[u])
-        for v in range(4):
-            gv = np.kron(PAULI[v], t_ji[v])
-            a[u, v] = np.trace(di_d @ gu @ dj_d @ gv) / np.pi
-    return a
+def _tangent_reference(op_i, gij, op_j, gji):
+    """Independent full-complex Green contraction for collinear z magnetic legs."""
+    vi = [np.kron(PAULI[a], op_i[:, :, 0, 0] / 2) for a in (1, 2)]
+    vj = [np.kron(PAULI[a], op_j[:, :, 0, 0] / 2) for a in (1, 2)]
+    gi = _dense_spinor_block(gij)
+    gj = _dense_spinor_block(gji)
+    return np.array([[np.trace(a @ gi @ b @ gj) for b in vj] for a in vi])
 
 
 def _fourier(blocks_k, rvec, kpoints, weights):
@@ -303,7 +293,8 @@ def test_lambda_zero_matches_collinear_kernel():
         smearing_eV=0.05,
     )
 
-    # collinear kernel reference: Im integral Tr[Delta G_up Delta G_down]/(4pi)
+    # Direct collinear full-spinor tangent trace: both opposite-spin paths
+    # survive, including distinct Fourier phases at nonzero R.
     collinear = ProjectorGreenData(
         kpoints=kpoints,
         weights=weights,
@@ -316,38 +307,33 @@ def test_lambda_zero_matches_collinear_kernel():
         site_projector_indices=site_projector_indices,
     )
     cg = ProjectorGreen(collinear)
-    ops_col = {0: np.eye(2) * delta_i, 1: np.eye(2) * delta_j}
     contour = CFR(nz=24, T=0.05 / kB)
+    indexed = {tuple(r): idx for idx, r in enumerate(rpts)}
     for (r, iatom, jatom), entry in result["exchange"].items():
-        if iatom == jatom and r == (0, 0, 0):
-            continue
         vals = []
         for energy in contour.path:
-            gup = cg.get_GR(rpts, energy, ispin=0)
-            gdn = cg.get_GR(rpts, energy, ispin=1)
-            ir = [i for i, rr in enumerate(map(tuple, rpts)) if tuple(rr) == tuple(r)][
-                0
-            ]
-            irm = [
-                i
-                for i, rr in enumerate(map(tuple, rpts))
-                if tuple(rr) == tuple(-np.array(r))
-            ][0]
-            gu = cg.get_site_block(gup[ir], iatom, jatom)
-            hd = cg.get_site_block(gdn[irm], jatom, iatom)
-            vals.append(np.trace(ops_col[iatom] @ gu @ ops_col[jatom] @ hd))
-        ref = np.imag(contour.integrate_values(np.asarray(vals))) / (4.0 * np.pi)
-        assert entry["Jiso"] == pytest.approx(ref, rel=1e-9, abs=1e-12), (
-            r,
-            iatom,
-            jatom,
-        )
-        assert np.linalg.norm(entry["dmi"]) < 1e-9
+            gu = cg.get_GR(rpts, energy, ispin=0)
+            gd = cg.get_GR(rpts, energy, ispin=1)
+            ir, im = indexed[r], indexed[tuple(-x for x in r)]
+            a = cg.get_site_block(gu[ir], iatom, jatom)
+            b = cg.get_site_block(gd[im], jatom, iatom)
+            c = cg.get_site_block(gd[ir], iatom, jatom)
+            d = cg.get_site_block(gu[im], jatom, iatom)
+            vals.append(
+                (delta_i, delta_j)[iatom]
+                * (delta_i, delta_j)[jatom]
+                * (np.trace(a @ b) + np.trace(c @ d))
+                / 4
+            )
+        ref = np.imag(contour.integrate_values(np.asarray(vals))) / (2 * np.pi)
+        assert entry["J_leg"][0, 0] == pytest.approx(ref, rel=1e-9, abs=1e-12)
+        assert entry["J_leg"][1, 1] == pytest.approx(ref, rel=1e-9, abs=1e-12)
+        np.testing.assert_allclose(entry["J_leg"][2], 0, atol=1e-12)
+        np.testing.assert_allclose(entry["J_leg"][:, 2], 0, atol=1e-12)
 
 
 # ---------------------------------------------------------------------------
-# TEST-003: rectangular (non-invertible) B_a accepted; production replay
-# equals the independent band-space resolvent end-to-end
+# Rectangular band map versus independent dense resolvent
 # ---------------------------------------------------------------------------
 
 
@@ -379,105 +365,39 @@ def test_rectangular_b_production_matches_band_reference():
         smearing_eV=0.05,
     )
 
-    # independent band-space reference through the pinned channel mapping
     contour = CFR(nz=24, T=0.05 / kB)
-    npj = 2
-    signs = {}
-    for site in range(2):
-        block = data.spinor_operator[site]
-        signs[site] = (
-            1.0
-            if float(np.real(np.trace(block[:, :, 0, 0] - block[:, :, 1, 1]))) >= 0
-            else -1.0
-        )
 
     def g_site_blocks(z, rvec):
-        """Fourier-transformed site blocks G(R) at relative energy z: dict
-        (i, j) -> (npj, npj, 2, 2), from direct band-space inversion."""
         per_k = np.empty((data.nkpt, 4, 4, 2, 2), dtype=complex)
         for ik in range(data.nkpt):
-            g = _band_G(z, data.efermi, data.eigenvalues[0, ik], w_soc[ik], lam)
+            resolvent = _band_G(z, data.efermi, data.eigenvalues[0, ik], w_soc[ik], lam)
             ci = data.coefficients[0, ik]
-            # G[p,q,s,t] = sum_nm C[n,s,p] G[n,m] C*[m,t,q]  (<p s|G|q t>)
-            per_k[ik] = np.einsum("nsp,nm,mtq->pqst", ci, g, ci.conj())
+            per_k[ik] = np.einsum("nsp,nm,mtq->pqst", ci, resolvent, ci.conj())
         full = _fourier(per_k, rvec, data.kpoints, data.weights)
-        return {
-            (i, j): _site_block(full, i, j, npj) for i in range(2) for j in range(2)
-        }
+        return {(i, j): _site_block(full, i, j, 2) for i in range(2) for j in range(2)}
 
     for r in map(tuple, rpts):
-        r = tuple(int(x) for x in r)
         rm = tuple(-x for x in r)
-        a_int = {
-            (i, j): np.zeros((4, 4), dtype=complex) for i in range(2) for j in range(2)
-        }
-        a_int_m = {
-            (i, j): np.zeros((4, 4), dtype=complex) for i in range(2) for j in range(2)
-        }
-        for ie, z in enumerate(contour.path):
-            g_r = g_site_blocks(z, r)
-            g_rm = g_site_blocks(z, rm)
-            for i in range(2):
-                for j in range(2):
-                    a_int[(i, j)][...] += (
-                        _pair_channels(
-                            data.spinor_operator[i],
-                            g_r[(i, j)],
-                            data.spinor_operator[j],
-                            g_rm[(j, i)],
-                        )
-                        * contour.weights[ie]
-                    )
-                    a_int_m[(i, j)][...] += (
-                        _pair_channels(
-                            data.spinor_operator[i],
-                            g_rm[(i, j)],
-                            data.spinor_operator[j],
-                            g_r[(j, i)],
-                        )
-                        * contour.weights[ie]
-                    )
-        # CFR.integrate_values applies the contour normalization -pi/2 on
-        # top of the quadrature weights; mirror it here
-        a_int = {key: val * -np.pi / 2 for key, val in a_int.items()}
-        a_int_m = {key: val * -np.pi / 2 for key, val in a_int_m.items()}
         for i in range(2):
             for j in range(2):
-                sgn = signs[i] * signs[j]
-                ai, am = a_int[(i, j)], a_int_m[(j, i)]
-                jiso_ref = (
-                    float(np.imag(ai[0, 0] - ai[1, 1] - ai[2, 2] - ai[3, 3]))
-                    / 8.0
-                    * sgn
+                values = []
+                for z in contour.path:
+                    g_r, g_rm = g_site_blocks(z, r), g_site_blocks(z, rm)
+                    values.append(
+                        _tangent_reference(
+                            data.spinor_operator[i],
+                            g_r[i, j],
+                            data.spinor_operator[j],
+                            g_rm[j, i],
+                        )
+                    )
+                integrated = contour.integrate_values(np.asarray(values))
+                reference = np.imag(integrated) / (2 * np.pi)
+                np.testing.assert_allclose(
+                    result["exchange"][(r, i, j)]["J_leg"][:2, :2],
+                    reference,
+                    atol=1e-9 * max(1.0, np.max(np.abs(reference))),
                 )
-                d_ref = np.array(
-                    [
-                        float(np.real(ai[0, p + 1] - ai[p + 1, 0])) / 8.0 * sgn
-                        for p in range(3)
-                    ]
-                )
-                jani_ref = np.asarray(
-                    [
-                        [
-                            float(np.imag(ai[a + 1, b + 1] + am[a + 1, b + 1]))
-                            / 8.0
-                            * sgn
-                            for b in range(3)
-                        ]
-                        for a in range(3)
-                    ]
-                )
-                entry = result["exchange"][(r, i, j)]
-                scale = max(1.0, abs(jiso_ref), abs(entry["Jiso"]))
-                assert entry["Jiso"] == pytest.approx(jiso_ref, abs=1e-9 * scale), (
-                    r,
-                    i,
-                    j,
-                    entry["Jiso"],
-                    jiso_ref,
-                )
-                assert np.allclose(entry["dmi"], d_ref, atol=1e-9 * scale)
-                assert np.allclose(entry["jani"], jani_ref, atol=1e-9 * scale)
 
 
 # ---------------------------------------------------------------------------
@@ -502,19 +422,16 @@ def test_ligand_soc_enters_dmi_but_not_vertices():
     res_mag = compute_ks_split_soc_exchange(data, w_mag, sites=[0, 1], **kw)
 
     key = ((1, 0, 0), 0, 1)
-    d_all = res_all["exchange"][key]["dmi"]
-    d_mag = res_mag["exchange"][key]["dmi"]
-    scale = max(1.0, np.linalg.norm(d_all), np.linalg.norm(d_mag))
-    assert np.linalg.norm(d_all - d_mag) > 1e-3 * scale
+    a = res_all["exchange"][key]["J_leg"]
+    b = res_mag["exchange"][key]["J_leg"]
+    assert np.linalg.norm(a - b) > 1e-3 * max(1.0, np.linalg.norm(a), np.linalg.norm(b))
 
     # magnetic-only vertex gating: requesting the magnetic subset with all
     # site vertices present changes nothing on the magnetic pairs
     res_all_sites = compute_ks_split_soc_exchange(data, w_all, sites=[0, 1, 2], **kw)
     for rk, entry in res_all["exchange"].items():
         other = res_all_sites["exchange"][rk]
-        assert entry["Jiso"] == pytest.approx(other["Jiso"], abs=1e-12)
-        np.testing.assert_allclose(entry["dmi"], other["dmi"], atol=1e-12)
-        np.testing.assert_allclose(entry["jani"], other["jani"], atol=1e-12)
+        np.testing.assert_allclose(entry["J_leg"], other["J_leg"], atol=1e-12)
     assert not any(i == 2 or j == 2 for (_, i, j) in res_all["exchange"])
 
 
@@ -544,31 +461,22 @@ def test_insertion_matches_central_fd_of_second_variation():
     # small Matsubara energies); 4 production runs at +-h, +-h/2
     h = 1e-2
 
-    def central(hh):
+    def central(hh, rk):
         p = compute_ks_split_soc_exchange(
             data, w_soc, lam=hh, mode=MODE_SECOND_VARIATION, **kw
         )
         m = compute_ks_split_soc_exchange(
             data, w_soc, lam=-hh, mode=MODE_SECOND_VARIATION, **kw
         )
-        return {
-            "Jiso": (p["exchange"][rk]["Jiso"] - m["exchange"][rk]["Jiso"]) / (2 * hh),
-            "dmi": (p["exchange"][rk]["dmi"] - m["exchange"][rk]["dmi"]) / (2 * hh),
-            "jani": (p["exchange"][rk]["jani"] - m["exchange"][rk]["jani"]) / (2 * hh),
-        }
+        return (p["exchange"][rk]["J_leg"] - m["exchange"][rk]["J_leg"]) / (2 * hh)
 
     for r in map(tuple, rpts):
         rk = (tuple(int(x) for x in r), 0, 1)
-        fd1, fd2 = central(h), central(h / 2)
-        rich = {q: (4 * np.asarray(fd2[q]) - np.asarray(fd1[q])) / 3 for q in fd1}
-        an = res_d["exchange"][rk]
-        assert rich["Jiso"] == pytest.approx(an["Jiso"], rel=1e-3, abs=1e-5), (
-            rk,
-            rich["Jiso"],
-            an["Jiso"],
+        fd1, fd2 = central(h, rk), central(h / 2, rk)
+        rich = (4 * fd2 - fd1) / 3
+        np.testing.assert_allclose(
+            rich, res_d["exchange"][rk]["J_leg"], rtol=1e-3, atol=1e-5
         )
-        np.testing.assert_allclose(rich["dmi"], an["dmi"], rtol=1e-3, atol=1e-5)
-        np.testing.assert_allclose(rich["jani"], an["jani"], rtol=1e-3, atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
@@ -604,8 +512,8 @@ def test_band_window_convergence_report():
     assert not report_c["converged"]
     assert report_c["changes"][-1] > 1e-8
     # window [4] values agree between the two W (identical restricted block)
-    assert report["windows"][0]["Jiso"] == pytest.approx(
-        report_c["windows"][0]["Jiso"], rel=1e-10
+    assert report["windows"][0]["J_uu"] == pytest.approx(
+        report_c["windows"][0]["J_uu"], rel=1e-10
     )
 
 
@@ -638,7 +546,7 @@ def test_fourier_phase_bookkeeping_for_translated_site():
 
     sz = np.array([[1, 0], [0, -1]], dtype=complex)
     orb = rng.normal(size=(2, 2))
-    orb = orb + orb.T
+    orb = orb @ orb.T + np.eye(2)
     vertex = np.einsum("st,pq->pqst", sz, orb)
     ops = np.stack([vertex, vertex])
 
@@ -670,57 +578,15 @@ def test_fourier_phase_bookkeeping_for_translated_site():
     # G_01(R) = G_00(R - R1) with B_1(k) = e^{-2 pi i k.R1} B_0(k): the pair
     # channels at (R=(1,0,0), 0-1) equal the onsite channels at (R=(0,0,0)),
     # and (R=(2,0,0), 0-1) equal (R=(1,0,0), 0-0)
-    a_pair = res_pair["exchange"][((1, 0, 0), 0, 1)]["A_ijR"]
-    a_self = res_self["exchange"][((0, 0, 0), 0, 0)]["A_ijR"]
+    a_pair = res_pair["exchange"][((1, 0, 0), 0, 1)]["K_ijR"]
+    a_self = res_self["exchange"][((0, 0, 0), 0, 0)]["K_ijR"]
     scale = max(1.0, np.abs(a_self).max())
     np.testing.assert_allclose(a_pair, a_self, atol=1e-10 * scale)
-    a_pair2 = res_pair["exchange"][((2, 0, 0), 0, 1)]["A_ijR"]
-    a_self2 = res_self["exchange"][((1, 0, 0), 0, 0)]["A_ijR"]
+    a_pair2 = res_pair["exchange"][((2, 0, 0), 0, 1)]["K_ijR"]
+    a_self2 = res_self["exchange"][((1, 0, 0), 0, 0)]["K_ijR"]
     scale2 = max(1.0, np.abs(a_self2).max())
     np.testing.assert_allclose(a_pair2, a_self2, atol=1e-10 * scale2)
     assert np.abs(a_pair).max() > 1e-6
-
-
-# ---------------------------------------------------------------------------
-# TEST-008: FR-050 provenance metadata
-# ---------------------------------------------------------------------------
-
-
-def test_provenance_metadata_emitted():
-    from TB2J.split_soc_kernel import (
-        MODE_SECOND_VARIATION,
-        compute_ks_split_soc_exchange,
-    )
-
-    data = _make_ks_data(nsite=2, nstate=4, nproj_per_site=2, nkpt=3, seed=3)
-    rng = np.random.default_rng(7)
-    w_soc = _random_w_soc(data, rng)
-    rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
-    res = compute_ks_split_soc_exchange(
-        data,
-        w_soc,
-        lam=0.5,
-        mode=MODE_SECOND_VARIATION,
-        Rpts=rpts,
-        nz=12,
-        smearing_eV=0.05,
-        metadata={
-            "strength0_reference": {"code": "synthetic", "leg": "collinear no-SOC"}
-        },
-    )
-    meta = res["metadata"]
-    assert meta["schema"] == "tb2j.split_soc_ks_provenance/1.0"
-    assert meta["mode"] == "second_variation"
-    assert meta["lambda"] == 0.5
-    assert meta["strength0_reference"]["code"] == "synthetic"
-    assert meta["soc_operator"]["units"] == "eV"
-    assert meta["soc_operator"]["coverage"] == "all_atoms"
-    assert meta["band_window"]["nband"] == 4
-    assert meta["pauli_order"] == "x,y,z"
-    assert "spinaxis" in meta["frame"]
-    assert meta["vertices"]["magnetic_only"] is True
-    assert meta["vertices"]["sites"] == [0, 1]
-    assert "merge_mode" in meta
 
 
 # ---------------------------------------------------------------------------

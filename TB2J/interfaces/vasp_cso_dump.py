@@ -1,27 +1,72 @@
-"""Source-neutral reader for the VASP ``tb2j_cso.bin`` dump (format v1).
+"""Reader for the VASP ``tb2j_cso.bin`` one-center SOC dump (versions 1-3).
 
-Vendored copy of ``VASP_TB2J_patch/python/vasp_cso_dump.py`` (story 010,
-format v1, magic 20260927) so that TB2J has no runtime dependency on the
-patch repository.  Format changes require synchronized updates in both
-places; the v1 layout is frozen upstream.
+The dump is produced by the VASP_TB2J_patch Fortran module ``tb2j_cso.F``
+(``TB2J_CSO_WRITE_DUMP``), which captures, per ion, the one-center spin-orbit
+matrix ``CSO`` and occupancy matrix ``COCC`` (both complex, 4 spinor blocks in
+the (uu, ud, du, dd) representation after ``OCC_FLIP4``) together with the
+spherical augmentation-sphere potential ``POTAE(:,1,1)`` exactly as consumed by
+VASP's ``SPINORB_STRENGTH``.  SAXIS Euler metadata is recorded so the spin
+frame of the operator is unambiguous.
 
-Layout (little-endian raw stream, written by ``TB2J_CSO_WRITE_DUMP``)::
+Conventions
+-----------
+- Little-endian raw stream (Fortran ``ACCESS='STREAM'``, no record markers).
+- ``cso``/``cocc`` are returned as arrays of shape ``(nions, 4, lmdim, lmdim)``,
+  ``potae`` as ``(nmax_max, nions)``; only ``potae[:nmax_ion[i], i]`` is valid
+  for ion ``i``.
+- ``E_soc`` per ion reproduces VASP's ``CALC_SPINORB_MATRIX_ELEMENTS``
+  (relativistic.F): the sum runs over same-``l`` channel pairs only, with the
+  inner (row) window following the second channel.  Because ``CSO`` has
+  vanishing channel-off-diagonal blocks, this equals ``Re Tr(CSO COCC^dagger)``
+  on the ``lmmax`` block.
+- ``potae`` carries the raw VASP storage convention (factor ``2*sqrt(pi)``);
+  multiply by ``1/(2*sqrt(pi))`` before building xi(r) as in
+  ``SPINORB_STRENGTH``.  ``nmax_ion[i]`` is the true per-ion radial-grid
+  length (``PP%R%NMAX``); the file zero-pads to ``nmax_max``.
+- The collinear strength-0 potential is the spin AVERAGE
+  ``(POTAE(:,1,1)+POTAE(:,1,2))/2`` for ISPIN=2 runs, matching the total
+  potential the stock noncollinear path consumes; channel 1 as-is for
+  ISPIN=1 and LSORBIT runs.  The file stores the full ``nmax_max``-padded
+  grid for every ion (zeros beyond ``nmax_ion[i]``); truncate to the POTCAR
+  dataset grid via ``nmax_ion`` before use.
+- The stream is enforced little-endian at write time
+  (``CONVERT='LITTLE_ENDIAN'``); the magic check makes accidental
+  host-endian reads fail closed.
 
-    i4 magic=20260927, i4 version=1
-    i4 nions, ntyp, lmdim_max, nmax_max, ncdij, lsorbit
-    f64 saxis(3), f64 alpha (PHI argument), f64 beta (THETA argument)
-    per type: i4 lmmax, i4 lmax, i4 lps(lmax), f64 zcore, f64 zvalf_orig,
-              char(2) label
-    i4 ityp(nions), i4 nmax_ion(nions)
-    c16 cso  (l1, l2, slot, ion)   row=l1 fastest -> [ion, slot, row, col]
-    c16 cocc (l1, l2, slot, ion)   same order
-    f64 potae (nmax_max, nions)    raw 2*sqrt(pi) spherical AE potential
+Version 2 (band/k provenance)
+-----------------------------
+Version 2 keeps every version-1 field at an unchanged offset and appends:
 
-``cso``/``cocc`` slots are the (uu, ud, du, dd) spinor blocks with
-row=CH2 (bra l' channel) and col=CH1 (ket l channel).  The collinear
-strength-0 capture stores the raw collinear augmentation occupations in
-slots uu/dd (``CRHODE`` components 1/2) and the ``SPINORB_STRENGTH``
-operator evaluated at the SAXIS Euler angles in ``cso``.
+- after the SAXIS/alpha/beta header prefix: ``int32 ispin, nkpts, nbands,
+  nb_tot``, ``f64 efermi``, ``int32 native_magic, native_version`` (writer
+  identity of the companion ``tb2j_native.bin`` snapshot);
+- after ``nmax_ion``: ``f64 vkpt(3, nkpts)``, ``f64 wtkpt(nkpts)``.
+
+These tie the dumped ``COCC`` to the same run's CPROJ export
+(``COCC = sum_nk w_k f_nk C* C`` per ``fast_aug.F``).  For version-1 files
+``CsoDump.provenance`` is ``None``; for version-2 files it is a dict with
+the keys above (``vkpt`` shaped ``(nkpts, 3)``, ``wtkpt`` shaped
+``(nkpts,)``).
+
+Version 3 (reference-potential provenance)
+------------------------------------------
+Version 3 keeps every v1/v2 field at an unchanged offset and appends,
+after the ``potae`` array:
+
+- ``f64 felect, invmc2, autoa``: the constants entering
+  ``APOT(r) = V_H[n_core] + V_nuc - potae_xcr(r) + potae(r)/(2*sqrt(pi))``
+  and ``xi(r) = invmc2 * dAPOT/dr`` in ``SPINORB_STRENGTH``
+  (``invmc2 = 7.45596E-6 A^2`` exactly as ``relativistic.F:50``);
+- ``f64 potae_xcr(nmax_max, nions)``: the per-type
+  ``PP%POTAE_XCUPDATED`` radial reference potential broadcast per ion,
+  zero-padded to ``nmax_max`` with valid length ``nmax_ion[i]`` (the
+  type's ``PP%R%NMAX``, same radial grid as ``potae``).
+
+``CsoDump.potae_xcr`` carries the array and ``CsoDump.constants`` the
+dict ``{"felect", "invmc2", "autoa"}`` (both ``None`` for v1/v2 files).
+v3 files are only written when the companion native export committed,
+so the recorded native identity is defined.
+
 """
 
 from __future__ import annotations
@@ -33,7 +78,8 @@ from pathlib import Path
 import numpy as np
 
 MAGIC = 20260927
-VERSION = 1
+VERSION = 3
+VERSIONS_SUPPORTED = (1, 2, 3)
 
 _I4 = np.dtype("<i4")
 _F8 = np.dtype("<f8")
@@ -69,6 +115,9 @@ class CsoDump:
     cso: np.ndarray = None  # (nions, 4, lmdim, lmdim) complex
     cocc: np.ndarray = None  # (nions, 4, lmdim, lmdim) complex
     potae: np.ndarray = None  # (nmax_max, nions) real
+    provenance: dict = None  # band/k provenance dict, or None for v1 dumps
+    potae_xcr: np.ndarray = None  # (nmax_max, nions) reference potential, v3
+    constants: dict = None  # {"felect","invmc2","autoa"}, or None for v1/v2
 
     def label(self, ion: int) -> str:
         """Element label for a 0-based ion index."""
@@ -124,14 +173,37 @@ def read_cso_dump(path) -> CsoDump:
         raise ValueError(
             "bad magic %d (expected %d); not a tb2j_cso.bin dump" % (magic, MAGIC)
         )
-    if int(version) != VERSION:
+    if int(version) not in VERSIONS_SUPPORTED:
         raise ValueError(
-            "unsupported dump version %d (expected %d)" % (version, VERSION)
+            "unsupported dump version %d (supported: %s)"
+            % (version, ", ".join(str(v) for v in VERSIONS_SUPPORTED))
         )
 
     nions, ntyp, lmdim_max, nmax_max, ncdij, lsorbit = (int(x) for x in r.get(_I4, 6))
     saxis = r.get(_F8, 3).astype(np.float64)
     alpha, beta = (float(x) for x in r.get(_F8, 2))
+
+    provenance = None
+    if int(version) >= 2:
+        ispin, nkpts, nbands, nb_tot = (int(x) for x in r.get(_I4, 4))
+        (efermi,) = (float(x) for x in r.get(_F8, 1))
+        native_magic, native_version = (int(x) for x in r.get(_I4, 2))
+        if ispin not in (1, 2) or nkpts < 1 or nbands < 1 or nb_tot < nbands:
+            raise ValueError(
+                "inconsistent provenance header: ispin=%d nkpts=%d "
+                "nbands=%d nb_tot=%d" % (ispin, nkpts, nbands, nb_tot)
+            )
+        provenance = dict(
+            ispin=ispin,
+            nkpts=nkpts,
+            nbands=nbands,
+            nb_tot=nb_tot,
+            efermi=efermi,
+            native_magic=native_magic,
+            native_version=native_version,
+            vkpt=None,
+            wtkpt=None,
+        )
 
     types = []
     for _ in range(ntyp):
@@ -143,6 +215,19 @@ def read_cso_dump(path) -> CsoDump:
 
     ityp = r.get(_I4, nions).astype(np.int64)
     nmax_ion = r.get(_I4, nions).astype(np.int64)
+
+    if int(version) >= 2:
+        provenance["vkpt"] = (
+            r.get(_F8, 3 * provenance["nkpts"])
+            .reshape(provenance["nkpts"], 3)
+            .astype(np.float64)
+        )
+        provenance["wtkpt"] = r.get(_F8, provenance["nkpts"]).astype(np.float64)
+        if abs(float(provenance["wtkpt"].sum()) - 1.0) > 1.0e-8:
+            raise ValueError(
+                "provenance k weights sum to %.12f (expected 1 within "
+                "1e-8)" % float(provenance["wtkpt"].sum())
+            )
 
     # fail closed on internally inconsistent headers (STD-02)
     if nions <= 0 or ntyp <= 0:
@@ -189,6 +274,13 @@ def read_cso_dump(path) -> CsoDump:
     )
     potae = r.get(_F8, nmax_max * nions).reshape(nions, nmax_max).T.copy()
 
+    constants = None
+    potae_xcr = None
+    if int(version) >= 3:
+        felect, invmc2, autoa = (float(x) for x in r.get(_F8, 3))
+        constants = dict(felect=felect, invmc2=invmc2, autoa=autoa)
+        potae_xcr = r.get(_F8, nmax_max * nions).reshape(nions, nmax_max).T.copy()
+
     if r.rest() != 0:
         raise ValueError("tb2j_cso.bin has %d trailing bytes; format drift?" % r.rest())
 
@@ -213,6 +305,9 @@ def read_cso_dump(path) -> CsoDump:
         cso=cso,
         cocc=cocc,
         potae=potae,
+        provenance=provenance,
+        potae_xcr=potae_xcr,
+        constants=constants,
     )
 
 
