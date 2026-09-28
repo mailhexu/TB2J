@@ -514,7 +514,13 @@ class ProjectorGreenData:
         nmax = self.site_projector_indices.shape[1]
         nproj = self.coefficients.shape[-1]
         for name, value in self.operator_components.items():
-            if value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
+            if value.ndim == 5:
+                if value.shape != (nsite, nmax, nmax, 2, 2):
+                    raise ValueError(
+                        f"operator component {name!r} must have shape "
+                        "(nsite, nproj_site_max, nproj_site_max, 2, 2)"
+                    )
+            elif value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
                 raise ValueError(
                     f"operator component {name!r} must have shape "
                     "(nsite, nproj_site_max, nproj_site_max) or (nproj, nproj)"

@@ -248,6 +248,68 @@ The TB2J ABINIT loader must reject files when:
 * exchange is requested but neither ``operator_components/delta_total`` nor
   sufficient spin-resolved ``hij`` data are present.
 
+Version 1.1: ``soc_pauli`` (additive)
+-------------------------------------
+
+Schema version ``1.1`` extends the version 1 collinear export additively with
+one optional operator component, written by ABINIT when ``savetb2j_soc`` is
+enabled (the unit-strength ``pawdijso`` operator evaluated at the frozen
+strength-0 density).  Version 1.0 files are unchanged, and version 1.1 files
+without the component load exactly as before.
+
+``operators/operator_components/soc_pauli``
+    Shape ``(nsite, nproj_site_max, nproj_site_max, nspinor, nspinor,
+    complex)`` with ``nspinor = 2``, on-disk units **Hartree** (also declared
+    in ``units_json``).  Required provenance attributes: ``source``
+    (``pawdijso(frozen_density)``), ``spin_treatment = "pauli_2x2"``,
+    ``completeness = "complete"``, ``soc_strength = "1.0"``,
+    ``spinaxis = "0 0 1"``, ``zora_term_class = "soc_only"``,
+    ``quantization = "lattice_frame"``, ``covers = "all_atoms"``,
+    ``reference = "strength_zero_frozen_density"``, and a non-empty
+    ``pauli_component_order``.
+
+On-disk orientation and TB2J contraction
+    ABINIT packs one value per projector pair and Pauli component with
+    ``stored(i <= j) = <p_j|W_SO|p_i>`` (``m_opernlc_ylm_allwf`` applies
+    ``gxfac(jlmn) += enl * gxi(ilmn)``, ``gxfac(ilmn) += conj(enl) * gxj(jlmn)``
+    per Pauli component); the packer writes these packed values directly into
+    the ``[i, j]`` slots.  The dense blocks are Hermitian with the L\ \cdot S
+    packing relations ``dd = -uu`` and ``du = -conjg(ud)``.  With the cprj
+    coefficient convention ``c[p] = <p|psi>``, the band-space SOC operator is
+    ``W_nm(k) = c_n^dag O c_m`` with a **full composite transpose**
+    ``O[p,q,s,t] = D[q,p,t,s]`` (both projector and spin index pairs,
+    flat index ``2*p+s``).  Transposing projector indices alone reverses
+    the complex spin-flip matrix elements and fails the iodine 5p L·S
+    element-level oracle.  Since the dense block is Hermitian, the full
+    composite transpose equals elementwise ``conjg(D)`` numerically, but
+    conjugating the wrong coefficient side does not implement the same
+    band-space contraction. The TB2J loader normalizes ``soc_pauli`` to
+    the operator orientation ``O[p,q,s,t]`` in eV at load time and records
+    ``orientation = "operator"``, ``source_units``, and the
+    ``band_space_contraction`` string in the component metadata.
+
+Loader validation for ``soc_pauli``
+    The loader rejects the component when the units are not Hartree,
+    ``units_json`` contradicts Hartree, the shape is not
+    ``(nsite, nproj_site_max, nproj_site_max, 2, 2)``, the dense blocks are
+    not Hermitian, the packing relations ``dd = -uu`` or
+    ``du = -conjg(ud)`` are violated, the provenance attributes are missing
+    or contradict unit strength / lattice-frame quantization / all-atom
+    coverage / SOC-only term class, or the component appears in a
+    ``schema_version`` ``1.0`` file.
+
+Split-SOC workflow
+    ``TB2J/interfaces/abinit_paw_split_soc.py`` consumes the normalized
+    component: the collinear up/down channels are stacked into a spinor band
+    window, ``W_SO^K(k) = sum_a c_a^dag O_a^{(leg)} c_a`` is assembled from
+    ALL atoms (ligand SOC enters the propagator), magnetic rotation vertices
+    ``delta_total`` (or ``delta_xc``) tensored with ``sigma_z`` are placed on
+    magnetic sites only, per-leg re-quantization uses the ABINIT spinaxis
+    SU(2) rotation, and the exchange tensors are rotated back to the lattice
+    frame (``T_lattice = O T_leg O^T``, ``O e_z = n``) before the three
+    x/y/z legs are merged with ``TB2J.io_merge``.  Every output directory
+    carries ``split_soc_provenance.json`` (FR-050/ADR-8).
+
 Synthetic Fixture Requirements
 ------------------------------
 

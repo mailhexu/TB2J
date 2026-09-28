@@ -777,10 +777,18 @@ def component_local_operators(data, component_name, sites, source_label="project
             f"{source_label} operator component is not exchange-ready: "
             f"{component_name} completeness={completeness!r}"
         )
-    return {
+    blocks = {
         int(site): data.get_operator_component(component_name, site=site)
         for site in sites
     }
+    if any(block.ndim != 2 for block in blocks.values()):
+        raise ValueError(
+            f"{source_label} operator component {component_name} is a "
+            "spinor (pauli_2x2) operator; it enters the split-SOC "
+            "propagator, not the collinear exchange vertex (use the "
+            "split-SOC leg builder)"
+        )
+    return blocks
 
 
 def compute_projector_exchange_jdict(
