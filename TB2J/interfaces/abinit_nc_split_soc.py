@@ -641,18 +641,17 @@ def _tangent_projection_check(
     3x3 J (story adjudication).  This gate compares ONLY the raw
     ``tensor[:2, :2]`` of the rank-9 merged tensor against the z one-shot
     leg's ``J_leg`` (already the measured lattice transverse block).
-
-    ``tol_eV=None`` derives the tolerance from the merge's own measured
-    repeat spread (twice the worst twice-measured diagonal deviation), so
-    the bound respects the reference-state differences between the x/y/z
-    references instead of assuming roundoff consistency.
+    ``tol_eV=None`` applies the specification tolerance of 1e-2 eV.  A
+    tolerance may NOT be derived from the merge's own repeat spread:
+    that would make the gate pass by construction exactly when the
+    reference inconsistency it exists to detect is present (adjudicated
+    2026-09-28; the I2 dimer fails this gate at 13.0 meV).  Pass an
+    explicit larger ``tol_eV`` only as a deliberate, reported
+    reference-anisotropy error bar.
     """
     if tol_eV is None:
-        worst_repeat = 0.0
-        if merge_diagnostics:
-            worst_repeat = float(merge_diagnostics.get("max_repeat_deviation", 0.0))
-        tol_eV = max(2.0 * worst_repeat, 1.0e-10)
-        tol_source = f"2x worst repeat deviation ({worst_repeat:.3e} eV)"
+        tol_eV = 1.0e-2
+        tol_source = "spec default (1e-2 eV)"
     else:
         tol_source = "explicit"
     report = {
@@ -884,7 +883,7 @@ def gen_exchange_abinit_nc_split_soc(
     anchor_dmi_tol_eV=_DEFAULT_ANCHOR_DMI_TOL_EV,
     wfk=None,
     frame_tol=1.0e-6,
-    merge_consistency_atol=5.0e-2,
+    merge_consistency_atol=1.0e-6,
 ):
     """Rank-9 three-reference split-SOC exchange from PAO_HS v2 + nc_soc_ks v1.
 
@@ -903,11 +902,15 @@ def gen_exchange_abinit_nc_split_soc(
     collinear kernel), ``verify_tangent_projection`` (FR-032
     projection-only merged-vs-z transverse block equality).
     ``merge_consistency_atol`` bounds the repeat-measurement spread of the
-    twice-measured diagonal entries across references; deviations are
-    reference-state effects of the collinear chain (reported per pair in
-    ``merge_diagnostics``), not roundoff — the default 5e-2 eV documents
-    that rather than assuming exact consistency.
+    twice-measured diagonal entries across references; the strict default
+    (1e-6 eV) makes an inconsistent reference set REFUSE — the certified
+    outcome for reference-inequivalent fixtures such as the iodine dimer
+    (spread ≈25 meV, structural; see the story adjudication).  Passing an
+    explicit larger atol publishes the tensor with the measured spread as
+    an explicit reference-anisotropy error bar (resolution option b) — a
+    deliberate choice that stays visible in ``merge_diagnostics``, never
     """
+
     from TB2J.interfaces.gpaw_projector import _magnetic_sites, _R_grid_for_cutoff
     from TB2J.split_soc_kernel import (
         band_window_convergence_report,

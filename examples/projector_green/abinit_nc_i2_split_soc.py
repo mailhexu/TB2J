@@ -66,9 +66,9 @@ def main(argv=None) -> int:
         "--tangent-tol",
         type=float,
         default=None,
-        help="FR-032 tangent-block tolerance in eV; default (None) derives "
-        "it from the merge's measured repeat spread (2x worst twice-measured "
-        "diagonal deviation), respecting reference-state differences",
+        help="FR-032 tangent-block tolerance in eV (default: the 1e-2 eV "
+        "spec value). Pass a larger value only as a deliberate, reported "
+        "reference-anisotropy error bar — never to force a pass",
     )
     parser.add_argument(
         "--skip-anchor",
@@ -120,7 +120,7 @@ def main(argv=None) -> int:
             "tensor or DMI proof): "
             f"passed={tangent['passed']} over {tangent['pairs_compared']} pairs "
             f"(max |dT[:2,:2]|={tangent['max_transverse_dev_eV']:.3e} eV, "
-            f"tol {tangent['tol_eV']:.1e} eV)"
+            f"tol {tangent['tol_eV']:.1e} eV [{tangent.get('tol_source', 'n/a')}])"
         )
         if tangent["passed"] is False:
             ok = False
