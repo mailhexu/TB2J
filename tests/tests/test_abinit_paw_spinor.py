@@ -3,16 +3,23 @@
 Source-verified conventions (ABINIT libpaw):
 
 * ``m_pawdij.F90`` stores ``paw_ij%dij(cplex_dij*qphase*lmn2_size, ndij)``
-  with ``dij(:,1)=up-up``, ``dij(:,2)=dwn-dwn``, ``dij(:,3)=up-dwn`` and
-  ``dij(:,4)=dwn-up=conj(dij(:,3))`` (elementwise; ``pawdijfock`` stores
-  ``dijfock_vv(klmn1+1, 4) = -dij_updn_i``).  For nspden=4,
-  ``cplex_dij=2``: real/imaginary interleaved along the lmn2 axis.
+  with ``dij(:,1)=up-up``, ``dij(:,2)=dwn-dwn``, ``dij(:,3)=up-dwn``,
+  ``dij(:,4)=dwn-up``; the spinor packing is the operator Hermiticity
+  ``D^{ss'}_{ij} = conjg(D^{s's}_{ji})`` — transposed site indices across
+  the cross-spin blocks, NOT elementwise conjugation of block 3 (the
+  elementwise form only coincides for a symmetric up-dwn block).  For
+  nspden=4, ``cplex_dij=2``: real/imaginary interleaved along the lmn2 axis.
 * ``pawdij_print_dij`` labels the four blocks per atom
   ``Atom # N - Component up-up / dwn-dwn / up-dwn / dwn-up`` and
   ``pawio_print_ij`` prints each block as a full square matrix with a
-  ``=== REAL PART:`` and a ``=== IMAGINARY PART:`` section (f9.5 rows).
-* The Pauli splitting follows the nspden=4 packing contract
-  ``(V11, V22, Re V12, Im V12)``: ``B = (Re D3, -Im D3, (D1-D2)/2)``,
+  ``=== REAL PART:`` and a ``=== IMAGINARY PART:`` section (f9.5 rows),
+  filling each block's lower triangle from ``conjg`` of the partner
+  component (``idij_sym = 7 - idij``, ``opt_sym=2``), so the printed
+  blocks satisfy ``dwn-up == conj(up-dwn).T`` and up-up/dwn-dwn are
+  Hermitian (complex for SOC prints).
+* The Pauli splitting follows the nspden=4 packing contract: per
+  projector pair ``B = ((D3+D4)/2, i(D3-D4)/2, (D1-D2)/2)`` (Hermitian;
+  reduces to ``(Re D3, -Im D3, (D1-D2)/2)`` for symmetric ``D3``),
   ``Delta = 2 B.sigma`` (same convention as ``abinao.spinor_export`` for
   the V_xc grid), identity part dropped.
 
@@ -129,19 +136,25 @@ def _write_spinor_pawprt_log(
 def _reference_components(delta_matrices):
     """Ground-truth four-component Dij set for collinear Delta matrices.
 
-    Delta = D1 - D2 per projector element with D2 = 0, up-dwn block complex:
-    D3 = a + i b so that B = (a, -b, D1/2) and Delta = 2 B.sigma reproduces
-    [[D1, 2(a+i b)], [2(a-i b), -D1]].
+    Delta = D1 - D2 per projector element with D2 = 0 and a GENERAL
+    (non-symmetric) complex up-dwn block, packed with the m_pawdij spinor
+    Hermiticity ``D^{ss'}_{ij} = conjg(D^{s's}_{ji})``:
+    ``dwn-up = conj(up-dwn).T`` — NOT ``conj(up-dwn)`` elementwise (the two
+    coincide only for a symmetric up-dwn block, which would make fixtures
+    unable to detect a transposed/conjugated packing swap).
     """
     out = {}
     for atom, delta in enumerate(delta_matrices):
-        d3 = 0.02 + 0.01j  # constant complex up-dwn offset
         comp = np.asarray(delta, dtype=complex)
+        d3 = np.full_like(comp, 0.02 + 0.01j)
+        if comp.shape[0] > 1:
+            d3[0, 1] = -0.004 + 0.003j
+            d3[1, 0] = 0.005 - 0.002j
         out[atom] = {
             "up-up": comp,
             "dwn-dwn": np.zeros_like(comp),
-            "up-dwn": np.full_like(comp, d3),
-            "dwn-up": np.full_like(comp, np.conj(d3)),
+            "up-dwn": d3,
+            "dwn-up": np.conj(d3.T),
         }
     return out
 
@@ -188,13 +201,40 @@ class TestSpinorDijLogParser:
             parsed[0]["up-up"], ev_reference[0]["up-up"], atol=2e-5
         )
 
-    def test_rejects_dwn_up_not_conj_up_dwn(self, tmp_path):
+    def test_dwn_up_packing_is_conj_transpose_of_up_dwn(self, tmp_path):
+        """Pin the m_pawdij spinor packing D^{ss'}_ij = conjg(D^{s's}_ji).
+
+        The print fills each cross-spin block's lower triangle from conjg of
+        the partner component (idij_sym = 7 - idij, pawio_print_ij
+        opt_sym=2), so the parsed full matrices must satisfy
+        ``dwn-up = conj(up-dwn).T``.  The previously pinned elementwise
+        ``conj(up-dwn)`` relation is WRONG — it coincides with the transpose
+        only for symmetric up-dwn blocks, and the real Ni fr_spinor log
+        (antisymmetric up-dwn) fails it with max deviation 2*max|D3|.
+        """
         reference = _reference_components([np.eye(2) * 0.5])
-        reference[0]["dwn-up"] = reference[0]["up-dwn"]  # wrong: not conj
-        log = _write_spinor_pawprt_log(tmp_path / "bad.abo", reference)
+        log = _write_spinor_pawprt_log(tmp_path / "run.abo", reference)
         parsed, unit = parse_pawprt_dij_spinor(log)
-        with pytest.raises(ValueError, match="dwn-up.*conj|conj.*up-dwn"):
-            pauli_delta_blocks_from_components(parsed, unit)
+        # The fixture packs the true (transposed) relation: accepted.
+        blocks, _ = pauli_delta_blocks_from_components(parsed, unit)
+        np.testing.assert_allclose(
+            blocks[0, :, :, 1, 0], 2 * np.conj(parsed[0]["up-dwn"].T)
+        )
+
+        # Elementwise conj — the previously pinned, wrong relation — must be
+        # rejected: the fixture's up-dwn block is non-symmetric, so
+        # conj(up-dwn) != conj(up-dwn).T.
+        bad = dict(parsed[0])
+        bad["dwn-up"] = np.conj(parsed[0]["up-dwn"])
+        with pytest.raises(ValueError, match=r"dwn-up block is not conj\(up-dwn\)\.T"):
+            pauli_delta_blocks_from_components({0: bad}, unit)
+
+        # A dwn-up block with the transposed partner on the WRONG side
+        # (missing conjugation) is equally rejected.
+        bad2 = dict(parsed[0])
+        bad2["dwn-up"] = parsed[0]["up-dwn"].T
+        with pytest.raises(ValueError, match=r"dwn-up block is not conj\(up-dwn\)\.T"):
+            pauli_delta_blocks_from_components({0: bad2}, unit)
 
     def test_rejects_collinear_log(self, tmp_path):
         log = tmp_path / "colo.abo"
@@ -233,12 +273,14 @@ class TestPauliDeltaDecomposition:
     def test_delta_equals_two_b_sigma(self):
         d1 = np.array([[0.5, 0.05], [0.05, 0.3]], dtype=complex)
         d3 = np.full((2, 2), 0.02 + 0.01j)
+        d3[0, 1] = -0.004 + 0.003j  # general (non-symmetric) up-dwn block
+        d3[1, 0] = 0.005 - 0.002j
         comps = {
             0: {
                 "up-up": d1,
                 "dwn-dwn": np.zeros((2, 2), dtype=complex),
                 "up-dwn": d3,
-                "dwn-up": np.conj(d3),
+                "dwn-up": np.conj(d3.T),
             }
         }
 
@@ -248,14 +290,49 @@ class TestPauliDeltaDecomposition:
         block = blocks[0]
         np.testing.assert_allclose(block[..., 0, 0], d1)
         np.testing.assert_allclose(block[..., 0, 1], 2 * d3)
-        np.testing.assert_allclose(block[..., 1, 0], 2 * np.conj(d3))
+        np.testing.assert_allclose(block[..., 1, 0], 2 * np.conj(d3.T))
         np.testing.assert_allclose(block[..., 1, 1], -d1)
         # Hermitian in (projector, spin) up to print-level noise.
         dense = block.transpose(2, 0, 3, 1).reshape(4, 4)
         np.testing.assert_allclose(dense, dense.conj().T, atol=1e-12)
 
+    def test_accepts_hermitian_complex_onsite_blocks(self):
+        """SOC prints carry antisymmetric imaginary parts in up-up/dwn-dwn.
+
+        The blocks are Hermitian, NOT real (regression: the real Ni
+        fr_spinor log has max |Im up-up| = 2.7e-2 hartree; the retired
+        "must be real" check rejected such logs before the packing check).
+        """
+        rng = np.random.default_rng(3)
+
+        def complex_hermitian(scale):
+            re = rng.normal(size=(2, 2)) * scale
+            im = rng.normal(size=(2, 2)) * scale
+            return (re + re.T) + 1j * (im - im.T)
+
+        d1 = complex_hermitian(0.5)
+        d2 = complex_hermitian(0.3)
+        d3 = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+        comps = {
+            0: {
+                "up-up": d1,
+                "dwn-dwn": d2,
+                "up-dwn": d3,
+                "dwn-up": np.conj(d3.T),
+            }
+        }
+
+        blocks, _ = pauli_delta_blocks_from_components(comps, unit="hartree")
+
+        np.testing.assert_allclose(blocks[0, :, :, 0, 0], d1 - d2)
+        np.testing.assert_allclose(blocks[0, :, :, 0, 1], 2 * d3)
+        np.testing.assert_allclose(blocks[0, :, :, 1, 0], 2 * np.conj(d3.T))
+        np.testing.assert_allclose(blocks[0, :, :, 1, 1], d2 - d1)
+
     def test_by_sigma_form_matches_component_form(self):
-        """Delta = 2(Bx sx + By sy + Bz sz) with B = (Re D3, -Im D3, (D1-D2)/2)."""
+        """Delta = 2(Bx sx + By sy + Bz sz) per projector pair, with
+        Bx = (D3+D4)/2, By = i(D3-D4)/2 (Hermitian under the packing;
+        = (Re D3, -Im D3) when D3 is symmetric) and Bz = (D1-D2)/2."""
         rng = np.random.default_rng(7)
 
         def hermitian(scale):
@@ -264,15 +341,14 @@ class TestPauliDeltaDecomposition:
 
         d1 = hermitian(1.0)
         d2 = hermitian(0.3)
-        a = hermitian(0.1)
-        b = hermitian(0.1)
-        d3 = a + 1j * b
+        d3 = rng.normal(size=(3, 3)) + 1j * rng.normal(size=(3, 3))
+        d4 = np.conj(d3.T)
         comps = {
             0: {
                 "up-up": d1.astype(complex),
                 "dwn-dwn": d2.astype(complex),
                 "up-dwn": d3,
-                "dwn-up": np.conj(d3),
+                "dwn-up": d4,
             }
         }
         sigmas = [
@@ -280,10 +356,15 @@ class TestPauliDeltaDecomposition:
             np.array([[0, -1j], [1j, 0]], dtype=complex),
             np.array([[1, 0], [0, -1]], dtype=complex),
         ]
+        bx = 0.5 * (d3 + d4)
+        by = 0.5j * (d3 - d4)
+        bz = 0.5 * (d1 - d2)
+        np.testing.assert_allclose(bx, bx.conj().T, atol=1e-14)
+        np.testing.assert_allclose(by, by.conj().T, atol=1e-14)
         expected = 2.0 * (
-            a[..., None, None] * sigmas[0]
-            - b[..., None, None] * sigmas[1]
-            + (0.5 * (d1 - d2))[..., None, None] * sigmas[2]
+            bx[..., None, None] * sigmas[0]
+            + by[..., None, None] * sigmas[1]
+            + bz[..., None, None] * sigmas[2]
         )
 
         blocks, _ = pauli_delta_blocks_from_components(comps, unit="eV")

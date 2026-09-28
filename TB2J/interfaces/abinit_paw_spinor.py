@@ -19,26 +19,34 @@ Source-verified conventions (ABINIT sources, libpaw ``m_pawdij.F90``):
 
 * Storage: ``paw_ij%dij(cplex_dij*qphase*lmn2_size, ndij)`` with
   ``dij(:,1)=D^{up-up}``, ``dij(:,2)=D^{dn-dn}``, ``dij(:,3)=D^{up-dn}``
-  and ``dij(:,4)=D^{dn-up}=conj(dij(:,3))`` elementwise — enforced by
-  construction in ``pawdijfock`` (``dijfock_vv(klmn1+1,4) = -dij_updn_i``)
-  and every other Dij contributor.  For ndij=4, ``cplex_dij=2``: complex
-  values interleaved real/imag along the packed lmn2 axis.
+  and ``dij(:,4)=D^{dn-up}``.  The spinor packing is the operator
+  Hermiticity ``D^{ss'}_{ij} = conjg(D^{s's}_{ji})`` — the cross-spin
+  blocks are related through TRANSPOSED site indices, not elementwise
+  conjugation.  For ndij=4, ``cplex_dij=2``: complex values interleaved
+  real/imag along the packed lmn2 axis.
 * Printing (``pawdij_print_dij`` + ``pawio_print_ij``, ``opt_sym=2``): each
   component is printed as a FULL square lmn x lmn matrix under a
   ``=== REAL PART:`` / ``=== IMAGINARY PART:`` pair of headers with
-  ``(1x,f9.5)`` rows.  The lower triangle of block ``c`` is reconstructed
-  from ``conj(block 7-c)``, which reproduces the same packed values, so the
-  full printed matrix of every block equals the symmetric-packed complex
-  Dij elementwise.  Blocks are labeled ``Atom # N - Component up-up`` etc.
+  ``(1x,f9.5)`` rows.  For ndij=4 the lower triangle of block ``c`` is
+  filled from ``conjg`` of the partner block ``7-c`` packed values
+  (``idij_sym = 7 - idij``), so the printed blocks satisfy
+  ``dwn-up == conj(up-dwn).T`` while ``up-up`` / ``dwn-dwn`` are printed
+  Hermitian (complex, with antisymmetric imaginary parts, for SOC prints).
+  Blocks are labeled ``Atom # N - Component up-up`` etc.
 
 Pauli packing contract (same as ``abinao.spinor_export`` for the nspden=4
-V_xc grid, and the paper contract): nspden=4 components are
-``(V11, V22, Re V12, Im V12)`` of the 2x2 operator, hence with
+V_xc grid, and the paper contract): the four components are the spin
+matrix elements of the 2x2 operator per projector pair ``(i, j)``, with
 ``V = v*1 + B.sigma``:
 
-    v  = (D1 + D2) / 2           (scalar part, dropped)
-    Bx = Re D3,   By = -Im D3,   Bz = (D1 - D2) / 2
+    v  = (D1 + D2) / 2                    (scalar part, dropped)
+    Bx = (D3 + D4) / 2,  By = i (D3 - D4) / 2,  Bz = (D1 - D2) / 2
     Delta = 2 * (Bx*sigma_x + By*sigma_y + Bz*sigma_z)
+
+``Bx`` / ``By`` are Hermitian lmn x lmn matrices under the
+``D^{ss'}_{ij} = conjg(D^{s's}_{ji})`` packing; they reduce to the
+elementwise ``(Re D3, -Im D3)`` form only when ``D3`` is symmetric
+(as for the per-point on-site ``V_xc`` scalars of ``abinao.spinor_export``).
 
 i.e. per projector pair ``(i, j)`` the 2x2 spin operator is
 
@@ -342,9 +350,13 @@ def pauli_delta_blocks_from_components(
 
     The packed m_pawdij conventions are verified at parse level:
 
-    * ``dwn-up == conj(up-dwn)`` on the packed (upper-triangular) values —
-      the elementwise conjugation every Dij contributor enforces;
-    * ``up-up`` / ``dwn-dwn`` are real (Hermitian symmetric-packed storage).
+    * ``dwn-up == conj(up-dwn).T`` — the m_pawdij spinor packing
+      ``D^{ss'}_{ij} = conjg(D^{s's}_{ji})``: ``pawdij_print_dij`` fills the
+      lower triangle of each cross-spin block from ``conjg`` of the partner
+      component's packed values (``idij_sym = 7 - idij``, ``pawio_print_ij``
+      ``opt_sym=2``), so the printed full matrices satisfy exactly this;
+    * ``up-up`` / ``dwn-dwn`` are Hermitian (complex for ``cplex_dij=2`` SOC
+      prints, with antisymmetric imaginary parts).
 
     Returns ``(blocks, unit)`` with ``blocks`` of shape
     ``(natom, nproj_max, nproj_max, 2, 2)`` in units of ``Delta = 2 B.sigma``
@@ -379,21 +391,29 @@ def pauli_delta_blocks_from_components(
         if d1.shape != (ni, ni):
             raise ValueError(f"atom {atom}: non-square Dij block {d1.shape}")
 
-        iu = np.triu_indices(ni)
-        # m_pawdij: component 4 (dn-up) = conj(component 3 (up-dn)) elementwise.
-        conj_deviation = np.max(np.abs(d4[iu] - np.conj(d3[iu])))
+        # m_pawdij spinor packing: D^{ss'}_{ij} = conjg(D^{s's}_{ji}).
+        # pawdij_print_dij reconstructs each block's lower triangle from the
+        # partner component (idij_sym = 7 - idij, pawio_print_ij opt_sym=2),
+        # so the printed full matrices obey dwn-up = conj(up-dwn).T — the
+        # site indices transpose across the cross-spin blocks; elementwise
+        # conj only coincides for a symmetric up-dwn block.
+        conj_deviation = np.max(np.abs(d4 - np.conj(d3.T)))
         if conj_deviation > tol:
             raise ValueError(
-                f"atom {atom}: dwn-up block is not conj(up-dwn) "
+                f"atom {atom}: dwn-up block is not conj(up-dwn).T "
                 f"(max deviation {conj_deviation:.3e} {unit}); the parsed "
-                "blocks violate the m_pawdij packing convention"
+                "blocks violate the m_pawdij spinor packing "
+                "D^{ss'}_ij = conjg(D^{s's}_ji)"
             )
-        imag_deviation = max(np.max(np.abs(d1.imag)), np.max(np.abs(d2.imag)))
-        if imag_deviation > tol:
+        herm_deviation = max(
+            np.max(np.abs(d1 - np.conj(d1.T))),
+            np.max(np.abs(d2 - np.conj(d2.T))),
+        )
+        if herm_deviation > tol:
             raise ValueError(
-                f"atom {atom}: up-up/dwn-dwn blocks have significant imaginary "
-                f"parts (max {imag_deviation:.3e} {unit}); expected real "
-                "Hermitian symmetric-packed storage"
+                f"atom {atom}: up-up/dwn-dwn blocks are not Hermitian "
+                f"(max deviation {herm_deviation:.3e} {unit}); expected "
+                "Hermitian pawio_print_ij output (opt_sym=2 self-fill)"
             )
 
         blocks[row, :ni, :ni, 0, 0] = d1 - d2
