@@ -1,5 +1,7 @@
 """Tests for the VASP native PAW export reader."""
 
+import io
+
 import numpy as np
 import pytest
 
@@ -250,9 +252,7 @@ def _write_v6_expansion_section(
     if action_factory is not None:
         actions = action_factory(nproj, nspin, nkpt_bz)
     else:
-        actions = np.zeros(
-            (nproj, nproj, nspin, nkpt_bz), dtype=np.complex128
-        )
+        actions = np.zeros((nproj, nproj, nspin, nkpt_bz), dtype=np.complex128)
         for s in range(nspin):
             for k in range(nkpt_bz):
                 actions[:, :, s, k] = np.eye(nproj, dtype=np.complex128)
@@ -324,9 +324,9 @@ def _write_test_native_v6(path, *, nprod_padding=0, **kwargs):
         wr(ibz_kpts.T)
         wr(ibz_wts)
         wr(5.0)
-        eigenvalues = np.arange(
-            nband * nkpt_ibz * nspin, dtype=float
-        ).reshape(nband, nkpt_ibz, nspin, order="F")
+        eigenvalues = np.arange(nband * nkpt_ibz * nspin, dtype=float).reshape(
+            nband, nkpt_ibz, nspin, order="F"
+        )
         wr(eigenvalues)
         wr(np.full((nband, nkpt_ibz, nspin), 0.5, dtype=float))
 
@@ -365,9 +365,7 @@ def test_v6_read_expansion_plan_identity(tmp_path):
 
     assert isinstance(plan, VaspIbzExpansionPlan)
     assert plan.kpoint_storage_mode == 1
-    np.testing.assert_allclose(
-        plan.bz_kpoints[1], [0.0, 0.0, 0.5]
-    )
+    np.testing.assert_allclose(plan.bz_kpoints[1], [0.0, 0.0, 0.5])
     assert plan.source_spin.shape == (nspin, nkpt_bz)
     assert plan.source_spin.dtype == np.intp
     assert plan.conjugate.shape == (nspin, nkpt_bz)
@@ -424,9 +422,7 @@ def test_v6_read_expansion_plan_custom_action(tmp_path):
     nspin, nproj, nkpt_bz, nkpt_ibz = 2, 2, 4, 2
 
     def custom_actions(nproj, nspin, nkpt_bz):
-        acts = np.zeros(
-            (nproj, nproj, nspin, nkpt_bz), dtype=np.complex128
-        )
+        acts = np.zeros((nproj, nproj, nspin, nkpt_bz), dtype=np.complex128)
         acts[0, 0, 0, 0] = 0.5 + 0.5j
         acts[1, 0, 0, 0] = -0.5 + 0.5j
         acts[0, 1, 0, 0] = 0.5 - 0.5j
@@ -440,18 +436,14 @@ def test_v6_read_expansion_plan_custom_action(tmp_path):
     with open(path, "rb") as f:
         plan = _read_v6_expansion_plan(f, nspin, nproj, nkpt_ibz)
 
-    expected = np.array(
-        [[0.5 + 0.5j, 0.5 - 0.5j], [-0.5 + 0.5j, 0.5 + 0.5j]]
-    )
+    expected = np.array([[0.5 + 0.5j, 0.5 - 0.5j], [-0.5 + 0.5j, 0.5 + 0.5j]])
     np.testing.assert_allclose(plan.projector_actions[0, 0], expected)
 
 
 def test_v6_read_expansion_plan_rejects_bad_kpoint_mode(tmp_path):
     path = tmp_path / "plan.bin"
     with open(path, "wb") as f:
-        _write_v6_expansion_section(
-            f, 2, 4, 8, 2, bad_kpoint_mode=True
-        )
+        _write_v6_expansion_section(f, 2, 4, 8, 2, bad_kpoint_mode=True)
     with open(path, "rb") as f:
         with pytest.raises(ValueError, match="kpoint_storage_mode"):
             _read_v6_expansion_plan(f, 2, 4, 2)
@@ -460,9 +452,7 @@ def test_v6_read_expansion_plan_rejects_bad_kpoint_mode(tmp_path):
 def test_v6_read_expansion_plan_rejects_bad_parent(tmp_path):
     path = tmp_path / "plan.bin"
     with open(path, "wb") as f:
-        _write_v6_expansion_section(
-            f, 2, 4, 8, 2, bad_parent=True
-        )
+        _write_v6_expansion_section(f, 2, 4, 8, 2, bad_parent=True)
     with open(path, "rb") as f:
         with pytest.raises(ValueError, match="parent_ibz"):
             _read_v6_expansion_plan(f, 2, 4, 2)
@@ -471,9 +461,7 @@ def test_v6_read_expansion_plan_rejects_bad_parent(tmp_path):
 def test_v6_read_expansion_plan_rejects_bad_spin(tmp_path):
     path = tmp_path / "plan.bin"
     with open(path, "wb") as f:
-        _write_v6_expansion_section(
-            f, 2, 4, 8, 2, bad_spin=True
-        )
+        _write_v6_expansion_section(f, 2, 4, 8, 2, bad_spin=True)
     with open(path, "rb") as f:
         with pytest.raises(ValueError, match="source_spin"):
             _read_v6_expansion_plan(f, 2, 4, 2)
@@ -512,7 +500,6 @@ def test_read_vasp_native_v6_rejects_truncated_header(tmp_path):
         read_vasp_native(path)
 
 
-
 def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
     """Non-trivial action and conjugation route through to expanded coefficients."""
     path = tmp_path / "test_v6_action.bin"
@@ -529,9 +516,7 @@ def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
     lmax_max = 2
 
     # Parent CPROJ: fill IBZ point 0 spin-0 with a known pattern.
-    cproj_ibz = np.zeros(
-        (nprod_stream, nband, nkpt_ibz, nspin), dtype=np.complex128
-    )
+    cproj_ibz = np.zeros((nprod_stream, nband, nkpt_ibz, nspin), dtype=np.complex128)
     for n in range(nband):
         for p in range(nproj):
             cproj_ibz[p, n, 0, 0] = complex(n + 1, p + 1)
@@ -543,9 +528,7 @@ def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
     )
 
     def custom_actions(nproj, nspin, nkpt_bz):
-        acts = np.zeros(
-            (nproj, nproj, nspin, nkpt_bz), dtype=np.complex128
-        )
+        acts = np.zeros((nproj, nproj, nspin, nkpt_bz), dtype=np.complex128)
         for s in range(nspin):
             for k in range(nkpt_bz):
                 acts[:, :, s, k] = np.eye(nproj, dtype=np.complex128)
@@ -558,14 +541,15 @@ def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
     conj_flags[1, 0] = 1
 
     with open(path, "wb") as f:
+
         def wi(v):
             f.write(np.array(v, dtype="<i4").tobytes())
+
         def wr(v):
             f.write(np.asarray(v, dtype="<f8").tobytes(order="F"))
+
         def wc(v):
-            f.write(
-                np.asarray(v, dtype=complex).astype("<c16").tobytes(order="F")
-            )
+            f.write(np.asarray(v, dtype=complex).astype("<c16").tobytes(order="F"))
 
         wi(20260812)
         wi(6)
@@ -604,11 +588,13 @@ def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
         wr(np.zeros((nband, nkpt_ibz, nspin), dtype=float))
         wr(np.full((nband, nkpt_ibz, nspin), 0.5, dtype=float))
         wc(cproj_ibz)
-        wc(np.zeros(
-            (lmdim_max, lmdim_max, nions, 2),
-            dtype=np.complex128,
-            order="F",
-        ))
+        wc(
+            np.zeros(
+                (lmdim_max, lmdim_max, nions, 2),
+                dtype=np.complex128,
+                order="F",
+            )
+        )
 
     snapshot = read_vasp_native(path)
 
@@ -621,6 +607,81 @@ def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
     )
 
     # Verify identity action at spin=0, kpt=1 (parent=1, empty CPROJ).
-    np.testing.assert_allclose(
-        snapshot.coefficients[0, 1], 0.0, atol=1e-10
-    )
+    np.testing.assert_allclose(snapshot.coefficients[0, 1], 0.0, atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Merged single-file export: CSO section appended after the native stream
+# ---------------------------------------------------------------------------
+
+
+def _cso_section_bytes() -> bytes:
+    """Serialize a minimal v3 CSO dump exactly as ``TB2J_CSO_WRITE_DUMP`` does.
+
+    This mirrors the section the patched VASP export appends to the end of
+    ``tb2j_native.bin`` in single-file mode (magic 20260927, version 3,
+    then the record stream).  Kept inline so this suite does not depend on
+    the VASP_TB2J_patch repository.
+    """
+    nions, ntyp, lmdim, nmax = 2, 1, 2, 8
+    nkpts, nbands = 1, 1
+    buf = io.BytesIO()
+
+    def wi(v):
+        buf.write(np.array(v, dtype="<i4").tobytes())
+
+    def wr(v):
+        buf.write(np.array(v, dtype="<f8").tobytes())
+
+    wi([20260927, 3])
+    wi([nions, ntyp, lmdim, nmax, 4, 1])
+    wr([0.0, 0.0, 1.0])
+    wr([0.0, 0.0])
+    wi([2, nkpts, nbands, nbands])  # ispin, nkpts, nbands, nb_tot
+    wr([6.25])  # efermi
+    wi([20260812, 7])  # companion native identity
+    wi([2, 1])  # lmmax, lmax
+    wi([2])  # lps
+    wr([2.0, 4.0])  # zcore, zvalf_orig
+    buf.write(b"Fe")
+    wi([1, 1])  # ityp
+    wi([nmax, nmax])  # nmax_ion
+    wr(np.zeros(3 * nkpts))
+    wr(np.full(nkpts, 1.0 / nkpts))
+    buf.write(np.zeros((nions, 4, lmdim, lmdim), dtype="<c16").tobytes())
+    buf.write(np.zeros((nions, 4, lmdim, lmdim), dtype="<c16").tobytes())
+    wr(np.zeros(nmax * nions))
+    wr([14.39964, 7.45596e-6, 0.529177249])  # felect, invmc2, autoa
+    wr(np.zeros(nmax * nions))
+    return buf.getvalue()
+
+
+def test_read_vasp_native_tolerates_appended_cso_section(tmp_path):
+    """Merged single-file export leaves the native snapshot byte-for-byte.
+
+    The CSO dump section is appended after the native records; the reader
+    consumes declared counts only, so the trailing section must be invisible.
+    """
+    pristine = _write_test_native_v6(tmp_path / "pristine.bin")
+    merged = tmp_path / "tb2j_native.bin"
+    merged.write_bytes(pristine.read_bytes() + _cso_section_bytes())
+
+    expected = read_vasp_native(pristine)
+    snapshot = read_vasp_native(merged)
+
+    assert snapshot.kpoint_mode == expected.kpoint_mode
+    for name in (
+        "kpoints",
+        "weights",
+        "eigenvalues",
+        "occupations",
+        "coefficients",
+        "cell",
+        "positions",
+        "atomic_numbers",
+    ):
+        np.testing.assert_allclose(
+            getattr(snapshot, name), getattr(expected, name), atol=0, err_msg=name
+        )
+    assert snapshot.site_layout == expected.site_layout
+    assert dict(snapshot.provenance) == dict(expected.provenance)
