@@ -1,8 +1,11 @@
 """Real second-variational GPAW split-SOC driver gates (opt-in fixture)."""
 
+import hashlib
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from xml.etree import ElementTree
 
 import numpy as np
 import pytest
@@ -16,15 +19,32 @@ from TB2J.interfaces.gpaw_split_soc import (
 from TB2J.io_merge import Merger, read_pickle
 
 
+def _artifact_provenance(path):
+    text = (
+        path.read_text()
+        if path.suffix == ".out"
+        else "".join(ElementTree.parse(path).getroot().itertext())
+    )
+    return json.loads(
+        next(
+            line.split(": ", 1)[1]
+            for line in text.splitlines()
+            if line.startswith("split_soc_provenance: ")
+        )
+    )
+
+
 @pytest.mark.parametrize("nz", [12, 30])
-def test_two_level_contour_mae_matches_exact_curvature(nz):
+@pytest.mark.parametrize("fermi", [0.0, 6.3])
+def test_two_level_contour_mae_matches_exact_curvature(nz, fermi):
     # Lowest eigenvalue of [[-1, lambda*w], [lambda*w, 1]] is
     # -sqrt(1 + lambda**2*w**2); its lambda**2 coefficient is -w**2/2.
     w = 0.1
     leg = SimpleNamespace(
-        eigenvalues_strength0=np.array([[-1.0, 1.0]]),
+        eigenvalues_strength0=np.array([[-1.0, 1.0]]) + fermi,
         w_soc=np.array([[[0.0, w], [w, 0.0]]]),
         weights=np.array([1.0]),
+        efermi=fermi,
     )
     assert _contour_second_order_shift(leg, nz=nz, smearing_eV=0.05) == pytest.approx(
         -w * w / 2, abs=1e-7
@@ -91,7 +111,7 @@ def test_real_three_leg_merge_and_mae(tmp_path):
     checkpoint = Path(os.environ["TB2J_GPAW_SPLIT_SOC_GPW"])
     calc = GPAW(str(checkpoint), legacy_gpaw=True)
     out = gen_exchange_gpaw_split_soc(
-        calc,
+        str(checkpoint),
         output_path=tmp_path / "split",
         Rpts=np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]]),
         Rcut=4.0,
@@ -100,6 +120,7 @@ def test_real_three_leg_merge_and_mae(tmp_path):
         magnetic_sites=[0, 1],
     )
     assert set(out["leg_paths"]) == {"x", "y", "z"}
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     for direction, path in out["leg_paths"].items():
         obj = read_pickle(str(path))
         axis = np.eye(3)[{"x": 0, "y": 1, "z": 2}[direction]]
@@ -109,12 +130,32 @@ def test_real_three_leg_merge_and_mae(tmp_path):
             atol=1e-14,
         )
         assert obj.exchange_Jdict
+        provenance = obj.split_soc_provenance
+        assert provenance == out["metadata"][direction]
+        assert provenance["strength0_reference"]["sha256"] == digest
+        study = provenance["band_window"]["convergence_study"]
+        assert len(study["windows"]) == 2
+        assert study["windows"][0]["nband"] < study["windows"][1]["nband"]
+        assert study["windows"][1]["Jiso"]["[0,0,0]"] == pytest.approx(
+            obj.exchange_Jdict[((0, 0, 0), 0, 1)], abs=1e-12
+        )
+        for artifact in (path / "exchange.out", path / "Multibinit" / "exchange.xml"):
+            assert _artifact_provenance(artifact) == provenance
     merger = Merger(*(str(p) for p in out["leg_paths"].values()))
     assert all(
         np.linalg.matrix_rank(a, tol=1e-2) == 6 for a in merger.coeff_matrix.values()
     )
     merged = read_pickle(str(out["merged_path"]))
     assert merged.exchange_Jdict
+    assert merged.split_soc_provenance["merge_mode"] == "three_legs"
+    assert merged.split_soc_provenance["legs"] == out["metadata"]
+    for artifact in (
+        out["merged_path"] / "exchange.out",
+        out["merged_path"] / "Multibinit" / "exchange.xml",
+    ):
+        assert _artifact_provenance(artifact) == merged.split_soc_provenance
+    report = json.loads((tmp_path / "split" / "split_soc_report.json").read_text())
+    assert report["metadata"] == out["metadata"]
     for direction, angles in {"x": (90, 0), "y": (90, 90), "z": (0, 0)}.items():
         direct = soc_eigenstates(
             calc, theta=angles[0], phi=angles[1], projected=False

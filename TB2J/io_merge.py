@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import warnings
 from itertools import combinations_with_replacement
@@ -225,13 +226,24 @@ class Merger:
 
 
 def merge(
-    *paths, main_path=None, save=True, write_path="TB2J_results", collinear_tol=1e-2
+    *paths,
+    main_path=None,
+    save=True,
+    write_path="TB2J_results",
+    collinear_tol=1e-2,
+    merged_provenance=None,
 ):
     m = Merger(*paths, main_path=main_path, collinear_tol=collinear_tol)
     m.merge_Jiso()
     m.merge_DMI()
     m.merge_Jani()
     m.standardize()
+    if merged_provenance is not None:
+        m.main_dat.split_soc_provenance = merged_provenance
+        m.main_dat.description = (
+            f"Merged TB2J exchange from {len(paths)} input legs.\n"
+            "split_soc_provenance: " + json.dumps(merged_provenance, sort_keys=True)
+        )
 
     if save:
         m.main_dat.write_all(path=write_path)

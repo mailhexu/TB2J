@@ -20,7 +20,28 @@ from TB2J.interfaces.gpaw_spinor_split_soc import (
 from TB2J.io_exchange.io_exchange import SpinIO
 from TB2J.io_merge import merge
 from TB2J.mycfr import CFR
-from TB2J.split_soc_kernel import compute_ks_split_soc_exchange
+from TB2J.split_soc_kernel import (
+    band_window_convergence_report,
+    compute_ks_split_soc_exchange,
+)
+
+
+def _json_safe(value):
+    """Convert array values and R-tuple keys without discarding window data."""
+    if isinstance(value, dict):
+        return {
+            json.dumps(key, separators=(",", ":"))
+            if isinstance(key, tuple)
+            else str(key): _json_safe(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, np.ndarray):
+        return _json_safe(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (tuple, list)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _magnetic_sites(calc, indices):
@@ -42,7 +63,9 @@ def _magnetic_sites(calc, indices):
     return sites, moments
 
 
-def _write_leg(path, data, exchange, sites, moments, axis, rotation, rcut):
+def _write_leg(
+    path, data, exchange, sites, moments, axis, rotation, rcut, metadata=None
+):
     """Write the rotated physical tensor and per-leg spin axes for io_merge."""
     atoms = Atoms(
         numbers=data.atomic_numbers,
@@ -71,7 +94,7 @@ def _write_leg(path, data, exchange, sites, moments, axis, rotation, rcut):
         jani[key] = apply_frame_rotation(entry["jani"], rotation)
     if not jiso:
         raise ValueError("no magnetic pairs lie within Rcut; increase the cutoff")
-    SpinIO(
+    spinio = SpinIO(
         atoms=atoms,
         charges=np.zeros(len(atoms)),
         spinat=spinat,
@@ -85,8 +108,16 @@ def _write_leg(path, data, exchange, sites, moments, axis, rotation, rcut):
             "GPAW split-SOC second-variational leg, strength-0 collinear frozen "
             "density; all-atom W_SO, magnetic-only PAW XC/+U vertices; "
             "tensor rotated psi->lattice before three-leg merge."
+            + (
+                "\nsplit_soc_provenance: " + json.dumps(metadata, sort_keys=True)
+                if metadata is not None
+                else ""
+            )
         ),
-    ).write_all(path=str(path))
+    )
+    if metadata is not None:
+        spinio.split_soc_provenance = metadata
+    spinio.write_all(path=str(path))
 
 
 def _contour_second_order_shift(leg, nz, smearing_eV):
@@ -100,7 +131,7 @@ def _contour_second_order_shift(leg, nz, smearing_eV):
     weighted_w2 = np.abs(leg.w_soc) ** 2 * leg.weights[:, None, None]
     values = []
     for energy in contour.path:
-        g = 1.0 / (energy - leg.eigenvalues_strength0)
+        g = 1.0 / (energy + leg.efermi - leg.eigenvalues_strength0)
         values.append(np.einsum("knm,kn,km->", weighted_w2, g, g, optimize=True))
     return -float(np.imag(contour.integrate_values(np.asarray(values)))) / (2.0 * np.pi)
 
@@ -178,6 +209,22 @@ def gen_exchange_gpaw_split_soc(
                 "merge_mode": "three_legs",
             },
         )
+        if data.nband < 4 or data.nband % 2:
+            raise ValueError(
+                "window convergence requires at least two paired spinor band windows"
+            )
+        study = band_window_convergence_report(
+            data,
+            leg.w_soc,
+            [data.nband - 2, data.nband],
+            pair=(sites[0], sites[1] if len(sites) > 1 else sites[0]),
+            Rpts=rpts,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            sites=sites,
+        )
+        result["metadata"]["band_window"]["convergence_study"] = _json_safe(study)
+        leg_metadata = _json_safe(result["metadata"])
         leg_path = output / direction
         _write_leg(
             leg_path,
@@ -188,6 +235,7 @@ def gen_exchange_gpaw_split_soc(
             leg.axis,
             leg.rotation,
             Rcut,
+            metadata=leg_metadata,
         )
         leg_paths[direction] = leg_path
         mae[direction] = {
@@ -198,7 +246,7 @@ def gen_exchange_gpaw_split_soc(
                 leg, nz, smearing_eV
             ),
         }
-        metadata[direction] = result["metadata"]
+        metadata[direction] = leg_metadata
     reference = mae["z"]["band_energy_eV"]
     contour_reference = mae["z"]["contour_second_order_shift_eV"]
     for row in mae.values():
@@ -218,6 +266,7 @@ def gen_exchange_gpaw_split_soc(
         *(str(leg_paths[name]) for name in LEG_AXES),
         save=True,
         write_path=str(merged_path),
+        merged_provenance={"merge_mode": "three_legs", "legs": metadata},
     )
     output.mkdir(parents=True, exist_ok=True)
     (output / "split_soc_report.json").write_text(
@@ -229,9 +278,6 @@ def gen_exchange_gpaw_split_soc(
                 "metadata": metadata,
             },
             indent=2,
-            default=lambda value: value.tolist()
-            if isinstance(value, np.ndarray)
-            else str(value),
         )
         + "\n"
     )

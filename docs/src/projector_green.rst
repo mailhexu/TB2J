@@ -243,6 +243,15 @@ before assigning a physical error bar. The saved per-leg metadata includes
 the strength-zero reference, PAW operator source, band window, spin frame,
 and merge mode.
 
+The contour resolvent is referenced to the strength-zero Fermi energy
+(``G0(z) = [z + mu - H0]**-1``); a nonzero GPAW Fermi level cannot be
+omitted. Each leg records an actual two-window, paired-band prefix study
+at the production k mesh, R grid, contour, and smearing, with a measured
+change and explicit ``converged`` flag. The study may report **not converged**
+and must not be read as a convergence certificate. The SHA-256, operator
+coverage, frame, and study are embedded in each leg
+``TB2J.pickle``, ``exchange.out``, ``Multibinit/exchange.xml``, and in the
+merged artifacts as three distinct leg records; the JSON report mirrors them.
 
 The input checkpoint path and SHA-256 are recorded when invoked from a file.
 The executable fcc Ni example also generates that file when ``--build`` is
