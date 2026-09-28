@@ -720,9 +720,7 @@ def gen_exchange_vasp_split_soc(
                 "Increase Rcut."
             )
 
-    from TB2J.io_merge import merge
-
-    merge(*[str(p) for p in leg_paths], write_path=str(output_path))
+    _merge_leg_results(leg_paths, output_path)
 
     provenance = {
         "schema": "tb2j.vasp_split_soc_provenance/1.0",
@@ -753,3 +751,17 @@ def gen_exchange_vasp_split_soc(
     with open(output_path / "split_soc_provenance.json", "w") as handle:
         json.dump(provenance, handle, indent=2, default=str)
     return output_path
+
+
+def _merge_leg_results(leg_paths, output_path):
+    """Merge the per-leg results into ``output_path``.
+
+    Seam for the rank-9 raw-tensor merge cutover: currently the legacy
+    :func:`TB2J.io_merge.merge` (its Jani/DMI stage is invalid — see the
+    gen_exchange_vasp_split_soc quarantine note); it will be replaced by
+    ``TB2J.split_soc_kernel.merge_transverse_legs`` once the tangent-core
+    contract lands, with the raw per-leg tensors as inputs.
+    """
+    from TB2J.io_merge import merge
+
+    merge(*[str(p) for p in leg_paths], write_path=str(output_path))
