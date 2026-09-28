@@ -8,11 +8,12 @@ Gamma-only export has a vanishing SOC-off exchange and is not a useful
 fixture: use a full-Brillouin-zone k-point list.
 
 With ``--anchor`` the script additionally reruns the three legs with
-``lam=0`` and compares them, shell by shell, against the collinear
-``delta_total`` projector exchange computed directly from the same file.
-The exported total energy is identical with and without the SOC export, so
-this anchor must close to numerical precision; a Gamma-only fixture would
-make the comparison vacuous (baseline below ``--anchor_baseline``).
+``lam=0`` and compares each leg's raw transverse block, entry by entry,
+against the collinear ``delta_total`` projector exchange computed
+directly from the same file.  The exported total energy is identical
+with and without the SOC export, so this anchor must close to numerical
+precision; a Gamma-only fixture would make the comparison vacuous
+(baseline below ``--anchor_baseline``).
 """
 
 from __future__ import annotations
@@ -25,31 +26,64 @@ import numpy as np
 from TB2J.interfaces.abinit_paw_split_soc import gen_exchange_abinit_paw_split_soc
 
 
-def _first_shell_rows(pickle_path: Path, site: int = 0) -> dict:
-    """Exchange values (eV) of the shortest nonzero R of one site pair."""
-    from TB2J.io_merge import read_pickle
+def _leg_tensors(leg_dir: Path):
+    """Load one leg's raw lattice-frame ``(pair_keys, J_leg, axis)`` arrays."""
+    npz = np.load(Path(leg_dir) / "split_soc_leg.npz")
+    keys = [tuple(int(v) for v in key) for key in npz["pair_keys"]]
+    return (
+        keys,
+        np.asarray(npz["J_leg"], dtype=float),
+        np.asarray(npz["axis"], dtype=float),
+    )
 
-    jdict = read_pickle(str(pickle_path)).exchange_Jdict
-    shells = {
-        key: value
-        for key, value in jdict.items()
-        if key[1] == site and key[2] == site and any(key[0])
-    }
+
+def _first_shell_indices(keys, site: int) -> list:
+    """Indices/keys of the shortest nonzero R of one site pair."""
+    shells = [
+        item
+        for item in enumerate(keys)
+        if item[1][1] == site and item[1][2] == site and any(item[1][0])
+    ]
     if not shells:
-        return {}
-    rmin = min(np.linalg.norm(key[0]) for key in shells)
+        return []
+    rmin = min(np.linalg.norm(np.asarray(key[0])) for _, key in shells)
+    return [item for item in shells if np.linalg.norm(np.asarray(item[1][0])) == rmin]
+
+
+def _first_shell_rows(pickle_path: Path, site: int = 0) -> dict:
+    """Merged J_iso (meV) of the shortest nonzero R of one site pair."""
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    jdict = SpinIO.load_pickle(path=str(pickle_path)).exchange_Jdict
+    keys = list(jdict)
     return {
-        str(key): float(value * 1e3)
-        for key, value in shells.items()
-        if np.linalg.norm(key[0]) == rmin
+        str(key): float(jdict[key] * 1e3) for _, key in _first_shell_indices(keys, site)
     }
+
+
+def _leg_transverse_deviation(leg_dir: Path, reference: dict) -> float:
+    """Max |J_leg[a, b] - J_ref| over transverse (a, b != n) entries."""
+    keys, j_leg, axis = _leg_tensors(leg_dir)
+    n = int(np.argmax(np.abs(axis)))
+    if set(keys) != set(reference):
+        missing = set(reference) - set(keys)
+        raise SystemExit(
+            f"{leg_dir}: anchor shells {sorted(missing)} "
+            "are missing from the collinear reference"
+        )
+    return max(
+        abs(float(j_leg[idx, a, b]) - float(reference[key]))
+        for idx, key in enumerate(keys)
+        for a in range(3)
+        for b in range(3)
+        if a != n and b != n
+    )
 
 
 def run_anchor(filename, sites, rpts, nz, smearing_eV, output_path, tol, baseline):
-    """Compare lam=0 legs against the collinear delta_total exchange."""
+    """Compare lam=0 leg transverse blocks against the collinear exchange."""
     from TB2J.interfaces.abinit_savetb2j import load_abinit_savetb2j
     from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
-    from TB2J.io_merge import read_pickle
 
     rpts = np.asarray(rpts, dtype=int).reshape(-1, 3)
     data = load_abinit_savetb2j(filename)
@@ -79,17 +113,10 @@ def run_anchor(filename, sites, rpts, nz, smearing_eV, output_path, tol, baselin
     )
     deviations = {}
     for direction, path in out["leg_paths"].items():
-        actual = read_pickle(str(path)).exchange_Jdict
-        missing = set(actual) - set(reference)
-        if missing:
-            raise SystemExit(
-                f"{direction}: anchor shells {sorted(map(tuple, missing))} "
-                "are missing from the collinear reference"
-            )
-        deviations[direction] = max(abs(actual[key] - reference[key]) for key in actual)
+        deviations[direction] = _leg_transverse_deviation(Path(path), reference)
         print(
-            f"anchor {direction}: max |J_leg - J_collinear| = "
-            f"{deviations[direction]:.3e} eV over {len(actual)} shells"
+            f"anchor {direction}: max |J_leg_transverse - J_collinear| = "
+            f"{deviations[direction]:.3e} eV over {len(reference)} shells"
         )
     worst = max(deviations.values())
     if worst > tol:
@@ -161,11 +188,16 @@ def main(argv=None) -> None:
     merged = Path(result["output_path"])
     print(f"Merged exchange: {merged / 'exchange.out'}")
     for direction, path in result["leg_paths"].items():
-        rows = _first_shell_rows(Path(path), site=sites[0])
-        for key, value in rows.items():
-            print(f"leg {direction} J_iso({key}) = {value:+.6f} meV")
-    rows = _first_shell_rows(merged, site=sites[0])
-    for key, value in rows.items():
+        keys, j_leg, axis = _leg_tensors(Path(path))
+        n = int(np.argmax(np.abs(axis)))
+        for idx, key in _first_shell_indices(keys, site=sites[0]):
+            diag = [j_leg[idx, a, a] * 1e3 for a in range(3) if a != n]
+            print(
+                f"leg {direction} transverse diag {key} = "
+                + " ".join(f"{value:+.6f}" for value in diag)
+                + " meV"
+            )
+    for key, value in _first_shell_rows(merged, site=sites[0]).items():
         print(f"merged J_iso({key}) = {value:+.6f} meV")
 
     if args.anchor:

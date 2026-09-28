@@ -26,7 +26,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from xml.etree import ElementTree
 
 import numpy as np
 import pytest
@@ -514,10 +513,10 @@ def test_soc_off_leg_matches_collinear_kernel_shell_by_shell(tmp_path):
         (tuple(r), i, j) for r in map(tuple, rpts) for i in sites for j in sites
     }
     for (r, i, j), entry in result["exchange"].items():
-        assert entry["Jiso"] == pytest.approx(
+        assert entry["J_leg"][0, 0] == pytest.approx(
             reference[(r, i, j)], rel=1e-8, abs=1e-10
         ), (r, i, j)
-        assert np.linalg.norm(entry["dmi"]) < 1e-9
+        assert entry["J_leg"][1, 1] == pytest.approx(entry["J_leg"][0, 0], abs=1e-10)
 
 
 # ---------------------------------------------------------------------------
@@ -687,11 +686,10 @@ def test_ligand_soc_enters_propagator_not_vertex(tmp_path):
     )
     pairs = [k for k in res["exchange"] if k[0] != (0, 0, 0)]
     assert any(
-        not np.isclose(
-            res["exchange"][k]["Jiso"], res_off["exchange"][k]["Jiso"], atol=1e-9
-        )
+        np.linalg.norm(res["exchange"][k]["J_leg"] - res_off["exchange"][k]["J_leg"])
+        > 1e-9
         for k in pairs
-    ), "ligand SOC must affect the propagator"
+    ), "ligand SOC must affect the magnetic transverse response"
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +721,9 @@ def test_driver_three_leg_rotate_merge(tmp_path):
     )
 
     filename = tmp_path / "driver.nc"
-    write_soc_pauli_savetb2j_fixture(filename)
+    write_soc_pauli_savetb2j_fixture(
+        filename, soc_blocks_hartree=np.zeros((2, 2, 2, 2, 2), dtype=complex)
+    )
     rpts = np.array(
         [(i, j, k) for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)],
         dtype=int,
@@ -740,71 +740,40 @@ def test_driver_three_leg_rotate_merge(tmp_path):
     assert (merged_dir / "TB2J.pickle").exists()
     assert (merged_dir / "exchange.out").exists()
     assert (merged_dir / "split_soc_provenance.json").exists()
+    from TB2J.io_merge import read_pickle
+
     for leg in ("x", "y", "z"):
         leg_dir = tmp_path / "TB2J_split_soc" / f"leg_{leg}"
-        assert (leg_dir / "TB2J.pickle").exists()
+        assert not (leg_dir / "TB2J.pickle").exists()
         meta = json.loads((leg_dir / "split_soc_provenance.json").read_text())
-        assert meta["merge_mode"] == "three_leg_rotate_merge"
         assert meta["frame"]["leg"] == leg
-        study = meta["band_window"]["convergence_study"]
-        assert [row["nband"] for row in study["windows"]] == [4, 6]
+        assert [
+            row["nband"] for row in meta["band_window"]["convergence_study"]["windows"]
+        ] == [4, 6]
         assert (
             meta["strength0_reference"]["sha256"]
             == hashlib.sha256(filename.read_bytes()).hexdigest()
         )
-        from TB2J.io_merge import read_pickle
-
-        sio = read_pickle(str(leg_dir))
-        assert study["windows"][-1]["Jiso"]["[1,0,0]"] == pytest.approx(
-            sio.exchange_Jdict[((1, 0, 0), 0, 0)], abs=1e-12
-        )
-        assert sio.split_soc_provenance == meta
-        for text in (
-            (leg_dir / "exchange.out").read_text(),
-            "".join(
-                ElementTree.parse(leg_dir / "Multibinit/exchange.xml")
-                .getroot()
-                .itertext()
-            ),
-        ):
-            assert (
-                json.loads(
-                    next(
-                        line.split(": ", 1)[1]
-                        for line in text.splitlines()
-                        if line.startswith("split_soc_provenance: ")
-                    )
+        with np.load(leg_dir / "split_soc_leg.npz") as raw:
+            axis = "xyz".index(leg)
+            np.testing.assert_allclose(raw["J_leg"][:, axis, :], 0, atol=1e-12)
+            for row, jl in zip(raw["pair_keys"], raw["J_leg"]):
+                key = (tuple(int(v) for v in row[:3]), int(row[3]), int(row[4]))
+                tensor = out["merged_exchange"][key]["tensor"]
+                other = [i for i in range(3) if i != axis]
+                np.testing.assert_allclose(
+                    tensor[np.ix_(other, other)], jl[np.ix_(other, other)], atol=1e-10
                 )
-                == meta
-            )
-
-    # The merge solves a rank-six anisotropy system and then moves its
-    # isotropic trace into Jiso. The final traceless Jani cannot be used
-    # to reconstruct that pre-standardization trace from leg scalars.
-    from TB2J.io_merge import Merger, read_pickle
-
-    merger = Merger(*(str(out["leg_paths"][leg]) for leg in ("x", "y", "z")))
-    assert merger.coeff_matrix
-    assert all(
-        np.linalg.matrix_rank(coeff, tol=1e-2) == 6
-        for coeff in merger.coeff_matrix.values()
-    )
     merged = read_pickle(str(merged_dir))
     assert merged.exchange_Jdict
     assert merged.split_soc_provenance == out["metadata"]
-    assert merged.split_soc_provenance["legs"] == out["leg_metadata"]
+    assert merged.split_soc_provenance["merge_diagnostics"]["min_rank"] == 9
+    np.testing.assert_allclose(merged.spinat[0], [0, 0, -1], atol=1e-12)
     for key, value in merged.exchange_Jdict.items():
         assert np.isfinite(value)
         jani = merged.Jani_dict[key]
         np.testing.assert_allclose(jani, jani.T, atol=1e-12)
         assert abs(np.trace(jani)) < 1e-11
-    for leg in ("x", "y", "z"):
-        sio = read_pickle(str(out["leg_paths"][leg]))
-        np.testing.assert_allclose(
-            sio.spinat[0] / np.linalg.norm(sio.spinat[0]),
-            -np.eye(3)["xyz".index(leg)],
-            atol=1e-12,
-        )
 
 
 def test_driver_refuses_to_assume_ligand_is_magnetic(tmp_path):
@@ -832,7 +801,9 @@ def test_afm_leg_writes_opposite_site_axes(tmp_path):
     from TB2J.io_merge import read_pickle
 
     source = tmp_path / "afm.nc"
-    write_soc_pauli_savetb2j_fixture(source)
+    write_soc_pauli_savetb2j_fixture(
+        source, soc_blocks_hartree=np.zeros((2, 2, 2, 2, 2), dtype=complex)
+    )
     with nc4.Dataset(source, "a") as nc:
         ops = nc.groups["operators"]
         for variable in (
@@ -855,46 +826,9 @@ def test_afm_leg_writes_opposite_site_axes(tmp_path):
         Rpts=rpts,
         nz=12,
     )
-    for direction, path in out["leg_paths"].items():
-        sio = read_pickle(str(path))
-        np.testing.assert_allclose(
-            sio.spinat[0], -np.eye(3)["xyz".index(direction)], atol=1e-12
-        )
-        np.testing.assert_allclose(sio.spinat[1], -sio.spinat[0])
-
-
-def test_driver_output_rotation_formula(tmp_path):
-    pytest.importorskip("netCDF4")
-    from TB2J.interfaces.abinit_paw_split_soc import (
-        _rotate_entry_tensors,
-        rotation_matrix_from_su2,
-        su2_leg_rotation,
-    )
-
-    rng = np.random.default_rng(5)
-    entry = {
-        "Jiso": 0.3,
-        "dmi": rng.normal(size=3),
-        "jani": rng.normal(size=(3, 3)),
-    }
-    entry["jani"] = (entry["jani"] + entry["jani"].T) / 2
-    entry["tensor"] = (
-        entry["Jiso"] * np.eye(3)
-        + 0.5 * (entry["dmi"][:, None] - entry["dmi"][None, :])
-        + 0.5 * (entry["jani"] + entry["jani"].T)
-    )
-    for leg in ("x", "y", "z"):
-        o = rotation_matrix_from_su2(su2_leg_rotation(leg))
-        out = _rotate_entry_tensors(dict(entry), o)
-        np.testing.assert_allclose(out["Jiso"], entry["Jiso"])
-        np.testing.assert_allclose(out["dmi"], o @ entry["dmi"], atol=1e-12)
-        np.testing.assert_allclose(out["jani"], o @ entry["jani"] @ o.T, atol=1e-12)
-        expected_tensor = (
-            entry["Jiso"] * np.eye(3)
-            + 0.5 * (out["dmi"][:, None] - out["dmi"][None, :])
-            + 0.5 * (out["jani"] + out["jani"].T)
-        )
-        np.testing.assert_allclose(out["tensor"], expected_tensor, atol=1e-12)
+    sio = read_pickle(str(out["output_path"]))
+    np.testing.assert_allclose(sio.spinat[0], [0, 0, -1], atol=1e-12)
+    np.testing.assert_allclose(sio.spinat[1], -sio.spinat[0], atol=1e-12)
 
 
 # ---------------------------------------------------------------------------

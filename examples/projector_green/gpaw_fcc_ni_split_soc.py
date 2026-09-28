@@ -1,4 +1,4 @@
-"""Run the real fcc Ni split-SOC GPAW symmetry, rank-six, and MAE gate.
+"""Run the real fcc Ni split-SOC GPAW rank-nine merge and MAE gate.
 
 First run ``--build`` to generate a no-SOC legacy GPAW checkpoint, then reuse
 that one checkpoint for every x/y/z SOC leg. Serial execution is required.
@@ -14,7 +14,6 @@ import numpy as np
 from ase import Atoms
 
 from TB2J.interfaces.gpaw_split_soc import gen_exchange_gpaw_split_soc
-from TB2J.io_merge import Merger, read_pickle
 
 
 def build_collinear_ni(path: Path) -> None:
@@ -43,10 +42,21 @@ def build_collinear_ni(path: Path) -> None:
     calc.write(str(path), mode="all")
 
 
+def _nearest_neighbour_pairs(merged) -> list:
+    """Non-on-site (R, i, j) keys nearest-neighbour along the ±x/±y/±z axes."""
+    return [
+        key
+        for key in merged.exchange_Jdict
+        if key[0] != (0, 0, 0) and int(np.abs(np.asarray(key[0])).max()) == 1
+    ]
+
+
 def run_gate(checkpoint: Path, output_path: Path) -> dict:
     """Run x/y/z second variation, then check full-BZ cubic/inversion nulls."""
     from gpaw import GPAW
     from gpaw.spinorbit import soc_eigenstates
+
+    from TB2J.io_exchange.io_exchange import SpinIO
 
     rpts = np.array(
         [(0, 0, 0)]
@@ -61,29 +71,29 @@ def run_gate(checkpoint: Path, output_path: Path) -> dict:
         smearing_eV=0.05,
         magnetic_sites=[0],
     )
-    legs = {name: read_pickle(str(path)) for name, path in result["leg_paths"].items()}
-    merged = read_pickle(str(result["merged_path"]))
-    ranks = [
-        int(np.linalg.matrix_rank(matrix, tol=1e-2))
-        for matrix in Merger(
-            *(str(path) for path in result["leg_paths"].values())
-        ).coeff_matrix.values()
-    ]
-    assert ranks and all(rank == 6 for rank in ranks), ranks
-    pairs = {}
-    for key, value in merged.exchange_Jdict.items():
-        if key[0] == (0, 0, 0):
-            continue
-        jlegs = [leg.exchange_Jdict[key] for leg in legs.values()]
-        pairs[str(key)] = {
-            "Jiso_meV": float(value * 1e3),
-            "Jiso_spread_meV": float((max(jlegs) - min(jlegs)) * 1e3),
+    report = json.loads((Path(output_path) / "split_soc_report.json").read_text())
+    diag = report["merge_diagnostics"]
+    assert diag["min_rank"] == 9, diag
+    assert diag["max_repeat_deviation"] <= 5e-5, diag
+    assert diag["max_transverse_mask_residual"] < 1e-8, diag
+
+    merged = SpinIO.load_pickle(path=str(result["merged_path"]))
+    nn_keys = _nearest_neighbour_pairs(merged)
+    assert len(nn_keys) == 6, nn_keys
+    jiso = [merged.exchange_Jdict[key] for key in nn_keys]
+    pairs = {
+        str(key): {
+            "Jiso_meV": float(merged.exchange_Jdict[key] * 1e3),
             "DMI_norm_meV": float(np.linalg.norm(merged.dmi_ddict[key]) * 1e3),
             "Jani_norm_meV": float(np.linalg.norm(merged.Jani_dict[key]) * 1e3),
         }
-    assert pairs and max(row["Jiso_spread_meV"] for row in pairs.values()) < 0.005
+        for key in nn_keys
+    }
+    # cubic shells share one Jiso; inversion + O_h null the anisotropic parts
+    assert (max(jiso) - min(jiso)) * 1e3 < 0.005, jiso
     assert max(row["DMI_norm_meV"] for row in pairs.values()) < 1e-6
     assert max(row["Jani_norm_meV"] for row in pairs.values()) < 0.02
+
     calc = GPAW(str(checkpoint), legacy_gpaw=True)
     for name, (theta, phi) in {"x": (90, 0), "y": (90, 90), "z": (0, 0)}.items():
         direct = soc_eigenstates(
@@ -91,11 +101,16 @@ def run_gate(checkpoint: Path, output_path: Path) -> dict:
         ).calculate_band_energy()
         assert result["mae"][name]["band_energy_eV"] == direct
         assert result["mae"][name]["contour_within_tolerance"]
-    report = {"rank": ranks, "pairs": pairs, "mae": result["mae"]}
+
+    gate = {
+        "merge_diagnostics": diag,
+        "pairs": pairs,
+        "mae": result["mae"],
+    }
     (output_path / "ni_symmetry_gate.json").write_text(
-        json.dumps(report, indent=2) + "\n"
+        json.dumps(gate, indent=2) + "\n"
     )
-    return report
+    return gate
 
 
 def main(argv=None) -> None:

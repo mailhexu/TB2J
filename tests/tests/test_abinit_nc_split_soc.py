@@ -46,15 +46,13 @@ def _synthetic_pao_hs(path, rng, nkpt=2, nband=3, nproj_site=4, nsites=2):
     nproj = nproj_site * nsites
     cell = np.eye(3) * 6.0
     positions = np.array([[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]])
-    kpts = np.array([[0.0, 0.0, 0.0], [0.37, -0.21, 0.11]])
+    kpts = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
     weights = np.full(nkpt, 1.0 / nkpt)
     eigenvalues = np.sort(rng.normal(loc=1.0, scale=2.0, size=(2, nkpt, nband)), axis=2)
-    coefficients = rng.normal(size=(2, nkpt, nband, nproj)) + 1j * rng.normal(
-        size=(2, nkpt, nband, nproj)
-    )
-    overlap = _hermitian(rng, nkpt, nproj, nproj)
+    coefficients = rng.normal(size=(2, nkpt, nband, nproj))
+    overlap = np.real(_hermitian(rng, nkpt, nproj, nproj))
     overlap += np.eye(nproj)[None] * (2.0 + nproj)
-    delta = _hermitian(rng, nsites, nproj_site, nproj_site)
+    delta = np.real(_hermitian(rng, nsites, nproj_site, nproj_site))
     for site in range(nsites):
         delta[site, 0, 0] += 0.4 * (site + 1)
 
@@ -374,32 +372,54 @@ def test_dualize_matches_inverse_overlap_mode(synthetic_dimer):
 
 def test_build_leg_composite_mapping_and_vertices(synthetic_dimer):
     pytest.importorskip("netCDF4")
-    from TB2J.interfaces.abinit_nc_split_soc import build_nc_split_soc_leg
+    from TB2J.interfaces.abinit_nc_split_soc import (
+        build_nc_split_soc_leg,
+        build_nc_split_soc_reference,
+    )
     from TB2J.interfaces.abinit_savetb2j import load_abinit_nc_pao_savetb2j
+    from TB2J.split_soc_kernel import split_soc_frame_report
 
     pao, sidecar_path = synthetic_dimer
     data = load_abinit_nc_pao_savetb2j(pao)
     sidecar = load_soc_ks_sidecar(sidecar_path)
     dual = dualize_pao_coefficients(data)
-    leg = build_nc_split_soc_leg(sidecar, dual, leg="z", sites_magnetic=[0, 1])
-    assert leg.nspinor == 2
-    assert leg.coefficients.shape == (1, data.nkpt, 2 * data.nband, 2, data.nproj)
+    reference = build_nc_split_soc_reference(sidecar, dual, sites_magnetic=[0, 1])
+    assert reference.nspinor == 2
+    assert reference.coefficients.shape == (1, data.nkpt, 2 * data.nband, 2, data.nproj)
     for spin in range(2):
         np.testing.assert_array_equal(
-            leg.eigenvalues[0, :, spin::2], data.eigenvalues[spin]
+            reference.eigenvalues[0, :, spin::2], data.eigenvalues[spin]
         )
         np.testing.assert_array_equal(
-            leg.coefficients[0, :, spin::2, spin, :], dual.coefficients[spin]
+            reference.coefficients[0, :, spin::2, spin, :], dual.coefficients[spin]
         )
         other = 1 - spin
-        np.testing.assert_array_equal(leg.coefficients[0, :, spin::2, other, :], 0.0)
+        np.testing.assert_array_equal(
+            reference.coefficients[0, :, spin::2, other, :], 0.0
+        )
     nproj_site = data.site_nproj[0]
-    vertex = leg.spinor_operator[0, :nproj_site, :nproj_site]
+    vertex = reference.spinor_operator[0, :nproj_site, :nproj_site]
     assert np.abs(vertex[:, :, 0, 1]).max() == 0.0
     delta = data.get_operator_component("delta_total", site=0)
     np.testing.assert_allclose(vertex[:, :, 0, 0], delta)
     # V = Delta (x) sigma_z: the sigma_down block carries -Delta
     np.testing.assert_allclose(vertex[:, :, 1, 1], -delta)
+
+    # the x leg is a genuine SU(2) rotation of the reference: the measured
+    # vertex direction moves to +x and the spectrum is unchanged
+    leg_x = build_nc_split_soc_leg(
+        sidecar, dual, leg="x", sites_magnetic=[0, 1], reference=reference
+    )
+    np.testing.assert_array_equal(leg_x.eigenvalues, reference.eigenvalues)
+    report = split_soc_frame_report(
+        leg_x,
+        axis=np.array([1.0, 0.0, 0.0]),
+        reference_data=reference,
+        sites=[0, 1],
+    )
+    assert report["ok"], report
+    assert abs(report["site_cosine"][0]) == pytest.approx(1.0)
+    assert report["eigenvalue_residual"] == pytest.approx(0.0, abs=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -407,63 +427,44 @@ def test_build_leg_composite_mapping_and_vertices(synthetic_dimer):
 # ---------------------------------------------------------------------------
 
 
-class _MergedStub:
-    def __init__(self, exchange_Jdict, dmi_ddict, Jani_dict):
-        self.exchange_Jdict = exchange_Jdict
-        self.dmi_ddict = dmi_ddict
-        self.Jani_dict = Jani_dict
-
-
 def _gate_fixture():
     cell = np.eye(3) * 6.0
     positions = np.array([[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]])
     key = ((1, 0, 0), 0, 1)
-    jiso, dmi, jani = -0.02, np.array([0.0, 0.0, 3e-4]), np.diag([1e-3, -5e-4, -5e-4])
-    entry = {"Jiso": jiso, "dmi": dmi, "jani": jani}
-    merged = _MergedStub({key: jiso}, {key: dmi}, {key: jani})
-    return key, entry, merged, cell, positions
+    tensor = np.array([[0.012, 0.001, 0.02], [-0.003, 0.015, 0.04], [0.06, 0.07, 0.02]])
+    measured = tensor.copy()
+    measured[2, :] = 0.0
+    measured[:, 2] = 0.0
+    return key, {"J_leg": measured}, {"tensor": tensor}, cell, positions
 
 
 def test_tangent_projection_gate_passes_and_ignores_undetermined():
     key, entry, merged, cell, positions = _gate_fixture()
     report = _tangent_projection_check(
-        merged, {key: entry}, [0, 1], cell, positions, 1e-2
+        {key: merged}, {key: entry}, cell, positions, 1e-2
     )
     assert report["passed"]
     assert report["pairs_compared"] == 1
     assert report["max_transverse_dev_eV"] == pytest.approx(0.0, abs=1e-14)
-
-    # a perturbation confined to components NOT determined by one z
-    # reference (DMI_x, Jani_zz, ...) must NOT fail the projection gate
-    merged_x = _MergedStub(
-        {key: entry["Jiso"]},
-        {key: entry["dmi"] + np.array([5e-2, 0.0, 0.0])},
-        {key: entry["jani"] + np.diag([0.0, 0.0, 9e-2])},
-    )
-    report = _tangent_projection_check(
-        merged_x, {key: entry}, [0, 1], cell, positions, 1e-2
-    )
-    assert report["passed"]
-
-    # perturbing the determined transverse block must fail the gate
-    merged_bad = _MergedStub(
-        {key: entry["Jiso"]},
-        {key: entry["dmi"]},
-        {key: entry["jani"] + np.diag([9e-2, 0.0, 0.0])},
-    )
+    modified = merged["tensor"].copy()
+    modified[2, 0] += 0.05
+    modified[2, 2] += 0.09
+    assert _tangent_projection_check(
+        {key: {"tensor": modified}}, {key: entry}, cell, positions, 1e-2
+    )["passed"]
+    modified[0, 1] += 0.09
     with pytest.raises(ValueError, match="tangent projection gate FAILED"):
         _tangent_projection_check(
-            merged_bad, {key: entry}, [0, 1], cell, positions, 1e-2
+            {key: {"tensor": modified}}, {key: entry}, cell, positions, 1e-2
         )
 
 
 def test_tangent_projection_gate_needs_nononsite_pairs():
-    _, entry, merged, cell, positions = _gate_fixture()
+    _, entry, merged, cell, _ = _gate_fixture()
     colocated = np.zeros((2, 3))
+    key = ((0, 0, 0), 0, 1)
     with pytest.raises(ValueError, match="no pairs"):
-        _tangent_projection_check(
-            merged, {((0, 0, 0), 0, 1): entry}, [0, 1], cell, colocated, 1e-2
-        )
+        _tangent_projection_check({key: merged}, {key: entry}, cell, colocated, 1e-2)
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +492,7 @@ def test_gen_exchange_end_to_end_synthetic_dimer(synthetic_dimer, tmp_path):
         study = provenance["band_window"]["convergence_study"]
         assert [w["nband"] for w in study["windows"]] == [4, 6]
         assert (
-            tmp_path / "TB2J_results_nc_split_soc" / f"leg_{leg}" / "exchange.out"
+            tmp_path / "TB2J_results_nc_split_soc" / f"leg_{leg}" / "split_soc_leg.npz"
         ).exists()
         assert (
             tmp_path
@@ -512,11 +513,12 @@ def test_gen_exchange_end_to_end_synthetic_dimer(synthetic_dimer, tmp_path):
 
 def test_gen_refuses_mismatched_pao_hash(synthetic_dimer, tmp_path):
     pytest.importorskip("netCDF4")
-    import shutil
 
     from netCDF4 import Dataset
 
     pao, sidecar = synthetic_dimer
+    import shutil
+
     tampered = tmp_path / "tampered_pao.nc"
     shutil.copy(pao, tampered)
     with Dataset(tampered, "a") as nc:

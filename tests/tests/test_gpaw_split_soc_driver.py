@@ -13,10 +13,9 @@ import pytest
 from TB2J.interfaces.gpaw_spinor_split_soc import c_gpaw, o_from_c
 from TB2J.interfaces.gpaw_split_soc import (
     _contour_second_order_shift,
-    _write_leg,
     gen_exchange_gpaw_split_soc,
 )
-from TB2J.io_merge import Merger, merge, read_pickle
+from TB2J.io_merge import read_pickle
 
 
 def _artifact_provenance(path):
@@ -52,51 +51,51 @@ def test_two_level_contour_mae_matches_exact_curvature(nz, fermi):
 
 
 def test_three_leg_merge_recovers_known_anisotropic_tensor(tmp_path):
-    # Rotation and the rank-six SpinIO merge must recover a physical tensor,
-    # not just produce three pickles. Includes nonzero off-diagonal Jani/DMI.
+    from TB2J.interfaces.gpaw_split_soc import _write_merged
+    from TB2J.Jtensor import decompose_J_tensor
+    from TB2J.split_soc_kernel import merge_transverse_legs, rotate_transverse_leg
+
     cell = np.eye(3) * 5.0
     data = SimpleNamespace(
         atomic_numbers=np.array([26, 26]),
         positions=np.array([[0, 0, 0], [1, 0, 0]]),
         cell=cell,
     )
-    jani = np.array([[0.3, 0.12, -0.09], [0.12, -0.1, 0.08], [-0.09, 0.08, -0.2]])
-    dmi = np.array([0.05, -0.07, 0.03])
-    paths = []
-    for name, theta, phi in (("x", 90, 0), ("y", 90, 90), ("z", 0, 0)):
-        t, p = np.deg2rad([theta, phi])
-        rotation = o_from_c(c_gpaw(t, p))
-        axis = rotation @ np.array([0, 0, 1])
-        exchange = {
-            ((0, 0, 0), 0, 1): {
-                "Jiso": 1.25,
-                "jani": rotation.T @ jani @ rotation,
-                "dmi": rotation.T @ dmi,
-            },
-            ((0, 0, 0), 1, 0): {
-                "Jiso": 1.25,
-                "jani": rotation.T @ jani @ rotation,
-                "dmi": -(rotation.T @ dmi),
-            },
-        }
-        path = tmp_path / name
-        _write_leg(
-            path, data, exchange, [0, 1], np.array([2.0, 2.0]), axis, rotation, 4.0
-        )
-        paths.append(str(path))
-    merger = Merger(*paths)
-    assert all(
-        np.linalg.matrix_rank(matrix, tol=1e-2) == 6
-        for matrix in merger.coeff_matrix.values()
-    )
-    merger.merge_Jiso()
-    merger.merge_DMI()
-    merger.merge_Jani()
-    merger.standardize()
+    tensor = np.array([[1.55, 0.15, -0.16], [0.09, 1.15, 0.01], [-0.02, 0.15, 1.05]])
     key = ((0, 0, 0), 0, 1)
-    assert merger.main_dat.exchange_Jdict[key] == pytest.approx(1.25, abs=1e-10)
-    np.testing.assert_allclose(merger.main_dat.Jani_dict[key], jani, atol=1e-10)
-    np.testing.assert_allclose(merger.main_dat.dmi_ddict[key], dmi, atol=1e-10)
+    reverse = ((0, 0, 0), 1, 0)
+    legs = {}
+    for name, theta, phi in (("x", 90, 0), ("y", 90, 90), ("z", 0, 0)):
+        rotation = o_from_c(c_gpaw(*np.deg2rad([theta, phi])))
+        measured = rotation.T @ tensor @ rotation
+        measured[2, :] = 0.0
+        measured[:, 2] = 0.0
+        entries = {
+            key: {"J_leg": measured, "mask_residual": 0.0, "frame": {"n": 2}},
+            reverse: {"J_leg": measured.T, "mask_residual": 0.0, "frame": {"n": 2}},
+        }
+        legs[name] = {
+            "exchange": rotate_transverse_leg(entries, rotation, "xyz".index(name))
+        }
+    combined = merge_transverse_legs(legs)
+    np.testing.assert_allclose(combined["exchange"][key]["tensor"], tensor, atol=1e-12)
+    np.testing.assert_allclose(
+        combined["exchange"][reverse]["tensor"], tensor.T, atol=1e-12
+    )
+    _write_merged(
+        tmp_path / "merged",
+        data,
+        combined["exchange"],
+        [0, 1],
+        np.array([2.0, 2.0]),
+        4.0,
+        {"merge_mode": "raw_rank_nine"},
+    )
+    output = read_pickle(str(tmp_path / "merged"))
+    jiso, dmi, jani = decompose_J_tensor(tensor)
+    assert output.exchange_Jdict[key] == pytest.approx(jiso, abs=1e-12)
+    np.testing.assert_allclose(output.dmi_ddict[key], dmi, atol=1e-12)
+    np.testing.assert_allclose(output.Jani_dict[key], jani, atol=1e-12)
 
 
 @pytest.mark.skipif(
@@ -122,60 +121,27 @@ def test_real_three_leg_merge_and_mae(tmp_path):
     assert set(out["leg_paths"]) == {"x", "y", "z"}
     digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     for direction, path in out["leg_paths"].items():
-        obj = read_pickle(str(path))
-        axis = np.eye(3)[{"x": 0, "y": 1, "z": 2}[direction]]
-        np.testing.assert_allclose(
-            obj.spinat[:2] / np.linalg.norm(obj.spinat[:2], axis=1)[:, None],
-            np.tile(axis, (2, 1)),
-            atol=1e-14,
-        )
-        assert obj.exchange_Jdict
-        provenance = obj.split_soc_provenance
-        assert provenance == out["metadata"][direction]
+        with np.load(path / "split_soc_leg.npz") as leg:
+            axis = "xyz".index(direction)
+            assert leg["J_leg"].shape[1:] == (3, 3)
+            np.testing.assert_allclose(leg["J_leg"][:, axis, :], 0, atol=1e-12)
+            np.testing.assert_allclose(leg["J_leg"][:, :, axis], 0, atol=1e-12)
+        provenance = out["metadata"][direction]
         assert provenance["strength0_reference"]["sha256"] == digest
         study = provenance["band_window"]["convergence_study"]
-        assert len(study["windows"]) == 2
         assert study["windows"][0]["nband"] < study["windows"][1]["nband"]
-        assert study["windows"][1]["Jiso"]["[0,0,0]"] == pytest.approx(
-            obj.exchange_Jdict[((0, 0, 0), 0, 1)], abs=1e-12
-        )
-        for artifact in (path / "exchange.out", path / "Multibinit" / "exchange.xml"):
-            assert _artifact_provenance(artifact) == provenance
-    merger = Merger(*(str(p) for p in out["leg_paths"].values()))
-    assert all(
-        np.linalg.matrix_rank(a, tol=1e-2) == 6 for a in merger.coeff_matrix.values()
-    )
     merged = read_pickle(str(out["merged_path"]))
     assert merged.exchange_Jdict
-    assert merged.split_soc_provenance["merge_mode"] == "three_legs"
+    assert merged.split_soc_provenance["merge_mode"] == "raw_rank_nine"
     assert merged.split_soc_provenance["legs"] == out["metadata"]
+    assert merged.split_soc_provenance["diagnostics"]["min_rank"] == 9
     for artifact in (
         out["merged_path"] / "exchange.out",
         out["merged_path"] / "Multibinit" / "exchange.xml",
     ):
         assert _artifact_provenance(artifact) == merged.split_soc_provenance
     report = json.loads((tmp_path / "split" / "split_soc_report.json").read_text())
-    assert report["metadata"] == out["metadata"]
-    # Public generic merge must not silently inherit only the last z leg.
-    generic_path = tmp_path / "generic_merge"
-    merge(
-        *(str(out["leg_paths"][name]) for name in ("x", "y", "z")),
-        write_path=str(generic_path),
-    )
-    generic = read_pickle(str(generic_path))
-    records = generic.split_soc_provenance["inputs"]
-    assert [record["provenance"] for record in records] == [
-        out["metadata"][name] for name in ("x", "y", "z")
-    ]
-    for artifact in (
-        generic_path / "exchange.out",
-        generic_path / "Multibinit" / "exchange.xml",
-    ):
-        assert _artifact_provenance(artifact) == generic.split_soc_provenance
-    for key in merged.exchange_Jdict:
-        assert generic.exchange_Jdict[key] == pytest.approx(
-            merged.exchange_Jdict[key], abs=1e-12
-        )
+    assert report["merge_diagnostics"]["min_rank"] == 9
     for direction, angles in {"x": (90, 0), "y": (90, 90), "z": (0, 0)}.items():
         direct = soc_eigenstates(
             calc, theta=angles[0], phi=angles[1], projected=False
@@ -222,7 +188,6 @@ def test_scale_zero_matches_current_collinear_exporter_shell_by_shell(tmp_path):
         scale=0.0,
         vertex_component="delta_xc",
     )
-    for path in out["leg_paths"].values():
-        jiso = read_pickle(str(path)).exchange_Jdict
-        assert set(jiso) == expected
-        assert max(abs(jiso[key] - reference[key]) for key in expected) < 1e-8
+    merged = read_pickle(str(out["merged_path"])).exchange_Jdict
+    assert set(merged) == expected
+    assert max(abs(merged[key] - reference[key]) for key in expected) < 1e-8

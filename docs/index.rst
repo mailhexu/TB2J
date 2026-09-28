@@ -33,6 +33,7 @@ Welcome to TB2J's documentation!
    src/split_soc_gpaw.rst
    src/split_soc_abinit_paw.rst
    src/split_soc_abinit_nc.rst
+   src/split_soc_vasp.rst
    src/abinit_savetb2j_schema.rst
    src/sprkkr_magnon.md
    src/edit.md

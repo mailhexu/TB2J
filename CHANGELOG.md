@@ -8,12 +8,11 @@
   abinao WFK → `abinit.nc_pao_hs` v2 / `abinao.nc_soc_ks` v1 production
   chain, the SHA-256 hash join, PAO dualization `B = S^-1 C`, units
   (eV sidecar / Hartree-on-disk PAO_HS), the full refusal catalog, the
-  single-reference transverse-block scope and the FR-032 tangent
-  projection gate (iodine I2: 7.114 meV vs 10 meV tolerance,
-  projection-only, not a full-tensor proof).  Added the sidecar
+  single-reference transverse-block scope and the gate set (SOC-off
+  anchor, always-on rank-9 merge invariance gate, FR-032 tangent
+  projection gate).  Added the sidecar
   on-disk contract to `abinit_savetb2j_schema.rst` and a real runnable
-  example `examples/projector_green/abinit_nc_i2_split_soc.py` (smoked
-  on the I2 fixture: anchor 1.7e-15 relative over 28 pairs).
+  example `examples/projector_green/abinit_nc_i2_split_soc.py`.
 - Documented the per-backend split-SOC workflows: a shared strength-zero
   overview in `projector_green.rst`, a new GPAW page with the CLI reference,
   MAE comparison how-to and provenance contract, and a new ABINIT PAW page
@@ -24,13 +23,59 @@
   SOC-off anchor against the collinear `delta_total` exchange, rejecting
   vacuous Gamma-only baselines.
 
+### Split-SOC raw rank-nine core cutover
+
+- The split-SOC kernel now emits, per leg, only the *measured* transverse
+  `2x2` block (`J_leg`, zero-masked on the leg's `n` row/column with the
+  residual recorded) of its right-handed `(u, v, n)` triad; per-leg scalar
+  `Jiso`/DMI/Jani from a single reference are no longer produced anywhere.
+  This is the ADR-9 tangent rank-nine contract of the split-soc-ks spec.
+- New merge `TB2J.split_soc_kernel.merge_transverse_legs`: three x/y/z
+  transverse legs give 12 constraints for the 9 entries of the raw real
+  lattice tensor (each diagonal measured twice); exact least-squares solve,
+  then `Jtensor.decompose_J_tensor` (Levi-Civita DMI).  The legacy scalar
+  `TB2J.io_merge` averaging is retired from every split-SOC path (its
+  independent scalar/traceless decomposition biases anisotropy: a true
+  `diag(1,2,3)` returns `diag(7/6,2,17/6)` through that route).
+- Two invariance gates fail closed on every merge: design-matrix rank must
+  be 9 (three independent reference axes), and every repeated diagonal row
+  must agree within a per-backend `consistency_atol` (GPAW driver 5e-5 eV,
+  ABINIT PAW driver 1e-4 eV, ABINIT NC driver 1e-6 eV).  Diagnostics record
+  `min_rank`, `max_repeat_deviation`, `max_transverse_mask_residual` and
+  `max_reciprocity_residual`.
+- Per-leg artifacts are now raw `split_soc_leg.npz` blocks plus
+  `split_soc_provenance.json`; merged results are rank-nine SpinIO outputs
+  with the merge diagnostics embedded in the provenance.
+- Real ABINIT PAW fcc Ni fixture (`a = 3.52` Å, schema 1.1, 28 bands)
+  passes the full rank-nine merge: rank 9 on every pair, repeated-diagonal
+  agreement 9.0e-8 eV (gate 1e-4 eV), mask residual 7.8e-19 eV, reciprocity
+  3.7e-19 eV, merged nn `Jiso` 0.209 meV.  Its 26→28 band-window study is
+  *not* converged (4.7e-5 at 1e-6) and stays flagged.
+- Noncertification recorded: on the real NC iodine-dimer fixture the
+  repeated-diagonal rows disagree by up to 2.5e-2 eV (~25 meV) against the
+  1e-6 eV NC gate, so `merge_transverse_legs` refuses and the driver aborts
+  before any merged tensor or tangent report exists — no exchange number
+  from that fixture is quotable.  The SOC-off anchor still passes
+  (4.0e-15 max relative deviation over 12 R-pairs).  The earlier
+  pre-cutover "tangent gate passes at 7.1 meV" recording described the
+  retired scalar merge and is superseded.
+- Documented the VASP split-SOC workflow (`split_soc_vasp.rst`, registered
+  in the toctree): `tb2j_cso.bin` v1-v3 contract with **v3 now current**
+  (patch commit `0f9f073`: runtime `FELECT`/`INVMC2`/`AUTOA` plus per-ion
+  `POTAE_XCUPDATED`, gated on a committed native export; bit-identical
+  patch-vs-installer files, no sidecar left behind on native `OPEN`
+  failure), the `E_soc` identity oracle, run-identity + COCC pairing
+  gates, all-atom `W_SO` vs magnetic-only vertices, and explicit
+  non-claims: merged DMI/Jani await the Story-011 full-exchange
+  cross-validation.
+
 ### GPAW split-SOC exchange and MAE
 
 - Added `gpaw_split_soc2J.py`: one old-API collinear no-SOC GPAW checkpoint
   produces three frozen-density second-variational x/y/z exchange legs,
-  rotated and merged `SpinIO` tensors, exact GPAW band-energy MAE and a
-  tolerance-reported second-order contour comparison. The shared KS-band
-  kernel uses all-atom SOC with magnetic-only exchange vertices.
+  merged into the raw rank-nine `SpinIO` tensor, with exact GPAW band-energy
+  MAE and a tolerance-reported second-order contour comparison. The shared
+  KS-band kernel uses all-atom SOC with magnetic-only exchange vertices.
 
 ### ABINIT PAW split-SOC projector exchange
 

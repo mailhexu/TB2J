@@ -365,7 +365,9 @@ class TestSpinorCollinearIdentity:
             smearing_eV=0.1,
             sites=[0, 1],
         )
-        spinor_jdict = {key: entry["Jiso"] for key, entry in spinor_exchange.items()}
+        spinor_jdict = {
+            key: entry["J_leg"][0, 0] for key, entry in spinor_exchange.items()
+        }
         assert set(spinor_jdict) == set(collinear_jdict)
         for key in collinear_jdict:
             np.testing.assert_allclose(
@@ -521,67 +523,18 @@ class TestGenExchangeAbinitPawSpinor:
         log = _write_spinor_pawprt_log(tmp_path / "run.abo", reference, unit="hartree")
         projected = self._write_projected(tmp_path)
 
-        exchange_out, jdict = gen_exchange_abinit_paw_spinor(
-            projected_data_path=str(projected),
-            log_path=str(log),
-            output_path=str(tmp_path / "out"),
-            nz=8,
-            smearing_eV=0.1,
-            index_magnetic_atoms=[0, 1],
-        )
-
-        assert Path(exchange_out).exists()
-        assert jdict
-        for key, value in jdict.items():
-            assert np.isfinite(value), f"non-finite J for {key}"
-
-        # Cross-check against the direct spinor data path (no log).
-        _, _, delta_ij = _synthetic_collinear_payload()
-        spinor = _build_spinor_data()
-        direct = compute_spinor_projector_exchange(
-            spinor, Rpts=_R_grid(nmax=1), nz=8, smearing_eV=0.1, sites=[0, 1]
-        )
-        assert len(direct) > 0
-
-    def test_direct_delta_ij_blocks_path(self, tmp_path):
-        """delta_ij=(ni, ni, 2, 2) eV Pauli blocks bypass the log parser."""
-        projected = self._write_projected(tmp_path)
-        _, _, delta_ij = _synthetic_collinear_payload()
-        blocks = {}
-        for atom, delta in delta_ij.items():
-            block = np.zeros((NPROJ_PER_ATOM, NPROJ_PER_ATOM, 2, 2), dtype=complex)
-            block[..., 0, 0] = delta
-            block[..., 1, 1] = -delta
-            blocks[atom] = block
-
-        exchange_out, jdict = gen_exchange_abinit_paw_spinor(
-            projected_data_path=str(projected),
-            delta_ij=blocks,
-            output_path=str(tmp_path / "direct_out"),
-            nz=8,
-            smearing_eV=0.1,
-            index_magnetic_atoms=[0, 1],
-        )
-        assert Path(exchange_out).exists()
-        assert jdict and all(np.isfinite(v) for v in jdict.values())
-
-        # Same Delta and coefficients as the log-driven e2e run: same J.
-        reference = _reference_components(list(delta_ij.values()))
-        for atom in reference:
-            reference[atom]["up-dwn"] = np.zeros_like(reference[atom]["up-dwn"])
-            reference[atom]["dwn-up"] = np.zeros_like(reference[atom]["dwn-up"])
-        log = _write_spinor_pawprt_log(tmp_path / "run.abo", reference, unit="eV")
-        _, jdict_log = gen_exchange_abinit_paw_spinor(
-            projected_data_path=str(projected),
-            log_path=str(log),
-            output_path=str(tmp_path / "log_out"),
-            nz=8,
-            smearing_eV=0.1,
-            index_magnetic_atoms=[0, 1],
-        )
-        assert set(jdict) == set(jdict_log)
-        for key in jdict:
-            np.testing.assert_allclose(jdict[key], jdict_log[key], rtol=1e-10)
+        with pytest.raises(
+            ValueError, match="three independent x/y/z reference datasets"
+        ):
+            gen_exchange_abinit_paw_spinor(
+                projected_data_path=str(projected),
+                log_path=str(log),
+                output_path=str(tmp_path / "out"),
+                nz=8,
+                smearing_eV=0.1,
+                index_magnetic_atoms=[0, 1],
+            )
+        assert not (tmp_path / "out" / "TB2J.pickle").exists()
 
     def test_requires_data_source(self, tmp_path):
         with pytest.raises(ValueError, match="projected_data_path or wfk_path"):

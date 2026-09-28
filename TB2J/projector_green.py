@@ -44,6 +44,8 @@ PAULI_MATRICES = np.array(
     dtype=complex,
 )
 
+_CARTESIAN_AXES = np.eye(3)
+
 
 def _jsonable(value):
     if isinstance(value, np.ndarray):
@@ -1511,120 +1513,108 @@ def site_magnetization_sign(operator_block):
     return 1.0 if ztrace >= 0.0 else -1.0
 
 
-def spinor_pair_channels(delta_i, g_ij, delta_j, g_ji):
-    """ExchangeNCL channel matrix A^{uv} for one (R, i, j) pair.
+def magnetic_tangent_vertices(operator_block, magnitude_tol=1.0e-10):
+    """Magnetic tangent rotation vertices for one site.
 
-    A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji] / pi with T^u the Pauli
-    components of the spinor Green block and G^(u) = kron(sigma_u, T^u)
-    (u, v in {0, x, y, z}).  ``delta_i``/``delta_j`` are site-local spinor
-    operators (nproj_i, nproj_i, 2, 2)/(nproj_j, nproj_j, 2, 2);
-    ``g_ij``/``g_ji`` the spinor Green site blocks (nproj_i, nproj_j, 2, 2)
-    and (nproj_j, nproj_i, 2, 2).
+    ``operator_block`` is the site-local *magnetic* spinor operator
+    ``(nproj, nproj, 2, 2)`` — the stored spin splitting (never the scalar
+    charge part, never the SOC operator).  With ``M`` the dense spin-major
+    operator and ``n = m/|m|`` the unit direction of the splitting vector
+    ``m_k = Tr[M kron(sigma_k, I)]/2``, the vertex generating a rotation of
+    the local magnetic field toward the Cartesian axis ``t_a`` is::
 
-    Pauli matrices decompose G (NOT multiply Delta on the outside):
-    Tr[(sigma_a Delta) G (sigma_b Delta) G] is identically zero for
-    block-diagonal (collinear) G, while (T^0)^2 - (T^z)^2 = G_up G_down
-    gives the LKAG cross-channel algebraically
-    (docs/sympy/spinor_projector_green.md).
+        V^a = -(i/4) [ kron((n x t_a).sigma, I_orb), M ]
+
+    which is exactly the generator ``dH_mag/dtheta_a`` of the physical
+    rotation (docs/sympy/spinor_tangent_vertex_green.md).  For an
+    axis-aligned collinear operator ``M = kron(Delta sigma_n, W)`` this
+    reduces to ``V^a = |Delta|/2 kron(sigma_a, W)`` on the two axes
+    transverse to ``n`` and ``V^n = 0`` — for BOTH signs of ``Delta``, so
+    no site-sign factor enters anywhere downstream.
+
+    Returns ``{"n": (3,) unit splitting direction, "magnitude": |m|,
+    "vertices": (3, 2*nproj, 2*nproj) complex dense vertex stack}``.
     """
-    dense_di = spinor_dense_block(delta_i)
-    dense_dj = spinor_dense_block(delta_j)
-    t_ijs = [
-        0.5 * np.einsum("pqst,st->pq", g_ij, SIG) for SIG in PAULI_IDENTITY_AND_MATRICES
-    ]
-    t_jis = [
-        0.5 * np.einsum("pqst,st->pq", g_ji, SIG) for SIG in PAULI_IDENTITY_AND_MATRICES
-    ]
-    g_u = [np.kron(PAULI_IDENTITY_AND_MATRICES[u], t_ijs[u]) for u in range(4)]
-    g_v = [np.kron(PAULI_IDENTITY_AND_MATRICES[v], t_jis[v]) for v in range(4)]
-    a = np.empty((4, 4), dtype=complex)
-    for u in range(4):
-        for v in range(4):
-            a[u, v] = np.trace(dense_di @ g_u[u] @ dense_dj @ g_v[v]) / np.pi
-    return a
-
-
-def spinor_channels_to_exchange_tensor(integrated, integrated_reverse, sign):
-    """Map contour-integrated channel matrices to the exchange tensor.
-
-    ``integrated`` is the 4x4 channel matrix integrated over the contour at
-    (R, i, j); ``integrated_reverse`` the same at (-R, j, i).  ExchangeNCL
-    channel mapping (A^{uv} = Tr[Delta G^(u) Delta G^(v)]/pi):
-    J_iso = Im(A00 - Axx - Ayy - Azz)/8, DMI_i = Re(A0i - Ai0)/8,
-    Jani[i,j] = Im(A^{ij}(R) + A^{ij}(-R))/8.  The 1/4 prefactor pins the
-    collinear reduction exactly to the collinear kernel
-    Im integral Tr[Delta G_up Delta G_down]/(4 pi); ``sign`` is the
-    site-magnetization product (see :func:`site_magnetization_sign`).
-    """
-    integrated = np.asarray(integrated, dtype=complex)
-    integrated_reverse = np.asarray(integrated_reverse, dtype=complex)
-    jiso = (
-        float(
-            np.imag(
-                integrated[0, 0]
-                - integrated[1, 1]
-                - integrated[2, 2]
-                - integrated[3, 3]
-            )
+    block = np.asarray(operator_block, dtype=complex)
+    if block.ndim != 4 or block.shape[2:] != (2, 2):
+        raise ValueError(
+            "magnetic tangent vertices require a (nproj, nproj, 2, 2) operator, "
+            f"got shape {block.shape}"
         )
-        / 8.0
-        * sign
-    )
-    dmi = np.array(
+    dense = spinor_dense_block(block)
+    norb = block.shape[0]
+    orb_identity = np.eye(norb)
+    m = np.array(
         [
-            float(np.real(integrated[0, i + 1] - integrated[i + 1, 0])) / 8.0 * sign
-            for i in range(3)
+            0.5
+            * float(np.real(np.trace(dense @ np.kron(PAULI_MATRICES[k], orb_identity))))
+            for k in range(3)
         ]
     )
-    jani = np.asarray(
-        [
-            [
-                float(
-                    np.imag(integrated[a + 1, b + 1] + integrated_reverse[a + 1, b + 1])
-                )
-                / 8.0
-                * sign
-                for b in range(3)
-            ]
-            for a in range(3)
-        ]
-    )
-    tensor = jiso * np.eye(3)
-    tensor += 0.5 * (dmi[:, None] - dmi[None, :])
-    tensor += 0.5 * (jani + jani.T)
-    return {"Jiso": jiso, "dmi": dmi, "jani": jani, "tensor": tensor}
+    magnitude = float(np.linalg.norm(m))
+    if magnitude <= magnitude_tol:
+        raise ValueError(
+            "site has no magnetic splitting; magnetic tangent vertices are undefined"
+        )
+    scale = float(np.abs(dense).max(initial=0.0))
+    if not np.allclose(dense, dense.conj().T, rtol=1e-8, atol=1e-8 * scale):
+        raise ValueError("magnetic tangent vertices require a Hermitian operator")
+    n = m / magnitude
+    vertices = np.empty((3, dense.shape[0], dense.shape[1]), dtype=complex)
+    for a in range(3):
+        axis = np.cross(n, _CARTESIAN_AXES[a])
+        sigma_axis = np.einsum("kab,k->ab", PAULI_MATRICES, axis)
+        generator = np.kron(sigma_axis, orb_identity)
+        vertices[a] = -0.25j * (generator @ dense - dense @ generator)
+    return {"n": n, "magnitude": magnitude, "vertices": vertices}
 
 
-def spinor_projector_exchange_trace(
+def spinor_tangent_pair_matrix(vertices_i, g_ij, vertices_j, g_ji):
+    """Tangent trace matrix ``K^{ab} = Tr[V_i^a G_ij V_j^b G_ji]`` for one pair.
+
+    All arguments are dense spin-major complex arrays: ``vertices_i`` is
+    the ``(3, 2*ni, 2*ni)`` site-i vertex stack from
+    :func:`magnetic_tangent_vertices`, ``g_ij`` the ``(2*ni, 2*nj)`` FULL
+    complex spinor Green block (no Pauli decomposition, no spin
+    transposition), ``g_ji`` the reverse block at the reversed lattice
+    vector.  Pair reversal holds before integration
+    (``K^{ab}_ij(R) = K^{ba}_ji(-R)``) by cyclicity of the trace.
+    """
+    v_i = np.asarray(vertices_i, dtype=complex)
+    v_j = np.asarray(vertices_j, dtype=complex)
+    left = v_i @ g_ij  # (3, 2*ni, 2*nj)
+    right = v_j @ g_ji  # (3, 2*nj, 2*ni)
+    return np.einsum("apq,bqp->ab", left, right, optimize=True)
+
+
+def spinor_tangent_trace(
     green,
     Rpts,
     energy,
-    local_operators=None,
+    vertices=None,
     sites=None,
 ):
-    """Compute the spinor projector exchange tensor for one energy.
+    """Full-spinor magnetic tangent traces for one energy.
 
-    Evaluates, per (R, i, j), the sympy-pinned object
-    J^{ab} = -Tr[(sigma_a Delta_i) G_ij(R) (sigma_b Delta_j) G_ji(-R)]
-    (docs/sympy/spinor_projector_green.md), takes the real part per the
-    TB2J tensor convention, applies the collinear 1/(4*pi) normalization,
-    and decomposes via TB2J.Jtensor.decompose_J_tensor into J_iso, DMI,
-    and anisotropic exchange.
+    Evaluates, per (R, i, j), ``K^{ab}(z) = Tr[V_i^a G_ij(R,z) V_j^b
+    G_ji(-R,z)]`` on the unprojected, full complex spinor Green blocks.
+    The contour prescription applied by the callers is
+    ``J^{ab} = Im contour K^{ab} dz / (2 pi)`` — calibrated so that a
+    collinear z reference reproduces the existing collinear kernel
+    (:func:`projector_exchange_trace` with the ``s_i s_j`` site-sign
+    product) exactly in ``J^{xx}`` and ``J^{yy}``, with the ``n`` row and
+    column masked to zero.  A single reference therefore determines only
+    the transverse 2x2 block; full tensors require the three-leg merge.
 
-    Note (sympy-pinned, docs/sympy/spinor_projector_green.md): at single
-    energy the raw J^{zz} carries the same-spin-channel piece
-    -z_i z_j (g_up h_up + g_dn h_dn); the physical exchange contour
-    prescription removes it (collinear reduction: J_iso = (J_xx+J_yy)/2 =
-    the two cross-channel terms of the collinear kernel).
+    This replaces the ExchangeNCL channel construction
+    (``spinor_pair_channels``), whose ``A0i - Ai0`` differences vanish
+    identically for collinear ``Delta sigma_z`` vertices even with SOC in
+    ``G``, and whose ``A^{zz}`` channel generates the self-pair Jani
+    spurion (docs/sympy/spinor_tangent_vertex_green.md).
     """
-    for method in (
-        "get_GR_spinor",
-        "get_site_block_spinor",
-        "get_local_operators_spinor",
-        "get_site_projectors",
-    ):
+    for method in ("get_GR_spinor", "get_site_block_spinor", "get_sites"):
         if not callable(getattr(green, method, None)):
-            raise TypeError(f"spinor exchange backend requires {method}()")
+            raise TypeError(f"spinor tangent backend requires {method}()")
     Rpts = np.asarray(Rpts, dtype=int)
     if Rpts.ndim != 2 or Rpts.shape[1] != 3:
         raise ValueError("Rpts must have shape (nR, 3)")
@@ -1637,27 +1627,32 @@ def spinor_projector_exchange_trace(
     if sites is None:
         sites = green.get_sites()
     sites = [int(site) for site in sites]
-    if local_operators is None:
-        local_operators = green.get_local_operators_spinor(sites=sites)
-    local_operators = {
-        int(site): np.asarray(op) for site, op in local_operators.items()
-    }
+    if vertices is None:
+        operators = green.get_local_operators_spinor(sites=sites)
+        vertices = {
+            site: magnetic_tangent_vertices(op)["vertices"]
+            for site, op in operators.items()
+        }
+    vertices = {int(site): np.asarray(v, dtype=complex) for site, v in vertices.items()}
 
     GR = green.get_GR_spinor(Rpts, energy)
-    A_ijR = {}
+    K_ijR = {}
     for iR, R in enumerate(Rkeys):
         iRm = R_index[tuple(-x for x in R)]
         for iatom in sites:
             for jatom in sites:
-                Gij = green.get_site_block_spinor(GR[iR], iatom, jatom)
-                Gji = green.get_site_block_spinor(GR[iRm], jatom, iatom)
-                key = (R, iatom, jatom)
-                A_ijR[key] = spinor_pair_channels(
-                    local_operators[iatom], Gij, local_operators[jatom], Gji
+                gij = spinor_dense_block(
+                    green.get_site_block_spinor(GR[iR], iatom, jatom)
+                )
+                gji = spinor_dense_block(
+                    green.get_site_block_spinor(GR[iRm], jatom, iatom)
+                )
+                K_ijR[(R, iatom, jatom)] = spinor_tangent_pair_matrix(
+                    vertices[iatom], gij, vertices[jatom], gji
                 )
     return {
-        "A_ijR": A_ijR,
-        "method": "spinor_projector_exchange_trace",
-        "normalization": "A^{uv}=Tr[Delta T^u Delta T^v]/pi (ExchangeNCL channels)",
-        "operator": "spinor_2x2",
+        "K_ijR": K_ijR,
+        "method": "spinor_tangent_trace",
+        "operator": "magnetic_tangent",
+        "normalization": "raw trace; J^{ab} = Im contour K^{ab} dz/(2 pi)",
     }

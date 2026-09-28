@@ -25,6 +25,7 @@ used as stored (run with ``symmetry='off'`` or via the unfolding adapter).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +34,6 @@ from ase.units import Ha, kB
 from TB2J.projector_green import (
     SPINOR_OPERATOR_DEFINITION,
     ProjectorGreenData,
-    site_magnetization_sign,
 )
 
 SIGMA = np.array(
@@ -216,74 +216,73 @@ def compute_spinor_projector_exchange(
     overlap_mode=None,
     overlap_rcond=None,
 ):
-    """Contour-integrated spinor exchange tensor per (R, i, j).
+    """Return a single spinor reference's measured transverse exchange leg.
 
-    Integrates the sympy-pinned J^{ab}(E) object over the fermion contour;
-    the imaginary-part prescription removes the same-spin-channel piece,
-    so the collinear reduction J_iso = (J_xx+J_yy)/2 holds. Returns
-    {(R, i, j): {"Jiso", "dmi", "jani", "tensor"}} with the ExchangeNCL
-    (TB2J.Jtensor) decomposition.
+    The input already includes SOC in its eigenstates. No second SOC insertion
+    is made. A single reference cannot determine Jiso/DMI/Jani; use three
+    independent x/y/z references and merge_transverse_legs for a full tensor.
     """
+    from TB2J.interfaces.gpaw_projector import _R_grid
     from TB2J.mycfr import CFR
     from TB2J.projector_green import (
         ProjectorGreen,
-        spinor_channels_to_exchange_tensor,
-        spinor_projector_exchange_trace,
+        magnetic_tangent_vertices,
+        spinor_tangent_trace,
     )
 
     if data.nspinor != 2:
         raise ValueError("spinor exchange requires nspinor=2 data")
     if Rpts is None:
-        from TB2J.interfaces.gpaw_projector import _R_grid
-
         Rpts = _R_grid(nmax=1)
     Rpts = np.asarray(Rpts, dtype=int)
-    if sites is None:
-        sites = list(range(len(data.site_nproj)))
-    sites = [int(site) for site in sites]
+    sites = (
+        list(range(len(data.site_nproj))) if sites is None else [int(s) for s in sites]
+    )
+    if not sites:
+        raise ValueError("at least one magnetic site is required")
     green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
-    local_operators = green.get_local_operators_spinor(sites=sites)
-    signs = {site: site_magnetization_sign(op) for site, op in local_operators.items()}
-
+    operators = green.get_local_operators_spinor(sites=sites)
+    vert_info = {site: magnetic_tangent_vertices(op) for site, op in operators.items()}
+    vertices = {site: entry["vertices"] for site, entry in vert_info.items()}
+    directions = {site: entry["n"] for site, entry in vert_info.items()}
+    n0 = directions[sites[0]]
+    axis = int(np.argmax(np.abs(n0)))
+    axis_aligned = abs(abs(n0[axis]) - 1.0) < 1e-6 and all(
+        abs(abs(np.dot(n0, n)) - 1.0) < 1e-6 for n in directions.values()
+    )
+    frame = {"n": axis if axis_aligned else None, "axis": n0, "site_n": directions}
     contour = CFR(nz=nz, T=smearing_eV / kB)
-    values = {
-        (tuple(int(x) for x in R), i, j): [] for R in Rpts for i in sites for j in sites
-    }
+    values = {}
     for energy in contour.path:
-        trace = spinor_projector_exchange_trace(
-            green, Rpts, energy=energy, local_operators=local_operators, sites=sites
+        trace = spinor_tangent_trace(
+            green, Rpts, energy=energy, vertices=vertices, sites=sites
         )
-        for key in values:
-            values[key].append(trace["A_ijR"][key])
-
-    result = {}
-    for key, vals in values.items():
-        R, i, j = key
-        Rm = tuple(-x for x in R)
-        integrated = np.asarray(
+        for key, matrix in trace["K_ijR"].items():
+            values.setdefault(key, []).append(matrix)
+    exchange = {}
+    for key, matrices in values.items():
+        integrated = np.array(
             [
                 [
-                    contour.integrate_values(np.asarray([v[a, b] for v in vals]))
-                    for b in range(4)
+                    contour.integrate_values(np.asarray([m[a, b] for m in matrices]))
+                    for b in range(3)
                 ]
-                for a in range(4)
+                for a in range(3)
             ]
         )
-        valm = np.asarray(
-            [
-                [
-                    contour.integrate_values(
-                        np.asarray([v[a, b] for v in values[(Rm, j, i)]])
-                    )
-                    for b in range(4)
-                ]
-                for a in range(4)
-            ]
-        )
-        result[key] = spinor_channels_to_exchange_tensor(
-            integrated, valm, signs[i] * signs[j]
-        )
-    return result
+        j_leg = np.imag(integrated) / (2 * np.pi)
+        residual = 0.0
+        if axis_aligned:
+            residual = max(np.abs(j_leg[axis, :]).max(), np.abs(j_leg[:, axis]).max())
+            j_leg[axis, :] = 0
+            j_leg[:, axis] = 0
+        exchange[key] = {
+            "J_leg": j_leg,
+            "K_ijR": integrated,
+            "frame": frame,
+            "mask_residual": float(residual),
+        }
+    return exchange
 
 
 def write_spinor_projector_exchange_out(
@@ -301,12 +300,34 @@ def write_spinor_projector_exchange_out(
     overlap_mode=None,
     overlap_rcond=None,
 ):
-    """Write standard TB2J outputs (noncollinear SpinIO) from spinor data."""
+    """Write SpinIO only after x/y/z transverse legs determine rank nine."""
     from ase import Atoms
 
     from TB2J.interfaces.gpaw_projector import _magnetic_sites, _R_grid_for_cutoff
     from TB2J.io_exchange.io_exchange import SpinIO
+    from TB2J.split_soc_kernel import merge_transverse_legs
 
+    if not isinstance(data, Mapping) or set(data) != {"x", "y", "z"}:
+        raise ValueError(
+            "full spinor exchange requires three independent x/y/z reference "
+            "datasets; a single SOC reference measures only a transverse leg. "
+            "For a frozen collinear GPAW checkpoint use gen_exchange_gpaw_split_soc."
+        )
+    references = data
+    data = references["z"]
+    for axis, reference in references.items():
+        if (
+            reference.nband != data.nband
+            or not np.array_equal(reference.atomic_numbers, data.atomic_numbers)
+            or not np.array_equal(reference.site_nproj, data.site_nproj)
+            or not np.allclose(reference.cell, data.cell)
+            or not np.allclose(reference.positions, data.positions)
+            or not np.allclose(reference.kpoints, data.kpoints)
+            or not np.allclose(reference.weights, data.weights)
+        ):
+            raise ValueError(
+                f"spinor reference {axis!r} differs in geometry, k mesh, or band window"
+            )
     atoms = Atoms(
         numbers=data.atomic_numbers,
         positions=data.positions,
@@ -320,19 +341,38 @@ def write_spinor_projector_exchange_out(
     )
     if Rpts is None:
         Rpts = _R_grid_for_cutoff(data, sites, Rcut if Rcut is not None else 10.0)
-    exchange = compute_spinor_projector_exchange(
-        data,
-        Rpts=Rpts,
-        nz=nz,
-        smearing_eV=smearing_eV,
-        sites=sites,
-        overlap_mode=overlap_mode,
-        overlap_rcond=overlap_rcond,
-    )
+    legs = {
+        axis: {
+            "exchange": compute_spinor_projector_exchange(
+                reference,
+                Rpts=Rpts,
+                nz=nz,
+                smearing_eV=smearing_eV,
+                sites=sites,
+                overlap_mode=overlap_mode,
+                overlap_rcond=overlap_rcond,
+            )
+        }
+        for axis, reference in references.items()
+    }
+    for axis, leg in legs.items():
+        expected_axis = "xyz".index(axis)
+        if any(
+            entry["frame"]["n"] != expected_axis for entry in leg["exchange"].values()
+        ):
+            raise ValueError(
+                f"spinor {axis!r} reference is not axis-aligned; cannot merge rank nine"
+            )
+    exchange = merge_transverse_legs(legs)["exchange"]
     if charges is None:
         charges = np.zeros(len(atoms), dtype=float)
     if spinat is None:
         spinat = np.zeros((len(atoms), 3), dtype=float)
+        from TB2J.projector_green import ProjectorGreen, site_magnetization_sign
+
+        ops = ProjectorGreen(data).get_local_operators_spinor(sites=sites)
+        for site in sites:
+            spinat[site, 2] = -site_magnetization_sign(ops[site])
     index_spin = [-1] * len(atoms)
     site_to_spin = {}
     for ispin, site in enumerate(sites):
@@ -356,10 +396,8 @@ def write_spinor_projector_exchange_out(
         Jani_dict[key] = np.asarray(entry["jani"], dtype=float)
     if description is None:
         description = (
-            "Spinor projector Green workflow using GPAW noncollinear+SOC "
-            "projections and the dH_asii Pauli-decomposed 2x2 site operator. "
-            "J_iso, DMI, and anisotropic exchange from the sympy-pinned "
-            "spinor exchange tensor (docs/sympy/spinor_projector_green.md).\n"
+            "Full rank-nine spinor exchange reconstructed from three independent "
+            "x/y/z magnetic references by raw transverse-leg merge.\n"
         )
     output = SpinIO(
         atoms=atoms,
@@ -387,10 +425,17 @@ def gen_exchange_gpaw_spinor_netcdf(
     magnetic_elements=None,
     index_magnetic_atoms=None,
 ):
-    """Python interface for spinor projector-NetCDF exchange calculation."""
+    """Write three precomputed spinor NetCDF legs as one full tensor."""
     from TB2J.projector_green import ProjectorGreenData
 
-    data = ProjectorGreenData.load_netcdf(filename)
+    if not isinstance(filename, Mapping) or set(filename) != {"x", "y", "z"}:
+        raise ValueError(
+            "spinor NetCDF exchange requires a mapping of x/y/z reference "
+            "files; one SOC file determines only a transverse leg"
+        )
+    data = {
+        name: ProjectorGreenData.load_netcdf(path) for name, path in filename.items()
+    }
     return write_spinor_projector_exchange_out(
         data,
         path=output_path,

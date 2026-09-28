@@ -13,17 +13,17 @@ from ase.units import kB
 from TB2J.interfaces.gpaw_projector import _R_grid_for_cutoff
 from TB2J.interfaces.gpaw_spinor_split_soc import (
     LEG_AXES,
-    apply_frame_rotation,
     collect_soc_leg,
     soc_leg_to_projector_green_data,
 )
 from TB2J.io_exchange.io_exchange import SpinIO
-from TB2J.io_merge import merge
 from TB2J.mycfr import CFR
 from TB2J.split_soc_kernel import (
     band_window_convergence_report,
     compute_ks_split_soc_exchange,
     json_safe_provenance,
+    merge_transverse_legs,
+    rotate_transverse_leg,
 )
 
 
@@ -46,25 +46,16 @@ def _magnetic_sites(calc, indices):
     return sites, moments
 
 
-def _write_leg(
-    path, data, exchange, sites, moments, axis, rotation, rcut, metadata=None
-):
-    """Write the rotated physical tensor and per-leg spin axes for io_merge."""
+def _write_merged(path, data, exchange, sites, moments, rcut, metadata):
+    """Write a complete rank-nine tensor, never a rank-four leg, to SpinIO."""
     atoms = Atoms(
-        numbers=data.atomic_numbers,
-        positions=data.positions,
-        cell=data.cell,
-        pbc=True,
+        numbers=data.atomic_numbers, positions=data.positions, cell=data.cell, pbc=True
     )
     site_to_spin = {site: n for n, site in enumerate(sites)}
     index_spin = [site_to_spin.get(i, -1) for i in range(len(atoms))]
     spinat = np.zeros((len(atoms), 3))
-    for site in sites:
-        spinat[site] = moments[site] * axis
-    distances = {}
-    jiso = {}
-    dmi = {}
-    jani = {}
+    spinat[sites, 2] = moments[sites]
+    distances, jiso, dmi, jani = {}, {}, {}, {}
     for (r, i, j), entry in exchange.items():
         vector = np.asarray(r) @ data.cell + data.positions[j] - data.positions[i]
         distance = float(np.linalg.norm(vector))
@@ -73,11 +64,11 @@ def _write_leg(
         key = (tuple(int(v) for v in r), site_to_spin[i], site_to_spin[j])
         distances[key] = (vector, distance)
         jiso[key] = float(entry["Jiso"])
-        dmi[key] = rotation @ np.asarray(entry["dmi"], dtype=float)
-        jani[key] = apply_frame_rotation(entry["jani"], rotation)
+        dmi[key] = np.asarray(entry["dmi"], dtype=float)
+        jani[key] = np.asarray(entry["jani"], dtype=float)
     if not jiso:
         raise ValueError("no magnetic pairs lie within Rcut; increase the cutoff")
-    spinio = SpinIO(
+    output = SpinIO(
         atoms=atoms,
         charges=np.zeros(len(atoms)),
         spinat=spinat,
@@ -88,19 +79,12 @@ def _write_leg(
         dmi_ddict=dmi,
         Jani_dict=jani,
         description=(
-            "GPAW split-SOC second-variational leg, strength-0 collinear frozen "
-            "density; all-atom W_SO, magnetic-only PAW XC/+U vertices; "
-            "tensor rotated psi->lattice before three-leg merge."
-            + (
-                "\nsplit_soc_provenance: " + json.dumps(metadata, sort_keys=True)
-                if metadata is not None
-                else ""
-            )
+            "GPAW frozen-density split-SOC: rank-nine tensor from three independent transverse legs.\n"
+            "split_soc_provenance: " + json.dumps(metadata, sort_keys=True)
         ),
     )
-    if metadata is not None:
-        spinio.split_soc_provenance = metadata
-    spinio.write_all(path=str(path))
+    output.split_soc_provenance = metadata
+    output.write_all(path=str(path))
 
 
 def _contour_second_order_shift(leg, nz, smearing_eV):
@@ -165,6 +149,7 @@ def gen_exchange_gpaw_split_soc(
     output = Path(output_path)
     leg_paths = {}
     mae = {}
+    legs = {}
     metadata = {}
     rpts = None if Rpts is None else np.asarray(Rpts, dtype=int)
     for direction, (theta, phi) in LEG_AXES.items():
@@ -210,17 +195,18 @@ def gen_exchange_gpaw_split_soc(
             study
         )
         leg_metadata = json_safe_provenance(result["metadata"])
+        rotated = rotate_transverse_leg(
+            result["exchange"], leg.rotation, "xyz".index(direction)
+        )
+        legs[direction] = {"exchange": rotated, "metadata": leg_metadata}
         leg_path = output / direction
-        _write_leg(
-            leg_path,
-            data,
-            result["exchange"],
-            sites,
-            moments,
-            leg.axis,
-            leg.rotation,
-            Rcut,
-            metadata=leg_metadata,
+        leg_path.mkdir(parents=True, exist_ok=True)
+        keys = sorted(rotated)
+        np.savez_compressed(
+            leg_path / "split_soc_leg.npz",
+            pair_keys=np.asarray([[*r, i, j] for r, i, j in keys], dtype=int),
+            J_leg=np.asarray([rotated[key]["J_leg"] for key in keys]),
+            axis=np.asarray(leg.axis),
         )
         leg_paths[direction] = leg_path
         mae[direction] = {
@@ -247,17 +233,26 @@ def gen_exchange_gpaw_split_soc(
             abs(row["contour_residual_eV"]) <= mae_contour_tolerance_eV
         )
     merged_path = output / "merged"
-    merge(
-        *(str(leg_paths[name]) for name in LEG_AXES),
-        save=True,
-        write_path=str(merged_path),
-        merged_provenance={"merge_mode": "three_legs", "legs": metadata},
+    combined = merge_transverse_legs(legs, consistency_atol=5e-5)
+    _write_merged(
+        merged_path,
+        data,
+        combined["exchange"],
+        sites,
+        moments,
+        Rcut,
+        {
+            "merge_mode": "raw_rank_nine",
+            "legs": metadata,
+            "diagnostics": combined["diagnostics"],
+        },
     )
     output.mkdir(parents=True, exist_ok=True)
     (output / "split_soc_report.json").write_text(
         json.dumps(
             {
                 "mae": mae,
+                "merge_diagnostics": combined["diagnostics"],
                 "legs": {name: str(path) for name, path in leg_paths.items()},
                 "merged": str(merged_path),
                 "metadata": metadata,

@@ -200,26 +200,29 @@ The same run from the command line:
 Outputs and provenance
 ----------------------
 
-Each leg is written to ``leg_x/``, ``leg_y/``, ``leg_z/`` as a
-noncollinear TB2J results directory with ``spinat`` along the leg axis,
-plus ``split_soc_provenance.json``; the three legs are merged into
-``output_path``.  Every leg records the FR-050/ADR-8 provenance block:
+Each leg is written to ``leg_x/``, ``leg_y/``, ``leg_z/`` as the raw
+rotated transverse blocks ``split_soc_leg.npz`` (``J_leg`` per
+``(R, i, j)`` pair — never per-leg scalar :math:`J_\mathrm{iso}`/DMI/Jani,
+which a single reference cannot determine) plus
+``split_soc_provenance.json``; a successful three-leg merge writes the
+rank-nine merged results to ``output_path``.  Every leg records the
+FR-050/ADR-8 provenance block:
 strength-0 reference (PAO_HS path + SHA-256, WFK name + SHA-256), sidecar
 schema and operator source with explicit ``units: "eV"``, the spin frame
 (``spinaxis`` and the resulting lattice-frame axis), the magnetic vertex
 sites and component, the even-prefix band-window study with its measured
 change, tolerance and ``converged`` flag, the merge mode
 ``three_leg_rotate_merge``, and the full pairing report.  The merged
-artifacts keep the three leg records and add the rank-9 merged view.
+provenance keeps the three leg records and adds the ``raw_rank_nine``
+merge diagnostics.
 
 .. warning::
 
    Per-leg scalar ``Jiso``/``DMI``/``Jani`` decompositions of a
    single-reference leg are **not** physical observables; see the next
-   section.  The per-leg artifact layout is also evolving with the
-   split-SOC core cutover (raw per-leg transverse tensors and the
-   ``split_soc_kernel.merge_transverse_legs`` merge); consume the driver's
-   return value and the provenance JSON, not the per-leg pickle internals.
+   section.  Per-leg artifacts store only the raw transverse ``J_leg``
+   blocks; consume the driver's return value and the provenance JSON, not
+   the per-leg ``npz`` internals.
 
 Single-reference scope: what one leg can and cannot determine
 -------------------------------------------------------------
@@ -229,68 +232,92 @@ transverse :math:`2\times2` block :math:`(J_{xx}, J_{xy}, J_{yx}, J_{yy})`
 and :math:`D_z` of that leg.  Each leg's provenance carries this as an
 explicit ``quantity_scope`` statement, and the merged provenance records
 that the full rank-9 exchange tensor is final **only** after merging three
-SU(2)-rotated magnetic references (x, y and z reference axes).  Until that
-three-reference merge is produced and certified by the split-SOC core, no
-full-tensor or DMI-vector value from this workflow may be quoted as a
-physical result.
+SU(2)-rotated magnetic references (x, y and z reference axes).  That merge
+exists (``TB2J.split_soc_kernel.merge_transverse_legs``) but it *certifies
+itself per fixture*: its repeated-row invariance gate can refuse a given
+three-leg set, and a refused merge means no exchange number may be quoted
+at all (the iodine dimer below is the standing example).
 
 Gates
 -----
 
-Both gates run by default and are recorded in the provenance; either can
-be disabled only explicitly.
+Three gates run by default and are recorded in the provenance; the
+opt-outs below are explicit and not recommended.
 
 * **SOC-off collinear anchor**: with ``lam=0`` the consumer's spinor replay
   must reproduce the existing collinear NC PAO exchange kernel
   (``compute_projector_exchange_jdict``) shell for shell on the same
   strength-0 data (default relative tolerance :math:`10^{-7}`, plus a
-  near-zero DMI norm check).
-* **FR-032 tangent projection gate**: the merged raw transverse block
-  ``[:2, :2]`` must match the z one-shot leg (whose lattice-frame rotation
-  is the identity) within the documented tolerance.  The default
-  :math:`10^{-2}` eV tolerance deliberately respects reference-state
-  differences between a merged three-leg tensor and the single-axis z leg.
-  This is a *projection-only* consistency gate — it is never a
-  full-tensor certificate.
+  near-zero DMI norm check).  Disable with ``--no-soc-off-anchor`` /
+  ``soc_off_anchor=False``; retune with ``--anchor_rtol``.
+* **Rank-9 merge invariance gate** (always on, not optional): the three
+  rotated legs must jointly determine the raw lattice tensor —
+  ``merge_transverse_legs`` requires design-matrix rank 9 (three
+  independent reference axes) and that every *repeated* diagonal row
+  (each diagonal entry is measured in two different legs) agrees within
+  ``merge_consistency_atol`` (:math:`10^{-6}` eV in the NC driver).
+  A refusal aborts the driver before any merged tensor exists; see the
+  iodine dimer below.
+* **FR-032 tangent projection gate**: after a successful merge, the merged
+  raw transverse block ``[:2, :2]`` must match the z one-shot leg (whose
+  lattice-frame rotation is the identity) within the documented tolerance.
+  The default :math:`10^{-2}` eV tolerance deliberately respects
+  reference-state differences between a merged three-leg tensor and the
+  single-axis z leg.  This is a *projection-only* consistency gate — it is
+  never a full-tensor certificate.  Disable with
+  ``--no-verify-tangent-projection``; retune with ``--tangent_tol``.
 
-The band-window study is the third, always-on diagnostic: even composite
+The band-window study is the fourth, always-on diagnostic: even composite
 prefixes (:math:`2b-2`, :math:`2b` by default) are compared per leg, and a
 ``converged: false`` flag is an unresolved error bar that calls for a
 larger sidecar band window, never for a favourable error bar.
 
-Real iodine proof (I₂ dimer)
-----------------------------
+Real iodine dimer (I₂): anchor certified, tensor **not** certified
+------------------------------------------------------------------
 
-The workflow was certified on a real stretched iodine dimer
+The retained stretched iodine dimer fixture
 (bond :math:`7.5\,a_0` in an :math:`18\,a_0` box, Hund-state ``spinat``
 :math:`(0,0,1)` on both atoms, 14 bands/spin → 28 composite states,
-Γ-point :math:`1\times1\times1` mesh):
+Γ-point :math:`1\times1\times1` mesh) is **not a certified exchange
+fixture** under the rank-nine core.  Its verified status:
 
-* **SOC-off anchor**: max relative Jiso deviation
-  :math:`1.7\times10^{-15}` over 28 R-pairs (recorded smoke:
-  :math:`1.7\times10^{-15}` over 12 pairs at a shorter cutoff); DMI norms
-  at the :math:`10^{-18}` eV level.
-* **FR-032 tangent projection gate**: max transverse deviation
-  :math:`7.114\times10^{-3}` eV = 7.114 meV against the
-  :math:`10^{-2}` eV = 10 meV tolerance — the gate **passes**, and the
-  residual is dominated by the reference-state difference the tolerance
-  exists for.  This is the projection-only gate outcome, **not** a
-  full-tensor proof: the full tensor requires the three SU(2)-rotated
-  magnetic references and the pending shared-core merge.
+* **SOC-off anchor — passes.**  Max relative Jiso deviation
+  :math:`4.0\times10^{-15}` over 12 R-pairs (a shorter-cutoff recording:
+  :math:`1.7\times10^{-15}`); DMI norms at the :math:`10^{-18}` eV level.
+  The strength-zero replay itself is exact.
+* **Rank-9 merge — refuses.**  The three legs measure each diagonal entry
+  twice (repeated rows of the design matrix).  On this fixture the two
+  measurements disagree by up to :math:`2.5\times10^{-2}` eV (≈25 meV,
+  worst pair ``((-1,0,0), 0, 0)``) against the
+  :math:`10^{-6}` eV ``merge_consistency_atol``, so
+  ``merge_transverse_legs`` raises and the driver aborts: **no merged
+  tensor, no tangent-gate outcome, no :math:`J_\mathrm{iso}`/DMI/Jani
+  exists for this fixture.**  The x/y/z leg references disagree at the
+  tens-of-meV level; diagnose the sidecar band window and the leg
+  reference states — do not raise the tolerance to force a merge.
 * **Band window (FR-050)**: the default :math:`2b-2 \to 2b` study moves by
   :math:`1.7\times10^{-5}` eV at a :math:`10^{-6}` eV tolerance, i.e.
   ``converged: false`` — production use of this fixture needs a larger
-  sidecar band window, and the flag stays visible in the provenance.
+  sidecar band window, and the flag stays visible in the per-leg
+  provenance.
 
-The single iodine atom fixture closes even tighter (anchor
-:math:`5.6\times10^{-16}`, tangent :math:`2.3\times10^{-11}` eV).
+An earlier, pre-cutover recording quoted a passing FR-032 tangent residual
+(:math:`7.1` meV against a 10 meV tolerance) computed against the legacy
+scalar merge; that path is retired and the numbers are superseded by the
+merge refusal above.  Until the ~25 meV repeated-row disagreement is
+diagnosed, every exchange-level statement about this dimer is
+uncertified; only the anchor and the per-leg diagnostics stand.
 
 Runnable example
 ----------------
 
 ``examples/projector_green/abinit_nc_i2_split_soc.py`` runs the three-leg
 driver on a real ``abinit.nc_pao_hs`` v2 + ``abinao.nc_soc_ks`` v1 pair
-and prints the pairing, the two gate reports and the output paths:
+and prints the pairing, the anchor and merge gate reports and the output
+paths.  On the current retained fixture the rank-nine merge refuses
+(repeated-row spread ≈ 25 meV), so the script exits nonzero after the
+per-leg diagnostics — that refusal is the documented behaviour, not a
+crash:
 
 .. code-block:: bash
 

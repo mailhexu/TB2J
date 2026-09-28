@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from TB2J.interfaces.vasp_native import read_vasp_native_spinor
-from TB2J.projector_green import ProjectorGreen, spinor_projector_exchange_trace
+from TB2J.projector_green import ProjectorGreen, spinor_tangent_trace
 
 MAGIC = 20260812
 
@@ -71,7 +71,7 @@ def _make_v7_file(path, rng, nkpt_bz=4, nions=2, nproj_per_ion=2, nband=3):
     cdij_converted = np.zeros((lmdim, lmdim, nions, 4), dtype=complex)
     for ion in range(nions):
         c00 = np.diag([0.2, 0.1]).astype(complex)
-        cz = np.diag([0.5, -0.5]).astype(complex) * (1 if ion == 0 else -1)
+        cz = np.diag([0.5, 0.25]).astype(complex) * (1 if ion == 0 else -1)
         cdij_raw[:, :, ion, 0] = 0.5 * (c00 + cz)
         cdij_raw[:, :, ion, 3] = 0.5 * (c00 - cz)
         cdij_converted[:, :, ion, 0] = c00 + cz
@@ -144,12 +144,12 @@ def test_v7_roundtrip(tmp_path):
     )
     np.testing.assert_allclose(
         data.spinor_operator[0, :, :, 0, 0],
-        np.diag([0.5, -0.5]),
+        np.diag([0.5, 0.25]),
         atol=1e-12,
     )
     np.testing.assert_allclose(
         data.spinor_operator[1, :, :, 0, 0],
-        np.diag([-0.5, 0.5]),
+        np.diag([-0.5, -0.25]),
         atol=1e-12,
     )
 
@@ -161,9 +161,10 @@ def test_v7_kernel_consumes(tmp_path):
     data = read_vasp_native_spinor(path)
     green = ProjectorGreen(data)
     Rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
-    result = spinor_projector_exchange_trace(green, Rpts, energy=0.05)
-    J = result["A_ijR"][((0, 0, 0), 0, 1)]
-    assert np.isfinite(J).all()
+    result = spinor_tangent_trace(green, Rpts, energy=0.05)
+    K = result["K_ijR"][((0, 0, 0), 0, 1)]
+    np.testing.assert_allclose(K, result["K_ijR"][((0, 0, 0), 1, 0)].T, atol=1e-12)
+    assert np.isfinite(K).all()
 
 
 def test_v7_rejects_v6(tmp_path):

@@ -22,19 +22,11 @@ zero on the other component (the collinear strength-0 limit), dualizes the
 nonorthogonal PAO maps ``B(k) = S(k)^-1 C(k)`` (never dropping ``S`` by
 fiat; the split-SOC kernel consumes normalized band data with
 ``overlap_k=None``), and feeds the story-002 KS split-SOC kernel per leg.
-Per-leg tensors are rotated to the lattice frame with the ABINIT spinaxis
-convention ``T_lattice = O T_leg O^T`` (``O e_z`` = leg spinaxis) and the
-three legs are merged with ``TB2J.io_merge``.
-
-Two acceptance gates run by default:
-
-- **FR-032 dimer gate**: the merged three-leg output must equal a one-shot
-  KS tensor kernel evaluation in the lattice frame (the z leg, whose
-  spinaxis is +e_z, so ``O = I``) within a documented tolerance.
-- **SOC-off collinear anchor**: with ``W_SO = 0`` the consumer's spinor
-  replay must reproduce the existing collinear NC PAO exchange kernel
-  (``compute_projector_exchange_jdict``) shell for shell on the same
-  strength-0 data.
+The producer supplies three gauge-matched SOC matrices for x/y/z ABINIT
+spinaxis rotations. Each rotated reference measures only its transverse
+2x2 exchange block; the rank-nine raw tensor is solved from all three
+before decomposition into Jiso/DMI/Jani. The strength-0 collinear anchor
+and the z-leg transverse projection are checked independently.
 """
 
 from __future__ import annotations
@@ -51,7 +43,8 @@ from TB2J.interfaces.abinit_savetb2j import (
     ABINIT_NC_PAO_HS_SCHEMA_VERSION,
     load_abinit_nc_pao_savetb2j,
 )
-from TB2J.split_soc_kernel import band_window_convergence_report, json_safe_provenance
+from TB2J.projector_green import site_magnetization_sign
+from TB2J.split_soc_kernel import json_safe_provenance
 
 __all__ = [
     "NC_SOC_KS_SCHEMA_NAME",
@@ -445,14 +438,13 @@ def dualize_pao_coefficients(data):
     )
 
 
-def build_nc_split_soc_leg(
+def build_nc_split_soc_reference(
     sidecar,
     data,
-    leg="z",
     sites_magnetic=None,
     vertex_component="delta_total",
 ):
-    """Build the normalized no-SOC spinor band data for one NC PAO leg.
+    """Build the normalized no-SOC spinor REFERENCE (the z reference).
 
     Composite state ``2*n + s`` carries the dualized PAO map of collinear
     channel ``s`` on spinor component ``s`` and zero elsewhere; magnetic
@@ -467,11 +459,8 @@ def build_nc_split_soc_leg(
     )
     from TB2J.projector_green import SPINOR_OPERATOR_DEFINITION
 
-    leg = str(leg).lower()
-    if leg not in SOC_OFF_LEG_DIRECTIONS:
-        raise ValueError(f"leg must be one of {SOC_OFF_LEG_DIRECTIONS}, got {leg!r}")
     if data.nspinor != 1 or data.coefficients.ndim != 4:
-        raise ValueError("build_nc_split_soc_leg expects collinear PAO_HS data")
+        raise ValueError("build_nc_split_soc_reference expects collinear PAO_HS data")
     if sidecar.nband_composite != 2 * data.nband:
         raise ValueError(
             f"sidecar composite bands {sidecar.nband_composite} != 2 * nband "
@@ -519,7 +508,7 @@ def build_nc_split_soc_leg(
         **data.metadata,
         "split_soc_leg": {
             "backend": "abinit_nc",
-            "leg": leg,
+            "leg": "z",
             "sidecar": sidecar.source_path,
             "coefficient_convention": "abinao PAO <phi|psi> dualized B = S^-1 C "
             "(ket-side spectral replay)",
@@ -544,8 +533,82 @@ def build_nc_split_soc_leg(
     )
 
 
+def _abinit_spinaxis_rotation(axis):
+    """ABINIT geteuler z-y spin gauge used by abinao.spin_matrices.
+
+    Band-space W_SO is gauge-dependent: the producer contracts U^dag S U in
+    the unrotated collinear WFK basis. The leg must rotate its states by this
+    same U; choosing any other SU(2) representative changes W_SO's phases.
+    """
+    axis = np.asarray(axis, dtype=float)
+    axis = axis / np.linalg.norm(axis)
+    alpha = float(np.arctan2(axis[1], axis[0])) if np.hypot(*axis[:2]) > 1e-8 else 0.0
+    beta = float(np.arctan2(np.hypot(*axis[:2]), axis[2]))
+    cb, sb = np.cos(beta / 2), np.sin(beta / 2)
+    em = np.exp(-0.5j * alpha)
+    ep = em.conjugate()
+    return np.array([[cb * em, -sb * em], [sb * ep, cb * ep]], dtype=complex)
+
+
+def build_nc_split_soc_leg(
+    sidecar,
+    data,
+    leg="z",
+    sites_magnetic=None,
+    vertex_component="delta_total",
+    reference=None,
+):
+    """Build one Cartesian reference leg: an SU(2)-rotated spinor reference.
+
+    The source producer evaluates its matrix in the ABINIT z-y Euler spin
+    gauge. Rotate the no-SOC states and magnetic operator by that exact U,
+    so the sidecar W_SO for this leg is in the matching composite band basis.
+    The physical SOC operator stays fixed in the lattice frame; its band
+    matrix generally differs for x/y/z references.
+    """
+    import dataclasses
+
+    leg = str(leg).lower()
+    if leg not in SOC_OFF_LEG_DIRECTIONS:
+        raise ValueError(f"leg must be one of {SOC_OFF_LEG_DIRECTIONS}, got {leg!r}")
+    if reference is None:
+        reference = build_nc_split_soc_reference(
+            sidecar,
+            data,
+            sites_magnetic=sites_magnetic,
+            vertex_component=vertex_component,
+        )
+    if leg == "z":
+        return reference
+
+    u = _abinit_spinaxis_rotation(_LEG_AXES[leg])
+    coefficients = np.einsum(
+        "at,knbtp->knbap",
+        u,
+        np.asarray(reference.coefficients, dtype=complex),
+        optimize=True,
+    )
+    spinor_operator = np.einsum(
+        "as,bt,npqst->npqab",
+        u,
+        u.conj(),
+        np.asarray(reference.spinor_operator, dtype=complex),
+        optimize=True,
+    )
+    metadata = {
+        **reference.metadata,
+        "split_soc_leg": {**reference.metadata["split_soc_leg"], "leg": leg},
+    }
+    return dataclasses.replace(
+        reference,
+        coefficients=coefficients,
+        spinor_operator=spinor_operator,
+        metadata=metadata,
+    )
+
+
 def w_soc_for_leg(sidecar, leg):
-    """Return the leg's all-atom band-window SOC operator (eV), (nk, 2b, 2b)."""
+    """Return the leg-gauge SOC operator from the sidecar (eV), (nk, 2b, 2b)."""
     return np.asarray(sidecar.w_so[sidecar.leg_index(leg)], dtype=complex)
 
 
@@ -563,16 +626,9 @@ def _default_window_prefixes(nband_composite):
     return [nband_composite - 2, nband_composite]
 
 
-def _load_merged_results(path):
-    from TB2J.io_exchange.io_exchange import SpinIO
-
-    return SpinIO.load_pickle(path=str(path))
-
-
 def _tangent_projection_check(
-    merged_results,
-    one_shot_entries,
-    sites,
+    merged_exchange,
+    z_leg_exchange,
     cell,
     positions,
     tol_eV,
@@ -581,21 +637,11 @@ def _tangent_projection_check(
 
     One collinear z reference determines only the raw 2x2 transverse block
     (J_xx, J_xy, J_yx, J_yy) and D_z of the physical tensor — never the full
-    3x3 J (SymPy story-001/002 adjudication; confirmed numerically on
-    synthetic psi-gauge data where Jiso/DMI_z are leg-consistent to roundoff
-    while the transverse block is not).  This gate therefore compares ONLY
-    the raw ``tensor[:2, :2]`` of the rank-9 merged tensor against the z
-    one-shot leg, with a tolerance that respects reference-state
-    differences between the legs.  Single-leg ``Jiso`` is never treated as
-    a final observable; the full isotropic/Jani/DMI split is meaningful
-    only after the three-leg merge.
+    3x3 J (story adjudication).  This gate compares ONLY the raw
+    ``tensor[:2, :2]`` of the rank-9 merged tensor against the z one-shot
+    leg's ``J_leg`` (already the measured lattice transverse block), with a
+    tolerance that respects reference-state differences between the legs.
     """
-    one_shot = {}
-    for (r, i, j), entry in one_shot_entries.items():
-        vector = np.asarray(r) @ cell + positions[j] - positions[i]
-        if float(np.linalg.norm(vector)) < 1e-6:
-            continue
-        one_shot[(tuple(int(x) for x in r), i, j)] = entry
     report = {
         "gate": (
             "FR-032 dimer projection-only equivalence: merged raw tensor "
@@ -607,31 +653,24 @@ def _tangent_projection_check(
         "max_transverse_dev_eV": 0.0,
         "worst_pair": None,
     }
-
-    def _transverse(jiso, dmi, jani):
-        from TB2J.Jtensor import combine_J_tensor
-
-        tensor = combine_J_tensor(Jiso=float(jiso), D=dmi, Jani=jani)
-        return tensor[:2, :2]
-
-    for key, entry in one_shot.items():
-        if key not in merged_results.exchange_Jdict:
+    for key, z_entry in z_leg_exchange.items():
+        vector = np.asarray(key[0]) @ cell + positions[key[2]] - positions[key[1]]
+        if float(np.linalg.norm(vector)) < 1e-6:
+            continue
+        if key not in merged_exchange:
             raise ValueError(
                 "tangent projection gate: merged output is missing pair "
                 f"{key}; the three legs and the one-shot run must share k "
                 "mesh and R grid"
             )
-        merged_block = _transverse(
-            merged_results.exchange_Jdict[key],
-            merged_results.dmi_ddict[key],
-            merged_results.Jani_dict[key],
-        )
-        z_block = _transverse(entry["Jiso"], entry["dmi"], entry["jani"])
-        deviation = float(np.abs(merged_block - z_block).max())
+        merged_entry = merged_exchange[key]
+        merged_tensor = np.asarray(merged_entry["tensor"], dtype=float)
+        z_block = np.asarray(z_entry["J_leg"], dtype=float)[:2, :2]
+        deviation = float(np.abs(merged_tensor[:2, :2] - z_block).max())
         report["pairs_compared"] += 1
         if deviation > report["max_transverse_dev_eV"]:
             report["max_transverse_dev_eV"] = deviation
-            report["worst_pair"] = list(key)
+            report["worst_pair"] = [int(x) for x in key[0]] + [key[1], key[2]]
         if deviation > tol_eV:
             raise ValueError(
                 "tangent projection gate FAILED for pair "
@@ -659,12 +698,14 @@ def nc_split_soc_soc_off_anchor(
     vertex_component,
     jiso_rtol=_DEFAULT_ANCHOR_RTOL,
     dmi_tol_eV=_DEFAULT_ANCHOR_DMI_TOL_EV,
+    reference=None,
 ):
     """SOC-off collinear anchor gate (existing NC PAO exchange kernel).
 
-    The dualized stacked leg replayed with ``W_SO = 0`` must reproduce the
-    existing collinear ``delta_total`` projector exchange Jiso pair by pair,
-    with vanishing DMI.
+    The dualized stacked z reference replayed with ``W_SO = 0`` must
+    reproduce the existing collinear ``delta_total`` projector exchange
+    kernel exactly on the transverse diagonal (``J_leg[u, u]`` and
+    ``J_leg[v, v]``), with a symmetric transverse block.
     """
     from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
     from TB2J.split_soc_kernel import (
@@ -672,7 +713,7 @@ def nc_split_soc_soc_off_anchor(
         compute_ks_split_soc_exchange,
     )
 
-    reference = compute_projector_exchange_jdict(
+    reference_jdict = compute_projector_exchange_jdict(
         data,
         Rpts=Rpts,
         nz=nz,
@@ -680,14 +721,14 @@ def nc_split_soc_soc_off_anchor(
         sites=sites,
         operator_component=vertex_component,
     )
-    leg = build_nc_split_soc_leg(
-        sidecar,
-        dualized,
-        leg="z",
-        sites_magnetic=sites,
-        vertex_component=vertex_component,
+    leg = (
+        reference
+        if reference is not None
+        else build_nc_split_soc_reference(
+            sidecar, dualized, sites_magnetic=sites, vertex_component=vertex_component
+        )
     )
-    zero_w = np.zeros((data.nkpt, 2 * data.nband, 2 * data.nband))
+    zero_w = np.zeros((dualized.nkpt, 2 * dualized.nband, 2 * dualized.nband))
     result = compute_ks_split_soc_exchange(
         leg,
         zero_w,
@@ -701,38 +742,110 @@ def nc_split_soc_soc_off_anchor(
     report = {
         "gate": "SOC-off collinear anchor (compute_projector_exchange_jdict)",
         "vertex_component": vertex_component,
+        "observable": "z reference J_leg[u,u] / J_leg[v,v]",
         "max_rel_Jiso_dev": 0.0,
-        "max_dmi_norm_eV": 0.0,
+        "max_transverse_asymmetry_eV": 0.0,
         "pairs_compared": 0,
     }
     for (r, i, j), entry in result["exchange"].items():
         key = (tuple(int(x) for x in r), i, j)
-        ref = reference.get(key)
+        ref = reference_jdict.get(key)
         if ref is None:
             continue
-        deviation = abs(float(entry["Jiso"]) - float(ref)) / max(1.0, abs(float(ref)))
+        frame = entry["frame"]
+        u_ax, v_ax = int(frame["u"]), int(frame["v"])
+        j_leg = np.asarray(entry["J_leg"], dtype=float)
+        deviation = max(
+            abs(float(j_leg[u_ax, u_ax]) - float(ref)) / max(1.0, abs(float(ref))),
+            abs(float(j_leg[v_ax, v_ax]) - float(ref)) / max(1.0, abs(float(ref))),
+        )
+        asymmetry = float(abs(j_leg[u_ax, v_ax] - j_leg[v_ax, u_ax]))
         report["pairs_compared"] += 1
         report["max_rel_Jiso_dev"] = max(report["max_rel_Jiso_dev"], deviation)
-        report["max_dmi_norm_eV"] = max(
-            report["max_dmi_norm_eV"], float(np.linalg.norm(entry["dmi"]))
+        report["max_transverse_asymmetry_eV"] = max(
+            report["max_transverse_asymmetry_eV"], asymmetry
         )
     if report["pairs_compared"] == 0:
         raise ValueError("SOC-off anchor found no comparable pairs")
     if report["max_rel_Jiso_dev"] > jiso_rtol:
         raise ValueError(
-            "SOC-off anchor FAILED: spinor replay Jiso deviates from the "
-            f"collinear kernel by {report['max_rel_Jiso_dev']:.3e} (rel, tol "
-            f"{jiso_rtol:.1e}); the dualized stacked replay must reproduce "
-            "the existing exchange kernel at zero SOC"
+            "SOC-off anchor FAILED: spinor replay transverse diagonal deviates "
+            f"from the collinear kernel by {report['max_rel_Jiso_dev']:.3e} "
+            f"(rel, tol {jiso_rtol:.1e}); the dualized stacked replay must "
+            "reproduce the existing exchange kernel at zero SOC"
         )
-    if report["max_dmi_norm_eV"] > dmi_tol_eV:
+    if report["max_transverse_asymmetry_eV"] > dmi_tol_eV:
         raise ValueError(
-            "SOC-off anchor FAILED: nonzero DMI "
-            f"{report['max_dmi_norm_eV']:.3e} eV at zero SOC (tol "
+            "SOC-off anchor FAILED: antisymmetric transverse block "
+            f"{report['max_transverse_asymmetry_eV']:.3e} eV at zero SOC (tol "
             f"{dmi_tol_eV:.1e})"
         )
     report["passed"] = True
     return report
+
+
+def _write_merged_results(data, merged_exchange, sites, path, description, provenance):
+    """Write the rank-9 merged tensor set as one TB2J results directory."""
+    from ase import Atoms
+
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    atoms = Atoms(
+        numbers=data.atomic_numbers,
+        positions=data.positions,
+        cell=data.cell,
+        pbc=True,
+    )
+    index_spin = [-1] * len(atoms)
+    site_to_spin = {}
+    for ispin, site in enumerate(sites):
+        index_spin[site] = ispin
+        site_to_spin[site] = ispin
+    exchange_Jdict = {}
+    dmi_ddict = {}
+    Jani_dict = {}
+    distance_dict = {}
+    for (r, i, j), entry in merged_exchange.items():
+        vector = np.asarray(r) @ data.cell + atoms.positions[j] - atoms.positions[i]
+        distance = float(np.linalg.norm(vector))
+        if distance < 1e-6:
+            continue  # onsite pair excluded (spinor-path convention)
+        key = (tuple(int(x) for x in r), site_to_spin[i], site_to_spin[j])
+        distance_dict[key] = (vector, distance)
+        exchange_Jdict[key] = float(entry["Jiso"])
+        dmi_ddict[key] = np.asarray(entry["dmi"], dtype=float)
+        Jani_dict[key] = np.asarray(entry["jani"], dtype=float)
+    spinat = np.zeros((len(atoms), 3), dtype=float)
+    for site in sites:
+        nproj_site = int(data.site_nproj[site])
+        vertex = data.spinor_operator[site, :nproj_site, :nproj_site]
+        signed_trace = float(np.real(np.trace(vertex[:, :, 0, 0] - vertex[:, :, 1, 1])))
+        if abs(signed_trace) <= 1e-10:
+            raise ValueError(
+                f"cannot infer magnetic direction for site {site} from zero "
+                "vertex trace (is the strength-0 state actually magnetic?)"
+            )
+        # Majority-spin NC PAO potential is LOWER on a positive-moment site:
+        # Delta = V_up - V_down has the opposite sign to M (PAW-consumer
+        # convention); the reference quantization axis is +z.
+        moment_sign = -site_magnetization_sign(vertex)
+        spinat[site] = moment_sign * np.array([0.0, 0.0, 1.0])
+    output = SpinIO(
+        atoms=atoms,
+        charges=np.zeros(len(atoms), dtype=float),
+        spinat=spinat,
+        index_spin=index_spin,
+        colinear=False,
+        distance_dict=distance_dict,
+        exchange_Jdict=exchange_Jdict,
+        dmi_ddict=dmi_ddict,
+        Jani_dict=Jani_dict,
+        description=description
+        + "\nsplit_soc_provenance: "
+        + json.dumps(provenance, sort_keys=True),
+    )
+    output.split_soc_provenance = provenance
+    output.write_all(path=str(path))
 
 
 def gen_exchange_abinit_nc_split_soc(
@@ -756,41 +869,40 @@ def gen_exchange_abinit_nc_split_soc(
     anchor_jiso_rtol=_DEFAULT_ANCHOR_RTOL,
     anchor_dmi_tol_eV=_DEFAULT_ANCHOR_DMI_TOL_EV,
     wfk=None,
+    frame_tol=1.0e-6,
+    merge_consistency_atol=1.0e-6,
 ):
-    """Three-direction split-SOC exchange from PAO_HS v2 + nc_soc_ks v1.
+    """Rank-9 three-reference split-SOC exchange from PAO_HS v2 + nc_soc_ks v1.
 
-    For each leg: take the sidecar's eV band-window SOC operator, run the
-    story-002 KS second-variation kernel on the dualized composite spinor
-    window, attach the even-prefix window convergence study, rotate the
-    output tensors to the lattice frame (``T_lattice = O T_leg O^T``, ABINIT
-    spinaxis convention), and write one noncollinear TB2J results directory
-    per leg.  The three legs are merged with ``TB2J.io_merge.merge``.
+    Builds the dualized strength-0 composite spinor reference and rotates
+    each leg by the native ABINIT spinaxis matrix (states and magnetic vertex).
+    The lattice-fixed SOC operator has distinct band matrices in the three
+    rotated references; each is read from the matching sidecar leg. The
+    reference-frame gates inspect the full Green function and vertex.
+    The kernel returns only the measured transverse ``J_leg`` per leg; the
+    full lattice tensor comes exclusively from ``merge_transverse_legs``.
+    one TB2J results directory.  Per-leg raw ``J_leg`` blocks are stored as
+    ``leg_<x|y|z>/split_soc_leg.npz`` — never as per-leg scalar
+    Jiso/DMI/Jani, which a single reference cannot determine.
 
-    Gates (both on by default): ``verify_tangent_projection`` enforces the
-    FR-032 projection-only equivalence — the rank-9 merged tensor's raw
-    transverse block vs the z one-shot leg within a documented tolerance
-    (never a full-tensor single-leg claim: one collinear reference
-    determines only J_xx/J_xy/J_yx/J_yy and D_z); ``soc_off_anchor``
-    enforces the SOC-off collinear anchor on the same strength-0 data.
+    Gates (default on): ``soc_off_anchor`` (W=0 z reference vs the existing
+    collinear kernel), ``verify_tangent_projection`` (FR-032
+    projection-only merged-vs-z transverse block equality).
     """
-    from TB2J.interfaces.abinit_paw_split_soc import (
-        _rotate_entry_tensors,
-        _write_leg_results,
-        rotation_matrix_from_su2,
-        su2_leg_rotation,
-    )
     from TB2J.interfaces.gpaw_projector import _magnetic_sites, _R_grid_for_cutoff
-    from TB2J.io_merge import merge
-    from TB2J.projector_green import site_magnetization_sign
-    from TB2J.split_soc_kernel import compute_ks_split_soc_exchange
+    from TB2J.split_soc_kernel import (
+        band_window_convergence_report,
+        compute_ks_split_soc_exchange,
+        merge_transverse_legs,
+        spinor_frame_rotation_residual,
+        split_soc_frame_report,
+    )
 
     legs = tuple(str(leg).lower() for leg in legs)
     if legs != SOC_OFF_LEG_DIRECTIONS:
         raise ValueError(f"legs must be {SOC_OFF_LEG_DIRECTIONS} in order, got {legs}")
     if mode != "second_variation":
-        raise ValueError(
-            "NC three-leg SpinIO output requires absolute second_variation exchange"
-        )
+        raise ValueError("NC rank-9 merge requires absolute second_variation exchange")
 
     data = load_abinit_nc_pao_savetb2j(pao_hs)
     sidecar = load_soc_ks_sidecar(soc_kernel)
@@ -823,6 +935,10 @@ def gen_exchange_abinit_nc_split_soc(
         Rpts = _R_grid_for_cutoff(data, sites, Rcut)
     Rpts = np.asarray(Rpts, dtype=int)
 
+    reference = build_nc_split_soc_reference(
+        sidecar, dualized, sites_magnetic=sites, vertex_component=vertex_component
+    )
+
     if soc_off_anchor:
         anchor_report = nc_split_soc_soc_off_anchor(
             data,
@@ -835,6 +951,7 @@ def gen_exchange_abinit_nc_split_soc(
             vertex_component,
             jiso_rtol=anchor_jiso_rtol,
             dmi_tol_eV=anchor_dmi_tol_eV,
+            reference=reference,
         )
     else:
         anchor_report = {
@@ -850,17 +967,14 @@ def gen_exchange_abinit_nc_split_soc(
     output_root = Path(output_path)
     leg_dirs = {}
     leg_metadata = {}
-    leg_z_entries = None
+    leg_exchanges = {}
     pao_sha = pairing["pao_hs"]["sha256"]
     for leg in legs:
-        su2 = su2_leg_rotation(leg)
-        o_frame = rotation_matrix_from_su2(su2)
-        leg_axis = o_frame @ np.array([0.0, 0.0, 1.0])
         spinaxis = sidecar.spinaxis[sidecar.leg_index(leg)]
-        if not np.allclose(leg_axis, spinaxis, atol=1e-8):
+        if not np.allclose(spinaxis, _LEG_AXES[leg], atol=_AXIS_ALIGN_TOL):
             raise ValueError(
-                f"leg {leg!r}: sidecar spinaxis {spinaxis} disagrees with the "
-                f"ABINIT spinaxis rotation axis {leg_axis}"
+                f"leg {leg!r}: sidecar spinaxis {spinaxis} does not align with "
+                f"the +{leg} Cartesian axis"
             )
         leg_data = build_nc_split_soc_leg(
             sidecar,
@@ -868,11 +982,12 @@ def gen_exchange_abinit_nc_split_soc(
             leg=leg,
             sites_magnetic=sites,
             vertex_component=vertex_component,
+            reference=reference,
         )
-        w_leg = w_soc_for_leg(sidecar, leg)
+        leg_w = w_soc_for_leg(sidecar, leg)
         result = compute_ks_split_soc_exchange(
             leg_data,
-            w_leg,
+            leg_w,
             lam=lam,
             mode=mode,
             Rpts=Rpts,
@@ -904,28 +1019,57 @@ def gen_exchange_abinit_nc_split_soc(
                         "source", "abinao compute_wfk_soc_kernel"
                     ),
                     "units": "eV",
+                    "frame": "lattice-fixed operator in ABINIT leg-gauge band states",
                 },
                 "frame": {
                     "leg": leg,
-                    "spinaxis": [float(v) for v in spinaxis],
-                    "leg_axis_lattice": [float(v) for v in leg_axis],
+                    "axis": [float(v) for v in _LEG_AXES[leg]],
+                    "construction": "ABINIT z-y Euler spin rotation of states and vertex; sidecar W in matching leg gauge",
                 },
-                "merge_mode": "three_leg_rotate_merge",
+                "merge_mode": "rank9_transverse_merge",
                 "quantity_scope": (
-                    "single magnetic reference axis: only the raw transverse "
-                    "block (J_xx, J_xy, J_yx, J_yy) and D_z of this leg are "
-                    "physical observables; leg Jiso/DMI/Jani scalars are NOT "
-                    "final and the full tensor requires all three reference "
-                    "axes (rank-9 merge)"
+                    "single magnetic reference axis: only the measured "
+                    "transverse J_leg block exists per leg; no per-leg "
+                    "Jiso/DMI/Jani is published and the full tensor requires "
+                    "all three reference axes (rank-9 merge)"
                 ),
                 "vertex_component": vertex_component,
                 "sidecar_pairing": pairing,
                 "soc_off_anchor": anchor_report,
             },
         )
+        frame_report = split_soc_frame_report(
+            leg_data,
+            axis=_LEG_AXES[leg],
+            tol=frame_tol,
+            reference_data=reference,
+            sites=sites,
+        )
+        if not frame_report["ok"]:
+            raise ValueError(
+                f"leg {leg!r} frame report FAILED: {frame_report}; a leg must "
+                "be a genuine global SU(2) rotation of the reference (vertex "
+                "direction and spectrum), not a metadata-only relabelling"
+            )
+        rotation_residual = spinor_frame_rotation_residual(
+            leg_data,
+            reference,
+            axis=_LEG_AXES[leg],
+            energy=float(data.efermi - 3.0),
+            rpts=Rpts,
+            sites=sites,
+            rotation=_abinit_spinaxis_rotation(_LEG_AXES[leg]),
+        )
+        if rotation_residual["max_g_residual"] > frame_tol:
+            raise ValueError(
+                f"leg {leg!r} G-covariance proof FAILED: max_g_residual="
+                f"{rotation_residual['max_g_residual']:.3e} exceeds tol "
+                f"{frame_tol:.1e}; the leg is not an SU(2) rotation of the "
+                "reference"
+            )
         study = band_window_convergence_report(
             leg_data,
-            w_leg,
+            leg_w,
             window_prefixes,
             pair=(sites[0], sites[1] if len(sites) > 1 else sites[0]),
             lam=lam,
@@ -943,89 +1087,86 @@ def gen_exchange_abinit_nc_split_soc(
                 **result["metadata"],
                 "backend": "abinit_nc",
                 "leg": leg,
-                "merge_mode": "three_leg_rotate_merge",
+                "frame_report": frame_report,
+                "rotation_residual": rotation_residual,
+                "merge_mode": "rank9_transverse_merge",
             }
         )
-        spinat_vectors = {}
-        for site in sites:
-            nproj_site = int(data.site_nproj[site])
-            vertex = leg_data.spinor_operator[site, :nproj_site, :nproj_site]
-            signed_trace = float(
-                np.real(np.trace(vertex[:, :, 0, 0] - vertex[:, :, 1, 1]))
-            )
-            if abs(signed_trace) <= 1e-10:
-                raise ValueError(
-                    f"cannot infer magnetic direction for site {site} from zero "
-                    "vertex trace (is the strength-0 state actually magnetic?)"
-                )
-            # Majority-spin NC PAO potential is LOWER on a positive-moment
-            # site: Delta = V_up - V_down has the opposite sign to M (same
-            # convention as the PAW consumer).
-            moment_sign = -site_magnetization_sign(vertex)
-            spinat_vectors[site] = moment_sign * leg_axis
         leg_dir = output_root / f"leg_{leg}"
-        description = (
-            f"ABINIT NC split-SOC leg '{leg}' (story-009): KS second-variation "
-            "spectra from the abinao.nc_soc_ks sidecar W_SO (all-atom "
-            "propagator SOC, magnetic-only delta vertices, dualized PAO maps), "
-            "tensors rotated to the lattice frame with T_lattice = O T_leg O^T.\n"
-        )
-        rotated = {
-            key: _rotate_entry_tensors(entry, o_frame)
-            for key, entry in result["exchange"].items()
-        }
-        _write_leg_results(
-            data, rotated, sites, leg_dir, description, spinat_vectors, provenance
+        leg_dir.mkdir(parents=True, exist_ok=True)
+        keys = sorted(result["exchange"])
+        np.savez(
+            leg_dir / "split_soc_leg.npz",
+            keys=np.array([repr(k) for k in keys]),
+            j_leg=np.stack(
+                [np.asarray(result["exchange"][k]["J_leg"], dtype=float) for k in keys]
+            ),
+            mask_residual=np.array(
+                [float(result["exchange"][k]["mask_residual"]) for k in keys]
+            ),
         )
         (leg_dir / "split_soc_provenance.json").write_text(
             json.dumps(provenance, indent=2, default=str) + "\n"
         )
         leg_dirs[leg] = leg_dir
         leg_metadata[leg] = provenance
-        if leg == "z":
-            leg_z_entries = rotated
+        leg_exchanges[leg] = result["exchange"]
 
+    merged = merge_transverse_legs(
+        {leg: {"exchange": leg_exchanges[leg]} for leg in legs},
+        consistency_atol=merge_consistency_atol,
+    )
     merged_provenance = {
         "schema": leg_metadata[legs[0]]["schema"],
         "backend": "abinit_nc",
-        "merge_mode": "three_leg_rotate_merge",
+        "merge_mode": "rank9_transverse_merge",
         "legs": leg_metadata,
-        "rotation": "T_lattice = O T_leg O^T with O e_z = leg spinaxis",
+        "construction": "one no-SOC reference; ABINIT z-y rotated states and vertices; matching sidecar SOC matrix per leg",
         "full_tensor": (
-            "rank-9 three-leg merge over three independent magnetic "
-            "reference axes; merged Jiso/DMI/Jani are the final observables"
+            "rank-9 merge over three independent magnetic reference axes; "
+            "merged Jiso/DMI/Jani are the final observables and exist ONLY "
+            "at this level"
         ),
+        "merge_diagnostics": merged["diagnostics"],
         "sidecar_pairing": pairing,
         "soc_off_anchor": anchor_report,
         "lambda": float(lam),
         "units": "eV",
     }
-    merge(
-        *[str(leg_dirs[leg]) for leg in legs],
-        save=True,
-        write_path=str(output_root),
-        merged_provenance=merged_provenance,
+    description = (
+        "ABINIT NC split-SOC rank-9 merged exchange (story-009): x/y/z "
+        "reference legs from the abinao.nc_soc_ks sidecar W_SO (all-atom "
+        "propagator SOC, dualized PAO maps), merged transverse blocks via "
+        "merge_transverse_legs.\n"
     )
 
     tangent_report = None
     if verify_tangent_projection:
-        merged_results = _load_merged_results(output_root)
         tangent_report = _tangent_projection_check(
-            merged_results,
-            leg_z_entries,
-            sites,
+            merged["exchange"],
+            leg_exchanges["z"],
             data.cell,
             data.positions,
             tangent_tol_eV,
         )
         merged_provenance["tangent_projection_check"] = tangent_report
 
+    _write_merged_results(
+        reference,
+        merged["exchange"],
+        sites,
+        output_root,
+        description,
+        merged_provenance,
+    )
     (output_root / "split_soc_provenance.json").write_text(
         json.dumps(merged_provenance, indent=2, default=str) + "\n"
     )
     return {
         "output_path": output_root,
         "leg_paths": leg_dirs,
+        "merged_exchange": merged["exchange"],
+        "merge_diagnostics": merged["diagnostics"],
         "metadata": merged_provenance,
         "leg_metadata": leg_metadata,
         "soc_off_anchor": anchor_report,

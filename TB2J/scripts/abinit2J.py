@@ -62,6 +62,26 @@ def _indices(args):
     return [i - 1 for i in args.index_magnetic_atoms]
 
 
+def _paw_xml_arg(tokens):
+    """Normalize --paw_xml tokens to the str | Mapping form the interfaces take.
+
+    A single bare path (single-species WFK) passes through as a plain string;
+    ``SPECIES=PATH`` tokens become a per-species mapping.
+    """
+    if len(tokens) == 1 and "=" not in tokens[0]:
+        return tokens[0]
+    mapping = {}
+    for token in tokens:
+        species, sep, path = token.partition("=")
+        if not sep or not species or not path:
+            raise SystemExit(
+                "--paw_xml expects either one bare PATH (single-species WFK) "
+                "or SPECIES=PATH tokens for every species; got " + repr(tokens)
+            )
+        mapping[species] = path
+    return mapping
+
+
 _PAW_SAVETB2J_ONLY = ("population_mode",)
 _NC_ONLY = (
     "no_shell_filter",
@@ -176,7 +196,7 @@ def _run_pawlog(args):
 
         exchange_out, _ = gen_exchange_abinit_paw_spinor(
             wfk_path=args.wfk,
-            paw_xml_path=args.paw_xml,
+            paw_xml_path=_paw_xml_arg(args.paw_xml),
             log_path=args.log,
             projected_data_path=args.projected_data,
             magnetic_elements=args.elements,
@@ -194,7 +214,7 @@ def _run_pawlog(args):
 
     exchange_out, _ = gen_exchange_abinit_paw(
         wfk_path=args.wfk,
-        paw_xml_path=args.paw_xml,
+        paw_xml_path=_paw_xml_arg(args.paw_xml),
         log_path=args.log,
         projected_data_path=args.projected_data,
         magnetic_elements=args.elements,

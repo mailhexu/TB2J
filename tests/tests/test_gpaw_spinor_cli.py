@@ -50,24 +50,15 @@ def ni_soc_nc(tmp_path_factory):
 def test_cli_spinor_netcdf_exchange(ni_soc_nc, tmp_path):
     from TB2J.interfaces.gpaw_projector import gen_exchange_projector_netcdf
 
-    out, jdict = gen_exchange_projector_netcdf(
-        str(ni_soc_nc), output_path=str(tmp_path / "TB2J_results"), Rcut=5.0, nz=20
-    )
-    assert out.exists()
-    text = out.read_text()
-    assert "Combined J tensor" in text
-    assert "DMI" in text
-    # bcc Ni with inversion symmetry: DMI must vanish within tolerance
-    js = [v for k, v in jdict.items() if np.linalg.norm(np.asarray(k[0])) > 0]
-    assert js, "no offsite exchange entries"
-    first_shell = [v for v in js if v > 0]
-    assert first_shell, "FM nearest-neighbour exchange expected for bcc Fe"
-    content = (tmp_path / "TB2J_results").exists()
-    assert content
+    with pytest.raises(ValueError, match="mapping of x/y/z reference files"):
+        gen_exchange_projector_netcdf(
+            str(ni_soc_nc), output_path=str(tmp_path / "TB2J_results"), Rcut=5.0, nz=20
+        )
+    assert not (tmp_path / "TB2J_results" / "TB2J.pickle").exists()
 
 
-def test_dmi_symmetry_consistency(ni_soc_nc, tmp_path):
-    """DMI vectors must vanish for inversion-symmetric bcc Fe pairs."""
+def test_spinor_transverse_reciprocity(ni_soc_nc):
+    """Pair reversal survives full-complex Green contraction on real Fe."""
     from TB2J.interfaces.gpaw_spinor_projector import (
         compute_spinor_projector_exchange,
     )
@@ -87,9 +78,6 @@ def test_dmi_symmetry_consistency(ni_soc_nc, tmp_path):
         dtype=int,
     )
     exchange = compute_spinor_projector_exchange(data, Rpts=Rpts, nz=16)
-    for key, entry in exchange.items():
-        R = np.asarray(key[0])
-        if np.linalg.norm(R) < 0.5:
-            continue
-        dmi = np.asarray(entry["dmi"])
-        assert np.linalg.norm(dmi) < 1e-6, f"nonzero DMI for {key}: {dmi}"
+    for (r, i, j), entry in exchange.items():
+        reverse = exchange[(tuple(-x for x in r), j, i)]["J_leg"]
+        np.testing.assert_allclose(entry["J_leg"], reverse.T, atol=1e-8)

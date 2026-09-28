@@ -12,7 +12,7 @@ from TB2J.interfaces.gpaw_spinor_projector import (  # noqa: E402
 from TB2J.projector_green import (  # noqa: E402
     SPINOR_OPERATOR_DEFINITION,
     ProjectorGreen,
-    spinor_projector_exchange_trace,
+    spinor_tangent_trace,
 )
 
 
@@ -69,28 +69,25 @@ def test_spinor_kernel_consumes_export():
     data = gpaw_spinor_calc_to_projector_green_data(calc)
     green = ProjectorGreen(data)
     Rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], dtype=int)
-    # Corrected kernel contract (docs/sympy/spinor_projector_green.md
-    # correction 2026-09-23): the kernel returns the ExchangeNCL channel
-    # matrix A^{uv} = Tr[Delta_i G^(u) Delta_j G^(v)]/pi; the J_iso/DMI/Jani
-    # decomposition lives in compute_spinor_projector_exchange.
-    result = spinor_projector_exchange_trace(green, Rpts, energy=0.05)
-    A = result["A_ijR"][((0, 0, 0), 0, 0)]
-    assert A.shape == (4, 4)
-    assert np.isfinite(A).all()
-
+    trace = spinor_tangent_trace(green, Rpts, energy=0.05)
+    matrix = trace["K_ijR"][((1, 0, 0), 0, 0)]
+    reverse = trace["K_ijR"][((-1, 0, 0), 0, 0)]
+    np.testing.assert_allclose(matrix, reverse.T, atol=1e-10)
     exchange = compute_spinor_projector_exchange(
         data, Rpts=Rpts, nz=6, smearing_eV=0.05, sites=[0]
     )
-    for key, entry in exchange.items():
-        assert np.isfinite(entry["Jiso"])
-        assert np.isfinite(entry["dmi"]).all()
-        assert np.isfinite(entry["jani"]).all()
-    # Cubic symmetry of a single-site bcc-like box: exchange is even in R
-    # and DMI vanishes.
-    j_r = exchange[((1, 0, 0), 0, 0)]["Jiso"]
-    j_mr = exchange[((-1, 0, 0), 0, 0)]["Jiso"]
-    assert j_r == pytest.approx(j_mr, rel=1e-6)
-    assert exchange[((1, 0, 0), 0, 0)]["dmi"] == pytest.approx(np.zeros(3), abs=1e-6)
+    for entry in exchange.values():
+        frame = entry["frame"]
+        assert frame["n"] == 2
+        assert "Jiso" not in entry and "dmi" not in entry and "jani" not in entry
+        np.testing.assert_allclose(entry["J_leg"][2, :], 0.0, atol=1e-12)
+        np.testing.assert_allclose(entry["J_leg"][:, 2], 0.0, atol=1e-12)
+    with pytest.raises(ValueError, match="three independent x/y/z"):
+        from TB2J.interfaces.gpaw_spinor_projector import (
+            write_spinor_projector_exchange_out,
+        )
+
+        write_spinor_projector_exchange_out(data)
 
 
 def test_symmetry_forced_off_for_sc_noncollinear():

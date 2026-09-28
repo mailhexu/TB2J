@@ -19,7 +19,9 @@ cprj bands, and feeds the story-002 KS-band split-SOC kernel:
   with the ABINIT ``spinaxis`` SU(2) rotation ``U_n`` (``geteuler``),
   the exchange tensors are computed in the leg frame, and rotated back
   to the lattice frame ``T_lattice = O_n T_leg O_n^T`` with
-  ``O_n e_z = n``; the three legs are merged with ``TB2J.io_merge``.
+  ``O_n e_z = n``; the three raw transverse blocks are then merged into
+  one rank-nine lattice tensor by
+  ``TB2J.split_soc_kernel.merge_transverse_legs``.
 """
 
 from __future__ import annotations
@@ -113,22 +115,6 @@ def _rotate_spin_blocks(block, u):
     operators are exactly the exporter's re-quantization convention.
     """
     return np.einsum("ws,pqwv,vt->pqst", u.conj(), np.asarray(block, dtype=complex), u)
-
-
-def _rotate_entry_tensors(entry, o):
-    """Rotate one leg exchange entry to the lattice frame: O T O^T."""
-    out = dict(entry)
-    dmi = o @ np.asarray(entry["dmi"], dtype=float)
-    jani = o @ np.asarray(entry["jani"], dtype=float) @ o.T
-    tensor = (
-        float(entry["Jiso"]) * np.eye(3)
-        + 0.5 * (dmi[:, None] - dmi[None, :])
-        + 0.5 * (jani + jani.T)
-    )
-    out["dmi"] = dmi
-    out["jani"] = jani
-    out["tensor"] = tensor
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +280,7 @@ def paw_split_soc_band_w_soc(data, leg="z"):
 # ---------------------------------------------------------------------------
 
 
-def _write_leg_results(
+def _write_merged_results(
     data,
     exchange,
     sites,
@@ -303,7 +289,7 @@ def _write_leg_results(
     spinat_vectors,
     provenance,
 ):
-    """Write one leg's exchange tensors (lattice frame) as TB2J results."""
+    """Write only the decomposed rank-nine exchange as TB2J results."""
     from ase import Atoms
 
     from TB2J.io_exchange.io_exchange import SpinIO
@@ -369,27 +355,25 @@ def gen_exchange_abinit_paw_split_soc(
     lam=1.0,
     mode="second_variation",
     spinat_magnitude=1.0,
+    merge_consistency_atol=1.0e-4,
 ):
-    """Three-direction split-SOC exchange from one schema-1.1 savetb2j file.
+    """Produce a full rank-nine tensor from three PAW spinaxis references.
 
-    For each leg ``n``: re-quantize the exported soc_pauli operator with
-    the ABINIT spinaxis SU(2) rotation, run the story-002 KS second-
-    variation kernel in the leg frame, rotate the output tensors to the
-    lattice frame (``T_lattice = O_n T_leg O_n^T``, ``O_n e_z = n``), and
-    write one noncollinear TB2J results directory per leg with
-    ``spinat`` along the leg axis.  The three legs are then merged with
-    ``TB2J.io_merge.merge`` into ``output_path``.
-
-    Returns a dict with ``output_path`` (merged), ``leg_paths``,
-    ``metadata`` (merged FR-050 provenance), and per-leg ``metadata``.
+    Each psi-gauge leg measures only a transverse block. Rotate that raw
+    block into the lattice frame, then merge x/y/z before any SpinIO output.
+    A scalar exchange or DMI is never assigned to an isolated leg.
     """
+
     from TB2J.interfaces.gpaw_projector import (
         _magnetic_sites,
         _R_grid_for_cutoff,
     )
-    from TB2J.io_merge import merge
     from TB2J.projector_green import site_magnetization_sign
-    from TB2J.split_soc_kernel import compute_ks_split_soc_exchange
+    from TB2J.split_soc_kernel import (
+        compute_ks_split_soc_exchange,
+        merge_transverse_legs,
+        rotate_transverse_leg,
+    )
 
     legs = tuple(str(leg).lower() for leg in legs)
     if legs != LEG_DIRECTIONS:
@@ -431,7 +415,7 @@ def gen_exchange_abinit_paw_split_soc(
     output_root = Path(output_path)
     leg_dirs = {}
     leg_metadata = {}
-    leg_Jdicts = {}
+    leg_exchanges = {}
     digest = hashlib.sha256()
     source = Path(filename).resolve()
     with source.open("rb") as stream:
@@ -538,45 +522,53 @@ def gen_exchange_abinit_paw_split_soc(
                 # Fe site: Delta = H_up - H_down has the opposite sign to M.
                 moment_sign = -site_magnetization_sign(vertex)
             spinat_vectors[site] = spinat_magnitude * moment_sign * leg_axis
+        if leg == "z":
+            merged_spinat = spinat_vectors
         leg_dir = output_root / f"leg_{leg}"
-        description = (
-            f"ABINIT PAW split-SOC leg '{leg}' (story-006): KS second-variation "
-            f"spectra from the schema-{schema_version} soc_pauli operator "
-            "(all-atom propagator SOC, magnetic-only delta vertices), tensors "
-            "rotated to the lattice frame with T_lattice = O T_leg O^T.\n"
+        leg_dir.mkdir(parents=True, exist_ok=True)
+        rotated = rotate_transverse_leg(
+            result["exchange"], o, LEG_DIRECTIONS.index(leg)
         )
-        leg_Jdicts[leg] = _write_leg_results(
-            data,
-            {
-                key: _rotate_entry_tensors(entry, o)
-                for key, entry in result["exchange"].items()
-            },
-            sites,
-            leg_dir,
-            description,
-            spinat_vectors,
-            provenance,
+        keys = sorted(rotated)
+        np.savez_compressed(
+            leg_dir / "split_soc_leg.npz",
+            pair_keys=np.asarray([[*r, i, j] for r, i, j in keys], dtype=int),
+            J_leg=np.asarray([rotated[key]["J_leg"] for key in keys]),
+            axis=np.asarray(leg_axis),
         )
+        leg_exchanges[leg] = {"exchange": rotated}
         (leg_dir / "split_soc_provenance.json").write_text(
             json.dumps(provenance, indent=2, default=str) + "\n"
         )
         leg_dirs[leg] = leg_dir
         leg_metadata[leg] = provenance
 
+    merged = merge_transverse_legs(
+        leg_exchanges, consistency_atol=merge_consistency_atol
+    )
     merged_provenance = {
         "schema": leg_metadata[legs[0]]["schema"],
         "backend": "abinit_paw",
-        "merge_mode": "three_leg_rotate_merge",
+        "merge_mode": "raw_rank_nine",
         "legs": leg_metadata,
-        "rotation": "T_lattice = O T_leg O^T with O e_z = leg axis",
+        "rotation": "J_lattice = O J_psi O^T with O e_z = leg axis",
+        "merge_diagnostics": merged["diagnostics"],
+        "merge_consistency_atol_eV": float(merge_consistency_atol),
         "lambda": float(lam),
         "units": "eV",
     }
-    merge(
-        *[str(leg_dirs[leg]) for leg in legs],
-        save=True,
-        write_path=str(output_root),
-        merged_provenance=merged_provenance,
+    description = (
+        "ABINIT PAW frozen-density split-SOC: rank-nine raw tensor reconstructed "
+        "from x/y/z transverse measurements.\n"
+    )
+    merged_Jdict = _write_merged_results(
+        data,
+        merged["exchange"],
+        sites,
+        output_root,
+        description,
+        merged_spinat,
+        merged_provenance,
     )
     (output_root / "split_soc_provenance.json").write_text(
         json.dumps(merged_provenance, indent=2, default=str) + "\n"
@@ -586,5 +578,7 @@ def gen_exchange_abinit_paw_split_soc(
         "leg_paths": leg_dirs,
         "metadata": merged_provenance,
         "leg_metadata": leg_metadata,
-        "leg_Jdicts": leg_Jdicts,
+        "merged_exchange": merged["exchange"],
+        "merge_diagnostics": merged["diagnostics"],
+        "exchange_Jdict": merged_Jdict,
     }

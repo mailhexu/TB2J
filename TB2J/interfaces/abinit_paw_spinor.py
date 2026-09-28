@@ -538,19 +538,12 @@ def adapt_paw_projection_to_spinor_coefficients(
 ) -> np.ndarray:
     """Adapt abinao ``PawProjectionResult.cprj`` to spinor coefficient layout.
 
-    abinao ``project_wfk_paw`` projects both spinor components correctly but
-    keeps abinao's collinear axis order: ``cprj[ik][ispin]`` is
-    ``(nproj_total, nspinor, nband)`` (per-site blocks stacked on axis 0
-    along ``site_slices``) instead of the TB2J spinor layout
-    ``(nband, 2, nproj_total)``.  This adapter only permutes axes — the
-    values stay RAW (no conjugation).
-
-    abinao gap note (for the abinao side, not patched here):
-    ``PawProjectionResult`` has no nspinor field and documents
-    ``cprj[ik][ispin]`` as ``(natom, nproj_per_atom, nband)``; the spinor
-    axis is silently appended between projector and band axes.  Promoting
-    the spinor axis to a documented result field would be the clean abinao
-    fix.
+    abinao ``project_wfk_paw`` (with an explicit ``nspinor=2`` result field,
+    per-site ``(nproj, 2, nband)`` blocks, and the species-flattened path
+    stacking those blocks on axis 0) emits ``cprj[ik][0]`` as
+    ``(nproj_total, 2, nband)``; TB2J wants ``(nband, 2, nproj_total)``.
+    This adapter only permutes axes — the values stay RAW (no conjugation),
+    so the projector Green assembly applies the exchange convention itself.
     """
     adapted = []
     for ik, by_spin in enumerate(cprj_by_k):
@@ -774,10 +767,10 @@ def gen_exchange_abinit_paw_spinor(
     * ``delta_ij`` — pre-assembled per-site ``(ni, ni, 2, 2)`` Delta blocks
       in ``delta_unit`` (default eV).
 
-    Returns ``(Path, dict)``: the ``exchange.out`` path and the exchange
-    dictionary keyed by ``(R, i, j)`` with J_iso values (meV-scale eV units,
-    ExchangeNCL decomposition behind it: J_iso/DMI/Jani written by
-    ``write_spinor_projector_exchange_out``).
+    A single spinor reference cannot determine Jiso/DMI/Jani. This loader
+    validates the projection and magnetic operator, but the scalar output
+    writer refuses unless supplied independent x/y/z magnetic references;
+    use the PAW split-SOC three-leg driver for production exchange.
     """
     if projected_data_path is not None:
         proj = load_spinor_projected_data(projected_data_path)
@@ -856,11 +849,9 @@ def gen_exchange_abinit_paw_spinor(
 
     if description is None:
         description = (
-            "ABINIT spinor PAW projector-Green workflow (story 011): nspinor=2 "
-            "WFK dual-projector cprj (raw, no conjugation) + nspden=4 pawprt "
-            "Dij Pauli decomposition Delta=2*B.sigma. J_iso, DMI and Jani from "
-            "the ExchangeNCL spinor kernel "
-            "(docs/sympy/spinor_projector_green.md).\n"
+            "ABINIT PAW spinor projector Green data from nspinor=2 WFK and "
+            "nspden=4 PAW Dij magnetic operator. Full exchange requires "
+            "three independent magnetic reference axes.\n"
         )
     return write_spinor_projector_exchange_out(
         data,

@@ -8,8 +8,15 @@ magnetization directions are obtained by diagonalizing GPAW's
 second-variational spin-orbit operator on that one strength-zero state, and
 the PAW exchange vertex stays collinear in the ``psi`` gauge.  Each leg is
 rotated into the lattice frame (:math:`T_\chi = O T_\psi O^T` with
-:math:`O\mathbf e_z = \mathbf n_\chi`) and the three legs are merged into the
-standard rank-six reconstruction with :py:mod:`TB2J.io_merge`.
+:math:`O\mathbf e_z = \mathbf n_\chi`) and the three legs are merged by the
+raw rank-nine reconstruction of
+:py:func:`TB2J.split_soc_kernel.merge_transverse_legs`: every leg contributes
+only its *measured* transverse :math:`2\times2` block, the three x/y/z
+references give 12 constraints for the 9 entries of the real lattice tensor
+(each diagonal entry is measured twice), and :math:`J_\mathrm{iso}`/DMI/Jani
+are decomposed from the solved raw tensor afterwards.  The legacy scalar
+:py:mod:`TB2J.io_merge` averaging is deliberately *not* used (it biases
+anisotropy; see :ref:`split-soc-rank9-merge`).
 
 The same run also produces a magneto-crystalline anisotropy (MAE) comparison:
 per-direction band energies from GPAW itself and an independent second-order
@@ -91,11 +98,16 @@ vertices occur only on the selected magnetic sites.
 Outputs
 -------
 
-The CLI writes ``x/``, ``y/``, ``z/`` and ``merged/`` exchange outputs plus
-``split_soc_report.json``. The leg angles in degrees are (90,0), (90,90) and
-(0,0); the spin moments stored in each leg follow that direction. The PAW
-exchange vertex remains collinear in the ``psi`` gauge; no second SOC SCF is
-performed.
+The CLI writes the three legs to ``x/split_soc_leg.npz``,
+``y/split_soc_leg.npz``, ``z/split_soc_leg.npz`` — the raw rotated
+transverse :math:`2\times2` blocks ``J_leg`` per ``(R, i, j)`` pair, never
+per-leg scalar :math:`J_\mathrm{iso}`/DMI/Jani — plus the rank-nine merged
+SpinIO results in ``merged/`` (``TB2J.pickle``, ``exchange.out``,
+``Multibinit/exchange.xml``) and ``split_soc_report.json`` with the MAE
+comparison, the merge diagnostics and the per-leg provenance.  The leg
+angles in degrees are (90,0), (90,90) and (0,0); the merged ``spinat``
+moments follow the frozen collinear moments.  The PAW exchange vertex
+remains collinear in the ``psi`` gauge; no second SOC SCF is performed.
 
 MAE comparison how-to
 ---------------------
@@ -131,8 +143,8 @@ closes the comparison well inside the default tolerance.
 Each leg also records a **band-window study**: the actual exchange between
 the last two paired band prefixes at the production k mesh, R grid, contour
 and smearing, with the measured change and an explicit ``converged`` flag.
-The study is embedded in the per-leg ``TB2J.pickle``, ``exchange.out`` and
-``Multibinit/exchange.xml``.  A false flag is an unresolved error bar, **not**
+The study is carried in the leg provenance inside ``split_soc_report.json``.
+A false flag is an unresolved error bar, **not**
 a convergence certificate: the 6³ fcc Ni 24-band fixture, for example, moves
 by :math:`6.65\times 10^{-4}` between 22 and 24 bands at a
 :math:`10^{-6}` tolerance and is explicitly *not* window-converged despite
@@ -145,12 +157,14 @@ Every leg records the strength-zero reference (input path and SHA-256 when
 invoked from a file), the PAW operator source, the SOC operator coverage,
 the spin frame with the leg angles :math:`(90,0)`, :math:`(90,90)`,
 :math:`(0,0)`, the band window with its convergence study, and the merge
-mode.  These blocks are embedded in each leg ``TB2J.pickle``,
-``exchange.out`` and ``Multibinit/exchange.xml``.  The merged artifacts keep
-**all three** leg records as distinct, path-keyed blocks instead of
-inheriting the last leg's frame, and ``split_soc_report.json`` mirrors them.
-Rerunning the generic ``TB2J_merge.py x y z`` on the same leg directories
-retains the same provenance blocks.
+mode.  The blocks are written to ``split_soc_report.json`` (one distinct
+entry per leg, never inheriting the last leg's frame), and the merged
+SpinIO artifacts in ``merged/`` embed the merged provenance — including
+the ``raw_rank_nine`` merge diagnostics — in their description metadata.
+The merged exchange tensor itself is the raw rank-nine solution; see
+:ref:`split-soc-rank9-merge` for the shared merge contract and its
+repeated-row invariance gate (the GPAW driver runs it with a
+:math:`5\times10^{-5}` eV consistency tolerance).
 
 Worked example: fcc Ni gate
 ---------------------------
@@ -165,11 +179,14 @@ runs the three SOC legs on it, and asserts
 
 * the MAE band energies equal ``soc_eigenstates(...).calculate_band_energy()``
   bitwise for all three directions and stay within the contour tolerance;
-* the merged tensors have rank six;
 * inversion-odd DMI and cubic-anisotropy nulls hold on the full-BZ R grid;
 * the shell-resolved :math:`J_\mathrm{iso}` spread across legs stays below
-  5 µeV (representative run: 1.36 µeV; DMI norms at the 10⁻³² meV level;
-  Jani 7.1 µeV).
+  5 µeV.
 
-The gate report is written to ``ni_symmetry_gate.json``.  Serial execution
-is required by the legacy GPAW API.
+On the real 6×6×6 fcc Ni PAW run the gate passes with nearest-neighbour
+:math:`J_\mathrm{iso} = 5.20` meV, a leg spread of 1.36 µeV, DMI norms at
+the :math:`10^{-32}` meV level, Jani 7.1 µeV, bitwise-equal GPAW band MAE
+and a second-order contour residual below
+:math:`4\times10^{-13}` eV.  The gate report is written to
+``ni_symmetry_gate.json``.  Serial execution is required by the legacy GPAW
+API.

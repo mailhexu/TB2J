@@ -217,19 +217,57 @@ The frozen density is never recomputed with SOC. Each magnetization direction
 is obtained by applying the code's second-variational strength-one SOC
 operator to the same strength-zero bands, so the all-atom SOC operator
 :math:`W_{SO}` enters only the KS-band propagator, while the PAW exchange
-vertex stays collinear on the selected magnetic sites. Each leg tensor is
-rotated into the lattice frame, :math:`T_\chi = O T_\mathrm{leg} O^T` with
-:math:`O\mathbf e_z = \mathbf n_\chi`, and the three legs are merged into the
-standard rank-six ``TB2J.io_merge`` reconstruction.
+vertex stays collinear on the selected magnetic sites. Each leg measures only
+the raw transverse :math:`2\times2` block of its right-handed
+:math:`(u, v, n)` triad; the block is rotated into the lattice frame,
+:math:`T_\chi = O T_\mathrm{leg} O^T` with
+:math:`O\mathbf e_z = \mathbf n_\chi`, and the three legs feed the raw
+rank-nine merge described next.
+
+.. _split-soc-rank9-merge:
+
+The raw rank-nine three-leg merge and its invariance gates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+(Contract ADR-9 of the split-soc-ks specification.)  One magnetic reference
+axis determines **only** the transverse
+:math:`2\times2` block and :math:`D_z` of its triad — never scalar
+:math:`J_\mathrm{iso}`, a DMI vector or a Jani tensor on its own.  The full
+lattice tensor comes exclusively from
+:py:func:`TB2J.split_soc_kernel.merge_transverse_legs`, which stacks the
+three x/y/z reference blocks into 12 constraints for the 9 entries of the
+real tensor (each diagonal entry is measured twice — *repeated rows*) and
+solves the consistent system by exact least squares.
+:math:`J_\mathrm{iso}`/DMI/Jani are decomposed afterwards with the TB2J
+:py:func:`TB2J.Jtensor.decompose_J_tensor` Levi-Civita convention.  The
+legacy scalar :py:mod:`TB2J.io_merge` averaging is deliberately **not**
+used on these legs: its independent scalar/traceless decomposition biases
+anisotropy (a true ``diag(1, 2, 3)`` target returns ``diag(7/6, 2, 17/6)``
+through that route).  Two invariance gates guard every merge and fail
+closed:
+
+* **rank gate** — the design matrix must have rank 9, i.e. three genuinely
+  independent reference axes are present;
+* **repeated-row gate** — the two measurements of every diagonal entry must
+  agree within a per-backend ``consistency_atol`` (:math:`5\times10^{-5}` eV
+  GPAW, :math:`10^{-4}` eV ABINIT PAW, :math:`10^{-6}` eV ABINIT NC); a
+  disagreement aborts the run before any merged tensor is written.
+
+The merge diagnostics also report the masked longitudinal residual
+(leakage into the unmeasured :math:`n` row/column, which is zero-masked,
+never treated as data) and the reciprocity residual
+:math:`J_{ij}(R) - J_{ji}(-R)^T`.  A merge that passes these gates is a
+consistent raw-tensor reconstruction; it is still subject to the per-leg
+band-window error bars below.
 
 All backends share one provenance contract: every leg records the
 strength-zero reference (input path and SHA-256), the SOC operator source and
 coverage, the spin frame, a real band-window convergence study with an
-explicit ``converged`` flag, and the merge mode. These blocks are embedded in
-each leg ``TB2J.pickle``, ``exchange.out`` and ``Multibinit/exchange.xml``,
-kept as three distinct leg records in the merged artifacts (the generic
-``TB2J_merge.py`` retains them too, keyed by input path), and mirrored in the
-JSON provenance report. A false ``converged`` flag is an unresolved error
+explicit ``converged`` flag, and the merge mode.  Per-leg tensors are stored
+as raw ``split_soc_leg.npz`` blocks with a ``split_soc_provenance.json``
+alongside; the merged results (a rank-nine SpinIO output) and the merged
+provenance JSON keep the three leg records as distinct entries plus the
+merge diagnostics. A false ``converged`` flag is an unresolved error
 bar, **not** a convergence certificate.
 
 Per-backend recipes with the full option reference, output layout and

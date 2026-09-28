@@ -8,7 +8,10 @@ three-direction merged tensors as the GPAW workflow: all-atom SOC enters the
 KS-band propagator, collinear PAW ``delta_total``/``delta_xc`` vertices stay
 on the selected magnetic sites, three spinaxis legs are rotated to the
 lattice frame (:math:`T_\mathrm{lattice} = O\, T_\mathrm{leg}\, O^T`) and
-merged with :py:mod:`TB2J.io_merge`.  Only absolute second-variational
+merged by the raw rank-nine solve of
+:py:func:`TB2J.split_soc_kernel.merge_transverse_legs`
+(:ref:`split-soc-rank9-merge`), not by the legacy scalar
+:py:mod:`TB2J.io_merge` averaging.  Only absolute second-variational
 exchange is written; insertion derivatives are never labelled as
 :math:`J`.
 
@@ -111,11 +114,16 @@ is rejected instead of receiving an arbitrary direction.
 Outputs and provenance
 ----------------------
 
-Each leg is written to ``leg_x/``, ``leg_y/``, ``leg_z/`` as a standard
-noncollinear TB2J results directory with ``spinat`` along the leg axis,
-plus ``split_soc_provenance.json``; the three legs are merged into
-``output_path`` (``TB2J.pickle``, ``exchange.out``,
-``Multibinit/exchange.xml``, merged provenance JSON).  Each leg records
+Each leg writes ``leg_x/``, ``leg_y/``, ``leg_z/`` containing the raw
+rotated transverse ``J_leg`` blocks (``split_soc_leg.npz`` — never per-leg
+scalar :math:`J_\mathrm{iso}`/DMI/Jani, which a single reference cannot
+determine) and its ``split_soc_provenance.json``.  The rank-nine merged
+result is written to ``output_path`` as a standard TB2J results directory
+(``TB2J.pickle``, ``exchange.out``, ``Multibinit/exchange.xml``) plus the
+merged ``split_soc_provenance.json`` with ``merge_mode: raw_rank_nine``,
+the per-backend consistency tolerance
+(``merge_consistency_atol_eV``, default :math:`10^{-4}` eV) and the merge
+diagnostics.  Each leg records
 
 * the input checkpoint path and its actual SHA-256;
 * the schema version and normalized ``soc_pauli`` operator source;
@@ -126,9 +134,9 @@ plus ``split_soc_provenance.json``; the three legs are merged into
 * the magnetic vertex sites, vertex component and ``spinat`` sign source;
 * the merge mode ``three_leg_rotate_merge``.
 
-The merge preserves all three leg records; a false ``converged`` flag must
-stay visible and calls for a larger ABINIT band window, not for a favourable
-error bar.
+The merged provenance keeps all three leg records; a false ``converged``
+flag must stay visible and calls for a larger ABINIT band window, not for a
+favourable error bar.
 
 Physical anchors and gates
 --------------------------
@@ -137,6 +145,17 @@ Physical anchors and gates
   collinear schema-1.0 savetb2j exchange shell by shell (real 8-k bcc Fe
   fixture: agreement within :math:`10^{-8}` eV; the export-on/off
   ``OUT.nc`` total energies are bit-identical).
+* **Rank-9 three-leg merge on real fcc Ni**: a real ABINIT PAW fcc Ni
+  fixture (``a = 3.52`` Å, one-atom primitive cell, schema-1.1 export,
+  28-band window) passes the full three-reference reconstruction:
+  design-matrix rank 9 on every pair, repeated-diagonal measurements agree
+  to :math:`9.0\times10^{-8}` eV (gate: :math:`10^{-4}` eV), transverse
+  mask residual :math:`7.8\times10^{-19}` eV and reciprocity residual
+  :math:`3.7\times10^{-19}` eV.  The merged nearest-neighbour
+  :math:`J_\mathrm{iso}` is 0.209 meV with DMI at the numerical-zero
+  level.  Its own 26→28 band-window study is *not* converged
+  (:math:`4.7\times10^{-5}` change at a :math:`10^{-6}` tolerance) — the
+  merge gate and the window study are independent statements.
 * **Non-vacuous baseline**: a Γ-only Fe export has
   :math:`|J(R{=}1)|\approx 10^{-20}` eV, which makes SOC comparisons
   meaningless.  The 2×2×2 full-BZ Fe fixture has

@@ -311,15 +311,19 @@ Split-SOC workflow
     they are **opposite** the sign of the frozen ``H_up-H_down`` PAW
     potential trace (majority-spin potential is lower for positive moment).
     This preserves AFM sublattices and the positive Fe moment. Three
-    spinaxis SU(2) legs rotate tensors to the lattice frame and merge them
-    through ``TB2J.io_merge``.
+    spinaxis SU(2) legs rotate their measured transverse blocks to the
+    lattice frame and are merged by the raw rank-nine solve
+    (``TB2J.split_soc_kernel.merge_transverse_legs``, repeated-row
+    invariance gate at ``merge_consistency_atol`` = 1e-4 eV in this
+    driver); the legacy scalar ``TB2J.io_merge`` averaging is not used.
 
     The driver writes only absolute second-variational exchange; insertion
     derivatives are not mislabeled as J. A real two-prefix band-window
     study, its measured change, tolerance, and convergence flag accompany
-    each leg in ``TB2J.pickle``, ``exchange.out``,
-    ``Multibinit/exchange.xml`` and ``split_soc_provenance.json``; merged
-    outputs retain all three distinct leg records. A false convergence flag
+    each leg in ``leg_<x|y|z>/split_soc_provenance.json`` (per-leg tensors
+    are raw ``split_soc_leg.npz`` blocks); the rank-nine merged result is
+    written to the output root with the three distinct leg records in
+    ``split_soc_provenance.json``. A false convergence flag
     requires a larger ABINIT band window, not a favorable error bar.
 
     The real eight-k Fe fixture has a nonzero 33.992-meV SOC-off first
@@ -330,6 +334,14 @@ Split-SOC workflow
     within 0.886 meV maximum / 0.065 meV RMS. This is a small-strength
     eigenvalue check, not a full-strength ABINIT SOC validation: the same
     Fe 22→24 band-window study reports ``converged: false`` at 1e-6.
+
+    A real fcc Ni PAW fixture (``a = 3.52`` Å, one-atom primitive cell,
+    schema 1.1, 28-band window) passes the full rank-nine three-leg
+    merge: design-matrix rank 9, repeated-diagonal agreement
+    9.0e-8 eV against the 1e-4 eV gate, transverse-mask and reciprocity
+    residuals below 1e-18 eV, merged nearest-neighbour ``J_iso`` 0.209 meV.
+    Its own 26→28 band study is not converged (4.7e-5 change at 1e-6) and
+    stays flagged.
 
 For example, using zero-based Python atom indices::
 
