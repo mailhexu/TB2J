@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### GPAW split-SOC exchange and MAE
+
+- Added `gpaw_split_soc2J.py`: one old-API collinear no-SOC GPAW checkpoint
+  produces three frozen-density second-variational x/y/z exchange legs,
+  rotated and merged `SpinIO` tensors, exact GPAW band-energy MAE and a
+  tolerance-reported second-order contour comparison. The shared KS-band
+  kernel uses all-atom SOC with magnetic-only exchange vertices.
+
+
 ### Packaging
 
 - `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao

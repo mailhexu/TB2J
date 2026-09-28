@@ -208,6 +208,66 @@ the explicit XC-only field, while ``"delta_total"`` is the GPAW converged
 ``dH_asp`` spin difference for supported +U exports (and ABINIT's complete PAW
 operator).  ``"hij"`` remains a spin-resolved fallback.
 
+GPAW split-SOC from one collinear checkpoint
+--------------------------------------------
+
+``gpaw_split_soc2J.py`` reads a converged **old-API**, spin-polarized,
+SOC-free GPAW ``.gpw`` with PAW density and wavefunctions saved. It does not
+rerun SCF. The three x/y/z second-variational directions reuse that density;
+``projected=True`` and pre-existing SOC in the reference are not accepted.
+
+.. code-block:: bash
+
+   gpaw_split_soc2J.py --input fe_collinear.gpw \
+       --output_path TB2J_results_gpaw_split_soc --Rcut 3 \
+       --nz 30 --smearing 0.05 --index_magnetic_atoms 1 2
+
+The CLI writes ``x/``, ``y/``, ``z/``, and ``merged/`` exchange outputs plus
+``split_soc_report.json``. The leg angles in degrees are (90,0), (90,90),
+and (0,0); the spin moments stored in each leg follow that direction.
+The PAW exchange vertex remains collinear in the ``psi`` gauge, while the
+all-atom SOC operator enters the KS-band propagator. Leg tensors rotate
+by ``O T_leg O.T`` into the lattice frame before the standard rank-six
+``TB2J.io_merge`` reconstruction. ``--scale`` scales both the GPAW SOC
+band-energy MAE and the exchange propagator; no second SOC SCF is used.
+
+For each direction the report records GPAW
+``BZWaveFunctions.calculate_band_energy()`` (the exact band-energy MAE),
+the independent second-order contour insertion
+``-Im int Tr[(G0 W_SO)^2]/(2*pi)``, their difference relative to z, and
+whether that residual is within ``--mae-contour-tolerance`` (default
+5e-6 eV). A failed comparison is reported, not silently passed; it can
+reflect higher-order SOC, k-mesh, band-window, occupation, or contour error.
+Check convergence in ``--nz``, ``--smearing``, the GPAW band count and k mesh
+before assigning a physical error bar. The saved per-leg metadata includes
+the strength-zero reference, PAW operator source, band window, spin frame,
+and merge mode.
+
+The contour resolvent is referenced to the strength-zero Fermi energy
+(``G0(z) = [z + mu - H0]**-1``); a nonzero GPAW Fermi level cannot be
+omitted. Each leg records an actual two-window, paired-band prefix study
+at the production k mesh, R grid, contour, and smearing, with a measured
+change and explicit ``converged`` flag. The study may report **not converged**
+and must not be read as a convergence certificate. The SHA-256, operator
+coverage, frame, and study are embedded in each leg
+``TB2J.pickle``, ``exchange.out``, ``Multibinit/exchange.xml``, and in the
+merged artifacts as three distinct leg records; the JSON report mirrors them.
+
+Rerunning ``TB2J_merge.py`` on these same leg directories retains every
+input provenance block, keyed by its input path. It does not inherit the
+last leg's frame as if that frame described the merged tensor.
+
+The input checkpoint path and SHA-256 are recorded when invoked from a file.
+The executable fcc Ni example also generates that file when ``--build`` is
+specified and asserts rank-six merging, inversion-odd DMI nulls, cubic
+anisotropy nulls, and a shell-resolved J spread:
+
+.. code-block:: bash
+
+   python examples/projector_green/gpaw_fcc_ni_split_soc.py --build \
+       --input ni_fcc_pbe_nosoc.gpw --output TB2J_results_ni_split_soc
+
+
 ABINIT PAW Export
 -----------------
 
