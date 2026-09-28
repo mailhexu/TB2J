@@ -385,8 +385,15 @@ def test_lambda_zero_kernel_matches_collinear_reduction(fe_calc):
             hd = cg.get_site_block(gdn[irm], jatom, iatom)
             vals.append(np.trace(ops_col[iatom] @ gu @ ops_col[jatom] @ hd))
         ref = np.imag(contour.integrate_values(np.asarray(vals))) / (4.0 * np.pi)
-        assert entry["Jiso"] == pytest.approx(ref, rel=1e-8, abs=1e-12), (r, iatom)
-        assert np.linalg.norm(entry["dmi"]) < 1e-9
+        frame = entry["frame"]
+        assert (frame["n"], frame["u"], frame["v"]) == (2, 0, 1)
+        jl = entry["J_leg"]
+        # the calibrated tangent anchor: J_uu = J_vv = collinear kernel J
+        assert jl[0, 0] == pytest.approx(ref, rel=1e-8, abs=1e-12), (r, iatom)
+        assert jl[1, 1] == pytest.approx(ref, rel=1e-8, abs=1e-12), (r, iatom)
+        # longitudinal row/column structurally zero (no A^{zz}-class object)
+        np.testing.assert_allclose(jl[2, :], 0.0, atol=0.0)
+        np.testing.assert_allclose(jl[:, 2], 0.0, atol=0.0)
         compared += 1
     assert compared >= 2  # R=(1,0,0) and (-1,0,0) on-site-restricted pairs
 
