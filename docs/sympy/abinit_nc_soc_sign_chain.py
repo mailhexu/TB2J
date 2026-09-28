@@ -13,6 +13,10 @@ Source-pinned references (ABINIT tree branch `savetb2j`):
 - abinit/src/66_nonlocal/m_nonlop_pl.F90 (SO pass): amet(1) applies to gxa,
   amet(2) applies to i*gxa (temp = (-Im, +Re)), summed over the source spin;
   metcon_so rank=1 is a plain 3x3 application of amet on the tensor index.
+- abinit/src/66_nonlocal/m_opernla_ylm.F90:52-53,195-196: normalized-Y
+  projector amplitude 4*pi/sqrt(ucvol), squared SO weight (4*pi)^2/ucvol;
+  m_nonlop_pl.F90:497-503 gives 4*pi*(2l+1)/ucvol on unnormalized
+  Cartesian tensors. check_symbolic_normalization asserts the ratio.
 - Projector FT convention (pypao/abinao):
   P_lm(k) = sum_G i^l f_l(|k+G|) Y_lm(k+G^) exp(+i 2pi (k+G).tau_a) c_G,
   with real tesseral harmonics (pypao/spherical_harmonics.py: scipy lpmv,
@@ -265,7 +269,7 @@ def _toy_w(
     phi = np.arctan2(kg[:, 1], kg[:, 0])
     f_q = np.exp(-(q_norm**2))  # toy radial form factor
     m_vals = list(range(-l_val, l_val + 1))
-    wt = 4.0 * np.pi * (2 * l_val + 1) * so_eso  # ucvol = 1 toy
+    wt = (4.0 * np.pi) ** 2 * so_eso  # normalized Ylm, ucvol = 1
     amat = metric_so_amet(np.eye(3))  # [iy1, iy2, s', s]
     ls_mat = ls_complex_matrix()
     y_c = np.array(
@@ -526,9 +530,28 @@ def check_symbolic_phase_and_signs() -> None:
     )
 
 
+def check_symbolic_normalization() -> None:
+    """Cartesian/Legendre ABINIT factor -> normalized spherical Ylm."""
+    ell = sp.symbols("ell", integer=True, positive=True)
+    cart_weight = 4 * sp.pi * (2 * ell + 1)
+    # m_opernla_ylm: each normalized-Y projector has amplitude 4pi/sqrt(V).
+    ylm_weight = (4 * sp.pi) ** 2
+    angular_norm_ratio = 4 * sp.pi / (2 * ell + 1)
+    assert sp.simplify(cart_weight * angular_norm_ratio - ylm_weight) == 0
+    for l_value in (1, 2, 3):
+        assert (
+            sp.simplify(ylm_weight / cart_weight - angular_norm_ratio).subs(
+                ell, l_value
+            )
+            == 0
+        )
+    print("  symbolic: normalized-Y SO weight = (4 pi)^2 / V (exact)")
+
+
 def main() -> None:
     print("abinit_nc_soc_sign_chain: ABINIT NC SOC operator convention (story-001)")
     check_symbolic_phase_and_signs()
+    check_symbolic_normalization()
     check_amet_minus_i(np.eye(3))
     check_amet_spinaxis()
     check_two_branch_contraction()
