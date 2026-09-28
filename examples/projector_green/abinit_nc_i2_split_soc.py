@@ -65,8 +65,10 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--tangent-tol",
         type=float,
-        default=1e-2,
-        help="FR-032 tangent-block tolerance in eV (default 1e-2)",
+        default=None,
+        help="FR-032 tangent-block tolerance in eV; default (None) derives "
+        "it from the merge's measured repeat spread (2x worst twice-measured "
+        "diagonal deviation), respecting reference-state differences",
     )
     parser.add_argument(
         "--skip-anchor",

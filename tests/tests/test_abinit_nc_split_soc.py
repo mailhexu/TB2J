@@ -491,15 +491,10 @@ def test_gen_exchange_end_to_end_synthetic_dimer(synthetic_dimer, tmp_path):
         assert provenance["soc_off_anchor"]["passed"] is True
         study = provenance["band_window"]["convergence_study"]
         assert [w["nband"] for w in study["windows"]] == [4, 6]
-        assert (
-            tmp_path / "TB2J_results_nc_split_soc" / f"leg_{leg}" / "split_soc_leg.npz"
-        ).exists()
-        assert (
-            tmp_path
-            / "TB2J_results_nc_split_soc"
-            / f"leg_{leg}"
-            / "split_soc_provenance.json"
-        ).exists()
+        assert "J_uu" in study["windows"][0]
+        leg_dir = tmp_path / "TB2J_results_nc_split_soc" / f"leg_{leg}"
+        assert (leg_dir / "split_soc_leg.npz").exists()
+        assert (leg_dir / "split_soc_provenance.json").exists()
     assert result["tangent_projection_check"] is None
     merged = json.loads(
         (
