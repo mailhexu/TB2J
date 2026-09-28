@@ -224,7 +224,11 @@ change, tolerance and ``converged`` flag, the merge mode
 provenance keeps the three leg records (each with its frame report and
 rotation residual) and adds the ``merge_diagnostics`` block (design-matrix
 rank, worst repeated-row deviation, transverse mask and reciprocity
-residuals).
+residuals).  The per-leg artifacts are written during the leg loop,
+*before* the merge runs, so a consistency refusal always leaves the raw
+per-leg ``J_leg`` blocks and their provenance in place for diagnosis; a
+refused run publishes **no** merged provenance file — nothing past the
+gate.
 
 .. warning::
 
@@ -329,6 +333,11 @@ fixture** under the rank-nine core.  Its verified status:
   ``converged: false`` — production use of this fixture needs a larger
   sidecar band window, and the flag stays visible in the per-leg
   provenance.
+
+The single-iodine-atom fixture is the matching positive control: it
+passes both strict gates (repeated-diagonal spread :math:`\sim 2\times
+10^{-11}` eV), confirming that the refusal above is a property of the
+inequivalent-reference dimer, not of the consumer.
 
 An earlier, pre-cutover recording quoted a passing FR-032 tangent residual
 (:math:`7.1` meV against a 10 meV tolerance) computed against the legacy
