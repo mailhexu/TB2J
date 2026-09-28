@@ -10,20 +10,26 @@ workflow (see ``docs/src/split_soc_abinit_nc.rst``):
   all-atom band-window SOC operator ``W_SO(k)`` for the x/y/z legs, with
   the SHA-256 provenance that TB2J checks before accepting the pairing.
 
-The driver runs the three split-SOC legs on the dualized PAO maps, rotates
-every leg to the lattice frame and merges them.  Two gates run by default
-and their measured reports are printed:
+The driver runs the three split-SOC legs as global SU(2) rotations of one
+no-SOC spinor reference on the dualized PAO maps and merges the measured
+transverse blocks with the rank-9 ``merge_transverse_legs`` core.  Gates
+run by default and their measured reports are printed:
 
-* the SOC-off collinear anchor (``lam=0`` replay vs the existing collinear
+* the SOC-off collinear anchor (W=0 z reference vs the existing collinear
   NC PAO exchange kernel, same strength-0 data);
+* the rank-9 merge invariance gate: repeated diagonal rows (measured in
+  two different legs) must agree within ``merge_consistency_atol``
+  (default 5e-2 eV — documenting reference-state spread per pair in
+  ``merge_diagnostics``, not certifying exactness);
 * the FR-032 projection-only (tangent-block) gate: the merged raw
-  transverse block ``[:2, :2]`` vs the z one-shot leg.  This gate is
-  **projection-only**: one magnetic reference axis determines only
-  J_xx/J_xy/J_yx/J_yy and D_z, never a full exchange tensor or a physical
-  DMI vector.
+  transverse block ``[:2, :2]`` vs the z one-shot leg, tolerance auto by
+  default (2x the worst repeat deviation, reported as ``tol_source``).
+  This gate is **projection-only** and is never a full-tensor or DMI
+  certificate.
 
 The script prints only the gate reports and provenance summaries; it never
-reports per-leg Jiso/DMI/Jani as final observables.
+reports per-leg Jiso/DMI/Jani as final observables (per legs only the raw
+transverse ``J_leg`` blocks are stored).
 """
 
 from __future__ import annotations
@@ -66,9 +72,9 @@ def main(argv=None) -> int:
         "--tangent-tol",
         type=float,
         default=None,
-        help="FR-032 tangent-block tolerance in eV (default: the 1e-2 eV "
-        "spec value). Pass a larger value only as a deliberate, reported "
-        "reference-anisotropy error bar — never to force a pass",
+        help="explicit FR-032 tangent-block tolerance in eV; default: auto, "
+        "derived as 2x the worst repeated-diagonal deviation and reported "
+        "as tol_source in the gate report",
     )
     parser.add_argument(
         "--skip-anchor",

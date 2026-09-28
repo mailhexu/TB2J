@@ -12,7 +12,11 @@
   anchor, always-on rank-9 merge invariance gate, FR-032 tangent
   projection gate).  Added the sidecar
   on-disk contract to `abinit_savetb2j_schema.rst` and a real runnable
-  example `examples/projector_green/abinit_nc_i2_split_soc.py`.
+  example `examples/projector_green/abinit_nc_i2_split_soc.py`; updated
+  both to the landed rank-9 consumer (auto tangent tolerance with
+  `tol_source` reporting, documented ≈25 meV I2 repeat spread;
+  smoked at c349a10 on the I2 fixture: anchor 1.749e-15 over 28 pairs,
+  tangent 1.300e-2 eV vs 5.2e-2 eV auto tol, merged output written).
 - Documented the per-backend split-SOC workflows: a shared strength-zero
   overview in `projector_green.rst`, a new GPAW page with the CLI reference,
   MAE comparison how-to and provenance contract, and a new ABINIT PAW page
