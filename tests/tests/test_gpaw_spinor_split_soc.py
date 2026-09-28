@@ -178,7 +178,12 @@ def test_projection_gauge_identity_pchi_equals_c_ppsi():
     p_psi = _RNG.normal(size=(nb, nproj, 2)) + 1j * _RNG.normal(size=(nb, nproj, 2))
     c_mat = c_gpaw(np.pi / 2, np.pi / 2)  # y leg: complex mixing of S_z slots
     # P^chi = C P^psi on the spinor slot index
-    p_chi = np.einsum("ab,mpa->mpb", c_mat, p_psi)
+    p_chi = np.einsum("ba,mpa->mpb", c_mat, p_psi)
+    expected = np.array(
+        [[c_mat @ p_psi[m, p] for p in range(nproj)] for m in range(nb)]
+    )
+    np.testing.assert_allclose(p_chi, expected, atol=1e-14)
+    assert np.abs(p_chi - p_psi @ c_mat).max() > 0.1  # reject C.T
     norms_psi = np.abs(p_psi**2).sum(axis=(1, 2))
     norms_chi = np.abs(p_chi**2).sum(axis=(1, 2))
     assert np.abs(norms_psi - norms_chi).max() < 1e-13
@@ -414,6 +419,27 @@ def test_leg_data_validates_and_psi_gauge_vertices(fe_calc):
     np.testing.assert_allclose(data.metadata["frame"]["spinaxis"], leg.axis, atol=1e-12)
     # single efermi on spinor leg data
     assert data.efermi_spin is None
+
+
+def test_full_bz_occupations_and_frame_roundtrip(fe_calc, tmp_path):
+    pytest.importorskip("netCDF4")
+    k = int(fe_calc.wfs.kd.bz2ibz_k[0])
+    original = [fe_calc.get_occupation_numbers(kpt=k, spin=s).copy() for s in (0, 1)]
+    leg = _leg(fe_calc, 90.0, 90.0)
+    data = soc_leg_to_projector_green_data(leg)
+    weight = fe_calc.wfs.kd.weight_k[k]  # two spin channels: 2 / nspins == 1
+    for spin in (0, 1):
+        np.testing.assert_allclose(
+            data.occupations[0, 0, spin::2], original[spin] / weight
+        )
+        np.testing.assert_array_equal(
+            fe_calc.get_occupation_numbers(kpt=k, spin=spin), original[spin]
+        )
+    path = tmp_path / "leg.nc"
+    data.save_netcdf(path)
+    restored = ProjectorGreenData.load_netcdf(path)
+    np.testing.assert_allclose(restored.metadata["frame"]["spinaxis"], leg.axis)
+    assert restored.metadata["frame"]["gauge"] == "psi"
 
 
 def test_three_legs_driver_seam(fe_calc):

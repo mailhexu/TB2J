@@ -451,8 +451,15 @@ def collect_soc_leg(
         k = int(kd.bz2ibz_k[K])
         eig_pre[K, 0::2] = calc.get_eigenvalues(kpt=k, spin=0)
         eig_pre[K, 1::2] = calc.get_eigenvalues(kpt=k, spin=1)
-        occ_pre[K, 0::2] = np.asarray(calc.get_occupation_numbers(kpt=k, spin=0))
-        occ_pre[K, 1::2] = np.asarray(calc.get_occupation_numbers(kpt=k, spin=1))
+        # GPAW raw=True divides its collected occupation view IN PLACE.
+        # Divide the weighted result in a fresh expression instead.
+        weight = kd.weight_k[k] * (2.0 / calc.wfs.nspins)
+        occ_pre[K, 0::2] = (
+            np.asarray(calc.get_occupation_numbers(kpt=k, spin=0)) / weight
+        )
+        occ_pre[K, 1::2] = (
+            np.asarray(calc.get_occupation_numbers(kpt=k, spin=1)) / weight
+        )
 
     eig_soc = np.asarray(bzw.eigenvalues(), dtype=float)
     occ_soc = np.asarray(bzw.occupation_numbers(), dtype=float)
@@ -523,7 +530,6 @@ def collect_soc_leg(
         "scale": scale,
         "axis": axis.tolist(),
         "rotation": rotation.tolist(),
-        "c_matrix": c_matrix.tolist(),
         "output_rotation": "T_lattice = O T_leg O^T with O e_z = n (ADR-4)",
         "per_leg_spinat": "leg axis",
         "strength0_reference": {
@@ -634,7 +640,6 @@ def soc_leg_to_projector_green_data(
             "theta_deg": leg.theta,
             "phi_deg": leg.phi,
             "rotation": leg.rotation.tolist(),
-            "c_matrix": leg.c_matrix.tolist(),
             "output_rotation": "T_lattice = O T_leg O^T",
             "per_leg_spinat": "leg axis",
         },
