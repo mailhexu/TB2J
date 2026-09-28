@@ -355,3 +355,63 @@ TB2J tests should include a tiny synthetic ABINIT-like NetCDF fixture with:
 The fixture must be small enough to create inside unit tests and must not depend
 on an ABINIT executable.  ABINIT-generated fixtures are covered by later
 end-to-end validation stories.
+
+
+ABINIT NC split-SOC sidecar (``abinao.nc_soc_ks`` v1)
+-----------------------------------------------------
+
+This section documents the SOC sidecar consumed together with the
+norm-conserving PAO projection file (``abinit.nc_pao_hs`` v2, see
+:doc:`projector_green`) by the ABINIT NC split-SOC workflow of
+:doc:`split_soc_abinit_nc`.  The sidecar is written by the *abinao*
+``soc_kernel`` writer, not by ABINIT's ``savetb2j``; it is a separate
+contract that exists only as the SOC partner of the NC PAO file, and the
+TB2J consumer joins the two artifacts by SHA-256 before any physics.
+
+Root attributes
+~~~~~~~~~~~~~~~
+
+* ``schema_name = "abinao.nc_soc_ks"``, ``schema_version = "1"``;
+* ``energy_unit = "eV"`` and ``hartree_to_ev`` (validated against the
+  TB2J constant to :math:`10^{-12}` relative tolerance);
+* ``band_window_lo`` / ``band_window_hi`` (half-open composite window,
+  ``-1 -1`` = full window);
+* ``spnorbscl`` (must be exactly ``1.0``: the sidecar stores the
+  :math:`\lambda=1` kernel; scaling belongs to the consumer's ``lam``);
+* ``all_atoms_covered`` (must be ``1``: ligand SOC enters the propagator);
+* ``fr050_metadata`` (JSON: ``strength0_provenance`` including
+  ``nsppol``/``nspinor``, ``operator`` source, ``frame``/``spinaxis``);
+* ``source_wfk`` and ``source_wfk_sha256``;
+* optional ``pao_hs`` and ``pao_hs_sha256`` — the TB2J consumer *requires*
+  the hash and refuses an unverifiable pairing without it.
+
+Variables
+~~~~~~~~~
+
+* ``leg(nleg)`` = ``x, y, z`` and ``spinaxis(nleg, 3)`` (one unit axis per
+  leg, matching the ABINIT spinaxis rotation convention);
+* ``kpts(nkpt, 3)`` and ``kweights(nkpt)`` in full-BZ WFK order, weights
+  non-negative;
+* ``w_so_real`` / ``w_so_imag`` of shape ``(nleg, nkpt, 2n, 2n)``: the
+  Hermitian band-window SOC operator in the composite basis
+  :math:`i = 2n + \sigma`, all atoms, in eV;
+* optional ``w_so_site_real`` / ``w_so_site_imag`` (site-resolved blocks
+  summing to the band matrix);
+* optional ``eigenvalues_ev(nleg, nkpt, 2n)`` used as a cross-check
+  against the PAO_HS band energies (tolerance :math:`10^{-6}` eV).
+
+Loader and pairing refusals
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The TB2J loader refuses: any schema name/version mismatch; a non-eV
+``energy_unit``; a ``hartree_to_ev`` mismatch; ``spnorbscl != 1``; missing
+all-atom coverage; non-Hermitian :math:`W^k_{SO}`; negative k-weights;
+spinaxis vectors that disagree with the leg axes; non-finite or
+all-zero leg matrices; inconsistent shapes; and composite eigenvalue
+arrays of the wrong length.  The pairing gate additionally refuses: a
+PAO_HS/WFK SHA-256 mismatch, a missing ``pao_hs_sha256``, k-point
+order/gauge or k-weight mismatches against the PAO_HS file, an
+eigenvalue cross-check failure, a composite band count different from
+:math:`2 \times` the PAO_HS ``nband``, and a *spinor-flavor* sidecar
+(``nsppol=1``, ``nspinor=2``), which must be routed through a
+spinor-flavor consumer instead.

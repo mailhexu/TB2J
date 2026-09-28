@@ -252,6 +252,15 @@ diagnostics:
   ``gen_exchange_abinit_paw_split_soc``; see :doc:`split_soc_abinit_paw`
   and the file contract in :doc:`abinit_savetb2j_schema`.
 
+* **ABINIT NC (PAO)** — a collinear strength-0 WFK is exported by abinao
+  into an ``abinit.nc_pao_hs`` v2 projection file plus a versioned
+  ``abinao.nc_soc_ks`` v1 SOC sidecar; ``abinit_nc_split_soc2J.py`` joins
+  the two by SHA-256, dualizes the nonorthogonal PAO maps
+  :math:`B = S^{-1} C` and runs the same three-leg rotate/merge.  See
+  :doc:`split_soc_abinit_nc`, the sidecar contract in
+  :doc:`abinit_savetb2j_schema` and the iodine :math:`\mathrm{I}_2`
+  gate example.
+
 
 ABINIT PAW Export
 -----------------
@@ -335,8 +344,15 @@ Current limitations:
   exchange;
 * diagnostic PAO ``H(k)`` arrays are not the primary TB2J exchange representation.
 
+The split-SOC extension of this path pairs the same ``abinit.nc_pao_hs``
+v2 file with a versioned ``abinao.nc_soc_ks`` v1 SOC sidecar
+(``abinao.soc_kernel``) and is consumed by ``abinit_nc_split_soc2J.py``;
+see :doc:`split_soc_abinit_nc` and the sidecar contract in
+:doc:`abinit_savetb2j_schema`.  That consumer remains collinear-only:
+spinor-flavor sidecars are refused with an explicit routing message.
+
 Projector Hamiltonian ``H_ij``
------------------------------
+------------------------------
 
 Exchange-like projector traces require a site-local spin-dependent operator in
 the same projector channel space as the Green function.  TB2J stores this as

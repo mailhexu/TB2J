@@ -4,6 +4,16 @@
 
 ### Split-SOC documentation and examples
 
+- Documented the ABINIT NC split-SOC workflow: a new page covering the
+  abinao WFK → `abinit.nc_pao_hs` v2 / `abinao.nc_soc_ks` v1 production
+  chain, the SHA-256 hash join, PAO dualization `B = S^-1 C`, units
+  (eV sidecar / Hartree-on-disk PAO_HS), the full refusal catalog, the
+  single-reference transverse-block scope and the FR-032 tangent
+  projection gate (iodine I2: 7.114 meV vs 10 meV tolerance,
+  projection-only, not a full-tensor proof).  Added the sidecar
+  on-disk contract to `abinit_savetb2j_schema.rst` and a real runnable
+  example `examples/projector_green/abinit_nc_i2_split_soc.py` (smoked
+  on the I2 fixture: anchor 1.7e-15 relative over 28 pairs).
 - Documented the per-backend split-SOC workflows: a shared strength-zero
   overview in `projector_green.rst`, a new GPAW page with the CLI reference,
   MAE comparison how-to and provenance contract, and a new ABINIT PAW page
