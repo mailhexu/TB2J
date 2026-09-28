@@ -191,15 +191,16 @@ The same run from the command line:
      - Even composite-band prefixes for the per-leg window convergence
        study (default: :math:`2b-2` and :math:`2b`).
    * - ``--tangent_tol`` / ``--no-verify-tangent-projection``
-     - Explicit FR-032 tangent-block tolerance in eV (CLI default
-       :math:`10^{-2}`) and its opt-out (not recommended).  The Python API
-       (``tangent_tol_eV=None``) instead derives the tolerance from the
-       merge's measured repeat spread and records the derivation as
-       ``tol_source``.
+     - FR-032 tangent-block tolerance in eV; the default (``None``) is the
+       :math:`10^{-2}` eV specification value on both the CLI and the
+       Python API, and ``tol_source`` records which bound a report used.
+       It is never derived from the merge's own spread.  Opt-out (not
+       recommended).
    * - ``merge_consistency_atol`` (Python API)
-     - Bound on the repeated-diagonal spread across references
-       (default :math:`5\times10^{-2}` eV, documented per pair in
-       ``merge_diagnostics`` rather than assumed exact).
+     - Bound on the repeated-diagonal spread across references; strict
+       default :math:`10^{-6}` eV (refusal).  A larger value is the
+       explicit option-b that publishes the tensor with its measured
+       reference-anisotropy spread.
    * - ``--anchor_rtol`` / ``--no-soc-off-anchor``
      - SOC-off anchor relative-Jiso tolerance (default :math:`10^{-7}`),
        and its opt-out (not recommended).
@@ -245,10 +246,7 @@ SU(2)-rotated magnetic references (x, y and z reference axes).  That merge
 exists (``TB2J.split_soc_kernel.merge_transverse_legs``) and it *certifies
 itself per fixture*: its repeated-row invariance gate can refuse a given
 three-leg set, and a refused merge means no exchange number may be quoted
-at all.  At the NC driver's default the repeated-row spread is instead
-*documented* as a reference-anisotropy error bar (the iodine dimer below
-carries a ≈25 meV one on record) — a documented spread is not a
-certification.
+at all (the iodine dimer below is the standing example).
 
 Gates
 -----
@@ -265,26 +263,24 @@ opt-outs below are explicit and not recommended.
 * **Rank-9 merge invariance gate** (always on, not optional): the three
   rotated legs must jointly determine the raw lattice tensor —
   ``merge_transverse_legs`` requires design-matrix rank 9 (three
-  independent reference axes) and bounds the disagreement of every
-  *repeated* diagonal row (each diagonal entry is measured in two
-  different legs) by ``merge_consistency_atol``.  The NC driver default is
-  :math:`5\times10^{-2}` eV: collinear-chain repeats measure real
-  reference-state effects, and the default *documents* the spread — per
-  pair, in ``merge_diagnostics`` — instead of assuming exact consistency.
-  A documented spread is a reference-anisotropy error bar, not a roundoff
-  certificate; a refusal above the bound aborts the driver before any
-  merged tensor exists.
+  independent reference axes) and that every *repeated* diagonal row
+  (each diagonal entry is measured in two different legs) agrees within
+  ``merge_consistency_atol`` (:math:`10^{-6}` eV in the NC driver).
+  A refusal aborts the driver before any merged tensor exists; see the
+  iodine dimer below.  A larger ``merge_consistency_atol`` is a
+  deliberate, diagnostics-visible choice that publishes the merged tensor
+  together with the measured spread as an explicit reference-anisotropy
+  error bar — never a silent default.
 * **FR-032 tangent projection gate**: after a successful merge, the merged
   raw transverse block ``[:2, :2]`` must match the z one-shot leg (whose
   lattice-frame rotation is the identity) within the documented tolerance.
-  The Python API derives the tolerance by default from the merge's own
-  measured repeat spread (:math:`2\times` the worst repeated-diagonal
-  deviation; the report records the derivation in ``tol_source``), while
-  the CLI ``--tangent_tol`` pins an explicit value (default
-  :math:`10^{-2}` eV).  This is a *projection-only* consistency gate — it
-  is never a full-tensor certificate, and an auto tolerance is by
-  construction as wide as the merge's own documented spread.  Disable
-  with ``--no-verify-tangent-projection``; retune with ``--tangent_tol`` /
+  The default is the :math:`10^{-2}` eV specification value (CLI and
+  Python API alike; ``tol_source`` records whether a report used the spec
+  default or an explicit value).  The tolerance is deliberately *not*
+  derived from the merge's own repeat spread — a bound taken from the
+  very inconsistency under test cannot fail.  This is a *projection-only*
+  consistency gate — it is never a full-tensor certificate.  Disable with
+  ``--no-verify-tangent-projection``; retune with ``--tangent_tol`` /
   ``tangent_tol_eV``.
 
 The band-window study is the fourth, always-on diagnostic: even composite
@@ -305,30 +301,29 @@ fixture** under the rank-nine core.  Its verified status:
   :math:`4.0\times10^{-15}` over 12 R-pairs (a shorter-cutoff recording:
   :math:`1.7\times10^{-15}`); DMI norms at the :math:`10^{-18}` eV level.
   The strength-zero replay itself is exact.
-* **Rank-9 merge — completes with a documented ≈25 meV spread; not
-  certified.**  The three legs measure each diagonal entry twice
-  (repeated rows of the design matrix).  On this fixture the two
-  measurements disagree by up to :math:`2.599\times10^{-2}` eV (worst
-  pair ``((-1,0,0), 0, 0)``), uniform at 24.95–25.99 meV across all 24
-  non-onsite pairs.  Under the landed NC driver default this spread is
-  *documented, not certified*: the merge completes (rank 9, transverse
-  mask and reciprocity residuals at :math:`10^{-17}`), and
-  ``merge_diagnostics`` records ``max_repeat_deviation = 2.599e-2`` eV
-  for every merged number to carry.  Root cause (characterized
-  2026-09-28, not a defect): the legs are individually window-converged
-  (:math:`26\to28`-band changes :math:`\le 2\times10^{-5}` eV) and the
-  sidecar legs are faithful producer outputs (bit-exact recompute,
-  Hermitian to :math:`10^{-16}`), but the strongly split collinear
-  reference (:math:`|\Delta|` up to 0.72 eV/band) makes the three
-  magnetization axes physically inequivalent references for this
-  anisotropic single dimer — substituting the *exact* SU(2) projected
-  images of the z-leg still widens the spread
-  (:math:`3.03\times10^{-2}` eV).  The three-reference rank-nine merge is
-  *certified* only where the three references are symmetry-equivalent
-  (fcc Ni: repeat spread :math:`9\times10^{-8}` eV); on this dimer every
-  merged :math:`J_\mathrm{iso}`/DMI/Jani number exists only together
-  with its documented reference-anisotropy error bar, and must be quoted
-  as such or not at all.
+* **Rank-9 merge — refuses.**  The three legs measure each diagonal entry
+  twice (repeated rows of the design matrix).  On this fixture the two
+  measurements disagree by up to :math:`2.495\times10^{-2}` eV (worst
+  pair ``((-1,0,0), 0, 0)``) against the :math:`10^{-6}` eV
+  ``merge_consistency_atol``, so ``merge_transverse_legs`` raises and the
+  driver aborts: **no merged tensor, no tangent-gate outcome, no
+  :math:`J_\mathrm{iso}`/DMI/Jani exists for this fixture.**  The
+  refusal is uniform (24.95–25.99 meV across all 24 non-onsite pairs).
+  Root cause (characterized 2026-09-28, not a defect): the legs are
+  individually window-converged (:math:`26\to28`-band changes
+  :math:`\le 2\times10^{-5}` eV) and the sidecar legs are faithful
+  producer outputs (bit-exact recompute, Hermitian to
+  :math:`10^{-16}`), but the strongly split collinear reference
+  (:math:`|\Delta|` up to 0.72 eV/band) makes the three magnetization
+  axes physically inequivalent references for this anisotropic single
+  dimer — substituting the *exact* SU(2) projected images of the z-leg
+  still refuses (spread :math:`3.03\times10^{-2}` eV, worse).  The
+  three-reference rank-nine merge is certified only where the three
+  references are symmetry-equivalent (fcc Ni: passes at
+  :math:`9\times10^{-8}` eV); for dimer oracles use a single-reference
+  full-tensor method, or pass a larger ``merge_consistency_atol`` as the
+  explicit, reported option-b that publishes the tensor with its measured
+  reference-anisotropy spread.  Do not raise the default.
 * **Band window (FR-050)**: the default :math:`2b-2 \to 2b` study moves by
   :math:`1.7\times10^{-5}` eV at a :math:`10^{-6}` eV tolerance, i.e.
   ``converged: false`` — production use of this fixture needs a larger
@@ -338,28 +333,30 @@ fixture** under the rank-nine core.  Its verified status:
 An earlier, pre-cutover recording quoted a passing FR-032 tangent residual
 (:math:`7.1` meV against a 10 meV tolerance) computed against the legacy
 scalar merge; that path is retired.  Under the rank-9 code the
-projection deviation on this fixture is **13.0 meV — above the 10 meV
-explicit CLI tolerance**.  With the default auto tolerance the same gate
-reports 13.0 meV against :math:`5.2\times10^{-2}` eV derived as
-:math:`2\times` the worst repeat deviation (``tol_source`` records the
-derivation) and passes — i.e. exactly as wide as the fixture's own
-documented spread.  That is a consistency statement, not a certificate:
-every exchange-level statement about this dimer stays uncertified, and
-only the anchor and the per-leg/merge diagnostics stand.
+forced-lstsq projection deviation on this fixture is **13.0 meV — above
+the 10 meV tolerance**, so the projection gate fails too.  An interim
+policy (c349a10) derived the gate bound from the merge's own repeat
+spread, which let this gate pass by construction; it was reverted the
+same day.  Every exchange-level statement about this dimer stays
+uncertified; only the anchor and the per-leg diagnostics stand.
 
 Runnable example
 ----------------
 
 ``examples/projector_green/abinit_nc_i2_split_soc.py`` runs the three-leg
 driver on a real ``abinit.nc_pao_hs`` v2 + ``abinao.nc_soc_ks`` v1 pair
-and prints the pairing, the anchor, merge and FR-032 gate reports and the
-output paths.  On the current retained fixture the run completes: the
-anchor passes (:math:`1.7\times10^{-15}` relative), the merge documents
-its ≈25 meV repeat spread, and the auto-tolerance FR-032 gate passes at
-:math:`1.30\times10^{-2}` eV against the :math:`5.2\times10^{-2}` eV
-``tol_source`` bound — with the printed provenance keeping the uncertified
-status of the merged dimer tensor visible.  Run it against the TB2J
-checkout (the interface module is not part of a released TB2J yet):
+and prints the pairing, the anchor and merge gate reports and the output
+paths.  On the current retained fixture the rank-nine merge refuses
+(repeated-row spread ≈ 25 meV against the :math:`10^{-6}` eV default),
+so the script prints the refusal, points at the per-leg artifacts and
+exits nonzero — that refusal is the documented behaviour, not a crash:
+
+.. code-block:: text
+
+   REFUSED: leg diagonals disagree for pair ((-1, 0, 0), 0, 0): max spread 2.495e-02 exceeds consistency_atol 1.0e-06
+
+Run it against the TB2J checkout (the interface module is not part of a
+released TB2J yet):
 
 .. code-block:: bash
 

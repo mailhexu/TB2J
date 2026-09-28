@@ -19,17 +19,23 @@ run by default and their measured reports are printed:
   NC PAO exchange kernel, same strength-0 data);
 * the rank-9 merge invariance gate: repeated diagonal rows (measured in
   two different legs) must agree within ``merge_consistency_atol``
-  (default 5e-2 eV — documenting reference-state spread per pair in
-  ``merge_diagnostics``, not certifying exactness);
+  (strict default 1e-6 eV — a refusal is the certified outcome for
+  reference-inequivalent fixtures; a larger value is a deliberate,
+  diagnostics-visible option-b error bar);
 * the FR-032 projection-only (tangent-block) gate: the merged raw
-  transverse block ``[:2, :2]`` vs the z one-shot leg, tolerance auto by
-  default (2x the worst repeat deviation, reported as ``tol_source``).
-  This gate is **projection-only** and is never a full-tensor or DMI
-  certificate.
+  transverse block ``[:2, :2]`` vs the z one-shot leg, at the 1e-2 eV
+  specification tolerance by default (``tol_source`` records whether the
+  bound is the spec default or an explicit value; it is never derived
+  from the merge's own spread, which would make the gate unable to
+  fail).  This gate is **projection-only** and is never a full-tensor or
+  DMI certificate.
 
-The script prints only the gate reports and provenance summaries; it never
-reports per-leg Jiso/DMI/Jani as final observables (per legs only the raw
-transverse ``J_leg`` blocks are stored).
+A refused merge raises before any merged tensor exists; the script
+catches it, reports the refusal and exits nonzero, leaving the per-leg
+artifacts and provenance in place.  The script prints only the gate
+reports and provenance summaries; it never reports per-leg Jiso/DMI/Jani
+as final observables (per legs only the raw transverse ``J_leg`` blocks
+are stored).
 """
 
 from __future__ import annotations
@@ -72,9 +78,9 @@ def main(argv=None) -> int:
         "--tangent-tol",
         type=float,
         default=None,
-        help="explicit FR-032 tangent-block tolerance in eV; default: auto, "
-        "derived as 2x the worst repeated-diagonal deviation and reported "
-        "as tol_source in the gate report",
+        help="explicit FR-032 tangent-block tolerance in eV (default: the "
+        "1e-2 eV spec value). Pass a larger value only as a deliberate, "
+        "reported reference-anisotropy error bar — never to force a pass",
     )
     parser.add_argument(
         "--skip-anchor",
@@ -85,22 +91,31 @@ def main(argv=None) -> int:
 
     from TB2J.interfaces.abinit_nc_split_soc import gen_exchange_abinit_nc_split_soc
 
-    result = gen_exchange_abinit_nc_split_soc(
-        args.pao_hs,
-        args.soc_kernel,
-        output_path=args.output,
-        Rcut=args.Rcut,
-        nz=args.nz,
-        smearing_eV=args.smearing,
-        index_magnetic_atoms=(
-            None
-            if args.index_magnetic_atoms is None
-            else [i - 1 for i in args.index_magnetic_atoms]
-        ),
-        tangent_tol_eV=args.tangent_tol,
-        soc_off_anchor=not args.skip_anchor,
-        wfk=args.wfk,
-    )
+    try:
+        result = gen_exchange_abinit_nc_split_soc(
+            args.pao_hs,
+            args.soc_kernel,
+            output_path=args.output,
+            Rcut=args.Rcut,
+            nz=args.nz,
+            smearing_eV=args.smearing,
+            index_magnetic_atoms=(
+                None
+                if args.index_magnetic_atoms is None
+                else [i - 1 for i in args.index_magnetic_atoms]
+            ),
+            tangent_tol_eV=args.tangent_tol,
+            soc_off_anchor=not args.skip_anchor,
+            wfk=args.wfk,
+        )
+    except ValueError as exc:
+        print(f"REFUSED: {exc}")
+        print(
+            "No merged tensor exists. Per-leg artifacts and provenance "
+            f"(if written) are under {args.output}/leg_*/ — a gate refusal "
+            "is a documented outcome, not a crash."
+        )
+        return 2
 
     ok = True
     pairing = result["metadata"]["sidecar_pairing"]
