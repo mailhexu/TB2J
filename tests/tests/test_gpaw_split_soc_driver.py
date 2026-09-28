@@ -16,7 +16,7 @@ from TB2J.interfaces.gpaw_split_soc import (
     _write_leg,
     gen_exchange_gpaw_split_soc,
 )
-from TB2J.io_merge import Merger, read_pickle
+from TB2J.io_merge import Merger, merge, read_pickle
 
 
 def _artifact_provenance(path):
@@ -156,6 +156,26 @@ def test_real_three_leg_merge_and_mae(tmp_path):
         assert _artifact_provenance(artifact) == merged.split_soc_provenance
     report = json.loads((tmp_path / "split" / "split_soc_report.json").read_text())
     assert report["metadata"] == out["metadata"]
+    # Public generic merge must not silently inherit only the last z leg.
+    generic_path = tmp_path / "generic_merge"
+    merge(
+        *(str(out["leg_paths"][name]) for name in ("x", "y", "z")),
+        write_path=str(generic_path),
+    )
+    generic = read_pickle(str(generic_path))
+    records = generic.split_soc_provenance["inputs"]
+    assert [record["provenance"] for record in records] == [
+        out["metadata"][name] for name in ("x", "y", "z")
+    ]
+    for artifact in (
+        generic_path / "exchange.out",
+        generic_path / "Multibinit" / "exchange.xml",
+    ):
+        assert _artifact_provenance(artifact) == generic.split_soc_provenance
+    for key in merged.exchange_Jdict:
+        assert generic.exchange_Jdict[key] == pytest.approx(
+            merged.exchange_Jdict[key], abs=1e-12
+        )
     for direction, angles in {"x": (90, 0), "y": (90, 90), "z": (0, 0)}.items():
         direct = soc_eigenstates(
             calc, theta=angles[0], phi=angles[1], projected=False

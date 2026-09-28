@@ -238,10 +238,26 @@ def merge(
     m.merge_DMI()
     m.merge_Jani()
     m.standardize()
+    if merged_provenance is None:
+        inputs = [
+            {"path": str(path), "provenance": obj.split_soc_provenance}
+            for path, obj in zip((*paths, *((main_path,) if main_path else ())), m.dat)
+            if hasattr(obj, "split_soc_provenance")
+        ]
+        if inputs and len(inputs) == len(m.dat):
+            merged_provenance = {"merge_mode": "generic_merge", "inputs": inputs}
+        elif inputs:
+            # An incomplete provenance set must never inherit the last leg
+            # as if its source, frame, and window described the merged tensor.
+            m.main_dat.__dict__.pop("split_soc_provenance", None)
+            m.main_dat.description = (
+                f"Merged TB2J exchange from {len(m.dat)} inputs; "
+                "split-SOC provenance incomplete (an input has no record)."
+            )
     if merged_provenance is not None:
         m.main_dat.split_soc_provenance = merged_provenance
         m.main_dat.description = (
-            f"Merged TB2J exchange from {len(paths)} input legs.\n"
+            f"Merged TB2J exchange from {len(m.dat)} input legs.\n"
             "split_soc_provenance: " + json.dumps(merged_provenance, sort_keys=True)
         )
 

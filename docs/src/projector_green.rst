@@ -253,6 +253,10 @@ coverage, frame, and study are embedded in each leg
 ``TB2J.pickle``, ``exchange.out``, ``Multibinit/exchange.xml``, and in the
 merged artifacts as three distinct leg records; the JSON report mirrors them.
 
+Rerunning ``TB2J_merge.py`` on these same leg directories retains every
+input provenance block, keyed by its input path. It does not inherit the
+last leg's frame as if that frame described the merged tensor.
+
 The input checkpoint path and SHA-256 are recorded when invoked from a file.
 The executable fcc Ni example also generates that file when ``--build`` is
 specified and asserts rank-six merging, inversion-odd DMI nulls, cubic
