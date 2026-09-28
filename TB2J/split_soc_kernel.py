@@ -519,7 +519,13 @@ def compute_ks_split_soc_exchange(
     Rpts : (nR, 3) array_like of int, optional
         Lattice vectors; each negative R must be present.  Defaults to
         the same ``_R_grid(nmax=1)`` full grid as the existing spinor
-        kernel.
+        kernel.  ``kpoints`` must form a uniform full-BZ grid (the
+        R-Fourier in ``get_GR_spinor`` is only meaningful on a periodic
+        mesh) and ``Rpts`` should cover every R reachable within the
+        cutoff: a partial R sum is a Dirichlet-windowed q-average, not
+        the q=0 response.  Self-pairs ``(R, i, i)`` are on-site
+        curvature entries; inter-site exchange is the ``(R, i, j)``,
+        ``i != j`` block.
     sites : list[int]
         Magnetic sites carrying vertices (magnetic-only gating); default
         all sites.
@@ -731,6 +737,14 @@ def merge_transverse_legs(legs, consistency_atol=1.0e-8):
     diag(7/6, 2, 17/6) through that route).  The decomposition here is the
     TB2J :func:`Jtensor.decompose_J_tensor` (Levi-Civita DMI convention)
     applied to the raw solved tensor.
+
+    The repeated-diagonal gate (``consistency_atol``) is a physics gate,
+    not a data-integrity check: at finite SOC strength the three leg
+    references are perturbed about non-stationary O(lam^2)-split states,
+    so an exactly-specified full-strength fixture can legitimately
+    refuse a tight tolerance (e.g. a few 1e-4 eV spread at lam=1).  A
+    refusal at small lam instead indicates the references do not share
+    one strength-0 state - chase the producer, not the merge.
 
     Returns ``{"exchange": {(R, i, j): {"tensor", "Jiso", "dmi", "jani",
     "diagnostics"}}, "diagnostics": {...worst values...}}``.
