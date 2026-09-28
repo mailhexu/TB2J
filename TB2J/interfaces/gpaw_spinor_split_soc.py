@@ -116,7 +116,7 @@ def o_from_c(c_mat: np.ndarray) -> np.ndarray:
     return np.array(
         [
             [
-                0.5 * np.trace(SIGMA[w] @ c_mat @ SIGMA[v] @ c_mat.conj().T)
+                0.5 * np.trace(SIGMA[w] @ c_mat @ SIGMA[v] @ c_mat.conj().T).real
                 for v in range(3)
             ]
             for w in range(3)
@@ -190,6 +190,7 @@ class GPAWSocLeg:
     occupations_soc: np.ndarray  # (nk, 2 nb)
     efermi: float  # strength-0 (collinear) fermi level, eV
     efermi_soc: float  # leg fermi level from BZWaveFunctions, eV
+    band_energy_soc: float  # exact BZWaveFunctions.calculate_band_energy() result
     w_soc: np.ndarray  # (nk, 2 nb, 2 nb) eV, strength-0 psi band basis
     w_soc_atom: np.ndarray  # (natoms, ni_max, ni_max, 2, 2) eV, leg frame
     p_amj_soc: np.ndarray  # (nk, 2 nb, nproj, 2) psi-gauge leg projections
@@ -568,6 +569,7 @@ def collect_soc_leg(
         occupations_soc=occ_soc,
         efermi=float(calc.get_fermi_level()),
         efermi_soc=float(bzw.fermi_level),
+        band_energy_soc=float(bzw.calculate_band_energy()),
         w_soc=w_soc,
         w_soc_atom=w_atom,
         p_amj_soc=p_amj,
