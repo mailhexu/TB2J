@@ -6,6 +6,15 @@ Story 001 of the SOC spinor projector-Green spec
 Script: `spinor_projector_green.py` (assertion-checked; run in `mydev`).
 Status: **all assertions pass** (2026-09-22).
 
+> **SUPERSEDED (2026-09-28).** The exchange-tensor object pinned here and the
+> 2026-09-23 correction at the bottom of this document are **replaced** by the
+> physical tangent-vertex derivation: `spinor_tangent_vertex_green.py` / `.md`
+> (story 002). The false-premise claim and the defective A-channel mapping are
+> documented there as negative controls. The collinear cross-channel algebra
+> below remains valid and is the anchor the tangent vertex reduces onto.
+> A single-reference one-shot replay is a **transverse projection only**
+> (rank 4 of 9) — not a full tensor.
+
 ## Pinned exchange tensor object
 
 $$
@@ -64,14 +73,76 @@ with $J_\mathrm{ani}$ symmetric and traceless, and
 - Decomposition identities asserted symbolically on a general real 3x3 tensor.
 - Full tensor cross-checked symbolically vs an independent numpy implementation on random complex inputs (1e-12), plus a lambdified diagonal-limit spot check.
 
-## Consequences for implementation (story 002)
+## Consequences for implementation (story 002) — [SUPERSEDED 2026-09-28]
 
-1. Kernel entry point: compute $J^{\alpha\beta}(E)$ for $\alpha,\beta\in\{x,y,z\}$ from spinor Green blocks and 2x2 site operators, take Re, decompose via `TB2J.Jtensor.decompose_J_tensor`.
-2. Collinear ($nspinor=1$) data feeds the same formula with $\Delta = z\,\sigma_z$ and diagonal $G$; $J^{xx}=J^{yy}$ reproduce the existing channel sum — the bitwise-stability requirement should instead pin the *existing* collinear path unchanged and route spinor data through the new path.
-3. The $J^{zz}$ same-channel piece is excluded by prescription; implement the contour with the standard imaginary-part/contour scheme as in the collinear kernel.
+The items below describe the original Pauli-left path and are **superseded**
+by `spinor_tangent_vertex_green.md`. Kept only with corrections for the
+record:
+
+1. ~~Kernel entry point: compute $J^{\alpha\beta}(E)$ ... take Re~~ ->
+   kernel entry point is the tangent vertex on the **full spinor G**
+   (`magnetic_tangent_vertices` / `spinor_tangent_pair_matrix` /
+   `spinor_tangent_trace`), with `J^{ab} = Im contour K^{ab}/(2 pi)` — not
+   `Re`, and no `TB2J.Jtensor.decompose_J_tensor` on per-leg data.
+2. ~~Collinear data feeds the same formula with $\Delta = z\sigma_z$ ...~~ ->
+   the collinear path is retained unchanged for bitwise stability; the
+   tangent path reduces onto it exactly (`J^{xx} = J^{yy} = J_cl`), with
+   sign-free `|Delta|` vertices and no `s_i s_j` in the tangent path.
+3. ~~The $J^{zz}$ same-channel piece is excluded by prescription~~ ->
+   **false for the old vertex**: `Jzz_old = -z_i z_j (g_up h_up + g_dn
+   h_dn) != 0` survives any prescription (spurious `Jani_zz` class). The
+   tangent vertex has `K^{zz} = 0` exactly.
 
 
-## Correction (2026-09-23): Pauli placement and channel mapping
+## Superseded (2026-09-28): the pinned object above and the 2026-09-23 "correction" are replaced
+
+**The 2026-09-23 correction recorded below was false in both premise and
+prescription.** Its factual claim — that `-Tr[(sigma_a Delta_i) G_ij
+(sigma_b Delta_j) G_ji]` is "identically zero" for block-diagonal collinear
+G — is wrong: that arrangement yields exactly the LKAG cross-channel
+`z_i z_j (g_up h_dn + g_dn h_up)` (asserted in `spinor_tangent_vertex_green.py`).
+Its replacement mapping, the G-Pauli channel reconstruction
+`A^{uv} = Tr[Delta_i G^(u)_ij Delta_j G^(v)_ji]/pi` with
+`J_iso = Im(A00-Axx-Ayy-Azz)/8`, `DMI_i = Re(A0i-Ai0)/8`,
+`Jani = Im(A^{ij}(R)+A^{ij}(-R))/8`, is the actual defect:
+
+- `A^{0i} - A^{i0} = 0` **identically** for collinear `Delta = z sigma_z`,
+  for arbitrary (even fully SOC spin-mixed) G components — the mapping
+  cannot produce DMI from collinear legs;
+- the `Azz` contraction carries a longitudinal self-pair residue — the
+  spurious FeO `Jani_zz = -114` meV;
+- the antisymmetric assembly `0.5*(dmi[:,None]-dmi[None,:])` is not the TB2J
+  Levi-Civita D tensor;
+- the claimed conjugation fix `S^-1 G S^-1` is unrelated to this defect class
+  and is not endorsed here.
+
+**The correct object is the physical local magnetic rotation vertex on the
+full spinor G**, pinned and assertion-checked in
+`spinor_tangent_vertex_green.py` / `.md` (story 002):
+
+$$
+V_i^a = -\frac{i}{2}\big[(\mathbf{n}_i\times\mathbf{t}_a)\cdot\boldsymbol{\sigma},\, H_{\mathrm{mag},i}\big],\quad
+H_{\mathrm{mag},i} = M_i/2,\quad
+K_{ij}^{ab} = \mathrm{Tr}[V_i^a G_{ij} V_j^b G_{ji}],\quad
+J^{ab} = \mathrm{Im}\oint K^{ab}\mathrm{d}z/(2\pi)
+$$
+
+with `Kzz = 0` exactly, collinear reduction `J^{xx} = J^{yy} = J_cl` exact
+(sign-free `|Delta|` vertices, no `s_i s_j`), the two-site finite-angle
+anchor `J = E''/2 = bt/(8(b+t))` and the DMI chiral anchor
+`D_z = bt sin(phi)/(8(b+t))`. **A single-reference one-shot replay is a
+transverse projection only (rank 4 of 9): `Jiso`, `D_x`, `D_y`, `Jani` and
+the longitudinal entries are not claimable without genuine x/y/z magnetic
+reference legs.**
+
+What survives of the present document: the Pauli identities, the collinear
+cross-channel algebra (it is the kernel anchor the tangent vertex reduces
+onto), the conjugation-structure discussion for that algebra, and the
+`TB2J.Jtensor` decomposition identities. The exchange-tensor pin in the
+header and the story-002 items below are superseded by the tangent-vertex
+derivation.
+
+## Correction (2026-09-23): Pauli placement and channel mapping — [RETRACTED 2026-09-28, see above]
 
 The originally pinned arrangement `J^{ab} = -Tr[(sigma_a Delta_i) G_ij
 (sigma_b Delta_j) G_ji]/(4 pi)` is **identically zero** for

@@ -3,7 +3,17 @@
 Story 001 of the SOC spinor projector-Green spec
 (Projects/TB2J/specs/soc-spinor-projector-green).
 
-Pins, with assertion checks:
+**SUPERSEDED (2026-09-28):** the exchange-tensor object pinned below is
+historical.  The physical object is the magnetic tangent vertex on the full
+spinor G -- V^a = -(i/2)[(n x t).sigma, H_mag], K = Tr[V_i G_ij V_j G_ji],
+J = Im contour K/(2 pi) -- derived and asserted in
+spinor_tangent_vertex_green.py/.md, which also documents the false premise
+and the A-channel defect of the 2026-09-23 "correction".  What remains valid
+here (and asserted): the Pauli identities, the collinear cross-channel
+algebra (the kernel anchor the tangent vertex reduces onto), the conjugation
+structure of that algebra, and the TB2J.Jtensor decomposition identities.
+
+Historical pins, with assertion checks:
 
 1. The spinor exchange-tensor object (overall sign: positive J = FM)
    J^{ab}(E) = -Tr[(sigma_a Delta_i) G_ij(E) (sigma_b Delta_j) G_ji(E)]
@@ -260,7 +270,8 @@ def main():
     numeric_cross_check()
     print("[OK] Numeric cross-check against numpy implementation (1e-12)")
     print()
-    print("All assertions passed. Spinor tensor object pinned:")
+    print("All assertions passed. Historical object (superseded 2026-09-28,")
+    print("see spinor_tangent_vertex_green.py for the physical tangent vertex):")
     print("  J^{ab}(E) = -Tr[(sigma_a Delta_i) G_ij (sigma_b Delta_j) G_ji]")
     print("  Collinear: J_iso = (J_xx + J_yy)/2 = z_i z_j (g_up h_dn + g_dn h_up)")
 
