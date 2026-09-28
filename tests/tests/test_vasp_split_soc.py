@@ -517,6 +517,12 @@ def _feo_paths():
 
 
 def test_real_feo_cso_structure_and_cocc_reconstruction():
+    """COCC reconstruction against the retained (pre-R1, v1) FeO dump.
+
+    NOTE: this archived dump predates the story-010 R1 POTAE semantics —
+    it is a valid v1 fixture for the reconstruction convention but must
+    NOT be pinned as a v2 regression reference (Main, S10 v2 handoff).
+    """
     paths = _feo_paths()
     if paths is None:
         pytest.skip("real FeO story-010 dump not available")
