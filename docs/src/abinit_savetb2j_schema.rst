@@ -300,15 +300,43 @@ Loader validation for ``soc_pauli``
 
 Split-SOC workflow
     ``TB2J/interfaces/abinit_paw_split_soc.py`` consumes the normalized
-    component: the collinear up/down channels are stacked into a spinor band
-    window, ``W_SO^K(k) = sum_a c_a^dag O_a^{(leg)} c_a`` is assembled from
-    ALL atoms (ligand SOC enters the propagator), magnetic rotation vertices
-    ``delta_total`` (or ``delta_xc``) tensored with ``sigma_z`` are placed on
-    magnetic sites only, per-leg re-quantization uses the ABINIT spinaxis
-    SU(2) rotation, and the exchange tensors are rotated back to the lattice
-    frame (``T_lattice = O T_leg O^T``, ``O e_z = n``) before the three
-    x/y/z legs are merged with ``TB2J.io_merge``.  Every output directory
-    carries ``split_soc_provenance.json`` (FR-050/ADR-8).
+    component: collinear up/down bands are **interleaved** so each even
+    window prefix contains equal numbers of both channels.
+    ``W_SO^K(k) = sum_a c_a^dag O_a^{(leg)} c_a`` uses SOC on ALL atoms
+    (ligands included); exchange vertices use ``delta_total`` or ``delta_xc``
+    on explicitly selected magnetic sites only. If the export lacks magnetic
+    moments, pass ``index_magnetic_atoms`` or ``magnetic_elements``: never
+    infer that every SOC-bearing ligand is magnetic. Signed per-site
+    ``spinat`` directions use exported moments when available; otherwise
+    they are **opposite** the sign of the frozen ``H_up-H_down`` PAW
+    potential trace (majority-spin potential is lower for positive moment).
+    This preserves AFM sublattices and the positive Fe moment. Three
+    spinaxis SU(2) legs rotate tensors to the lattice frame and merge them
+    through ``TB2J.io_merge``.
+
+    The driver writes only absolute second-variational exchange; insertion
+    derivatives are not mislabeled as J. A real two-prefix band-window
+    study, its measured change, tolerance, and convergence flag accompany
+    each leg in ``TB2J.pickle``, ``exchange.out``,
+    ``Multibinit/exchange.xml`` and ``split_soc_provenance.json``; merged
+    outputs retain all three distinct leg records. A false convergence flag
+    requires a larger ABINIT band window, not a favorable error bar.
+
+    The real eight-k Fe fixture has a nonzero 33.992-meV SOC-off first
+    exchange shell. Its physical Fe moment is positive although the PAW
+    splitting trace is negative. A native fixed-density spinor
+    ``iscf=-2`` response at lambda 0→0.005 (8 k-points × 24 states)
+    matches the *loaded-component consumer* band eigenvalue changes to
+    within 0.886 meV maximum / 0.065 meV RMS. This is a small-strength
+    eigenvalue check, not a full-strength ABINIT SOC validation: the same
+    Fe 22→24 band-window study reports ``converged: false`` at 1e-6.
+
+For example, using zero-based Python atom indices::
+
+    from TB2J.interfaces.abinit_paw_split_soc import gen_exchange_abinit_paw_split_soc
+    gen_exchange_abinit_paw_split_soc(
+        "fe_soc1o_SAVETB2J.nc", index_magnetic_atoms=[0], Rcut=8.0
+    )
 
 Synthetic Fixture Requirements
 ------------------------------

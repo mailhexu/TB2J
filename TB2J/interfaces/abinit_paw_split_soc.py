@@ -24,6 +24,7 @@ cprj bands, and feeds the story-002 KS-band split-SOC kernel:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from TB2J.interfaces.abinit_savetb2j import (
     ABINIT_PAULI_SPIN_TREATMENT,
     load_abinit_savetb2j,
 )
+from TB2J.split_soc_kernel import band_window_convergence_report, json_safe_provenance
 
 __all__ = [
     "LEG_DIRECTIONS",
@@ -153,11 +155,10 @@ def _load_soc_pauli_blocks(data):
 
 
 def _stacked_spinor_coefficients(coefficients, nband):
-    """Stack the collinear channels into the (1, nkpt, 2*nband, 2, nproj) layout.
+    """Interleave equal prefixes of up/down cprj bands in a spinor window.
 
-    State ``n`` of channel ``s`` keeps its collinear coefficient
-    ``<p_mu | psi_{n, s}>`` on spinor component ``s`` and zero on the other:
-    the pinned cprj bra convention of the spectral replay.
+    State ``2*n+s`` retains ``<p_mu|psi_{n,s}>`` on component ``s``;
+    a window prefix of even length includes the same number of each spin.
     """
     coeff = np.asarray(coefficients, dtype=complex)
     nspin, nkpt, _, nproj = coeff.shape
@@ -165,7 +166,7 @@ def _stacked_spinor_coefficients(coefficients, nband):
         raise ValueError("collinear savetb2j data must have nspin=2 channels")
     stacked = np.zeros((1, nkpt, 2 * nband, 2, nproj), dtype=complex)
     for s in range(2):
-        stacked[0, :, s * nband : (s + 1) * nband, s, :] = coeff[s]
+        stacked[0, :, s::2, s, :] = coeff[s]
     return stacked
 
 
@@ -202,14 +203,14 @@ def build_paw_split_soc_leg(
         raise ValueError(f"missing magnetic-vertex component: {vertex_component}")
 
     coefficients = _stacked_spinor_coefficients(data.coefficients, nband)
-    eigenvalues = np.concatenate([data.eigenvalues[0], data.eigenvalues[1]], axis=1)[
-        None, ...
-    ]
+    eigenvalues = np.empty((1, data.nkpt, 2 * nband), dtype=float)
+    for s in range(2):
+        eigenvalues[0, :, s::2] = data.eigenvalues[s]
     occupations = None
     if data.occupations is not None:
-        occupations = np.concatenate(
-            [data.occupations[0], data.occupations[1]], axis=1
-        )[None, ...]
+        occupations = np.empty_like(eigenvalues)
+        for s in range(2):
+            occupations[0, :, s::2] = data.occupations[s]
 
     nsite = len(data.site_nproj)
     nmax = data.site_projector_indices.shape[1]
@@ -252,7 +253,7 @@ def build_paw_split_soc_leg(
         spinor_operator_definition=SPINOR_OPERATOR_DEFINITION,
         coefficient_source=data.coefficient_source,
         coefficient_projector=data.coefficient_projector,
-        channel_interpretation="stacked collinear channels (up, down)",
+        channel_interpretation="interleaved collinear channels (up, down)",
         operator_basis=data.operator_basis,
         metadata=metadata,
         nspinor=2,
@@ -300,6 +301,7 @@ def _write_leg_results(
     path,
     description,
     spinat_vectors,
+    provenance,
 ):
     """Write one leg's exchange tensors (lattice frame) as TB2J results."""
     from ase import Atoms
@@ -344,8 +346,11 @@ def _write_leg_results(
         exchange_Jdict=exchange_Jdict,
         dmi_ddict=dmi_ddict,
         Jani_dict=Jani_dict,
-        description=description,
+        description=description
+        + "\nsplit_soc_provenance: "
+        + json.dumps(provenance, sort_keys=True),
     )
+    output.split_soc_provenance = provenance
     output.write_all(path=str(path))
     return exchange_Jdict
 
@@ -383,14 +388,29 @@ def gen_exchange_abinit_paw_split_soc(
         _R_grid_for_cutoff,
     )
     from TB2J.io_merge import merge
+    from TB2J.projector_green import site_magnetization_sign
     from TB2J.split_soc_kernel import compute_ks_split_soc_exchange
 
     legs = tuple(str(leg).lower() for leg in legs)
     if legs != LEG_DIRECTIONS:
         raise ValueError(f"legs must be {LEG_DIRECTIONS} in order, got {legs}")
+    if mode != "second_variation":
+        raise ValueError(
+            "PAW three-leg SpinIO output requires absolute second_variation exchange"
+        )
+    if not np.isfinite(spinat_magnitude) or spinat_magnitude <= 0:
+        raise ValueError("spinat_magnitude must be finite and positive")
 
     data = load_abinit_savetb2j(filename)
     _load_soc_pauli_blocks(data)
+    if (
+        magnetic_elements is None
+        and index_magnetic_atoms is None
+        and data.metadata.get("magnetic_moments") is None
+    ):
+        raise ValueError(
+            "select magnetic sites with index_magnetic_atoms or magnetic_elements; the export includes ligand SOC"
+        )
     sites = _magnetic_sites(
         data,
         magnetic_elements=magnetic_elements,
@@ -400,6 +420,10 @@ def gen_exchange_abinit_paw_split_soc(
         raise ValueError(
             "no magnetic sites: pass index_magnetic_atoms or magnetic_elements"
         )
+    if len(set(sites)) != len(sites) or any(
+        site < 0 or site >= len(data.site_nproj) for site in sites
+    ):
+        raise ValueError("magnetic sites must be distinct in-range atom indices")
     if Rpts is None:
         Rpts = _R_grid_for_cutoff(data, sites, Rcut)
     Rpts = np.asarray(Rpts, dtype=int)
@@ -408,6 +432,11 @@ def gen_exchange_abinit_paw_split_soc(
     leg_dirs = {}
     leg_metadata = {}
     leg_Jdicts = {}
+    digest = hashlib.sha256()
+    source = Path(filename).resolve()
+    with source.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
     schema_version = data.metadata.get("abinit_schema_version", "unknown")
     for leg in legs:
         u = su2_leg_rotation(leg)
@@ -433,6 +462,8 @@ def gen_exchange_abinit_paw_split_soc(
                 "strength0_reference": {
                     "code": "abinit",
                     "schema": f"abinit.savetb2j.projector/{schema_version}",
+                    "checkpoint": str(source),
+                    "sha256": digest.hexdigest(),
                     "description": (
                         "collinear PAW savetb2j strength-0 export "
                         "(cprj bands, frozen density)"
@@ -452,7 +483,61 @@ def gen_exchange_abinit_paw_split_soc(
                 "vertex_component": vertex_component,
             },
         )
-        spinat_vectors = {site: spinat_magnitude * leg_axis for site in sites}
+        if leg_data.nband < 4:
+            raise ValueError(
+                "a PAW SOC window study requires at least two paired band prefixes"
+            )
+        study = band_window_convergence_report(
+            leg_data,
+            w_leg,
+            [leg_data.nband - 2, leg_data.nband],
+            pair=(sites[0], sites[1] if len(sites) > 1 else sites[0]),
+            lam=lam,
+            mode=mode,
+            Rpts=Rpts,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            sites=sites,
+        )
+        result["metadata"]["band_window"]["convergence_study"] = json_safe_provenance(
+            study
+        )
+        moments = data.metadata.get("magnetic_moments")
+        result["metadata"]["frame"]["spinat_sign_source"] = (
+            "exported magnetic_moments"
+            if moments is not None
+            else "opposite sign of up-minus-down PAW potential trace"
+        )
+        provenance = json_safe_provenance(
+            {
+                **result["metadata"],
+                "backend": "abinit_paw",
+                "leg": leg,
+                "merge_mode": "three_leg_rotate_merge",
+            }
+        )
+        spinat_vectors = {}
+        for site in sites:
+            nproj_site = int(data.site_nproj[site])
+            vertex = leg_data.spinor_operator[site, :nproj_site, :nproj_site]
+            signed_trace = float(
+                np.real(np.trace(vertex[:, :, 0, 0] - vertex[:, :, 1, 1]))
+            )
+            if abs(signed_trace) <= 1e-10:
+                raise ValueError(
+                    f"cannot infer magnetic direction for site {site} from zero vertex trace"
+                )
+            if moments is not None:
+                if len(moments) != len(data.site_nproj) or abs(moments[site]) <= 1e-3:
+                    raise ValueError(
+                        f"no nonzero magnetic moment available for site {site}"
+                    )
+                moment_sign = float(np.sign(moments[site]))
+            else:
+                # Majority-spin PAW potential is LOWER on a positive-moment
+                # Fe site: Delta = H_up - H_down has the opposite sign to M.
+                moment_sign = -site_magnetization_sign(vertex)
+            spinat_vectors[site] = spinat_magnitude * moment_sign * leg_axis
         leg_dir = output_root / f"leg_{leg}"
         description = (
             f"ABINIT PAW split-SOC leg '{leg}' (story-006): KS second-variation "
@@ -470,39 +555,29 @@ def gen_exchange_abinit_paw_split_soc(
             leg_dir,
             description,
             spinat_vectors,
+            provenance,
         )
-        provenance = {
-            **result["metadata"],
-            "backend": "abinit_paw",
-            "leg": leg,
-            "merge_mode": "three_leg_rotate_merge",
-        }
         (leg_dir / "split_soc_provenance.json").write_text(
             json.dumps(provenance, indent=2, default=str) + "\n"
         )
         leg_dirs[leg] = leg_dir
         leg_metadata[leg] = provenance
 
-    merge(
-        *[str(leg_dirs[leg]) for leg in legs],
-        save=True,
-        write_path=str(output_root),
-    )
     merged_provenance = {
         "schema": leg_metadata[legs[0]]["schema"],
         "backend": "abinit_paw",
         "merge_mode": "three_leg_rotate_merge",
-        "legs": list(legs),
-        "rotation": "T_lattice = O T_leg O^T with O e_z = leg axis "
-        "(ABINIT spinaxis SU(2) conventions)",
-        "soc_operator": leg_metadata[legs[0]]["soc_operator"],
-        "strength0_reference": leg_metadata[legs[0]]["strength0_reference"],
-        "band_window": leg_metadata[legs[0]]["band_window"],
-        "vertices": leg_metadata[legs[0]]["vertices"],
-        "vertex_component": vertex_component,
+        "legs": leg_metadata,
+        "rotation": "T_lattice = O T_leg O^T with O e_z = leg axis",
         "lambda": float(lam),
         "units": "eV",
     }
+    merge(
+        *[str(leg_dirs[leg]) for leg in legs],
+        save=True,
+        write_path=str(output_root),
+        merged_provenance=merged_provenance,
+    )
     (output_root / "split_soc_provenance.json").write_text(
         json.dumps(merged_provenance, indent=2, default=str) + "\n"
     )

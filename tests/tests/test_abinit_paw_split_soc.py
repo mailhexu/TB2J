@@ -22,9 +22,11 @@ Covers:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
+from xml.etree import ElementTree
 
 import numpy as np
 import pytest
@@ -317,6 +319,23 @@ def test_soc_pauli_roundtrip_hartree_to_ev(tmp_path):
     assert "source_units" not in delta_meta
 
 
+def test_normalized_soc_component_survives_generic_netcdf_roundtrip(tmp_path):
+    pytest.importorskip("netCDF4")
+    from TB2J.projector_green import ProjectorGreenData
+
+    source = tmp_path / "raw_soc.nc"
+    write_soc_pauli_savetb2j_fixture(source)
+    original = load_abinit_savetb2j(source)
+    destination = tmp_path / "normalized_soc.nc"
+    original.save_netcdf(destination)
+    reread = ProjectorGreenData.load_netcdf(destination)
+    np.testing.assert_array_equal(
+        reread.operator_components["soc_pauli"],
+        original.operator_components["soc_pauli"],
+    )
+    assert reread.operator_component_metadata["soc_pauli"]["orientation"] == "operator"
+
+
 def test_soc_off_file_schema_10_unchanged(tmp_path):
     pytest.importorskip("netCDF4")
     filename = tmp_path / "soc0.nc"
@@ -470,6 +489,17 @@ def test_soc_off_leg_matches_collinear_kernel_shell_by_shell(tmp_path):
     leg_data = build_paw_split_soc_leg(data, leg="z", sites_magnetic=sites)
     assert leg_data.nspinor == 2
     assert leg_data.coefficients.shape == (1, data.nkpt, 2 * data.nband, 2, data.nproj)
+    # A prefix ending at 2*m retains m states of EACH collinear channel.
+    for spin in (0, 1):
+        np.testing.assert_array_equal(
+            leg_data.eigenvalues[0, :, spin::2], data.eigenvalues[spin]
+        )
+        np.testing.assert_array_equal(
+            leg_data.occupations[0, :, spin::2], data.occupations[spin]
+        )
+        np.testing.assert_array_equal(
+            leg_data.coefficients[0, :, spin::2, spin, :], data.coefficients[spin]
+        )
     result = compute_ks_split_soc_exchange(
         leg_data,
         np.zeros((data.nkpt, 2 * data.nband, 2 * data.nband)),
@@ -510,7 +540,7 @@ def test_band_w_soc_matches_independent_assembly(tmp_path):
     assert scale > 1e-6
     assert np.allclose(w, np.conj(np.swapaxes(w, 1, 2)), atol=1e-12 * scale)
 
-    # independent loop assembly in the stacked (channel-major) basis,
+    # independent loop assembly in the interleaved spinor basis,
     # consuming the operator-orientation blocks (the on-disk orientation
     # is the full composite transpose, normalized by the loader)
     soc_ev = written.transpose(0, 2, 1, 4, 3) * HARTREE_TO_EV
@@ -519,7 +549,7 @@ def test_band_w_soc_matches_independent_assembly(tmp_path):
     for ik in range(nkpt):
         c = np.zeros((2 * nband, 2, data.nproj), dtype=complex)
         for s in range(2):
-            c[s * nband : (s + 1) * nband, s, :] = coeff[s, ik]
+            c[s::2, s, :] = coeff[s, ik]
         ref = np.zeros((2 * nband, 2 * nband), dtype=complex)
         for site in range(len(data.site_nproj)):
             proj = data.site_projector_indices[site]
@@ -716,6 +746,37 @@ def test_driver_three_leg_rotate_merge(tmp_path):
         meta = json.loads((leg_dir / "split_soc_provenance.json").read_text())
         assert meta["merge_mode"] == "three_leg_rotate_merge"
         assert meta["frame"]["leg"] == leg
+        study = meta["band_window"]["convergence_study"]
+        assert [row["nband"] for row in study["windows"]] == [4, 6]
+        assert (
+            meta["strength0_reference"]["sha256"]
+            == hashlib.sha256(filename.read_bytes()).hexdigest()
+        )
+        from TB2J.io_merge import read_pickle
+
+        sio = read_pickle(str(leg_dir))
+        assert study["windows"][-1]["Jiso"]["[1,0,0]"] == pytest.approx(
+            sio.exchange_Jdict[((1, 0, 0), 0, 0)], abs=1e-12
+        )
+        assert sio.split_soc_provenance == meta
+        for text in (
+            (leg_dir / "exchange.out").read_text(),
+            "".join(
+                ElementTree.parse(leg_dir / "Multibinit/exchange.xml")
+                .getroot()
+                .itertext()
+            ),
+        ):
+            assert (
+                json.loads(
+                    next(
+                        line.split(": ", 1)[1]
+                        for line in text.splitlines()
+                        if line.startswith("split_soc_provenance: ")
+                    )
+                )
+                == meta
+            )
 
     # The merge solves a rank-six anisotropy system and then moves its
     # isotropic trace into Jiso. The final traceless Jani cannot be used
@@ -730,6 +791,8 @@ def test_driver_three_leg_rotate_merge(tmp_path):
     )
     merged = read_pickle(str(merged_dir))
     assert merged.exchange_Jdict
+    assert merged.split_soc_provenance == out["metadata"]
+    assert merged.split_soc_provenance["legs"] == out["leg_metadata"]
     for key, value in merged.exchange_Jdict.items():
         assert np.isfinite(value)
         jani = merged.Jani_dict[key]
@@ -739,9 +802,65 @@ def test_driver_three_leg_rotate_merge(tmp_path):
         sio = read_pickle(str(out["leg_paths"][leg]))
         np.testing.assert_allclose(
             sio.spinat[0] / np.linalg.norm(sio.spinat[0]),
-            np.eye(3)["xyz".index(leg)],
+            -np.eye(3)["xyz".index(leg)],
             atol=1e-12,
         )
+
+
+def test_driver_refuses_to_assume_ligand_is_magnetic(tmp_path):
+    pytest.importorskip("netCDF4")
+    from TB2J.interfaces.abinit_paw_split_soc import gen_exchange_abinit_paw_split_soc
+
+    source = tmp_path / "fe_ligand.nc"
+    write_soc_pauli_savetb2j_fixture(source)  # second site has nonzero delta_total
+    with pytest.raises(
+        ValueError, match="magnetic_sites|index_magnetic_atoms|magnetic_elements"
+    ):
+        gen_exchange_abinit_paw_split_soc(source, output_path=tmp_path / "invalid")
+    with pytest.raises(ValueError, match="absolute second_variation"):
+        gen_exchange_abinit_paw_split_soc(
+            source,
+            output_path=tmp_path / "derivative_as_J",
+            index_magnetic_atoms=[0],
+            mode="first_order_insertion",
+        )
+
+
+def test_afm_leg_writes_opposite_site_axes(tmp_path):
+    nc4 = pytest.importorskip("netCDF4")
+    from TB2J.interfaces.abinit_paw_split_soc import gen_exchange_abinit_paw_split_soc
+    from TB2J.io_merge import read_pickle
+
+    source = tmp_path / "afm.nc"
+    write_soc_pauli_savetb2j_fixture(source)
+    with nc4.Dataset(source, "a") as nc:
+        ops = nc.groups["operators"]
+        for variable in (
+            ops.variables["hij"],
+            ops.groups["operator_components"].variables["delta_total"],
+        ):
+            values = variable[:]
+            site_axis = 1 if variable.name.endswith("hij") else 0
+            sl = [slice(None)] * values.ndim
+            sl[site_axis] = 1
+            values[tuple(sl)] *= -1
+            variable[:] = values
+    rpts = np.array(
+        [(i, j, k) for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)]
+    )
+    out = gen_exchange_abinit_paw_split_soc(
+        source,
+        output_path=tmp_path / "afm_exchange",
+        index_magnetic_atoms=[0, 1],
+        Rpts=rpts,
+        nz=12,
+    )
+    for direction, path in out["leg_paths"].items():
+        sio = read_pickle(str(path))
+        np.testing.assert_allclose(
+            sio.spinat[0], -np.eye(3)["xyz".index(direction)], atol=1e-12
+        )
+        np.testing.assert_allclose(sio.spinat[1], -sio.spinat[0])
 
 
 def test_driver_output_rotation_formula(tmp_path):
@@ -970,3 +1089,89 @@ class TestRealFixtures:
         merged_dir = Path(out["output_path"])
         assert (merged_dir / "TB2J.pickle").exists()
         assert merged_dir.joinpath("exchange.out").exists()
+
+    def test_iron_soc_off_matches_schema10_shells(self, tmp_path):
+        pytest.importorskip("netCDF4")
+        from TB2J.interfaces.abinit_paw_split_soc import (
+            gen_exchange_abinit_paw_split_soc,
+        )
+        from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
+        from TB2J.io_merge import read_pickle
+
+        root = Path(REAL_FIXTURE_DIR) / "fe-k8"
+        reference_data = load_abinit_savetb2j(root / "soc0/fe_k8_soc0o_SAVETB2J.nc")
+        rpts = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]])
+        expected = compute_projector_exchange_jdict(
+            reference_data,
+            Rpts=rpts,
+            nz=12,
+            smearing_eV=0.05,
+            sites=[0],
+            operator_component="delta_total",
+        )
+        assert (
+            abs(expected[((1, 0, 0), 0, 0)]) > 0.01
+        )  # real 8-k Fe shell, not Gamma-only zero
+        out = gen_exchange_abinit_paw_split_soc(
+            root / "soc1/fe_k8_soc1o_SAVETB2J.nc",
+            output_path=tmp_path / "soc_off_fe",
+            index_magnetic_atoms=[0],
+            Rpts=rpts,
+            Rcut=4.0,
+            nz=12,
+            smearing_eV=0.05,
+            lam=0.0,
+        )
+        for direction, path in out["leg_paths"].items():
+            actual = read_pickle(str(path)).exchange_Jdict
+            np.testing.assert_allclose(
+                read_pickle(str(path)).spinat[0],
+                np.eye(3)["xyz".index(direction)],
+                atol=1e-12,
+            )
+            assert set(actual) == {((1, 0, 0), 0, 0), ((-1, 0, 0), 0, 0)}
+            assert max(abs(actual[key] - expected[key]) for key in actual) < 1e-8
+
+    def test_iron_native_small_soc_response_from_consumer_band_matrix(self):
+        """Fe-class j-splitting response: actual loaded cprj/soc_pauli KS path.
+
+        Both native spinor legs solve wavefunctions at the SAME fixed nspden4
+        density (iscf=-2, nstep=50); subtracting lambda=0 cancels the
+        nspden2->4 baseline change. This is a small-lambda check, not a
+        full-strength window-convergence certificate.
+        """
+        nc4 = pytest.importorskip("netCDF4")
+        from TB2J.interfaces.abinit_paw_split_soc import (
+            build_paw_split_soc_leg,
+            paw_split_soc_band_w_soc,
+        )
+        from TB2J.split_soc_kernel import second_variation_spectrum
+
+        root = Path(REAL_FIXTURE_DIR) / "fe-k8"
+        data = load_abinit_savetb2j(root / "soc1/fe_k8_soc1o_SAVETB2J.nc")
+        leg = build_paw_split_soc_leg(data, leg="z", sites_magnetic=[0])
+        w_soc = paw_split_soc_band_w_soc(data, leg="z")
+        predicted, _ = second_variation_spectrum(leg.eigenvalues, w_soc, lam=0.005)
+        with nc4.Dataset(
+            root / "native_0conv/fe_k8_native_0convo_DEN.nc"
+        ) as d0, nc4.Dataset(
+            root / "native_p005conv/fe_k8_native_p005convo_DEN.nc"
+        ) as d1:
+            np.testing.assert_array_equal(d0["density"][:], d1["density"][:])
+        with nc4.Dataset(
+            root / "native_0conv/fe_k8_native_0convo_EIG.nc"
+        ) as z, nc4.Dataset(
+            root / "native_p005conv/fe_k8_native_p005convo_EIG.nc"
+        ) as small:
+            native_shift = (
+                27.211386245988
+                * (
+                    np.sort(np.asarray(small["Eigenvalues"][:]), axis=-1)
+                    - np.sort(np.asarray(z["Eigenvalues"][:]), axis=-1)
+                )[0]
+            )
+        predicted_shift = predicted - np.sort(leg.eigenvalues[0], axis=-1)
+        assert np.max(np.abs(native_shift)) > 0.002  # nonzero 2.5-meV response
+        residual = predicted_shift - native_shift
+        assert np.max(np.abs(residual)) < 0.0012
+        assert np.sqrt(np.mean(np.abs(residual) ** 2)) < 0.0001

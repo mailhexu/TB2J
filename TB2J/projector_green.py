@@ -735,12 +735,24 @@ class ProjectorGreenData:
                             nc.createDimension("nsite", component.shape[0])
                         if "nproj_site_max" not in nc.dimensions:
                             nc.createDimension("nproj_site_max", component.shape[1])
-                        dimensions = (
-                            "nsite",
-                            "nproj_site_max",
-                            "nproj_site_max",
-                            "complex",
-                        )
+                        if component.ndim == 5:
+                            if "operator_spinor" not in nc.dimensions:
+                                nc.createDimension("operator_spinor", 2)
+                            dimensions = (
+                                "nsite",
+                                "nproj_site_max",
+                                "nproj_site_max",
+                                "operator_spinor",
+                                "operator_spinor",
+                                "complex",
+                            )
+                        else:
+                            dimensions = (
+                                "nsite",
+                                "nproj_site_max",
+                                "nproj_site_max",
+                                "complex",
+                            )
                     variable = components.createVariable(name, "f8", dimensions)
                     variable[:] = encode_complex(component)
                     if self.operator_component_metadata is not None:
