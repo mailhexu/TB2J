@@ -746,6 +746,15 @@ def merge_transverse_legs(legs, consistency_atol=1.0e-8):
     refusal at small lam instead indicates the references do not share
     one strength-0 state - chase the producer, not the merge.
 
+    A second legitimate refusal class is reference inequivalence: when the
+    three magnetic references are physically inequivalent (e.g. a strongly
+    split anisotropic dimer, where the reference spectrum itself is not
+    SU(2)-covariant across legs), the doubly-measured diagonals cannot
+    agree at any tolerance.  The raw rank-nine merge is certified only for
+    symmetry-equivalent references (the fcc-Ni class); dimer-scale systems
+    need a single-reference full-tensor method or an explicit
+    reference-anisotropy error bar.
+
     Returns ``{"exchange": {(R, i, j): {"tensor", "Jiso", "dmi", "jani",
     "diagnostics"}}, "diagnostics": {...worst values...}}``.
     """

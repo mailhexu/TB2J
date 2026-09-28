@@ -292,9 +292,22 @@ fixture** under the rank-nine core.  Its verified status:
   :math:`10^{-6}` eV ``merge_consistency_atol``, so
   ``merge_transverse_legs`` raises and the driver aborts: **no merged
   tensor, no tangent-gate outcome, no :math:`J_\mathrm{iso}`/DMI/Jani
-  exists for this fixture.**  The x/y/z leg references disagree at the
-  tens-of-meV level; diagnose the sidecar band window and the leg
-  reference states — do not raise the tolerance to force a merge.
+  exists for this fixture.**  Root cause (characterized 2026-09-28,
+  not a defect): the legs are individually window-converged
+  (:math:`26\to28`-band changes :math:`\le 2\times10^{-5}` eV) and the
+  sidecar legs are faithful producer outputs (bit-exact recompute,
+  Hermitian to :math:`10^{-16}`), but the strongly split collinear
+  reference (:math:`|\Delta|` up to 0.72 eV/band) makes the three
+  magnetization axes physically inequivalent references for this
+  anisotropic single dimer — substituting the *exact* SU(2) projected
+  images of the z-leg still refuses (spread
+  :math:`3.03\times10^{-2}` eV, worse), and the refusal is uniform
+  (24.95–25.99 meV across all 24 non-onsite pairs).  The three-reference
+  rank-nine merge is certified only where the three references are
+  symmetry-equivalent (fcc Ni: passes at
+  :math:`9\times10^{-8}` eV); for dimer oracles use a single-reference
+  full-tensor method or publish the spread as an explicit
+  reference-anisotropy error bar.  Do not raise the tolerance.
 * **Band window (FR-050)**: the default :math:`2b-2 \to 2b` study moves by
   :math:`1.7\times10^{-5}` eV at a :math:`10^{-6}` eV tolerance, i.e.
   ``converged: false`` — production use of this fixture needs a larger
@@ -303,10 +316,11 @@ fixture** under the rank-nine core.  Its verified status:
 
 An earlier, pre-cutover recording quoted a passing FR-032 tangent residual
 (:math:`7.1` meV against a 10 meV tolerance) computed against the legacy
-scalar merge; that path is retired and the numbers are superseded by the
-merge refusal above.  Until the ~25 meV repeated-row disagreement is
-diagnosed, every exchange-level statement about this dimer is
-uncertified; only the anchor and the per-leg diagnostics stand.
+scalar merge; that path is retired.  Under the current rank-9 code the
+forced-lstsq projection deviation on this fixture is **13.0 meV — above
+the 10 meV tolerance**, so the projection gate fails too.  Every
+exchange-level statement about this dimer stays uncertified; only the
+anchor and the per-leg diagnostics stand.
 
 Runnable example
 ----------------
