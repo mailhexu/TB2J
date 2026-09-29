@@ -22,6 +22,8 @@ from collections import defaultdict
 
 import numpy as np
 
+from TB2J.exchange_pert2 import ExchangePert2
+
 
 class DisplacementVertex:
     """Energy-dependent localized displacement vertex V(z) = dH - z dS.
@@ -269,3 +271,134 @@ def fold_two_legged(GR, disp_vertex, Rpts, Rjlist, Ru, energy):
                 if Rmi in Rset and Rjn in Rset:
                     dGRji[Rj] += GR[Rjn] @ V @ GR[Rmi]
     return dGRij, dGRji
+
+
+class ExchangePert2Sl(ExchangePert2):
+    """Spin-lattice exchange with a localized non-orthogonal displacement.
+
+    The displacement enters through a ``LocalizedDisplacementDerivative``:
+    ``self.epc`` becomes the energy-dependent vertex provider
+    (``V(z)=dH-z*dS`` at each contour energy) and the A-matrix derivative
+    gains the two on-site magnetic-vertex terms dP_i, dP_j (H-like, from
+    the vertex on-site entry at z=0, where the dS term vanishes). The
+    collinear reduction and channel algebra are certified in
+    docs/sympy/nonorthogonal_spin_lattice.py (checks F0-F2).
+    """
+
+    def set_displacement(self, disp, J_only=False, density_method="eigenvector"):
+        vertex = disp.to_vertex(self.nbasis)
+        # route the parent EPW plumbing through the vertex provider
+        self.epc = vertex
+        self.Ru = tuple(disp.Ru)
+        self.J_only = J_only
+        self.density_method = density_method
+        self.disp = disp
+        self._dPdict = None
+
+    def get_dP_iatom(self, iatom):
+        """Displacement derivative of the magnetic on-site vertex P_i.
+
+        Evaluated from the two-legged on-site entry (legs (Ru, Ru) -> key
+        ((0,0,0),(0,0,0))) at z=0 so the overlap term drops; Pauli-blocked
+        and projected on the reference local-moment direction.
+        """
+        if getattr(self, "_dPdict", None) is None:
+            self._dPdict = {}
+        if iatom in self._dPdict:
+            return self._dPdict[iatom]
+        onsite = self.epc.vertex((0, 0, 0), (0, 0, 0), 0.0)
+        orbs = self.iorb(iatom)
+        block = onsite[np.ix_(orbs, orbs)]
+        ni = block.shape[0] // 2
+        if self.basis_is_separated:
+            uu, dd, ud, du = (
+                block[:ni, :ni],
+                block[ni:, ni:],
+                block[:ni, ni:],
+                block[ni:, :ni],
+            )
+        else:
+            uu, dd, ud, du = (
+                block[::2, ::2],
+                block[1::2, 1::2],
+                block[::2, 1::2],
+                block[1::2, ::2],
+            )
+        dm1 = (ud + du) / 2.0
+        dm2 = (ud - du) * 0.5j
+        dm3 = (uu - dd) / 2.0
+        # reference local-moment direction from _prepare_Patom's evec
+        H = self.get_H_atom(iatom)
+        if self.basis_is_separated:
+            hu, hd = H[:ni, :ni], H[ni:, ni:]
+            hud, hdu = H[:ni, ni:], H[ni:, :ni]
+        else:
+            hu, hd = H[::2, ::2], H[1::2, 1::2]
+            hud, hdu = H[::2, 1::2], H[1::2, ::2]
+        m1 = (hud + hdu) / 2.0
+        m2 = (hud - hdu) * 0.5j
+        m3 = (hu - hd) / 2.0
+        evec = np.array((np.trace(m1).real, np.trace(m2).real, np.trace(m3).real))
+        norm = np.linalg.norm(evec)
+        if norm > 1e-8:
+            evec = evec / norm
+        else:
+            evec = np.array((0.0, 0.0, 1.0))
+        dP = dm1 * evec[0] + dm2 * evec[1] + dm3 * evec[2]
+        self._dPdict[iatom] = dP
+        return dP
+
+    def get_AijR_rhoR(self, e):
+        """Energy-point worker: deterministic loop contraction with dP terms.
+
+        Uses the loop ``get_all_A`` path (no vectorized try/except swap) so
+        the dP insertion is always active (architecture ADR-003, W3).
+        """
+        (
+            GR_full,
+            dGRij_dict,
+            dGRji_dict,
+            rhoR_full,
+            GR_arr,
+            dGRij_arr,
+            dGRji_arr,
+        ) = self.G.get_GR_and_dGRdx_from_epw(
+            self.short_Rlist,
+            self.short_Rlist,
+            energy=e,
+            epc=self.epc,
+            Ru=self.Ru,
+            J_only=self.J_only,
+        )
+        AijR, dAdx_ijR, A_orb, dAdx_orb = self.get_all_A(
+            GR_full, dGRij_dict, dGRji_dict
+        )
+        return AijR, dAdx_ijR, self.get_rho_e_spin(rhoR_full), A_orb, dAdx_orb
+
+    def get_A_ijR(self, G, dG, dGrev, R, iatom, jatom):
+        """Parent contraction plus the two on-site dP product-rule terms."""
+        tmp, dtmp, torb, dtorb = super().get_A_ijR(G, dG, dGrev, R, iatom, jatom)
+        if self.J_only or getattr(self, "disp", None) is None:
+            return tmp, dtmp, torb, dtorb
+        Gij = self.GR_atom(G[R], iatom, jatom)
+        Rm = tuple(-x for x in R)
+        Gji = self.GR_atom(G[Rm], jatom, iatom)
+
+        def pauli_blocks(M):
+            ni, nj = M.shape[0] // 2, M.shape[1] // 2
+            if self.basis_is_separated:
+                uu, dd, ud, du = M[:ni, :nj], M[ni:, nj:], M[:ni, nj:], M[ni:, :nj]
+            else:
+                uu, dd, ud, du = M[::2, ::2], M[1::2, 1::2], M[::2, 1::2], M[1::2, ::2]
+            return (uu + dd) / 2.0, (ud + du) / 2.0, (ud - du) * 0.5j, (uu - dd) / 2.0
+
+        Pi = self.get_P_iatom(iatom)
+        Pj = self.get_P_iatom(jatom)
+        dPi = self.get_dP_iatom(iatom)
+        dPj = self.get_dP_iatom(jatom)
+        for a, b in ([0, 0], [3, 3]):
+            Gij_a = pauli_blocks(Gij)[a]
+            Gji_b = pauli_blocks(Gji)[b]
+            extra = (dPi @ Gij_a @ Pj + Pi @ Gij_a @ dPj) @ Gji_b
+            dtmp[a, b] += np.trace(extra) / np.pi
+        return tmp, dtmp, torb, dtorb
