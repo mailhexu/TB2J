@@ -108,12 +108,23 @@ class LocalizedDisplacementDerivative:
     differences.
     """
 
-    def __init__(self, dH, dS, Ru, atoms, provenance="unlabeled"):
+    def __init__(
+        self,
+        dH,
+        dS,
+        Ru,
+        atoms,
+        provenance="unlabeled",
+        atom_index=None,
+        direction=None,
+    ):
         self.dH = {tuple(k): np.asarray(v, dtype=complex) for k, v in dH.items()}
         self.dS = {tuple(k): np.asarray(v, dtype=complex) for k, v in dS.items()}
         self.Ru = tuple(Ru)
         self.atoms = atoms
         self.provenance = str(provenance)
+        self.atom_index = atom_index
+        self.direction = tuple(direction) if direction is not None else None
 
     def to_vertex(self, nbasis):
         return DisplacementVertex(self.dH, self.dS, nbasis)
@@ -158,55 +169,87 @@ class LocalizedDisplacementDerivative:
             Ru=(0, 0, 0),
             atoms=getattr(parser, "atoms", atoms),
             provenance="abacus out_mat_dh/out_mat_ds (frozen potential)",
+            atom_index=None,
+            direction=tuple(direction),
         )
 
     @classmethod
     def from_supercell_runs(
-        cls, ref_model, plus_model, minus_model, orb_map, atom_orbs, delta
+        cls,
+        ref_model,
+        plus_model,
+        minus_model,
+        orb_map,
+        atom_orbs,
+        delta,
+        atom_index=None,
+        direction=(1, 0, 0),
     ):
         """Producer B: central differences of +-displaced supercell runs.
 
         Parameters
         ----------
         ref_model, plus_model, minus_model : HamiltonIO LCAOHamiltonian-like
-            Supercell models with ``HR``, ``SR``, ``Rlist`` attributes,
-            identical basis ordering (asserted).
+            Supercell models with ``HR``, ``SR``, ``Rlist`` attributes.
+            All three must share the same R-list and basis size (checked).
         orb_map : list of (prim_orb_index, cell tuple) per supercell orbital
-            Maps each supercell orbital to its primitive orbital and cell
-            (integer supercell-cell coordinates).
+            Maps each supercell orbital to its primitive orbital and cell.
+            Use the symmetric cell range (e.g. -2,-1,0,1 for N=4) so
+            boundary bonds fold to the shortest image.
         atom_orbs : list of primitive orbital indices on the displaced atom
             The displaced atom sits in supercell cell (0, 0, 0).
         delta : float
             Displacement magnitude in Angstrom (plus/minus runs at +-delta).
+        atom_index, direction : displaced-atom identity recorded in the
+            provenance metadata (FR-005).
 
-        The supercell R-sum of each model gives the full matrix between all
-        orbital pairs; the difference restricted to elements touching the
-        displaced atom image is the two-legged derivative, keyed
-        (Rq, Rk) = (-n1, n2 - n1) for legs (n1, n2). Provenance is the
-        self-consistent response of the displaced runs.
+        Each supercell matrix element ``HR[iR][i, j]`` connects supercell
+        orbitals ``i`` (cell n_i) and ``j`` (cell n_j + R_sc): its two legs
+        are (n_i, n_j + R_sc) and the entry folds into the primitive
+        two-legged key (Rq, Rk) = (Ru - n_i, (n_j + R_sc) - n_i) at the
+        primitive orbital indices (mu_i, mu_j). Blocks are stored in the
+        PRIMITIVE basis so ``to_vertex(primitive_nbasis)`` accepts them.
         """
-        for name, model in (("plus", plus_model), ("minus", minus_model)):
-            if list(map(tuple, np.atleast_2d(plus_model.Rlist))) != list(
-                map(tuple, np.atleast_2d(model.Rlist))
-            ):
-                raise ValueError(f"{name} model R-list differs from the plus model")
-
-        def rsum(model, array):
-            return sum(np.asarray(array[iR]) for iR in range(len(model.Rlist)))
-
-        def diff(array_plus, array_minus):
-            return (rsum(plus_model, array_plus) - rsum(minus_model, array_minus)) / (
-                2.0 * delta
+        rlists = {
+            name: [tuple(int(c) for c in R) for R in np.atleast_2d(model.Rlist)]
+            for name, model in (
+                ("reference", ref_model),
+                ("plus", plus_model),
+                ("minus", minus_model),
             )
-
-        dM_up = diff(plus_model.HR, minus_model.HR)
-        # collinear spinor handled by passing already-merged spinor models
-        dM_S = diff(plus_model.SR, minus_model.SR)
-        n_sc = dM_up.shape[1]
+        }
+        if not (rlists["reference"] == rlists["plus"] == rlists["minus"]):
+            raise ValueError(
+                "reference/plus/minus supercell R-lists differ; the runs "
+                "must share the same R convention (FR-007)"
+            )
+        n_sc = np.asarray(plus_model.HR).shape[1]
+        for name, model in (("reference", ref_model), ("minus", minus_model)):
+            n = np.asarray(model.HR).shape[1]
+            if n != n_sc:
+                raise ValueError(
+                    f"{name} model basis size {n} differs from the plus model {n_sc}"
+                )
         if n_sc != len(orb_map):
             raise ValueError(
-                f"orb_map has {len(orb_map)} entries but the supercell basis has {n_sc}"
+                f"orb_map has {len(orb_map)} entries but the supercell basis "
+                f"has {n_sc}"
             )
+
+        # supercell multiplicity per axis from the complete cell labeling
+        cells = [tuple(int(c) for c in n) for _, n in orb_map]
+        Ns = []
+        for ax in range(3):
+            vals = sorted({c[ax] for c in cells})
+            N = len(vals)
+            if sorted({v % N for v in vals}) != list(range(N)):
+                raise ValueError(
+                    "orb_map cells do not form a complete supercell residue "
+                    "system per axis (FR-007)"
+                )
+            Ns.append(N)
+
+        n_prim = 1 + max(mu for mu, _ in orb_map)
         displaced_sc_orbs = [
             i
             for i, (mu, n) in enumerate(orb_map)
@@ -214,30 +257,56 @@ class LocalizedDisplacementDerivative:
         ]
         if not displaced_sc_orbs:
             raise ValueError("no supercell orbital maps to the displaced atom image")
+
         dH = {}
         dS = {}
-        for i in range(n_sc):
-            mu_i, n_i = orb_map[i]
-            for j in range(n_sc):
-                mu_j, n_j = orb_map[j]
-                if i not in displaced_sc_orbs and j not in displaced_sc_orbs:
-                    continue
-                key = (
-                    tuple(int(-c) for c in n_i),
-                    tuple(int(b - a) for a, b in zip(n_i, n_j)),
-                )
-                if np.all(dM_up[i, j] == 0) and np.all(dM_S[i, j] == 0):
-                    continue
-                dH.setdefault(key, np.zeros_like(dM_up))
-                dS.setdefault(key, np.zeros_like(dM_S))
-                dH[key][i, j] += dM_up[i, j]
-                dS[key][i, j] += dM_S[i, j]
+        for iR, R_sc in enumerate(rlists["plus"]):
+            dH_R = (np.asarray(plus_model.HR[iR]) - np.asarray(minus_model.HR[iR])) / (
+                2.0 * delta
+            )
+            dS_R = (np.asarray(plus_model.SR[iR]) - np.asarray(minus_model.SR[iR])) / (
+                2.0 * delta
+            )
+            for i in range(n_sc):
+                mu_i, n_i = orb_map[i]
+                for j in range(n_sc):
+                    mu_j, n_j = orb_map[j]
+                    if i not in displaced_sc_orbs and j not in displaced_sc_orbs:
+                        continue
+                    if np.all(dH_R[i, j] == 0) and np.all(dS_R[i, j] == 0):
+                        continue
+                    # second leg in primitive cells (R_sc is in supercell
+                    # lattice units = N primitive cells per axis), reduced
+                    # to the shortest image inside the supercell labeling
+                    diff = [n_j[ax] + Ns[ax] * R_sc[ax] - n_i[ax] for ax in range(3)]
+                    diff = [
+                        d - Ns[ax] * int(round(d / Ns[ax])) if Ns[ax] > 1 else d
+                        for ax, d in enumerate(diff)
+                    ]
+                    key = (
+                        tuple(int(-c) for c in n_i),
+                        tuple(int(d) for d in diff),
+                    )
+                    dH.setdefault(key, np.zeros((n_prim, n_prim), dtype=complex))
+                    dS.setdefault(key, np.zeros((n_prim, n_prim), dtype=complex))
+                    dH[key][mu_i, mu_j] += dH_R[i, j]
+                    dS[key][mu_i, mu_j] += dS_R[i, j]
+        # drop keys where both derivative channels vanish
+        for key in list(dH):
+            if not np.any(dH[key]) and not np.any(dS[key]):
+                del dH[key]
+                del dS[key]
         return cls(
             dH,
             dS,
             Ru=(0, 0, 0),
             atoms=getattr(ref_model, "atoms", None),
-            provenance="supercell +/- finite difference (self-consistent)",
+            provenance=(
+                "supercell +/- finite difference (self-consistent); "
+                f"atom_index={atom_index}, direction={tuple(direction)}"
+            ),
+            atom_index=atom_index,
+            direction=tuple(direction),
         )
 
 
@@ -286,10 +355,32 @@ class ExchangePert2Sl(ExchangePert2):
     """
 
     def set_displacement(self, disp, J_only=False, density_method="eigenvector"):
+        if disp is None:
+            # J-only run: no derivative data; epc is unused with J_only
+            self.J_only = True
+            self.density_method = density_method
+            self.epc = None
+            self.Ru = (0, 0, 0)
+            self._dPdict = None
+            if not hasattr(self, "basis_is_separated"):
+                orbs = self.iorb(self.ind_mag_atoms[0])
+                self.basis_is_separated = (
+                    len(orbs) > 1 and orbs[-1] - orbs[0] != len(orbs) - 1
+                )
+            self._init_pert_dicts()
+            return
         vertex = disp.to_vertex(self.nbasis)
-        # route the parent EPW plumbing through the vertex provider
+        # a new provider can change the (Rq, Rk) support: invalidate the
+        # TBGreen R-map cache built from the previous provider
+        self.G._Rmap = None
+        self.G._Rmap_rev = None
         self.epc = vertex
         self.Ru = tuple(disp.Ru)
+        if getattr(self, "orb_decomposition", False) and not J_only:
+            raise NotImplementedError(
+                "orbital-decomposed dJdx_orb does not include the dP terms "
+                "yet; disable orb_decomposition for spin-lattice runs"
+            )
         self.J_only = J_only
         self.density_method = density_method
         self.disp = disp
@@ -299,6 +390,9 @@ class ExchangePert2Sl(ExchangePert2):
             self.basis_is_separated = (
                 len(orbs) > 1 and orbs[-1] - orbs[0] != len(orbs) - 1
             )
+        self._init_pert_dicts()
+
+    def _init_pert_dicts(self):
         # attribute parity with the EPW path (set_epw initializes these)
         from collections import defaultdict
 
@@ -447,6 +541,15 @@ def gen_exchange_spin_lattice_lcao(
     """
     from TB2J.io_exchange.io_exchange import SpinIO
 
+    if disp is None and not Jonly:
+        raise ValueError("disp is required unless Jonly=True")
+    meta = ""
+    if disp is not None:
+        meta = (
+            f" [spin-lattice displacement provenance: {disp.provenance};"
+            f" atom_index={disp.atom_index}, Ru={disp.Ru},"
+            f" direction={disp.direction}]"
+        )
     ex = ExchangePert2Sl(
         tbmodels=tbmodel,
         atoms=atoms,
@@ -460,10 +563,12 @@ def gen_exchange_spin_lattice_lcao(
         nproc=np,
         exclude_orbs=exclude_orbs,
         index_magnetic_atoms=list_iatom,
-        description=description
-        + f" [spin-lattice displacement provenance: {disp.provenance}]",
+        description=description + meta,
         integration_method=integration_method,
     )
-    ex.set_displacement(disp, J_only=Jonly, density_method=density_method)
+    if disp is not None:
+        ex.set_displacement(disp, J_only=Jonly, density_method=density_method)
+    else:
+        ex.set_displacement(None, J_only=True, density_method=density_method)
     ex.run(output_path)
     return SpinIO.load_pickle(output_path)

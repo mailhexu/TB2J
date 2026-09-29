@@ -12,6 +12,7 @@ disagree.
 from __future__ import annotations
 
 import numpy as np
+import test_spin_lattice_fd as T_mod
 from scipy.linalg import eigh
 
 from TB2J.green import TBGreen
@@ -22,7 +23,8 @@ from TB2J.spin_lattice_lcao import (
 )
 
 # model parameters (1D chain, 1 orbital, collinear z)
-LAM = 1.1
+LAM_T = 1.1
+LAM_S = 1.1
 T0 = -0.6
 S0 = 0.15
 EPS = 0.3
@@ -71,8 +73,8 @@ class _SpinorChain:
             touched = True  # primitive model: every cell is the displaced one
         else:
             touched = i_cell == 0 or j_cell % self.ncell == 0
-        tt = T0 * np.exp(-LAM * self.tau) if touched else T0
-        ss = S0 * np.exp(-LAM * self.tau) if touched else S0
+        tt = T0 * np.exp(-LAM_T * self.tau) if touched else T0
+        ss = S0 * np.exp(-LAM_S * self.tau) if touched else S0
         return tt, ss
 
     def HSR(self):
@@ -126,8 +128,8 @@ def _green(model, kpts):
 
 def _analytic_vertex():
     """Two-legged vertex for displacing atom 0 in the primitive cell."""
-    dt = -LAM * T0
-    ds = -LAM * S0
+    dt = -LAM_T * T0
+    ds = -LAM_S * S0
     n = 2
 
     def spinor(mat):
@@ -257,7 +259,15 @@ def test_fd_localized_displacement_matches_production():
     assert rel_l < 1e-8, (O_analytic, O_fd_left, rel_l)
 
 
-def test_negative_controls_no_ds_and_fixed_z():
+def test_negative_controls_fixed_z(monkeypatch):
+    """Fixed-z control on the pure-overlap model: wrong constant z is wrong.
+
+    On the combined model the dS channel is a small fraction of O, so the
+    control runs where the overlap channel carries the whole signal.
+    """
+    monkeypatch.setattr(T_mod, "LAM_T", 0.0)
+    monkeypatch.setattr(T_mod, "DEPS", 0.0)
+    monkeypatch.setattr(T_mod, "DDELTA", 0.0)
     prim = _SpinorChain(ncell=1)
     kpts = [[j / 64, 0, 0] for j in range(64)]
     G = _green(prim, kpts)
@@ -265,15 +275,6 @@ def test_negative_controls_no_ds_and_fixed_z():
     ex.set_displacement(_analytic_vertex(), J_only=False)
     _, O_good = _pair_energy_sum(ex)
 
-    # no-dS control
-    disp = _analytic_vertex()
-    disp.dS = {}
-    ex2 = _wire_exchange(G, 2)
-    ex2.set_displacement(disp, J_only=False)
-    _, O_nods = _pair_energy_sum(ex2)
-    assert abs(O_nods - O_good) / abs(O_good) > 0.03  # observed ~6.5%
-
-    # fixed-z control: vertex evaluated at a wrong constant energy
     class _FixedZ(DisplacementVertex):
         def __init__(self, base, z0):
             super().__init__(base.dH, base.dS, base.nbasis)
@@ -284,9 +285,61 @@ def test_negative_controls_no_ds_and_fixed_z():
 
     ex3 = _wire_exchange(G, 2)
     base = _analytic_vertex().to_vertex(2)
-    ex3.epc = _FixedZ(base, 0.5 + 0.5j)
+    ex3.epc = _FixedZ(base, 2.0 + 2.0j)
     ex3.Ru = (0, 0, 0)
     ex3.J_only = False
     ex3.disp = _analytic_vertex()
     _, O_fixedz = _pair_energy_sum(ex3)
-    assert abs(O_fixedz - O_good) / abs(O_good) > 0.03  # observed ~6%
+    assert abs(O_fixedz - O_good) / abs(O_good) > 0.1, (O_fixedz, O_good)
+
+
+def _run_analytic():
+    G = _green(_SpinorChain(ncell=1), [[j / 64, 0, 0] for j in range(64)])
+    ex = _wire_exchange(G, 2)
+    ex.set_displacement(_analytic_vertex(), J_only=False)
+    return _pair_energy_sum(ex)
+
+
+def _run_fd(ncell=64, h=1e-6):
+    Jp = _supercell_J(+h, ncell=ncell, nk=1)
+    Jm = _supercell_J(-h, ncell=ncell, nk=1)
+    return (Jp[1] - Jm[1]) / (2 * h)
+
+
+def test_fd_pure_overlap_channel(monkeypatch):
+    """NFR-002: dS-only model (constant t, drifting s) — no-dS control fails."""
+    monkeypatch.setattr(T_mod, "LAM_T", 0.0)
+    monkeypatch.setattr(T_mod, "DEPS", 0.0)
+    monkeypatch.setattr(T_mod, "DDELTA", 0.0)
+    _, O_good = _run_analytic()
+    O_fd = _run_fd()
+    assert abs(O_good - O_fd) / abs(O_fd) < 1e-8, (O_good, O_fd)
+    assert abs(O_good) > 1e-6  # the overlap channel alone produces O
+
+    disp = T_mod._analytic_vertex()
+    disp.dS = {}
+    G = _green(T_mod._SpinorChain(ncell=1), [[j / 64, 0, 0] for j in range(64)])
+    ex = _wire_exchange(G, 2)
+    ex.set_displacement(disp, J_only=False)
+    _, O_nods = _pair_energy_sum(ex)
+    assert abs(O_nods - O_good) / abs(O_good) > 0.1, (O_nods, O_good)
+
+
+def test_fd_splitting_drift_channel(monkeypatch):
+    """NFR-002 second case: only the on-site splitting drifts (dP channel)."""
+    monkeypatch.setattr(T_mod, "LAM_T", 0.0)
+    monkeypatch.setattr(T_mod, "LAM_S", 0.0)
+    monkeypatch.setattr(T_mod, "DEPS", 0.0)
+    monkeypatch.setattr(T_mod, "DDELTA", 0.6)
+    _, O_good = _run_analytic()
+    O_fd = _run_fd()
+    assert abs(O_good) > 1e-6
+    assert abs(O_good - O_fd) / abs(O_fd) < 1e-8, (O_good, O_fd)
+
+
+def test_fd_orthogonal_limit(monkeypatch):
+    """FR-006: S=I and dS=0 reduce to the orthogonal (EPW-form) path."""
+    monkeypatch.setattr(T_mod, "S0", 0.0)
+    _, O_good = _run_analytic()
+    O_fd = _run_fd()
+    assert abs(O_good - O_fd) / abs(O_fd) < 1e-8, (O_good, O_fd)

@@ -52,6 +52,54 @@ def test_driver_smoke_synthetic_chain(tmp_path):
     assert "provenance" in sio.description or "synthetic" in sio.description
 
 
+def test_driver_jonly_without_displacement(tmp_path):
+    """FR-005: J-only operation requires no derivative input at all."""
+    model = FD._SpinorChain(ncell=1)
+    atoms = Atoms(
+        "Fe", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3), pbc=[True, False, False]
+    )
+    sio = gen_exchange_spin_lattice_lcao(
+        tbmodel=model,
+        atoms=atoms,
+        disp=None,
+        basis=["Fe1|orb1", "Fe1|orb1"],
+        efermi=FD.EFERMI,
+        magnetic_elements=["Fe"],
+        kmesh=(16, 1, 1),
+        emin=-10.0,
+        emax=0.0,
+        nz=20,
+        np=1,
+        output_path=str(tmp_path),
+        Jonly=True,
+    )
+    values = np.array(list(sio.exchange_Jdict.values()))
+    assert len(values) > 0
+    assert np.all(np.isfinite(values))
+    # J-only without a displacement writes no derivative data
+    assert all(v == 0.0 for v in sio.dJdx.values())  # EPW-path zero-fill parity
+
+
+def test_driver_rejects_missing_displacement(tmp_path):
+    """A derivative run without displacement data fails closed."""
+    model = FD._SpinorChain(ncell=1)
+    atoms = Atoms(
+        "Fe", positions=[[0.0, 0.0, 0.0]], cell=np.eye(3), pbc=[True, False, False]
+    )
+    with pytest.raises(ValueError, match="disp is required"):
+        gen_exchange_spin_lattice_lcao(
+            tbmodel=model,
+            atoms=atoms,
+            disp=None,
+            basis=["Fe1|orb1", "Fe1|orb1"],
+            efermi=FD.EFERMI,
+            magnetic_elements=["Fe"],
+            kmesh=(16, 1, 1),
+            output_path=str(tmp_path),
+            Jonly=False,
+        )
+
+
 def test_driver_jonly_parity(tmp_path):
     """J-only mode runs without derivative data influence."""
     model = FD._SpinorChain(ncell=1)

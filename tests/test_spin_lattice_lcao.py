@@ -188,27 +188,34 @@ class _CellModel:
 def _chain_supercell(tau, ncell=4, lam=1.3, t0=-1.0, s0=0.2, de=0.0):
     """1D chain supercell: atom 0 (cell 0) displaced by tau.
 
-    Bonds touching the displaced atom carry t(tau) = t0*exp(-lam*tau),
-    s(tau) = s0*exp(-lam*tau); others stay at tau=0 values. Returns the
-    supercell models for the given tau (Rlist covers the needed images).
+    Correct supercell block structure: intra-supercell bonds live in the
+    R_sc=0 block; the boundary bond (n-1 -> 0 of the next image) lives in
+    R_sc=+1 as element [n-1, 0], and its reverse in R_sc=-1 as [0, n-1].
+    Bonds touching atom 0 carry t(tau), s(tau); others stay at t0, s0.
     """
     n = ncell
     Rlist = [(-1, 0, 0), (0, 0, 0), (1, 0, 0)]
     HR = np.zeros((len(Rlist), n, n))
     SR = np.zeros((len(Rlist), n, n))
-    for iR, R in enumerate(Rlist):
-        for i in range(n):
-            if R[0] == 0:
-                continue  # onsite only in the R=0 block; bonds live in +-1
-            j_cell = (i + R[0]) % n
-            touches = (i == 0) or ((i + R[0]) % n == 0)
-            tt = t0 * np.exp(-lam * tau) if touches else t0
-            ss = s0 * np.exp(-lam * tau) if touches else s0
-            HR[iR, i, j_cell] += tt
-            SR[iR, i, j_cell] += ss
-    iR0 = Rlist.index((0, 0, 0))
-    HR[iR0, range(n), range(n)] += de * tau  # onsite drift on every atom
-    SR[:, range(n), range(n)] = 1.0
+
+    def ts(touched):
+        if touched:
+            return t0 * np.exp(-lam * tau), s0 * np.exp(-lam * tau)
+        return t0, s0
+
+    for i in range(n - 1):
+        tt, ss = ts(i == 0)  # bond (i, i+1) touches atom 0 only for i=0
+        HR[1, i, i + 1] = tt
+        HR[1, i + 1, i] = tt
+        SR[1, i, i + 1] = ss
+        SR[1, i + 1, i] = ss
+    tt, ss = ts(True)  # boundary bonds touch atom 0
+    HR[2, n - 1, 0] = tt
+    SR[2, n - 1, 0] = ss
+    HR[0, 0, n - 1] = tt
+    SR[0, 0, n - 1] = ss
+    HR[1, range(n), range(n)] += de * tau  # onsite drift
+    SR[1, range(n), range(n)] = 1.0
     return _CellModel(HR, SR, Rlist)
 
 
@@ -220,38 +227,44 @@ def test_from_supercell_runs_matches_analytic_derivative():
     ref = _chain_supercell(0.0, ncell, de=0.3)
     orb_map = [(0, (c, 0, 0)) for c in (0, 1, -2, -1)]  # symmetric labels
     disp = LocalizedDisplacementDerivative.from_supercell_runs(
-        ref, plus, minus, orb_map, atom_orbs=[0], delta=delta
+        ref,
+        plus,
+        minus,
+        orb_map,
+        atom_orbs=[0],
+        delta=delta,
+        atom_index=0,
+        direction=(1, 0, 0),
     )
     lam, t0, s0, de = 1.3, -1.0, 0.2, 0.3
     dt = -lam * t0
     ds = -lam * s0
-    # displaced atom in supercell cell 0; touching elements (legs (n_i,n_j)):
-    # (0,1), (0,-1), (1,0), (-1,0) plus onsite (0,0). Keys are
-    # (Rq, Rk) = (-n_i, n_j - n_i); the boundary bond uses the symmetric
-    # cell label -1 (cell 3 of the 4-supercell), the alias-free choice.
+    # touching bonds: (0,1),(1,0) inside the supercell (R_sc=0), the
+    # boundary bonds in R_sc=+-1; keys (Rq, Rk) = (-n_i, shortest-image
+    # n_j - n_i) in the PRIMITIVE basis
     expect = {
         ((0, 0, 0), (1, 0, 0)): dt,
-        ((0, 0, 0), (-1, 0, 0)): dt,
         ((-1, 0, 0), (-1, 0, 0)): dt,
         ((1, 0, 0), (1, 0, 0)): dt,
+        ((0, 0, 0), (-1, 0, 0)): dt,
         ((0, 0, 0), (0, 0, 0)): de,
     }
     assert set(disp.dH) == set(expect)
     for key, value in expect.items():
         mat = disp.dH[key]
-        nz = np.argwhere(np.abs(mat) > 1e-9)
-        assert len(nz) == 1, (key, mat)
-        assert abs(mat[nz[0][0], nz[0][1]] - value) < 1e-6, (key, mat)
-    # dS: same bond structure with ds; onsite S_ii = 1 is constant
-    for key, value in expect.items():
+        assert mat.shape == (1, 1), (key, mat.shape)
+        assert abs(mat[0, 0] - value) < 1e-6, (key, mat)
+    for key in expect:
         mat = disp.dS[key]
+        assert mat.shape == (1, 1)
         if key == ((0, 0, 0), (0, 0, 0)):
             assert np.max(np.abs(mat)) < 1e-9
         else:
-            nz = np.argwhere(np.abs(mat) > 1e-9)
-            assert len(nz) == 1, (key, mat)
-            assert abs(mat[nz[0][0], nz[0][1]] - ds) < 1e-6, (key, mat)
+            assert abs(mat[0, 0] - ds) < 1e-6, (key, mat)
     assert disp.provenance.startswith("supercell")
+    assert "atom_index=0" in disp.provenance
+    assert disp.atom_index == 0
+    assert disp.direction == (1, 0, 0)
 
 
 def test_from_supercell_runs_rejects_rlist_mismatch():
