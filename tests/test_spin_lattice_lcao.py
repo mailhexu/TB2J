@@ -275,3 +275,54 @@ def test_from_supercell_runs_rejects_rlist_mismatch():
         LocalizedDisplacementDerivative.from_supercell_runs(
             plus, plus, bad, [(0, (c, 0, 0)) for c in range(4)], [0], 1e-4
         )
+
+
+def test_from_supercell_runs_rejects_support_overlap():
+    """SPEC-001: derivative support spanning a full supercell must fail.
+
+    Second-neighbor bonds in an ncell=2 supercell touch two displaced
+    images at once: the (0 -> 2) bond aliases onto the onsite key
+    ((0,0,0),(0,0,0)) and the guard must reject the run.
+    """
+    ncell = 2
+
+    def _second_neighbor(tau):
+        m = _chain_supercell(tau, ncell)
+        # add second-neighbor bonds (0 -> 2) and (-2 -> 0), each touching
+        # two displaced images: elements [0, 0] in R_sc=+1 and R_sc=-1
+        m.HR[2, 0, 0] += 0.5 * np.exp(-1.3 * tau)
+        m.SR[2, 0, 0] += 0.1 * np.exp(-1.3 * tau)
+        m.HR[0, 0, 0] += 0.5 * np.exp(-1.3 * tau)
+        m.SR[0, 0, 0] += 0.1 * np.exp(-1.3 * tau)
+        return m
+
+    plus = _second_neighbor(+1e-4)
+    minus = _second_neighbor(-1e-4)
+    ref = _second_neighbor(0.0)
+    with pytest.raises(ValueError, match="supercell too small"):
+        LocalizedDisplacementDerivative.from_supercell_runs(
+            ref,
+            plus,
+            minus,
+            [(0, (c, 0, 0)) for c in range(ncell)],
+            atom_orbs=[0],
+            delta=1e-4,
+            atom_index=0,
+            direction=(1, 0, 0),
+        )
+
+
+def test_from_supercell_runs_rejects_inconsistent_orb_map():
+    """SPEC-002: a duplicated (orbital, cell) label must not pass."""
+    plus = _chain_supercell(1e-4, 4)
+    bad_map = [(0, (0, 0, 0)), (0, (1, 0, 0)), (0, (0, 0, 0)), (0, (-1, 0, 0))]
+    with pytest.raises(ValueError, match="orb_map"):
+        LocalizedDisplacementDerivative.from_supercell_runs(
+            plus, plus, plus, bad_map, [0], 1e-4
+        )
+    # missing orbital in one cell (same length, mislabeled)
+    bad_map2 = [(0, (0, 0, 0)), (0, (0, 0, 0)), (0, (1, 0, 0)), (0, (-1, 0, 0))]
+    with pytest.raises(ValueError, match="orb_map"):
+        LocalizedDisplacementDerivative.from_supercell_runs(
+            plus, plus, plus, bad_map2, [0], 1e-4
+        )

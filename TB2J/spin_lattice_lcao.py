@@ -248,8 +248,33 @@ class LocalizedDisplacementDerivative:
                     "system per axis (FR-007)"
                 )
             Ns.append(N)
-
         n_prim = 1 + max(mu for mu, _ in orb_map)
+        # each primitive orbital must appear exactly once per supercell cell
+        # (a duplicated or misordered same-length orb_map must not pass)
+        from collections import Counter
+
+        cell_of = {}
+        counts = Counter((int(mu), tuple(int(c) for c in n)) for mu, n in orb_map)
+        if counts and max(counts.values()) > 1:
+            raise ValueError(
+                "orb_map labels a (primitive orbital, cell) position more "
+                "than once — the map is inconsistent with the supercell "
+                "basis (FR-007)"
+            )
+        per_orb = Counter(int(mu) for mu, _ in orb_map)
+        if set(per_orb) != set(range(n_prim)) or len(cells) * n_prim != len(orb_map):
+            raise ValueError(
+                "orb_map is not a complete labeling: every primitive "
+                "orbital must appear exactly once in every supercell cell"
+            )
+        for mu, n in orb_map:
+            cell_of.setdefault(mu, set()).add(tuple(int(c) for c in n))
+        if any(len(s) != len(cells) for s in cell_of.values()):
+            raise ValueError(
+                "orb_map is not a complete labeling: some primitive orbital "
+                "does not appear in every supercell cell"
+            )
+
         displaced_sc_orbs = [
             i
             for i, (mu, n) in enumerate(orb_map)
@@ -260,6 +285,11 @@ class LocalizedDisplacementDerivative:
 
         dH = {}
         dS = {}
+        # (key, mu_i, mu_j) -> source (R_sc, i, j): each position of the
+        # unfolded vertex must be written exactly once; a second nonzero
+        # contribution means two displaced-image derivative supports alias
+        # into the same position, i.e. the supercell is too small
+        seen = {}
         for iR, R_sc in enumerate(rlists["plus"]):
             dH_R = (np.asarray(plus_model.HR[iR]) - np.asarray(minus_model.HR[iR])) / (
                 2.0 * delta
@@ -287,6 +317,15 @@ class LocalizedDisplacementDerivative:
                         tuple(int(-c) for c in n_i),
                         tuple(int(d) for d in diff),
                     )
+                    pos = (key, int(mu_i), int(mu_j))
+                    if pos in seen and seen[pos] != (tuple(R_sc), i, j):
+                        raise ValueError(
+                            "supercell too small: displaced-image derivative "
+                            "supports overlap — use a larger supercell "
+                            f"(position {pos} written from {seen[pos]} and "
+                            f"{(tuple(R_sc), i, j)})"
+                        )
+                    seen[pos] = (tuple(R_sc), i, j)
                     dH.setdefault(key, np.zeros((n_prim, n_prim), dtype=complex))
                     dS.setdefault(key, np.zeros((n_prim, n_prim), dtype=complex))
                     dH[key][mu_i, mu_j] += dH_R[i, j]
