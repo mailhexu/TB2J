@@ -326,3 +326,44 @@ def test_from_supercell_runs_rejects_inconsistent_orb_map():
         LocalizedDisplacementDerivative.from_supercell_runs(
             plus, plus, plus, bad_map2, [0], 1e-4
         )
+
+
+def test_from_supercell_runs_multi_orbital():
+    """A valid multi-orbital orb_map must pass the completeness guard and
+    unfold to (n_prim, n_prim) blocks (round-3 REG fix)."""
+    delta = 1e-4
+    labels = (0, 1, -2, -1)
+
+    def _two_orb(tau):
+        m = _chain_supercell(tau, 4, de=0.3)
+        eye2 = np.eye(2)
+        m.HR = np.kron(m.HR, eye2)
+        m.SR = np.kron(m.SR, eye2)
+        return m
+
+    plus, minus, ref = _two_orb(+delta), _two_orb(-delta), _two_orb(0.0)
+    orb_map = [(mu, (c, 0, 0)) for c in labels for mu in (0, 1)]
+    disp = LocalizedDisplacementDerivative.from_supercell_runs(
+        ref,
+        plus,
+        minus,
+        orb_map,
+        atom_orbs=[0, 1],
+        delta=delta,
+        atom_index=0,
+        direction=(1, 0, 0),
+    )
+    lam, t0, de = 1.3, -1.0, 0.3
+    dt = -lam * t0
+    expected_keys = {
+        ((0, 0, 0), (1, 0, 0)),
+        ((-1, 0, 0), (-1, 0, 0)),
+        ((1, 0, 0), (1, 0, 0)),
+        ((0, 0, 0), (-1, 0, 0)),
+        ((0, 0, 0), (0, 0, 0)),
+    }
+    assert set(disp.dH) == expected_keys
+    for key in expected_keys:
+        assert disp.dH[key].shape == (2, 2), (key, disp.dH[key].shape)
+        expect = de if key == ((0, 0, 0), (0, 0, 0)) else dt
+        np.testing.assert_allclose(disp.dH[key], expect * np.eye(2), atol=1e-6)

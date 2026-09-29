@@ -261,15 +261,19 @@ class LocalizedDisplacementDerivative:
                 "than once — the map is inconsistent with the supercell "
                 "basis (FR-007)"
             )
+        distinct_cells = set(cells)
         per_orb = Counter(int(mu) for mu, _ in orb_map)
-        if set(per_orb) != set(range(n_prim)) or len(cells) * n_prim != len(orb_map):
+        if (
+            set(per_orb) != set(range(n_prim))
+            or len(orb_map) != len(distinct_cells) * n_prim
+        ):
             raise ValueError(
                 "orb_map is not a complete labeling: every primitive "
                 "orbital must appear exactly once in every supercell cell"
             )
         for mu, n in orb_map:
             cell_of.setdefault(mu, set()).add(tuple(int(c) for c in n))
-        if any(len(s) != len(cells) for s in cell_of.values()):
+        if any(s != distinct_cells for s in cell_of.values()):
             raise ValueError(
                 "orb_map is not a complete labeling: some primitive orbital "
                 "does not appear in every supercell cell"
