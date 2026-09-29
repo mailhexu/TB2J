@@ -294,6 +294,16 @@ class ExchangePert2Sl(ExchangePert2):
         self.density_method = density_method
         self.disp = disp
         self._dPdict = None
+        if not hasattr(self, "basis_is_separated"):
+            orbs = self.iorb(self.ind_mag_atoms[0])
+            self.basis_is_separated = (
+                len(orbs) > 1 and orbs[-1] - orbs[0] != len(orbs) - 1
+            )
+        # attribute parity with the EPW path (set_epw initializes these)
+        from collections import defaultdict
+
+        self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
+        self.dA2_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
 
     def get_dP_iatom(self, iatom):
         """Displacement derivative of the magnetic on-site vertex P_i.
@@ -402,3 +412,58 @@ class ExchangePert2Sl(ExchangePert2):
             extra = (dPi @ Gij_a @ Pj + Pi @ Gij_a @ dPj) @ Gji_b
             dtmp[a, b] += np.trace(extra) / np.pi
         return tmp, dtmp, torb, dtorb
+
+
+def gen_exchange_spin_lattice_lcao(
+    tbmodel,
+    atoms,
+    disp,
+    basis=None,
+    efermi=0.0,
+    magnetic_elements=None,
+    kmesh=(5, 5, 5),
+    emin=-10.0,
+    emax=0.0,
+    nz=50,
+    np=1,
+    exclude_orbs=[],
+    description="",
+    list_iatom=None,
+    output_path="TB2J_results",
+    Jonly=False,
+    integration_method="CFR",
+    density_method="eigenvector",
+):
+    """Spin-lattice exchange for a non-orthogonal LCAO model (driver).
+
+    Parameters mirror ``gen_exchange_Oiju_epw3`` where meaningful; the
+    displacement comes from a ``LocalizedDisplacementDerivative`` (ABACUS
+    ``out_mat_dh``/``out_mat_ds`` direct loader or supercell +/- FD)
+    instead of EPW q-space data. ``tbmodel`` is the merged spinor model
+    (interleaved or separated spin layout; auto-detected). ``efermi`` must
+    be pinned from the undisplaced reference. The output ``SpinIO``
+    carries ``J_iso`` and the spin-lattice derivative ``dJdx`` for the one
+    displaced mode, with the derivative provenance in the description.
+    """
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    ex = ExchangePert2Sl(
+        tbmodels=tbmodel,
+        atoms=atoms,
+        basis=basis,
+        efermi=efermi,
+        magnetic_elements=magnetic_elements,
+        kmesh=kmesh,
+        emin=emin,
+        emax=emax,
+        nz=nz,
+        nproc=np,
+        exclude_orbs=exclude_orbs,
+        index_magnetic_atoms=list_iatom,
+        description=description
+        + f" [spin-lattice displacement provenance: {disp.provenance}]",
+        integration_method=integration_method,
+    )
+    ex.set_displacement(disp, J_only=Jonly, density_method=density_method)
+    ex.run(output_path)
+    return SpinIO.load_pickle(output_path)

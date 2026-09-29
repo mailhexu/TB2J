@@ -46,7 +46,9 @@ class _SpinorChain:
     """
 
     is_orthogonal = False
+    name = "synthetic-chain"
     R2kfactor = 2j * np.pi
+    efermi = None
 
     @property
     def norb(self):
