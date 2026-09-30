@@ -174,6 +174,63 @@ class LocalizedDisplacementDerivative:
         )
 
     @classmethod
+    def from_siesta_dhsdr(cls, block, atoms=None):
+        """Producer C: SIESTA ``dHSdR.nc`` loader (upstream dev/rel-5.4).
+
+        ``block`` is a ``HamiltonIO.siesta.dhsdr.DisplacementBlock`` from
+        ``read_dHSdR`` (one displaced unit-cell atom, one Cartesian axis).
+        Its rows are unit-cell orbitals (cell 0) and columns live in
+        supercell cells ``R``. Under the adopted convention (user decision
+        2026-09-30, following the upstream developer's description) the
+        R-resolved blocks are treated as the localized derivative of the
+        displaced home-cell atom: every R-block maps to the vertex key
+        (Rq, Rk) = ((0,0,0), R) with Ru = (0,0,0), exactly like the ABACUS
+        direct loader. The derivative is a self-consistent central
+        difference from the FC run.
+        """
+        from HamiltonIO.siesta.dhsdr import block_to_R_lists
+
+        Rlist, dHR, dSR = block_to_R_lists(block)
+        if dHR.size == 0:
+            raise ValueError(
+                f"dHSdR block (atom {block.atom_index}, axis {block.axis}) "
+                "is empty — check FC.dHdR.Tolerance"
+            )
+        if dHR.shape[-1] not in (1, 2):
+            raise ValueError(
+                f"dHSdR spin dimension {dHR.shape[-1]} not supported "
+                "(collinear/non-polarized only)"
+            )
+        if dHR.shape[-1] == 1:
+            dH_up = dH_dn = dHR[..., 0]
+            dS = dSR
+        else:
+            dH_up = dHR[..., 0]
+            dH_dn = dHR[..., 1]
+            dS = dSR
+        dH = {
+            ((0, 0, 0), tuple(R)): cls._interleave_two_spin(dH_up[iR], dH_dn[iR])
+            for iR, R in enumerate(Rlist)
+        }
+        dS_sc = {
+            ((0, 0, 0), tuple(R)): cls._interleave_two_spin(dS[iR], dS[iR])
+            for iR, R in enumerate(Rlist)
+        }
+        direction = tuple(1 if i == block.axis - 1 else 0 for i in range(3))
+        return cls(
+            dH,
+            dS_sc,
+            Ru=(0, 0, 0),
+            atoms=atoms,
+            provenance=(
+                "siesta dHSdR.nc FC central difference (self-consistent); "
+                f"atom_index={block.atom_index}, direction={direction}"
+            ),
+            atom_index=block.atom_index,
+            direction=direction,
+        )
+
+    @classmethod
     def from_supercell_runs(
         cls,
         ref_model,

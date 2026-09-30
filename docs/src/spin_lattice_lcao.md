@@ -26,6 +26,12 @@ derivative includes both on-site magnetic-vertex terms $\partial_{\tau_a}P$
     (`out_mat_dh` / `out_mat_ds` CSR files, frozen-potential provenance,
     multi-k required; atom-restricted output gives localized data without
     unfolding). Units Ry/Bohr are converted to eV/Å.
+  - `from_siesta_dhsdr(block)`: SIESTA `FC.Save.dHS T` output
+    (`SystemLabel.dHSdR.nc`, upstream `dev`/`rel-5.4`), self-consistent
+    central differences. Blocks are R-resolved over the auxiliary
+    supercell; under the adopted convention (user decision 2026-09-30)
+    they are treated as the localized derivative of the displaced home-cell
+    atom: each R-block maps to the vertex key (Rq, Rk) = ((0,0,0), R).
   - `from_supercell_runs(ref, plus, minus, orb_map, atom_orbs, delta)`:
     central differences of ± displaced **supercell** runs
     (self-consistent provenance), unfolded to primitive two-legged form.
@@ -33,13 +39,10 @@ derivative includes both on-site magnetic-vertex terms $\partial_{\tau_a}P$
     cell)`; use a complete cell labeling and a supercell larger than the
     hopping range so displaced-image supports do not overlap.
 
-## SIESTA force-constant derivatives: periodic q=0 response
+## SIESTA dHSdR workflow
 
-Upstream SIESTA `dev` and `rel-5.4` provide `FC.Save.dHS T` during an
-`MD.TypeOfRun FC` calculation. The output `SystemLabel.dHSdR.nc` contains
-central differences of H and S for a periodic displacement of each unit-cell
-atom and Cartesian axis (a q=0 sublattice displacement). `HamiltonIO` can
-read these blocks:
+Run SIESTA with `FC.Save.dHS T` during a force-constant run and build the
+localized derivative directly:
 
 ```fdf
 MD.TypeOfRun       FC
@@ -49,29 +52,30 @@ FC.Displacement    0.02 Bohr
 
 ```python
 from HamiltonIO.siesta.dhsdr import read_dHSdR
+from TB2J.spin_lattice_lcao import LocalizedDisplacementDerivative
 
-blocks = list(read_dHSdR("siesta.dHSdR.nc", atoms=[1],
-                         displacements=[(1, 1)]))
-block = blocks[0]  # raw periodic q=0 dH/dR and dS/dR data
+block = next(read_dHSdR("siesta.dHSdR.nc", atoms=[1],
+                        displacements=[(1, 1)]))
+disp = LocalizedDisplacementDerivative.from_siesta_dhsdr(block)
 ```
 
-SIESTA `ia` and `ixyz` indices are 1-based. The reader handles the writer's
+SIESTA `ia` and `ixyz` indices are 1-based. `read_dHSdR` returns raw
+derivative values in Ry/Bohr (`dH`) and 1/Bohr (`dS`); the adapter converts
+them to eV/Å and 1/Å via `block_to_R_lists`. The reader handles the writer's
 netCDF dimension order (`isc_off(n_s,xyz)`, `dH(spin,nnzs)` as seen from
-Python), the SIESTA SXC column encoding (`cell=(list_col-1)//no_u`,
-`orbital=(list_col-1)%no_u`), and independent dH/dS sparse patterns. It
-converts Ry/Bohr to eV/Å and 1/Bohr to 1/Å.
+Python), SXC column encoding (`cell=(list_col-1)//no_u`,
+`orbital=(list_col-1)%no_u`), independent dH/dS sparse patterns, and
+rejects duplicate supercell offsets.
 
-**Do not pass this block to the localized `from_supercell_runs`/`ABACUS`
-vertex path.** `FC.Save.dHS` is a periodic q=0 sublattice response: all
-periodic images of the selected unit-cell atom move together. It is not, in
-general, the derivative for displacing only the home-cell atom. Recovering a
-localized two-legged vertex would require separating image contributions and
-handling ambiguous same-sublattice terms. Story 005 is being revised to add a
-dedicated q=0 spin-lattice contraction; that API is not implemented yet.
-A one-atom bcc primitive cell is especially uninformative: moving its sole
-atom translates the entire lattice, so dH/dR and dS/dR vanish by translational
-invariance. Use at least a two-atom conventional bcc cell when inspecting
-nonzero sublattice response.
+A one-atom bcc primitive cell is uninformative: displacing its sole atom
+translates the whole lattice, so dH/dR and dS/dR vanish by translational
+invariance. Use at least the two-atom conventional bcc cell for bcc Fe.
+
+Note: the raw FC blocks are produced by displacing the periodic image
+sublattice in phase; the adopted convention (user decision 2026-09-30)
+treats them as the localized home-cell derivative. Cross-validation against
+explicit ± localized supercell runs is planned once the current SIESTA-path
+absolute-J discrepancy (see below) is resolved.
 
 ## Localized-vertex usage
 
