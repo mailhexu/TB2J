@@ -110,6 +110,58 @@
   up-minus-down PAW potential trace, not the potential sign itself.
 
 
+### VASP split-SOC adapter (ADR-7, story 011) — tangent cutover
+
+- `TB2J/interfaces/vasp_split_soc.py` migrated from the legacy
+  A-channel/io_merge flow to the shared tangent contract: each collinear
+  strength-0 run is one psi-gauge magnetic reference (states are
+  SAXIS-frame eigenstates, vertices `Delta sigma_z`, `W_SO` the
+  state-space matrix in the same frame); the shared kernel
+  (`TB2J.split_soc_kernel.compute_ks_split_soc_exchange`) measures each
+  reference's transverse 2x2 (`J_leg` masked on the `n` row/column,
+  `mask_residual` longitudinal-spurion diagnostic).  `TB2J.io_merge` is
+  no longer used anywhere in this workflow; the merged decomposition
+  comes from the rank-nine raw-tensor solve
+  (`merge_transverse_legs`, `rotate_transverse_leg`, 12 transverse
+  constraints -> exact least squares -> `decompose_J_tensor`).
+- The driver consumes **three independent strength-0 references**
+  (`leg_artifacts` mapping `x`/`y`/`z` to that run's `tb2j_native.bin`
+  + `tb2j_cso.bin`; the dump SAXIS must be parallel to its tag axis).
+  One run determines only the transverse plane of its own reference, so
+  a rank-nine lattice tensor requires the x/y/z SAXIS campaign (the
+  retained FeO collinear_x/y/z layout).  Real-fixture gate: the FeO
+  campaign merges at rank 9 with repeated-diagonal spread 2.9e-5 eV,
+  reciprocity residual 1.3e-15, inversion-symmetric-pair DMI 9.7e-10 eV,
+  and merged NN `Jiso = 8.0381 meV` vs the SOC-off collinear
+  `8.0402 meV` (reproducible numbers; the earlier 7.3836 recording was withdrawn); ADR-8 band-window study persisted
+  per leg.
+- COCC reconstruction convention pinned to the real FeO dump
+  (`CRHODE(LP,L) = conj(CPROJ(LP)) CPROJ(L)`, fast_aug order); the
+  driver fails fast when `tb2j_cso.bin` and `tb2j_native.bin` come from
+  different runs (COCC-vs-CPROJ integrity gate).
+- `tb2j_cso.bin` reader synced to the story-010 v1-v3 loader: v2
+  band/k provenance (ispin, nkpts, nbands, nb_tot, efermi, native
+  writer identity, vkpt/wtkpt) drives a dump-vs-native identity gate in
+  `_check_consistency` (same-run enforcement, IBZ k-count comparison);
+  k weights must sum to 1 within 1e-8; v3 per-ion XC-updated reference
+  potential (`potae_xcr` + constants) is consumed transparently.
+  Real-dump behavior gates: Ni nisoc v2 E_soc oracle (-0.08188974 eV vs
+  OUTCAR -0.0818897) and FeO collinear_z v2 dump/native identity.
+- Shared kernel upgraded in step with `wt-split-soc` (tangent pin):
+  `TB2J/split_soc_kernel.py` and `TB2J/projector_green.py` carry the
+  physical tangent vertices, `J_leg` leg frames, raw-tensor merge, and
+  frame-validation helpers; their test suites
+  (`test_split_soc_kernel.py`, `test_spinor_tangent_green.py`) pin the
+  contracts on this branch.  The GPAW exporter writer pin migrates with
+  the exporter story and is intentionally not carried here.
+- New CLI `vasp_split_soc2J.py`: `--leg x=RUN_DIR` (repeat for x/y/z;
+  `TAG=native_path:cso_path` also accepted), `--elements`/
+  `--index_magnetic_atoms`, `--lam`, `--mode`,
+  `--merge_consistency_atol`, `--no-band-window-study`; writes
+  per-leg `split_soc_leg.npz` + provenance, the merged TB2J results,
+  and `split_soc_provenance.json` (schema 2.0, raw_rank_nine
+  diagnostics, per-leg O maps with `O e_z = SAXIS`).
+
 ### Packaging
 
 - `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao
