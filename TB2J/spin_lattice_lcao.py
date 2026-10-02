@@ -19,10 +19,13 @@ the ``get_vertex_two_spin(Rq, Rk, z)`` contract, plus derivative producers
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
+from HamiltonIO.model.occupations import myfermi
 
 from TB2J.exchange_pert2 import ExchangePert2
+from TB2J.green import TBGreen
 
 
 class DisplacementVertex:
@@ -31,14 +34,13 @@ class DisplacementVertex:
     Holds two-legged real-space derivative matrices keyed by the pair
     (Rq, Rk), with both legs measured relative to the cell Ru of the
     displaced atom, in the primitive-orbital gauge of the reference model.
-    ``dH`` may carry the two-spin (spinor) layout; ``dS`` is spin-blind and
-    is duplicated into the same layout on access.
+    Both stores use the reference model's full basis layout; producers
+    duplicate spin-blind overlap data into the spinor layout.
 
     The contract consumed by ``TBGreen.get_dGR*`` is
     ``get_vertex_two_spin(Rq, Rk, z)`` returning the contraction-ready
-    matrix ``dH(Rq,Rk) - z*dS(Rq,Rk)`` (the transpose is applied by the
-    provider, mirroring ``.T`` in the legacy EPW branch).  A missing key
-    yields a zero vertex: the R-support is data-driven.
+    physical matrix ``dH(Rq,Rk) - z*dS(Rq,Rk)`` without a transpose.
+    A missing key yields a zero vertex: the R-support is data-driven.
     """
 
     def __init__(self, dH, dS, nbasis, Rqlist=None, Rklist=None):
@@ -47,8 +49,7 @@ class DisplacementVertex:
         ----------
         dH, dS : dict[(Rq, Rk) -> (nbasis, nbasis) complex ndarray]
             Displacement derivatives with legs relative to the displaced
-            cell. Entries may be spinor-sized (2*nbasis_scalar) already;
-            dS is spin-blind and its scalar form is accepted.
+            cell, already in the full (spinor, for NCL) model layout.
         nbasis : int
             Row/column size of the returned vertex matrices (the size the
             Green functions have, i.e. spinor layout if the model is NCL).
@@ -174,7 +175,7 @@ class LocalizedDisplacementDerivative:
         )
 
     @classmethod
-    def from_siesta_dhsdr(cls, block, atoms=None):
+    def from_siesta_dhsdr(cls, block, atoms=None, reference_fermi=0.0):
         """Producer C: SIESTA ``dHSdR.nc`` loader (upstream dev/rel-5.4).
 
         ``block`` is a ``HamiltonIO.siesta.dhsdr.DisplacementBlock`` from
@@ -187,10 +188,15 @@ class LocalizedDisplacementDerivative:
         (Rq, Rk) = ((0,0,0), R) with Ru = (0,0,0), exactly like the ABACUS
         direct loader. The derivative is a self-consistent central
         difference from the FC run.
+        ``reference_fermi`` is the undisplaced raw SIESTA Fermi energy in
+        eV. Pass it for sisl models (which store H - E_F S); leave zero
+        for an unshifted model. The derivative of this fixed gauge is
+        dH - E_F(reference) dS, not a moving Fermi-energy shift.
         """
         from HamiltonIO.siesta.dhsdr import block_to_R_lists
 
         Rlist, dHR, dSR = block_to_R_lists(block)
+        dHR = dHR - reference_fermi * dSR[..., None]
         if dHR.size == 0:
             raise ValueError(
                 f"dHSdR block (atom {block.atom_index}, axis {block.axis}) "
@@ -224,7 +230,8 @@ class LocalizedDisplacementDerivative:
             atoms=atoms,
             provenance=(
                 "siesta dHSdR.nc FC central difference (self-consistent); "
-                f"atom_index={block.atom_index}, direction={direction}"
+                f"atom_index={block.atom_index}, direction={direction}; "
+                f"raw_reference_fermi_eV={reference_fermi}"
             ),
             atom_index=block.atom_index,
             direction=direction,
@@ -442,6 +449,164 @@ def fold_two_legged(GR, disp_vertex, Rpts, Rjlist, Ru, energy):
     return dGRij, dGRji
 
 
+class _FullSpectrumGreen(TBGreen):
+    def _prepare_eigen(self, solve=True, saveH=False):
+        self._collinear_interleaved = getattr(
+            self.tbmodel, "collinear_interleaved", False
+        )
+        self._fourier_phases = {}
+        super()._prepare_eigen(solve=solve, saveH=saveH)
+        if self._use_cache:
+            self.evecs = np.memmap(
+                Path(self.cache_path) / "evecs.dat",
+                mode="r",
+                shape=self.evecs_shape,
+                dtype=complex,
+            )
+            if not self.is_orthogonal:
+                self.S = np.memmap(
+                    Path(self.cache_path) / "S.dat",
+                    mode="r",
+                    shape=(self.nkpts, self.nbasis, self.nbasis),
+                    dtype=complex,
+                )
+        if self._collinear_interleaved:
+            self._spin_vectors = tuple(
+                np.ascontiguousarray(self.evecs[:, s::2, s::2]) for s in (0, 1)
+            )
+            self._spin_adjoint = tuple(
+                v.conj().swapaxes(-1, -2) for v in self._spin_vectors
+            )
+            self._spin_overlap = (
+                None
+                if self.is_orthogonal
+                else tuple(np.ascontiguousarray(self.S[:, s::2, s::2]) for s in (0, 1))
+            )
+            # All subsequent contractions use scalar spin blocks. Full-matrix
+            # accessors reconstruct one k-point instead of retaining zeros.
+            del self.evecs, self.S
+
+    def get_evecs(self, ik):
+        if not self._collinear_interleaved:
+            return super().get_evecs(ik)
+        return LocalizedDisplacementDerivative._interleave_two_spin(
+            self._spin_vectors[0][ik], self._spin_vectors[1][ik]
+        )
+
+    def get_Sk(self, ik):
+        if not self._collinear_interleaved:
+            return super().get_Sk(ik)
+        if self.is_orthogonal:
+            return None
+        return LocalizedDisplacementDerivative._interleave_two_spin(
+            self._spin_overlap[0][ik], self._spin_overlap[1][ik]
+        )
+
+    def get_density_matrix(self):
+        if not self._collinear_interleaved:
+            return super().get_density_matrix()
+        rho = np.zeros((self.nbasis, self.nbasis), complex)
+        for ik, weight in enumerate(self.kweights):
+            occupation = myfermi(
+                self.evals[ik], self.efermi, width=self.fermi_width, nspin=2
+            )
+            for spin in (0, 1):
+                sl = slice(spin, None, 2)
+                block = (
+                    self._spin_vectors[spin][ik] * occupation[sl]
+                ) @ self._spin_adjoint[spin][ik]
+                if not self.is_orthogonal:
+                    block = block @ self._spin_overlap[spin][ik]
+                rho[sl, sl] += weight * block
+        return rho
+
+    def get_spin_realspace(self, energy, Rpts, derivatives=None, with_rho=False):
+        """Full-spectrum k sums with bounded temporary storage per energy."""
+        n = self.nbasis // 2
+        phase = self._fourier_phase(Rpts, self.kpts)
+        gr = np.zeros((len(Rpts), self.nbasis, self.nbasis), complex)
+        dgr = np.zeros_like(gr) if derivatives is not None else None
+        rho = np.zeros((self.nbasis, self.nbasis), complex) if with_rho else None
+        z = energy + self.efermi
+        for spin in (0, 1):
+            sl = slice(spin, None, 2)
+            scalar_gr = np.zeros((len(Rpts), n, n), complex)
+            scalar_dgr = np.zeros_like(scalar_gr) if derivatives is not None else None
+            for start in range(0, self.nkpts, 64):
+                part = slice(start, min(start + 64, self.nkpts))
+                denominator = 1.0 / (z - self.evals[part, sl])
+                g = (
+                    self._spin_vectors[spin][part] * denominator[:, None, :]
+                ) @ self._spin_adjoint[spin][part]
+                count = g.shape[0]
+                scalar_gr += (phase[:, part] @ g.reshape(count, -1)).reshape(
+                    len(Rpts), n, n
+                )
+                if derivatives is not None:
+                    dh, ds = derivatives
+                    dg = g @ (dh[spin][part] - z * ds[spin][part]) @ g
+                    scalar_dgr += (phase[:, part] @ dg.reshape(count, -1)).reshape(
+                        len(Rpts), n, n
+                    )
+                if with_rho:
+                    sg = g if self.is_orthogonal else self._spin_overlap[spin][part] @ g
+                    rho[sl, sl] += np.einsum("k,kij->ij", self.kweights[part], sg)
+            gr[:, sl, sl] = scalar_gr
+            if dgr is not None:
+                dgr[:, sl, sl] = scalar_dgr
+        return gr, dgr, rho
+
+    def get_spin_Gk_all(self, energy):
+        blocks = []
+        for spin in (0, 1):
+            denominators = 1.0 / (energy + self.efermi - self.evals[:, spin::2])
+            blocks.append(
+                (self._spin_vectors[spin] * denominators[:, None, :])
+                @ self._spin_adjoint[spin]
+            )
+        return blocks
+
+    def _fourier_phase(self, Rpts, kpts):
+        key = tuple(tuple(R) for R in Rpts)
+        if key not in self._fourier_phases:
+            self._fourier_phases[key] = (
+                np.exp(
+                    self.k2Rfactor
+                    * (np.asarray(Rpts).reshape(-1, 3) @ np.asarray(kpts).T)
+                )
+                * self.kweights[None, :]
+            )
+        return self._fourier_phases[key]
+
+    def compute_GR_spin(self, Rpts, kpts, blocks):
+        phase = self._fourier_phase(Rpts, kpts)
+        result = np.zeros((len(Rpts), self.nbasis, self.nbasis), complex)
+        for spin, scalar in enumerate(blocks):
+            sl = slice(spin, None, 2)
+            result[:, sl, sl] = (phase @ scalar.reshape(self.nkpts, -1)).reshape(
+                len(Rpts), self.nbasis // 2, self.nbasis // 2
+            )
+        return result
+
+    def get_Gk_all(self, energy, ispin=0):
+        if not self._collinear_interleaved:
+            return super().get_Gk_all(energy, ispin=ispin)
+        result = np.zeros((self.nkpts, self.nbasis, self.nbasis), complex)
+        for spin, block in enumerate(self.get_spin_Gk_all(energy)):
+            result[:, spin::2, spin::2] = block
+        return result
+
+    def compute_GR(self, Rpts, kpts, Gks):
+        if not self._collinear_interleaved:
+            return super().compute_GR(Rpts, kpts, Gks)
+        blocks = [np.ascontiguousarray(Gks[:, s::2, s::2]) for s in (0, 1)]
+        return self.compute_GR_spin(Rpts, kpts, blocks)
+
+    def _reduce_eigens(self, evals, evecs, emin, emax):
+        # G V G differentiates the full pencil inverse, not a moving band cut.
+        return evals, evecs
+
+
 class ExchangePert2Sl(ExchangePert2):
     """Spin-lattice exchange with a localized non-orthogonal displacement.
 
@@ -454,7 +619,15 @@ class ExchangePert2Sl(ExchangePert2):
     docs/sympy/nonorthogonal_spin_lattice.py (checks F0-F2).
     """
 
-    def set_displacement(self, disp, J_only=False, density_method="eigenvector"):
+    _green_class = _FullSpectrumGreen
+    response = "localized"
+
+    def set_displacement(
+        self, disp, J_only=False, density_method="eigenvector", response="localized"
+    ):
+        if response not in ("localized", "periodic"):
+            raise ValueError("response must be localized or periodic")
+        self.response = response
         if disp is None:
             # J-only run: no derivative data; epc is unused with J_only
             self.J_only = True
@@ -484,6 +657,53 @@ class ExchangePert2Sl(ExchangePert2):
         self.J_only = J_only
         self.density_method = density_method
         self.disp = disp
+        if response == "periodic":
+            # Sum translated images: the two-legged provider reduces to a
+            # diagonal k-space vertex, with the phase carried by Rk.
+            Rlist = sorted({Rk for _, Rk in set(disp.dH) | set(disp.dS)})
+            phase = np.exp(
+                self.G.R2kfactor * (self.G.kpts @ np.asarray(Rlist).reshape(-1, 3).T)
+            )
+            index = {R: i for i, R in enumerate(Rlist)}
+            collinear = getattr(self.G, "_collinear_interleaved", False)
+            n = self.nbasis // 2 if collinear else self.nbasis
+            spins = (0, 1) if collinear else (None,)
+            transformed = []
+            for store in (disp.dH, disp.dS):
+                blocks = []
+                for spin in spins:
+                    realspace = np.zeros((len(Rlist), n, n), complex)
+                    for (_, Rk), matrix in store.items():
+                        realspace[index[Rk]] += (
+                            matrix[spin::2, spin::2] if collinear else matrix
+                        )
+                    blocks.append(
+                        (phase @ realspace.reshape(len(Rlist), n * n)).reshape(
+                            self.G.nkpts, n, n
+                        )
+                    )
+                transformed.append(tuple(blocks))
+            if collinear:
+                self._spin_dHk, self._spin_dSk = transformed
+                self._periodic_dH0 = np.zeros((self.nbasis, self.nbasis), complex)
+                for spin in (0, 1):
+                    self._periodic_dH0[spin::2, spin::2] = np.einsum(
+                        "k,kij->ij", self.G.kweights, self._spin_dHk[spin]
+                    )
+            else:
+                self._dHk, self._dSk = (blocks[0] for blocks in transformed)
+                self._periodic_dH0 = np.einsum("k,kij->ij", self.G.kweights, self._dHk)
+        else:
+            support = set(self.short_Rlist)
+            for Rq, Rk in set(disp.dH) | set(disp.dS):
+                m = np.asarray(self.Ru) - np.asarray(Rq)
+                n = m + np.asarray(Rk)
+                support.update((tuple(m), tuple(-n)))
+                for Rj in self.short_Rlist:
+                    support.update(
+                        (tuple(np.asarray(Rj) - n), tuple(m - np.asarray(Rj)))
+                    )
+            self._green_Rlist = sorted(support)
         self._dPdict = None
         if not hasattr(self, "basis_is_separated"):
             orbs = self.iorb(self.ind_mag_atoms[0])
@@ -499,18 +719,28 @@ class ExchangePert2Sl(ExchangePert2):
         self.dA_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.dA2_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
 
-    def get_dP_iatom(self, iatom):
+    def get_dP_iatom(self, iatom, R=(0, 0, 0)):
         """Displacement derivative of the magnetic on-site vertex P_i.
 
-        Evaluated from the two-legged on-site entry (legs (Ru, Ru) -> key
-        ((0,0,0),(0,0,0))) at z=0 so the overlap term drops; Pauli-blocked
-        and projected on the reference local-moment direction.
+        The localized onsite is at cell R, with provider key (Ru-R, 0).
+        Periodic response uses the zero-R Fourier component of the periodic
+        derivative for every cell, not the k=0 sum over orbital-cell offsets.
+        The overlap term drops at z=0; project on the reference moment.
+        Missing onsite keys mean zero response under the supplied localized
+        representation; R-resolved unit-cell FC data alone do not certify
+        the onsite response of a distant atom in isolated bulk.
         """
         if getattr(self, "_dPdict", None) is None:
             self._dPdict = {}
-        if iatom in self._dPdict:
-            return self._dPdict[iatom]
-        onsite = self.epc.vertex((0, 0, 0), (0, 0, 0), 0.0)
+        key = (iatom, tuple(R))
+        if key in self._dPdict:
+            return self._dPdict[key]
+        Rq = tuple(np.asarray(self.Ru) - np.asarray(R))
+        onsite = (
+            self._periodic_dH0
+            if self.response == "periodic"
+            else self.epc.vertex(Rq, (0, 0, 0), 0.0)
+        )
         orbs = self.iorb(iatom)
         block = onsite[np.ix_(orbs, orbs)]
         ni = block.shape[0] // 2
@@ -549,7 +779,7 @@ class ExchangePert2Sl(ExchangePert2):
         else:
             evec = np.array((0.0, 0.0, 1.0))
         dP = dm1 * evec[0] + dm2 * evec[1] + dm3 * evec[2]
-        self._dPdict[iatom] = dP
+        self._dPdict[key] = dP
         return dP
 
     def get_AijR_rhoR(self, e):
@@ -558,26 +788,60 @@ class ExchangePert2Sl(ExchangePert2):
         Uses the loop ``get_all_A`` path (no vectorized try/except swap) so
         the dP insertion is always active (architecture ADR-003, W3).
         """
-        (
-            GR_full,
-            dGRij_dict,
-            dGRji_dict,
-            rhoR_full,
-            GR_arr,
-            dGRij_arr,
-            dGRji_arr,
-        ) = self.G.get_GR_and_dGRdx_from_epw(
-            self.short_Rlist,
-            self.short_Rlist,
-            energy=e,
-            epc=self.epc,
-            Ru=self.Ru,
-            J_only=self.J_only,
+        Rpts = (
+            self.short_Rlist
+            if self.response == "periodic" or self.J_only
+            else self._green_Rlist
         )
-        AijR, dAdx_ijR, A_orb, dAdx_orb = self.get_all_A(
-            GR_full, dGRij_dict, dGRji_dict
-        )
-        return AijR, dAdx_ijR, self.get_rho_e_spin(rhoR_full), A_orb, dAdx_orb
+        collinear = getattr(self.G, "_collinear_interleaved", False)
+        if collinear:
+            vertices = (
+                (self._spin_dHk, self._spin_dSk)
+                if self.response == "periodic" and not self.J_only
+                else None
+            )
+            gr, streamed_dgr, rho0 = self.G.get_spin_realspace(
+                e,
+                Rpts,
+                derivatives=vertices,
+                with_rho=self.density_method == "greens_function",
+            )
+            GR = dict(zip(Rpts, gr))
+        else:
+            Gk = self.G.get_Gk_all(e)
+            GR = dict(zip(Rpts, self.G.compute_GR(Rpts, self.G.kpts, Gk)))
+        dGRij, dGRji = {}, {}
+        if not self.J_only:
+            if self.response == "periodic":
+                z = e + self.G.efermi
+                if collinear:
+                    dGR = streamed_dgr
+                else:
+                    dGk = Gk @ (self._dHk - z * self._dSk) @ Gk
+                    dGR = self.G.compute_GR(self.short_Rlist, self.G.kpts, dGk)
+                dGRij = dict(zip(self.short_Rlist, dGR))
+                dGRji = {R: dGRij[tuple(-x for x in R)] for R in self.short_Rlist}
+            else:
+                dGRij, dGRji = self.G.get_dGR(
+                    GR,
+                    Rpts,
+                    self.short_Rlist,
+                    self.epc,
+                    self.Ru,
+                    cutoff=np.inf,
+                    energy=e,
+                )
+        rho = None
+        if self.density_method == "greens_function":
+            if not collinear:
+                rho0 = np.einsum(
+                    "k,kij->ij",
+                    self.G.kweights,
+                    Gk if self.G.is_orthogonal else self.G.S @ Gk,
+                )
+            rho = self.get_rho_e_spin({(0, 0, 0): rho0})
+        A, dA, Aorb, dAorb = self.get_all_A(GR, dGRij, dGRji)
+        return A, dA, rho, Aorb, dAorb
 
     def get_A_ijR(self, G, dG, dGrev, R, iatom, jatom):
         """Parent contraction plus the two on-site dP product-rule terms."""
@@ -599,7 +863,7 @@ class ExchangePert2Sl(ExchangePert2):
         Pi = self.get_P_iatom(iatom)
         Pj = self.get_P_iatom(jatom)
         dPi = self.get_dP_iatom(iatom)
-        dPj = self.get_dP_iatom(jatom)
+        dPj = self.get_dP_iatom(jatom, R)
         for a, b in ([0, 0], [3, 3]):
             Gij_a = pauli_blocks(Gij)[a]
             Gji_b = pauli_blocks(Gji)[b]
@@ -627,6 +891,9 @@ def gen_exchange_spin_lattice_lcao(
     Jonly=False,
     integration_method="CFR",
     density_method="eigenvector",
+    response="localized",
+    Rcut=None,
+    smearing=0.05,
 ):
     """Spin-lattice exchange for a non-orthogonal LCAO model (driver).
 
@@ -643,9 +910,9 @@ def gen_exchange_spin_lattice_lcao(
 
     if disp is None and not Jonly:
         raise ValueError("disp is required unless Jonly=True")
-    meta = ""
+    meta = f" [spin-lattice response={response}; full_spectrum=True; smearing_eV={smearing}]"
     if disp is not None:
-        meta = (
+        meta += (
             f" [spin-lattice displacement provenance: {disp.provenance};"
             f" atom_index={disp.atom_index}, Ru={disp.Ru},"
             f" direction={disp.direction}]"
@@ -665,10 +932,16 @@ def gen_exchange_spin_lattice_lcao(
         index_magnetic_atoms=list_iatom,
         description=description + meta,
         integration_method=integration_method,
+        Rcut=Rcut,
+        smearing=smearing,
     )
     if disp is not None:
-        ex.set_displacement(disp, J_only=Jonly, density_method=density_method)
+        ex.set_displacement(
+            disp, J_only=Jonly, density_method=density_method, response=response
+        )
     else:
-        ex.set_displacement(None, J_only=True, density_method=density_method)
+        ex.set_displacement(
+            None, J_only=True, density_method=density_method, response=response
+        )
     ex.run(output_path)
     return SpinIO.load_pickle(output_path)

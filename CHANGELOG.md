@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Non-orthogonal SIESTA spin-lattice coupling
+
+- Added the SIESTA FC spin-lattice entrypoint and executable finite-difference comparison. Raw FC derivatives and sisl Hamiltonians are aligned to the same fixed reference-Fermi gauge.
+- Added explicit periodic image-summed response alongside the localized home-cell convention. Full-spectrum pencil inverses retain the virtual states required by `G(dH-z dS)G`.
+- Fixed localized magnetic-vertex derivatives at translated bond endpoints and included internal Green-function support beyond the output pair radius. Replaced the old duplicated-endpoint FD oracle with independent displaced-supercell exchange checks.
+- The bccFe examples record finite-difference errors and numerical convergence settings; pickle units are eV and eV/Angstrom, not meV.
+- Fixed cached spin-lattice initialization by reopening the stored eigenvector and overlap arrays before preparing scalar-spin views.
+- Streamed collinear k-space contractions and scalar-spin Fourier vertices avoid full doubled zero-spin arrays. Finite-difference sweeps retain only serialized per-bond data between reference/plus/minus solves.
+- Validated the bccFe development case with declared rough convergence (5% +0.5 meV/Ang), unchanged strict independent-FD checks (1% +0.1 meV/Ang), and serialized cubic-axis symmetry. Precision convergence is explicitly not claimed.
+
 ### Packaging
 
 - `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao

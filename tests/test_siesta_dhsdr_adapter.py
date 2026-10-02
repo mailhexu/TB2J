@@ -2,24 +2,15 @@
 
 from __future__ import annotations
 
-import sys  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-# cross-worktree bootstrap: prefer the sibling HamiltonIO worktree of this
-# campaign (has siesta.dhsdr) over any globally installed HamiltonIO
-_HIO = Path(__file__).resolve().parents[2] / "HamiltonIO"
-if (_HIO / "HamiltonIO" / "siesta" / "dhsdr.py").exists():
-    sys.path.insert(0, str(_HIO))
-
-import numpy as np  # noqa: E402
-import pytest  # noqa: E402
-from HamiltonIO.siesta.dhsdr import (  # noqa: E402
+import numpy as np
+import pytest
+from HamiltonIO.siesta.dhsdr import (
     BOHR_TO_ANG,
     RY_PER_BOHR_TO_EV_PER_ANG,
     DisplacementBlock,
 )
 
-from TB2J.spin_lattice_lcao import LocalizedDisplacementDerivative  # noqa: E402
+from TB2J.spin_lattice_lcao import LocalizedDisplacementDerivative
 
 
 def _chain_block(dt, ds):
@@ -49,7 +40,7 @@ def test_from_siesta_dhsdr_chain_vertex_keys():
     assert "siesta dHSdR.nc" in disp.provenance
     # cell 0 is all-zero and dropped by block_to_R_lists
     assert set(disp.dH) == {((0, 0, 0), (-1, 0, 0)), ((0, 0, 0), (1, 0, 0))}
-    # values carry the Ry/Bohr -> eV/Ang, 1/Bohr -> 1/Ang conversion
+    # Ry/Bohr -> eV/Ang, 1/Bohr -> 1/Ang
     assert disp.dH[((0, 0, 0), (1, 0, 0))][0, 0] == pytest.approx(
         dt * RY_PER_BOHR_TO_EV_PER_ANG, rel=1e-12
     )
@@ -101,3 +92,33 @@ def test_from_siesta_dhsdr_rejects_empty_and_bad_spin():
     )
     with pytest.raises(ValueError, match="spin dimension"):
         LocalizedDisplacementDerivative.from_siesta_dhsdr(b)
+
+
+def test_reference_gauge_preserves_the_resolvent_derivative():
+    """Raw FC and Fermi-shifted model describe the same pencil response."""
+    from ase.units import Ry
+
+    h0 = np.diag([-1.2, 0.7])
+    s0 = np.eye(2) * 1.1
+    dh = np.diag([0.3, -0.1])
+    ds = np.eye(2) * 0.07
+    block = DisplacementBlock(
+        1,
+        1,
+        (1, 1, 1),
+        np.zeros((3, 1), int),
+        {0: np.array([[[0.3, -0.1]]]) * BOHR_TO_ANG / Ry},
+        {0: np.array([[0.07]]) * BOHR_TO_ANG},
+    )
+    ef = -5.0
+    disp = LocalizedDisplacementDerivative.from_siesta_dhsdr(block, reference_fermi=ef)
+    z = -0.4 + 0.8j
+    g = np.linalg.inv(z * s0 - h0)
+    analytic = g @ disp.to_vertex(2).vertex((0, 0, 0), (0, 0, 0), z - ef) @ g
+    step = 1e-5
+
+    def resolvent(t):
+        return np.linalg.inv(z * (s0 + t * ds) - (h0 + t * dh))
+
+    fd = (resolvent(step) - resolvent(-step)) / (2 * step)
+    np.testing.assert_allclose(analytic, fd, atol=1e-9, rtol=1e-7)

@@ -229,9 +229,11 @@ def _get_sc_A(ex, m, z):
     a_ij = pauli_block_all(Gij)
     a_ji = pauli_block_all(Gji)
     Pi = ex.Pdict[0]
+    # The undisplaced neighbour has its own splitting: only atom 0 drifts.
+    Pj = np.array([[(ex.HR0[2 * m, 2 * m] - ex.HR0[2 * m + 1, 2 * m + 1]) / 2]])
     A = np.zeros((4, 4), dtype=complex)
     for a, b in ([0, 0], [3, 3]):
-        A[a, b] = np.trace(Pi @ a_ij[a] @ Pi @ a_ji[b]) / np.pi
+        A[a, b] = np.trace(Pi @ a_ij[a] @ Pj @ a_ji[b]) / np.pi
     return A
 
 
@@ -284,6 +286,7 @@ def test_negative_controls_fixed_z(monkeypatch):
             return super().vertex(Rq, Rk, self._z0)
 
     ex3 = _wire_exchange(G, 2)
+    ex3.set_displacement(_analytic_vertex(), J_only=False)
     base = _analytic_vertex().to_vertex(2)
     ex3.epc = _FixedZ(base, 2.0 + 2.0j)
     ex3.Ru = (0, 0, 0)
