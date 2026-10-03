@@ -85,6 +85,8 @@ Spin-lattice calculations retain the **full spectrum**. Applying `G(dH-z dS)G` t
 
 For collinear SIESTA models, the implementation stores exact scalar-spin eigensystems and reconstructs full matrices only when requested through Green accessors. Contour contractions stream all k-points in blocks, including the final partial block; this bounds temporary G/dG storage without discarding bands or sampling points. Independent FD sweeps release each exchange object after extracting its per-bond results, rather than retaining three eigensystems concurrently.
 
+On dense exchange meshes, set `TB2J_SL_CACHE_DIR=/path/to/disk-backed/scratch` for the convergence example. It enables TBGreen's wavefunction/overlap memmaps and uses its `TMPDIR` fallback; do not point this to RAM-backed `/tmp` or `/dev/shm` on a memory-limited host. Cache files are cleaned after each reference/plus/minus solve.
+
 ### Reproducible bccFe convergence workflow
 
 `examples/siesta_spin_lattice_bccfe_convergence.py` creates a two-atom cubic Fe cell with PBE/DZP, tight SCF tolerances and the supplied Fe PSML. It runs reference, independent plus/minus SCFs and FC cases, then sweeps CFR order, exchange k-mesh, displacement, DFT k-mesh and real-space grid. Run in the environment containing TB2J, HamiltonIO, sisl and netCDF4:

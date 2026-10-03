@@ -36,6 +36,7 @@ larger nz/mesh and a larger displacement from the supplied protocol lists.
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -421,12 +422,24 @@ def analyze_case(args, k, cutoff, h, mesh, nz, with_fd=True):
     ref_fdf = case_dir(args.output, k, cutoff, h, "ref") / "siesta.fdf"
     ref, ef = load_siesta_spin_lattice_model(ref_fdf)
 
+    # Dense meshes hold multi-GB eigensystems; an explicit TB2J_SL_CACHE_DIR
+    # spills eigenvectors/overlap to disk-backed memmaps so successive
+    # reference/plus/minus solves release memory between prepare phases.
+    cache_dir = os.environ.get("TB2J_SL_CACHE_DIR")
+    if cache_dir is not None:
+        cache_dir = str(Path(cache_dir).resolve())
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        # ExchangeParams passes use_cache but not cache_path to TBGreen; its
+        # documented TMPDIR fallback is the actual cache-location seam.
+        os.environ["TMPDIR"] = cache_dir
+
     def run(tbmodel, disp):
         ex = ExchangePert2Sl(
             tbmodels=tbmodel,
             atoms=tbmodel.atoms,
             basis=tbmodel.orbs,
             efermi=0.0,
+            use_cache=cache_dir is not None,
             **params,
         )
         ex.set_displacement(disp, J_only=disp is None, response="periodic")
