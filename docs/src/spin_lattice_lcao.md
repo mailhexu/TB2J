@@ -85,7 +85,7 @@ Spin-lattice calculations retain the **full spectrum**. Applying `G(dH-z dS)G` t
 
 For collinear SIESTA models, the implementation stores exact scalar-spin eigensystems and reconstructs full matrices only when requested through Green accessors. Contour contractions stream all k-points in blocks, including the final partial block; this bounds temporary G/dG storage without discarding bands or sampling points. Independent FD sweeps release each exchange object after extracting its per-bond results, rather than retaining three eigensystems concurrently.
 
-On dense exchange meshes, set `TB2J_SL_CACHE_DIR=/path/to/disk-backed/scratch` for the convergence example. It enables TBGreen's wavefunction/overlap memmaps and uses its `TMPDIR` fallback; do not point this to RAM-backed `/tmp` or `/dev/shm` on a memory-limited host. Cache files are cleaned after each reference/plus/minus solve.
+On dense exchange meshes, set `TB2J_SL_CACHE_DIR=/path/to/disk-backed/scratch` for the convergence example. The collinear cached eigensolve now writes compact spin-resolved eigenvectors and overlaps directly into disk-backed memmaps and accumulates the on-site Hamiltonian without allocating full spinor H/S/eigenvector k-stacks. The subsequent contour still includes every band and k-point. Do not point the cache to RAM-backed `/tmp` or `/dev/shm` on a memory-limited host; cache files are cleaned after each reference/plus/minus solve.
 
 ### Reproducible bccFe convergence workflow
 

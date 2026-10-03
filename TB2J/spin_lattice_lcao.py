@@ -22,10 +22,10 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-from HamiltonIO.model.occupations import myfermi
+from HamiltonIO.model.occupations import GaussOccupations, myfermi
 
 from TB2J.exchange_pert2 import ExchangePert2
-from TB2J.green import TBGreen
+from TB2J.green import TBGreen, find_energy_ingap
 
 
 class DisplacementVertex:
@@ -455,6 +455,16 @@ class _FullSpectrumGreen(TBGreen):
             self.tbmodel, "collinear_interleaved", False
         )
         self._fourier_phases = {}
+        self._streamed_eigen = bool(
+            self._collinear_interleaved
+            and self._use_cache
+            and self.nproc == 1
+            and solve
+            and not saveH
+        )
+        if self._streamed_eigen:
+            self._prepare_collinear_cached_eigen()
+            return
         super()._prepare_eigen(solve=solve, saveH=saveH)
         if self._use_cache:
             self.evecs = np.memmap(
@@ -486,6 +496,70 @@ class _FullSpectrumGreen(TBGreen):
             # accessors reconstruct one k-point instead of retaining zeros.
             del self.evecs, self.S
 
+    def _prepare_collinear_cached_eigen(self):
+        """Fill compact spin eigenvectors and overlaps directly on disk.
+
+        The parent allocates three full spinor k-stacks before copying two
+        of them into the cache; that peak can exceed RAM on dense meshes.
+        """
+        self.nkpts = len(self.kpts)
+        self.evals = np.empty((self.nkpts, self.nbasis), dtype=float)
+        self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+        self.H = None
+        self.S = None
+        n = self.nbasis // 2
+        shape = (self.nkpts, n, n)
+        self._spin_vectors = tuple(
+            np.memmap(
+                Path(self.cache_path) / f"spin_evecs_{spin}.dat",
+                mode="w+",
+                dtype=complex,
+                shape=shape,
+            )
+            for spin in (0, 1)
+        )
+        self._spin_overlap = (
+            None
+            if self.is_orthogonal
+            else tuple(
+                np.memmap(
+                    Path(self.cache_path) / f"spin_overlap_{spin}.dat",
+                    mode="w+",
+                    dtype=complex,
+                    shape=shape,
+                )
+                for spin in (0, 1)
+            )
+        )
+        for ik, kpt in enumerate(self.kpts):
+            h, s, values, vectors = self.tbmodel.HSE_k(kpt)
+            self.evals[ik] = values
+            self.H0 += h
+            for spin in (0, 1):
+                sl = slice(spin, None, 2)
+                self._spin_vectors[spin][ik] = vectors[sl, sl]
+                if self._spin_overlap is not None:
+                    self._spin_overlap[spin][ik] = s[sl, sl]
+        self.H0 /= self.nkpts
+        if self.efermi is None:
+            occ = GaussOccupations(
+                nel=self.tbmodel.nel, width=0.1, wk=self.kweights, nspin=2
+            )
+            self.efermi = occ.efermi(self.evals.copy())
+        self.adjusted_emin = (
+            find_energy_ingap(
+                self.evals, rbound=self.efermi + self.initial_emin, gap=2.0
+            )
+            - self.efermi
+        )
+        # Form adjoints per k-block: a full conjugate stack would consume RAM.
+        self._spin_adjoint = None
+
+    def get_Hk(self, ik):
+        if self._streamed_eigen:
+            return self.tbmodel.gen_ham(self.kpts[ik])[0]
+        return super().get_Hk(ik)
+
     def get_evecs(self, ik):
         if not self._collinear_interleaved:
             return super().get_evecs(ik)
@@ -512,9 +586,13 @@ class _FullSpectrumGreen(TBGreen):
             )
             for spin in (0, 1):
                 sl = slice(spin, None, 2)
-                block = (
-                    self._spin_vectors[spin][ik] * occupation[sl]
-                ) @ self._spin_adjoint[spin][ik]
+                vectors = self._spin_vectors[spin][ik]
+                adjoint = (
+                    self._spin_adjoint[spin][ik]
+                    if self._spin_adjoint is not None
+                    else vectors.conj().T
+                )
+                block = (vectors * occupation[sl]) @ adjoint
                 if not self.is_orthogonal:
                     block = block @ self._spin_overlap[spin][ik]
                 rho[sl, sl] += weight * block
@@ -535,9 +613,13 @@ class _FullSpectrumGreen(TBGreen):
             for start in range(0, self.nkpts, 64):
                 part = slice(start, min(start + 64, self.nkpts))
                 denominator = 1.0 / (z - self.evals[part, sl])
-                g = (
-                    self._spin_vectors[spin][part] * denominator[:, None, :]
-                ) @ self._spin_adjoint[spin][part]
+                vectors = self._spin_vectors[spin][part]
+                adjoint = (
+                    self._spin_adjoint[spin][part]
+                    if self._spin_adjoint is not None
+                    else vectors.conj().swapaxes(-1, -2)
+                )
+                g = (vectors * denominator[:, None, :]) @ adjoint
                 count = g.shape[0]
                 scalar_gr += (phase[:, part] @ g.reshape(count, -1)).reshape(
                     len(Rpts), n, n
@@ -560,10 +642,13 @@ class _FullSpectrumGreen(TBGreen):
         blocks = []
         for spin in (0, 1):
             denominators = 1.0 / (energy + self.efermi - self.evals[:, spin::2])
-            blocks.append(
-                (self._spin_vectors[spin] * denominators[:, None, :])
-                @ self._spin_adjoint[spin]
+            vectors = self._spin_vectors[spin]
+            adjoint = (
+                self._spin_adjoint[spin]
+                if self._spin_adjoint is not None
+                else vectors.conj().swapaxes(-1, -2)
             )
+            blocks.append((vectors * denominators[:, None, :]) @ adjoint)
         return blocks
 
     def _fourier_phase(self, Rpts, kpts):

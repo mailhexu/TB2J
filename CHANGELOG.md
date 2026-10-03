@@ -10,6 +10,7 @@
 - The bccFe examples record finite-difference errors and numerical convergence settings; pickle units are eV and eV/Angstrom, not meV.
 - Fixed cached spin-lattice initialization by reopening the stored eigenvector and overlap arrays before preparing scalar-spin views.
 - Streamed collinear k-space contractions and scalar-spin Fourier vertices avoid full doubled zero-spin arrays. Finite-difference sweeps retain only serialized per-bond data between reference/plus/minus solves.
+- Fixed the dense-mesh cached preparation peak: collinear eigensystems and overlaps now go directly into compact disk-backed spin blocks instead of allocating full spinor H/S/eigenvector k-stacks before spilling.
 - Validated the bccFe development case with declared rough convergence (5% +0.5 meV/Ang), unchanged strict independent-FD checks (1% +0.1 meV/Ang), and serialized cubic-axis symmetry. Precision convergence is explicitly not claimed.
 
 ### Packaging

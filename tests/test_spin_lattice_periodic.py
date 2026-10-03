@@ -189,3 +189,35 @@ def test_streamed_k_sum_keeps_last_partial_block_and_density(cached, tmp_path):
     )
     np.testing.assert_allclose(ex.G.get_density_matrix(), rho_occupied, atol=2e-12)
     ex.finalize()
+
+
+def test_cached_collinear_preparation_avoids_full_k_spinor_stacks(
+    monkeypatch, tmp_path
+):
+    """Disk caching must bound the *preparation* peak, not just later G(E)."""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    original_zeros = np.zeros
+
+    def bounded_zeros(shape, *args, **kwargs):
+        if isinstance(shape, (tuple, list)) and tuple(shape) == (67, 4, 4):
+            raise AssertionError("allocated full k-point spinor stack in RAM")
+        return original_zeros(shape, *args, **kwargs)
+
+    model = HybridizedChain(collinear=True)
+    with monkeypatch.context() as patch:
+        patch.setattr(np, "zeros", bounded_zeros)
+        ex = ExchangePert2Sl(
+            tbmodels=model,
+            atoms=model.atoms,
+            basis=["Fe1|s|up", "Fe1|s|down", "Fe1|p|up", "Fe1|p|down"],
+            magnetic_elements=["Fe"],
+            efermi=0.3,
+            kmesh=(67, 1, 1),
+            Rcut=3.1,
+            nz=48,
+            smearing=0.1,
+            use_cache=True,
+        )
+    assert all(isinstance(v, np.memmap) for v in ex.G._spin_vectors)
+    assert all(isinstance(s, np.memmap) for s in ex.G._spin_overlap)
+    ex.finalize()
