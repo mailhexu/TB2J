@@ -187,10 +187,8 @@ class Magnon:
 
         U, V = get_rotation_arrays(magmoms, u=self._uz)
 
-        if getattr(self, "_J0_cache", None) is None:
-            # J0 is q-independent; compute once per instance.
-            self._J0_cache = self.Jq(np.zeros((1, 3)))[0]
-        J0 = -self._J0_cache
+        # Public reference/exchange arrays are mutable; do not cache J(0).
+        J0 = -self.Jq(np.zeros((1, 3)))[0]
         # J0 = -Hermitize(J0)[:, :, 0]
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 

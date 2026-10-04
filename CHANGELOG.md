@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Magnon reference updates
+
+- Recompute J(q=0) from current exchange/reference arrays in Hq; the
+  unkeyed cache could violate the Goldstone mode after moment, rotation-axis,
+  propagation-vector or exchange updates. Fourier vectorization is retained.
+
 ### Packaging
 
 - `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao
