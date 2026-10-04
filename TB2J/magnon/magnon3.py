@@ -153,14 +153,12 @@ class Magnon:
                 # n , so only on the right.
                 JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
 
-        nkpt = kpoints.shape[0]
-        Jq = np.zeros((nkpt, self.nspin, self.nspin, 3, 3), dtype=complex)
-
-        for iR, R in enumerate(Rlist):
-            for iqpt, qpt in enumerate(kpoints):
-                # Fourier transform of exchange tensors
-                phase = 2 * np.pi * R @ qpt
-                Jq[iqpt] += np.exp(-1j * phase) * JRprime[iR]
+        kpoints = np.asarray(kpoints, dtype=float)
+        # Vectorized Fourier transform: identical sum, no (R, q) Python loop.
+        phase = 2 * np.pi * Rlist @ kpoints.T  # (nR, nkpt)
+        Jq = np.einsum("rq,rijxy->qijxy", np.exp(-1j * phase), JRprime)
+        if self._Q is not None:
+            Jq = Jq.astype(complex)
 
         # Jq_copy = Jq.copy()
         # Jq.swapaxes(-1, -2)  # swap xyz
@@ -189,7 +187,10 @@ class Magnon:
 
         U, V = get_rotation_arrays(magmoms, u=self._uz)
 
-        J0 = -self.Jq(np.zeros((1, 3)))[0]
+        if getattr(self, "_J0_cache", None) is None:
+            # J0 is q-independent; compute once per instance.
+            self._J0_cache = self.Jq(np.zeros((1, 3)))[0]
+        J0 = -self._J0_cache
         # J0 = -Hermitize(J0)[:, :, 0]
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 
