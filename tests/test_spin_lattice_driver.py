@@ -20,6 +20,7 @@ def run(model, atoms, basis, path, disp=None, kmesh=(1, 1, 1)):
         emin=-10,
         emax=0,
         nz=48,
+        integration_method="semicircle",
         smearing=0.1,
         Rcut=1.1,
         output_path=str(path),

@@ -417,7 +417,7 @@ def analyze_case(args, k, cutoff, h, mesh, nz, with_fd=True):
         nproc=1,
         Rcut=args.rcut,
         smearing=args.temperature * kB,
-        integration_method="CFR",
+        integration_method="semicircle",
     )
     ref_fdf = case_dir(args.output, k, cutoff, h, "ref") / "siesta.fdf"
     ref, ef = load_siesta_spin_lattice_model(ref_fdf)
@@ -930,7 +930,7 @@ def main():
             np=1,
             Rcut=a.rcut,
             smearing=a.temperature * kB,
-            integration_method="CFR",
+            integration_method="semicircle",
         )
         certificate["final_settings"]["spinio_output"] = str(
             a.output / "spin_lattice_results"

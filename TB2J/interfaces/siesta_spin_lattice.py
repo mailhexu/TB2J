@@ -94,6 +94,7 @@ def gen_exchange_spin_lattice_siesta(
     params.setdefault("nz", 320)
     params.setdefault("emin", -12.0)
     params.setdefault("smearing", 0.0258519997864)
+    params.setdefault("integration_method", "semicircle")
     if params.pop("efermi", 0.0) != 0.0:
         raise ValueError("SIESTA model is reference-Fermi-shifted; efermi must be zero")
     return gen_exchange_spin_lattice_lcao(

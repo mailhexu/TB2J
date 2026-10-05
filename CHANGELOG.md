@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Non-orthogonal SIESTA spin-lattice coupling
+- **Fixed invalid exchange values from the CFR contour in the spin-lattice path.** The full-spectrum Green's function required by the exact pencil derivative keeps unoccupied poles above E_F; the finite-temperature CFR pole contour is only valid for windowed spectra and diverges with them present (bcc Fe benchmark: J_1 = -298.8 meV under CFR versus 18.7 meV semicircle and 17.6-18.2 meV for the standard windowed two-channel path, matching the archived SIESTA tutorial). The spin-lattice exchange now defaults to and enforces the semicircle (or legendre) contour, and pins the user's ``emin`` instead of the per-model auto-gap so the contour stays identical between displaced finite-difference runs. Earlier bccFe certification numbers produced under CFR are retracted.
 
 - Added the SIESTA FC spin-lattice entrypoint and executable finite-difference comparison. Raw FC derivatives and sisl Hamiltonians are aligned to the same fixed reference-Fermi gauge.
 - Added explicit periodic image-summed response alongside the localized home-cell convention. Full-spectrum pencil inverses retain the virtual states required by `G(dH-z dS)G`.

@@ -707,6 +707,32 @@ class ExchangePert2Sl(ExchangePert2):
     _green_class = _FullSpectrumGreen
     response = "localized"
 
+    def _adjust_emin(self):
+        # Keep the user's emin: the auto-gap value shifts between displaced
+        # models and would make the semicircle contour τ-dependent, breaking
+        # the exact FD identity dJ/dx = [J(+h)-J(-h)]/2h (the contour must
+        # be identical for the reference and displaced runs).
+        return None
+
+    def _prepare_elist(self, method=None):
+        # The full-spectrum Green's function required for the exact pencil
+        # derivative keeps unoccupied poles just above E_F (and semicore far
+        # below); the finite-temperature CFR pole contour assumes they are
+        # projected out. With them present the pole sum diverges from the
+        # physical integral (bcc Fe benchmark: CFR gives J_1 = -298.8 meV
+        # where the semicircle contour gives 18.7 meV and the standard
+        # windowed two-channel path 17.6-18.2 meV). Use semicircle/legendre.
+        m = (method or self.integration_method or "").lower()
+        if m in ("cfr", "cfr2"):
+            raise ValueError(
+                "integration_method 'cfr'/'cfr2' is incompatible with the "
+                "full-spectrum Green's function of the spin-lattice path; "
+                "use 'semicircle' or 'legendre'"
+            )
+        super()._prepare_elist(method=method)
+
+    response = "localized"
+
     def set_displacement(
         self, disp, J_only=False, density_method="eigenvector", response="localized"
     ):
@@ -974,7 +1000,7 @@ def gen_exchange_spin_lattice_lcao(
     list_iatom=None,
     output_path="TB2J_results",
     Jonly=False,
-    integration_method="CFR",
+    integration_method="semicircle",
     density_method="eigenvector",
     response="localized",
     Rcut=None,

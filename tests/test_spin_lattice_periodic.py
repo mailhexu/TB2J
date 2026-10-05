@@ -67,8 +67,8 @@ def calculation(tau=0, disp=None, collinear=False, cache_path=None):
         kmesh=(12, 1, 1),
         Rcut=3.1,
         nz=48,
+        integration_method="semicircle",
         smearing=0.1,
-        integration_method="CFR",
         use_cache=cache_path is not None,
         cache_path=str(cache_path) if cache_path is not None else None,
     )
@@ -132,6 +132,7 @@ def test_invalid_response_rejected():
         efermi=0.3,
         kmesh=(3, 1, 1),
         nz=12,
+        integration_method="semicircle",
     )
     with pytest.raises(ValueError, match="response"):
         ex.set_displacement(derivative(), response="localish")
@@ -149,6 +150,7 @@ def test_streamed_k_sum_keeps_last_partial_block_and_density(cached, tmp_path):
         kmesh=(67, 1, 1),
         Rcut=3.1,
         nz=48,
+        integration_method="semicircle",
         smearing=0.1,
         use_cache=cached,
         cache_path=str(tmp_path) if cached else None,
@@ -215,6 +217,7 @@ def test_cached_collinear_preparation_avoids_full_k_spinor_stacks(
             kmesh=(67, 1, 1),
             Rcut=3.1,
             nz=48,
+            integration_method="semicircle",
             smearing=0.1,
             use_cache=True,
         )
