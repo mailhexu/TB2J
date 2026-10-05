@@ -377,8 +377,8 @@ Loewdin pairing, or Tikhonov damping) is constructed lazily on first use and
 then cached per ``ProjectorGreen`` instance:
 
 * at most one cache configuration is retained; changing ``overlap_mode``,
-  ``overlap_rcond``, or ``overlap_condition_threshold``, or replacing
-  ``overlap_k``, discards prior entries;
+  ``overlap_rcond``, or ``overlap_condition_threshold``, or an edited or
+  replaced ``overlap_k`` with different content, discards prior entries;
 * each entry stores a snapshot of the source overlap and is validated by exact
   comparison on every request, so an in-place edit of ``overlap_k`` rebuilds
   the affected filter instead of returning a stale result;
