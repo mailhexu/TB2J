@@ -730,6 +730,14 @@ class ExchangePert2Sl(ExchangePert2):
                 "use 'semicircle' or 'legendre'"
             )
         super()._prepare_elist(method=method)
+        # Move the quadrature nodes off the real axis: with endpoint=True the
+        # first/last nodes sit exactly on emin/emax, inside the occupied d-band
+        # complex near E_F, and the near-pole evaluation corrupts J and dJ/dx
+        # (bcc Fe, nz=100: endpoint=True J_1 = -206.5 meV and |O_analytic -
+        # O_FD| = 16.4 meV/A; endpoint=False J_1 = 18.9 meV and 0.03 meV/A).
+        if m in ("semicircle", "legendre"):
+            self.contour.build_path_semicircle(self.nz, endpoint=False)
+            self.contour._weights = None
 
     response = "localized"
 
