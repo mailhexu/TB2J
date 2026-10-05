@@ -35,12 +35,14 @@ def test_goldstone_survives_moment_and_exchange_updates():
 
 
 def test_reference_axis_and_propagation_updates_match_fresh_model():
+    """P3A2-SPEC-003 regression: the test must assert the equivalence."""
     model = chain()
     q = np.array([[0.13, 0.05, 0.0]])
     model.Hq(q)
     fresh = chain()
     for candidate in (model, fresh):
         candidate.set_reference([0.2, 0.0, 0.0], [[0.0, 0.0, 1.0]], [1.0, 0.0, 0.0])
+    np.testing.assert_allclose(model.Hq(q), fresh.Hq(q), atol=1e-14)
 
 
 def test_repeated_calls_reuse_prepared_exchange_without_staleness():
