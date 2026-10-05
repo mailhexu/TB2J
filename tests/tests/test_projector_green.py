@@ -514,13 +514,19 @@ def test_projector_green_lowdin_matches_svd_at_same_cutoff():
 def test_projector_green_tikhonov_smoothly_damps_small_overlap_modes():
     data = make_overlap_k_projector_data()
     data.overlap_k[0] = np.diag([1.0, 1.0e-4])
-    green = ProjectorGreen(data, overlap_mode="tikhonov", overlap_rcond=1.0e-2)
-    regularized = green._inverse_overlap(data.overlap_k[0], 0)
+    energy = 1.0 + 0.4j
+    coeff = data.coefficients[0, 0]
+    inv_denom = 1.0 / (energy + data.efermi - data.eigenvalues[0, 0])
+    covariant = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
 
+    green = ProjectorGreen(data, overlap_mode="tikhonov", overlap_rcond=1.0e-2)
+    regularized = green.get_Gk(0, energy=energy)
     singular = np.array([1.0, 1.0e-4])
-    expected = singular / (singular**2 + 1.0e-4)
-    np.testing.assert_allclose(regularized, np.diag(expected))
-    assert 0.0 < regularized[1, 1] < 1.0 / singular[1]
+    filtered = singular / (singular**2 + 1.0e-4)
+    expected = np.diag(filtered) @ covariant @ np.diag(filtered)
+    np.testing.assert_allclose(regularized, expected)
+    # Small modes are damped smoothly, not truncated: strictly below 1/s.
+    assert 0.0 < filtered[1] < 1.0 / singular[1]
 
 
 def test_projector_green_gk_matches_operator_matrix_element():
@@ -567,6 +573,188 @@ def test_projector_green_gk_matches_operator_matrix_element():
     np.testing.assert_allclose(gk, gtrue, atol=1e-10)
     # the pre-fix transpose form must NOT match
     assert not np.allclose(gk, gtrue.T, atol=1e-6)
+
+
+def _expected_channel_filter(S, mode, rcond):
+    """Reference filter mirroring the documented per-mode numerics."""
+    if mode == "inverse":
+        return np.linalg.inv(S)
+    if mode == "svd":
+        left, singular, right = np.linalg.svd(S)
+        cutoff = rcond * singular[0]
+        inverse = np.divide(
+            1.0, singular, out=np.zeros_like(singular), where=singular > cutoff
+        )
+        return (right.conj().T * inverse) @ left.conj().T
+    hermitian = (S + S.conj().T) / 2.0
+    eigenvalues, eigenvectors = np.linalg.eigh(hermitian)
+    scale = np.max(np.abs(eigenvalues))
+    cutoff = rcond * scale
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+    if mode == "tikhonov":
+        filtered = eigenvalues / (eigenvalues**2 + cutoff**2)
+        return (eigenvectors * filtered) @ eigenvectors.conj().T
+    inverse_sqrt = np.sqrt(
+        np.divide(
+            1.0,
+            eigenvalues,
+            out=np.zeros_like(eigenvalues),
+            where=eigenvalues > cutoff,
+        )
+    )
+    lowdin = (eigenvectors * inverse_sqrt) @ eigenvectors.conj().T
+    return lowdin @ lowdin
+
+
+def _overlap_k_two_k_data(nspin=2, nband=6, nproj=4, seed=103):
+    """Two-k-point complex Hermitian overlap data shared by lifecycle tests.
+
+    ``Sk`` aliases ``data.overlap_k`` exactly as ``np.asarray`` would; callers
+    must not mutate ``Sk`` in place when comparing against the original.
+    """
+    rng = np.random.default_rng(seed)
+    A = rng.normal(size=(2, nproj, nproj)) + 1j * rng.normal(size=(2, nproj, nproj))
+    Sk = A @ A.conj().swapaxes(-1, -2) + nproj * np.eye(nproj)
+    data = ProjectorGreenData(
+        kpoints=np.array([[0.0, 0.0, 0.0], [0.2, 0.0, 0.0]]),
+        weights=np.array([0.5, 0.5]),
+        eigenvalues=rng.normal(size=(nspin, 2, nband)),
+        coefficients=rng.normal(size=(nspin, 2, nband, nproj))
+        + 1j * rng.normal(size=(nspin, 2, nband, nproj)),
+        efermi=0.1,
+        efermi_spin=np.linspace(-0.2, 0.2, nspin) if nspin >= 2 else None,
+        projector_site=np.array([0, 0, 1, 1]),
+        projector_atom=np.array([0, 0, 1, 1]),
+        overlap_k=Sk,
+    )
+    return data, Sk
+
+
+@pytest.mark.parametrize("mode", ["inverse", "svd", "lowdin", "tikhonov", "plain"])
+@pytest.mark.parametrize("masked", [False, True])
+def test_projector_green_all_modes_match_reference_construction(mode, masked):
+    data, Sk = _overlap_k_two_k_data()
+    rcond = 1.0e-6
+    if masked:
+        mask = np.ones((2, 2, 6), dtype=bool)
+        mask[:, :, ::5] = False
+        data.band_mask = mask
+    green = ProjectorGreen(data, overlap_mode=mode, overlap_rcond=rcond)
+
+    if mode == "plain":
+        dressed_all = None
+    else:
+        filters = np.array(
+            [_expected_channel_filter(Sk[ik], mode, rcond) for ik in range(2)]
+        )
+        dressed_all = np.einsum("kpq,sknq->sknp", filters, data.coefficients)
+
+    for ispin in range(2):
+        for energy in (-2.0 + 0.3j, 0.5 + 0.8j):
+            evals = data.eigenvalues[ispin]
+            coeff = data.coefficients[ispin]
+            inv_denom = 1.0 / (energy + green._fermi(ispin) - evals)
+            if masked:
+                inv_denom = np.where(data.band_mask[ispin], inv_denom, 0.0)
+            if mode == "plain":
+                expected = np.einsum("knp,knq,kn->kpq", coeff, coeff.conj(), inv_denom)
+            else:
+                dressed = dressed_all[ispin]
+                expected = np.einsum(
+                    "knp,knq,kn->kpq", dressed, dressed.conj(), inv_denom
+                )
+            np.testing.assert_allclose(
+                green.get_Gk_all(energy, ispin=ispin), expected, rtol=2e-12, atol=1e-12
+            )
+
+
+def test_projector_green_cache_reuses_filters_across_energies_and_spins():
+    data, Sk = _overlap_k_two_k_data()
+    green = ProjectorGreen(data, overlap_mode="inverse")
+    for spin in (0, 1):
+        for energy in (-1.0 + 0.3j, 0.2 + 0.5j, 1.0 + 0.8j):
+            green.get_Gk_all(energy, ispin=spin)
+    # One entry per k point after repeated use; nothing stale, nothing extra.
+    assert set(green._filter_cache) == {0, 1}
+    for ik in (0, 1):
+        snapshot, filt = green._filter_cache[ik]
+        np.testing.assert_allclose(filt, np.linalg.inv(Sk[ik]), rtol=1e-12)
+        assert snapshot.shape == Sk[ik].shape
+
+
+def test_projector_green_cache_rebuilds_after_inplace_overlap_edit():
+    data, Sk = _overlap_k_two_k_data()
+    reference = ProjectorGreen(data, overlap_mode="inverse")
+    green = ProjectorGreen(data, overlap_mode="inverse")
+    energy = -1.0 + 0.3j
+    green.get_Gk_all(energy, ispin=0)
+
+    data.overlap_k[0] = Sk[0] * 1.5
+    np.testing.assert_allclose(
+        green.get_Gk_all(energy, ispin=0),
+        reference.get_Gk_all(energy, ispin=0),
+        rtol=2e-12,
+        atol=1e-12,
+    )
+    # Only the edited k point was rebuilt; the untouched one survives.
+    # Note Sk aliases data.overlap_k, so Sk[0] already IS the edited matrix.
+    _, filt0 = green._filter_cache[0]
+    _, filt1 = green._filter_cache[1]
+    np.testing.assert_allclose(filt0, np.linalg.inv(Sk[0]), rtol=1e-12)
+    np.testing.assert_allclose(filt1, np.linalg.inv(Sk[1]), rtol=1e-12)
+
+
+def test_projector_green_cache_follows_settings_transitions():
+    data, _ = _overlap_k_two_k_data()
+    reference = ProjectorGreen(data, overlap_mode="inverse")
+    green = ProjectorGreen(data, overlap_mode="inverse")
+    energy = 0.4 + 0.5j
+    green.get_Gk_all(energy, ispin=0)
+
+    data.overlap_k = data.overlap_k * 1.2
+    for attr, value in (
+        ("overlap_mode", "tikhonov"),
+        ("overlap_rcond", 2.0e-2),
+        ("overlap_condition_threshold", 1.0e9),
+        ("overlap_mode", "inverse"),
+    ):
+        setattr(green, attr, value)
+        setattr(reference, attr, value)
+        np.testing.assert_allclose(
+            green.get_Gk_all(energy, ispin=0),
+            reference.get_Gk_all(energy, ispin=0),
+            rtol=2e-12,
+            atol=1e-12,
+        )
+
+
+def test_projector_green_cache_preserves_singular_error_after_edit():
+    data, _ = _overlap_k_two_k_data()
+    reference = ProjectorGreen(data, overlap_mode="inverse")
+    green = ProjectorGreen(data, overlap_mode="inverse")
+    energy = -1.0 + 0.3j
+    green.get_Gk_all(energy, ispin=0)
+
+    data.overlap_k[0] = np.zeros_like(data.overlap_k[0])
+    for backend in (reference, green):
+        with pytest.raises(ValueError, match="singular or ill-conditioned"):
+            backend.get_Gk(0, energy=energy, ispin=0)
+
+
+def test_projector_green_cache_releases_entries_for_dual_and_plain():
+    data, _ = _overlap_k_two_k_data()
+    green = ProjectorGreen(data, overlap_mode="inverse")
+    green.get_Gk_all(-1.0 + 0.3j, ispin=0)
+    assert len(green._filter_cache) == 2
+
+    data.overlap_k = None
+    green.get_Gk_all(-1.0 + 0.3j, ispin=0)
+    assert green._filter_cache == {}
+
+    data.overlap_k = np.array([np.eye(4, dtype=complex), np.eye(4, dtype=complex)])
+    plain = ProjectorGreen(data, overlap_mode="plain")
+    plain.get_Gk_all(-1.0 + 0.3j, ispin=0)
+    assert plain._filter_cache == {}
 
 
 def test_operator_component_api_prefers_delta_xc_and_is_selectable():

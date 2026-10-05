@@ -369,7 +369,31 @@ covariant spectral Green function from coefficients and then applies
 
    g(k,E)=S^{-1}(k)G_{cov}(k,E)S^{-1}(k)
 
-before the real-space Fourier transform.  Synthetic tests and optional
+before the real-space Fourier transform.
+
+The scalar and spinor reconstructions share one private channel-filter
+implementation.  For each k point the filter (exact inverse, SVD truncation,
+Loewdin pairing, or Tikhonov damping) is constructed lazily on first use and
+then cached per ``ProjectorGreen`` instance:
+
+* at most one cache configuration is retained; changing ``overlap_mode``,
+  ``overlap_rcond``, or ``overlap_condition_threshold``, or replacing
+  ``overlap_k``, discards prior entries;
+* each entry stores a snapshot of the source overlap and is validated by exact
+  comparison on every request, so an in-place edit of ``overlap_k`` rebuilds
+  the affected filter instead of returning a stale result;
+* preparation stays lazy: an ill-conditioned overlap raises only when its k
+  point is actually requested, as before;
+* when ``overlap_k`` is absent (dual PAW coefficients) or the mode is
+  ``plain``, no filtering is applied and cached entries are released.
+
+The cache is an internal performance detail: results are identical to
+recomputing the filter for every energy and spin, and raw coefficients keep
+their documented meanings (including the :math:`C^T g C^*` contraction).
+PAW augmentation (``overlap_metric``/``dO``) is a population- and
+augmentation-metric object, never a substitute for ``overlap_k``.
+
+Synthetic tests and optional
 real-fixture tests cover this behavior; set ``ABINIT_NC_PAO_FIXTURE`` to a real
 ABINIT NC PAO NetCDF file to enable the latter.
 

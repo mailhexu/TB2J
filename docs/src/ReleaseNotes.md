@@ -4,6 +4,14 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- The projector Green-function backend now prepares each k-point channel filter
+  (overlap inverse, SVD truncation, Loewdin pairing, or Tikhonov damping) once per
+  fixed configuration and reuses it across energies and spins, shared between the
+  collinear and spinor paths. Results are unchanged; repeated-energy contour work
+  no longer repeats O(nproj^3) overlap decompositions, and the cache stays
+  consistent under in-place edits of ``overlap_k`` or runtime option changes.
+  See ``docs/src/projector_green.rst``.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

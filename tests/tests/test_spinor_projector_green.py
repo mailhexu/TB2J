@@ -7,7 +7,40 @@ from TB2J.projector_green import (
     SPINOR_OPERATOR_DEFINITION,
     ProjectorGreen,
     ProjectorGreenData,
+    spinor_tangent_trace,
 )
+
+
+def _expected_channel_filter(S, mode, rcond):
+    """Reference filter mirroring the documented per-mode numerics."""
+    if mode == "inverse":
+        return np.linalg.inv(S)
+    if mode == "svd":
+        left, singular, right = np.linalg.svd(S)
+        cutoff = rcond * singular[0]
+        inverse = np.divide(
+            1.0, singular, out=np.zeros_like(singular), where=singular > cutoff
+        )
+        return (right.conj().T * inverse) @ left.conj().T
+    hermitian = (S + S.conj().T) / 2.0
+    eigenvalues, eigenvectors = np.linalg.eigh(hermitian)
+    scale = np.max(np.abs(eigenvalues))
+    cutoff = rcond * scale
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+    if mode == "tikhonov":
+        filtered = eigenvalues / (eigenvalues**2 + cutoff**2)
+        return (eigenvectors * filtered) @ eigenvectors.conj().T
+    inverse_sqrt = np.sqrt(
+        np.divide(
+            1.0,
+            eigenvalues,
+            out=np.zeros_like(eigenvalues),
+            where=eigenvalues > cutoff,
+        )
+    )
+    lowdin = (eigenvectors * inverse_sqrt) @ eigenvectors.conj().T
+    return lowdin @ lowdin
+
 
 RNG = np.random.default_rng(42)
 
@@ -87,3 +120,81 @@ def test_spinor_green_requires_spinor_data():
     green = ProjectorGreen(data)
     with pytest.raises(ValueError, match="nspinor=2"):
         green.get_Gk_spinor(0, 0.1)
+
+
+def _spinor_overlap_k_data(mode_seed=105):
+    """Nonorthogonal spinor data: k-dependent complex Hermitian overlap."""
+    data, _ = _make_spinor_data()
+    rng = np.random.default_rng(mode_seed)
+    A = rng.normal(size=(data.nkpt, data.nproj, data.nproj)) + 1j * rng.normal(
+        size=(data.nkpt, data.nproj, data.nproj)
+    )
+    data.overlap_k = A @ A.conj().swapaxes(-1, -2) + data.nproj * np.eye(data.nproj)
+    return data
+
+
+@pytest.mark.parametrize("mode", ["inverse", "svd", "lowdin", "tikhonov", "plain"])
+def test_spinor_green_all_modes_match_reference_construction(mode):
+    data = _spinor_overlap_k_data()
+    rcond = 1.0e-3
+    green = ProjectorGreen(data, overlap_mode=mode, overlap_rcond=rcond)
+    energy = 0.25 + 0.4j
+
+    evals = data.eigenvalues[0]
+    coeff = data.coefficients[0]  # (nkpt, nband, 2, nproj)
+    inv_denom = 1.0 / (energy + data.efermi - evals)
+    covariant = np.einsum("knsp,kntq,kn->kpqst", coeff, coeff.conj(), inv_denom)
+    if mode == "plain":
+        expected = covariant
+    else:
+        filters = np.array(
+            [_expected_channel_filter(S, mode, rcond) for S in data.overlap_k]
+        )
+        expected = np.einsum("kpa,kabst,kbq->kpqst", filters, covariant, filters)
+    np.testing.assert_allclose(
+        green.get_Gk_all_spinor(energy), expected, rtol=2e-12, atol=1e-12
+    )
+    R = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]])
+    phase = (
+        np.exp(green.k2Rfactor * np.einsum("ri,ki->rk", R, green.kpts))
+        * green.kweights[None, :]
+    )
+    expected_r = np.einsum("kpqst,rk->rpqst", expected, phase, optimize="optimal")
+    np.testing.assert_allclose(
+        green.get_GR_spinor(R, energy),
+        expected_r,
+        rtol=2e-12,
+        atol=1e-12,
+    )
+
+
+def test_spinor_green_cache_rebuilds_after_inplace_overlap_edit():
+    data = _spinor_overlap_k_data()
+    reference = ProjectorGreen(data, overlap_mode="inverse")
+    green = ProjectorGreen(data, overlap_mode="inverse")
+    energy = -0.8 + 0.3j
+    green.get_Gk_all_spinor(energy)
+
+    data.overlap_k[1] = data.overlap_k[1] * 1.4
+    np.testing.assert_allclose(
+        green.get_Gk_all_spinor(energy),
+        reference.get_Gk_all_spinor(energy),
+        rtol=2e-12,
+        atol=1e-12,
+    )
+    # Edited k point rebuilt; untouched one reused.
+    _, filt1 = green._filter_cache[1]
+    np.testing.assert_allclose(filt1, np.linalg.inv(data.overlap_k[1]), rtol=1e-12)
+
+
+def test_spinor_tangent_trace_matches_uncached_backend_after_cutover():
+    data = _spinor_overlap_k_data()
+    R = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]])
+    energy = -0.5 + 0.3j
+    ref = ProjectorGreen(data)  # default inverse mode, cache active by design
+    cached = ProjectorGreen(data, overlap_mode="inverse")
+    cached.get_GR_spinor(R, energy)  # warm the cache
+    a = spinor_tangent_trace(ref, R, energy)["K_ijR"]
+    b = spinor_tangent_trace(cached, R, energy)["K_ijR"]
+    for key in a:
+        np.testing.assert_allclose(a[key], b[key], rtol=2e-12, atol=1e-12)

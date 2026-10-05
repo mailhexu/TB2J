@@ -1071,6 +1071,12 @@ class ProjectorGreen:
         )
         if not 0.0 <= self.overlap_rcond < 1.0:
             raise ValueError("overlap_rcond must satisfy 0 <= rcond < 1")
+        # Lazy, mutation-safe channel-filter cache (one active configuration).
+        # Entries: ik -> (source-overlap snapshot, filter). Invalidated by any
+        # change of overlap mode/rcond/threshold or of the cached source matrix;
+        # see _channel_filter.
+        self._filter_cache_config = None
+        self._filter_cache = {}
 
     def _fermi(self, ispin):
         if self.efermi_spin is not None:
@@ -1086,7 +1092,7 @@ class ProjectorGreen:
             coeff = coeff[mask]
         inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
         Gk = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
-        return self._contravariant_Gk(Gk, ik)
+        return self._apply_channel_filter(Gk, ik)
 
     def get_Gk_all(self, energy, ispin=0):
         if self.data.band_mask is not None:
@@ -1099,9 +1105,10 @@ class ProjectorGreen:
         inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
         Gk_all = np.einsum("knp,knq,kn->kpq", coeff, coeff.conj(), inv_denom)
         if self.data.overlap_k is None:
+            self._release_filter_cache()
             return Gk_all
         return np.asarray(
-            [self._contravariant_Gk(Gk, ik) for ik, Gk in enumerate(Gk_all)],
+            [self._apply_channel_filter(Gk, ik) for ik, Gk in enumerate(Gk_all)],
             dtype=complex,
         )
 
@@ -1113,15 +1120,60 @@ class ProjectorGreen:
             return self.data.overlap_metric
         return np.eye(self.nbasis, dtype=complex)
 
-    def _contravariant_Gk(self, Gk, ik):
-        if self.data.overlap_k is None or self.overlap_mode == "plain":
-            return Gk
-        Sk = self.get_Sk(ik)
-        Sinv = self._inverse_overlap(Sk, ik)
-        return Sinv @ Gk @ Sinv
+    def _release_filter_cache(self):
+        """Drop cached filters when no dressing applies.
 
-    def _inverse_overlap(self, Sk, ik):
-        """Construct the full or truncated inverse overlap for one k point."""
+        Dual coefficients (``overlap_k is None``) and ``plain`` mode never
+        consult the cache; release it so removed overlaps cannot leave stale
+        entries behind.
+        """
+        if self.data.overlap_k is None or self.overlap_mode == "plain":
+            self._filter_cache.clear()
+            self._filter_cache_config = None
+
+    def _channel_filter(self, ik):
+        """Return the energy-independent channel filter for one k point.
+
+        Lazy and mutation-safe: the entry is validated against the *current*
+        source matrix and the current mode/rcond/condition-threshold settings
+        on every request, so in-place edits of ``data.overlap_k`` or attribute
+        changes rebuild instead of returning stale filters. Only one active
+        configuration is retained; entries are evicted before rebuild and
+        stored only after successful construction.
+        """
+        self._release_filter_cache()
+        if self.data.overlap_k is None or self.overlap_mode == "plain":
+            return None
+        config = (
+            self.overlap_mode,
+            self.overlap_rcond,
+            self.overlap_condition_threshold,
+            self.data.overlap_k.shape,
+        )
+        if config != self._filter_cache_config:
+            self._filter_cache.clear()
+            self._filter_cache_config = config
+        Sk = self.get_Sk(ik)
+        entry = self._filter_cache.get(ik)
+        if entry is not None and np.array_equal(entry[0], Sk):
+            return entry[1]
+        self._filter_cache.pop(ik, None)
+        snapshot = np.array(Sk, dtype=complex, copy=True)
+        filt = self._build_channel_filter(snapshot, ik)
+        self._filter_cache[ik] = (snapshot, filt)
+        return filt
+
+    def _apply_channel_filter(self, Gk, ik):
+        """Dress one Green block on its two leading projector axes."""
+        filt = self._channel_filter(ik)
+        if filt is None:
+            return Gk
+        if Gk.ndim > 2:
+            return np.einsum("pa,ab...,bq->pq...", filt, Gk, filt)
+        return filt @ Gk @ filt
+
+    def _build_channel_filter(self, Sk, ik):
+        """Construct the full or truncated channel filter for one k point."""
         if self.overlap_mode == "inverse":
             condition = np.linalg.cond(Sk)
             if (
@@ -1209,10 +1261,7 @@ class ProjectorGreen:
             coeff = coeff[mask]
         inv_denom = 1.0 / (energy + self.efermi - evals)
         Gk = np.einsum("nsp,ntq,n->pqst", coeff, coeff.conj(), inv_denom)
-        if self.data.overlap_k is None or self.overlap_mode == "plain":
-            return Gk
-        Sinv = self._inverse_overlap(self.get_Sk(ik), ik)
-        return np.einsum("pa,abst,bq->pqst", Sinv, Gk, Sinv)
+        return self._apply_channel_filter(Gk, ik)
 
     def get_Gk_all_spinor(self, energy):
         """Spinor Green blocks for all k: (nkpt, nproj, nproj, 2, 2)."""
@@ -1225,6 +1274,7 @@ class ProjectorGreen:
                 [self.get_Gk_spinor(ik, energy) for ik in range(self.data.nkpt)],
                 dtype=complex,
             )
+        self._release_filter_cache()
         evals = self.data.eigenvalues[0]
         coeff = self.data.coefficients[0]
         inv_denom = 1.0 / (energy + self.efermi - evals)

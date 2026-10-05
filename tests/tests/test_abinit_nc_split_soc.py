@@ -347,7 +347,7 @@ def test_pairing_refusals(synthetic_dimer, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_dualize_matches_inverse_overlap_mode(synthetic_dimer):
+def test_dualize_matches_inverse_mode(synthetic_dimer):
     pytest.importorskip("netCDF4")
     from TB2J.interfaces.abinit_savetb2j import load_abinit_nc_pao_savetb2j
     from TB2J.projector_green import ProjectorGreen
