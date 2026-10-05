@@ -107,10 +107,29 @@ class Magnon:
     def Q(self, value):
         self.set_propagation_vector(value)
 
+    def _exchange_state_key(self):
+        """Content key over every mutable input J(q) depends on.
+
+        Public Q/n/magmoms/Snorm/Rlist/JR arrays are mutable, so the key is
+        rebuilt from current bytes on every use; any change (including
+        in-place edits) produces a different key and invalidates the cache.
+        """
+        Q = (
+            None
+            if self._Q is None
+            else np.ascontiguousarray(self._Q, dtype=float).tobytes()
+        )
+        return (
+            Q,
+            np.ascontiguousarray(self._n, dtype=float).tobytes(),
+            np.ascontiguousarray(self.magmom, dtype=float).tobytes(),
+            np.ascontiguousarray(self.Snorm, dtype=float).tobytes(),
+            np.ascontiguousarray(self.Rlist, dtype=float).tobytes(),
+            np.ascontiguousarray(self.JR).tobytes(),
+        )
+
     def Jq(self, kpoints):
         """
-        Compute the exchange interactions in reciprocal space.
-
         The exchange interactions J(q) are computed using the Fourier transform:
         J(q) = ∑_R J(R) exp(iq·R)
 
@@ -137,33 +156,28 @@ class Magnon:
             First two indices are for magnetic atom pairs
             Last two indices are for 3x3 tensor components
         """
-        Rlist = np.array(self.Rlist)
-        Snorm_inv = 1 / self.Snorm
-        JR = np.einsum("rijxy, i, j-> rijxy", self.JR, Snorm_inv, Snorm_inv)
-        JRprime = JR.copy()
-
-        for iR, R in enumerate(Rlist):
-            if self._Q is not None:
-                # Rotate exchange tensors based on propagation vector
-                phi = 2 * np.pi * R @ self._Q  # angle ϕ = 2π R·Q
-                rv = phi * self._n  # rotation vector
-                Rmat = Rotation.from_rotvec(rv).as_matrix()
-                # J'_mn(R) = R_m(ϕ)^T J(R) R_n(ϕ) using Einstein summation.
-                # Here m is always in the R=0, thus the rotation is only applied on the
-                # n , so only on the right.
-                JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
-
+        state = self._exchange_state_key()
+        cache = getattr(self, "_Jq_prepared_cache", None)
+        if cache is not None and cache[0] == state:
+            Rlist, JRprime = cache[1]
+        else:
+            Rlist = np.array(self.Rlist)
+            Snorm_inv = 1 / self.Snorm
+            JR = np.einsum("rijxy, i, j-> rijxy", self.JR, Snorm_inv, Snorm_inv)
+            JRprime = JR.copy()
+            for iR, R in enumerate(Rlist):
+                if self._Q is not None:
+                    # Rotate exchange tensors for the propagation vector.
+                    phi = 2 * np.pi * R @ self._Q
+                    Rmat = Rotation.from_rotvec(phi * self._n).as_matrix()
+                    JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
+            self._Jq_prepared_cache = (state, (Rlist, JRprime))
         kpoints = np.asarray(kpoints, dtype=float)
         # Vectorized Fourier transform: identical sum, no (R, q) Python loop.
         phase = 2 * np.pi * Rlist @ kpoints.T  # (nR, nkpt)
         Jq = np.einsum("rq,rijxy->qijxy", np.exp(-1j * phase), JRprime)
         if self._Q is not None:
             Jq = Jq.astype(complex)
-
-        # Jq_copy = Jq.copy()
-        # Jq.swapaxes(-1, -2)  # swap xyz
-        # Jq.swapaxes(-3, -4)  # swap ij
-        # Jq = (Jq.conj() + Jq_copy) / 2.0
         return Jq
 
     def Hq(self, kpoints):
@@ -184,11 +198,14 @@ class Magnon:
         """
         magmoms = self.magmom.copy()
         magmoms /= np.linalg.norm(magmoms, axis=-1)[:, None]
-
         U, V = get_rotation_arrays(magmoms, u=self._uz)
-
-        # Public reference/exchange arrays are mutable; do not cache J(0).
-        J0 = -self.Jq(np.zeros((1, 3)))[0]
+        state = self._exchange_state_key()
+        cache = getattr(self, "_J0_cache", None)
+        if cache is not None and cache[0] == state:
+            J0 = cache[1]
+        else:
+            J0 = -self.Jq(np.zeros((1, 3)))[0]
+            self._J0_cache = (state, J0)
         # J0 = -Hermitize(J0)[:, :, 0]
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 
