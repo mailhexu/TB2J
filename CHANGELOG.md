@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- VASP split-SOC exports now require `LWRITE_TB2J = .TRUE.` in each
+  leg's INCAR. The new VASP patch switch defaults to `.FALSE.`; without
+  it, neither native nor CSO export is written.
+
 ### Split-SOC documentation and examples
 
 - Documented the ABINIT NC split-SOC workflow: a new page covering the

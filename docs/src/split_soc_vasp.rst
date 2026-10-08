@@ -6,25 +6,24 @@ spin-orbit-free **strength-zero** VASP runs whose PAW projectors are the
 native ``W%CPROJ`` augmentation maps.  **Each x/y/z leg is one independent
 strength-0 run** quantized along its own ``SAXIS`` axis; the rank-nine
 merge needs all three SAXIS references, because a single run determines
-only the transverse plane of its own spin frame.  Each run produces **two**
-artifacts, via a VASP build patched with the ``VASP_TB2J_patch``
-story-010 dump hooks (branch ``story010-cso-provenance``):
+only the transverse plane of its own spin frame.  With
+``LWRITE_TB2J = .TRUE.``, each current patched run writes one
+``tb2j_native.bin`` containing two sections:
 
-1. a ``tb2j_native.bin`` **v5/v6 collinear native export** (complex
-   ``W%CPROJ``, band eigenvalues/occupations, ``CDIJ`` spin difference),
-   read by :func:`TB2J.interfaces.vasp_native.read_vasp_native`;
-2. a ``tb2j_cso.bin`` **CSO dump** written by the patched Fortran module
-   ``tb2j_cso.F``: the per-ion one-center spin-orbit operator ``CSO``, the
-   augmentation occupations ``COCC`` and the spherical augmentation-sphere
-   potential ``POTAE`` exactly as consumed by VASP's ``SPINORB_STRENGTH``,
-   plus SAXIS Euler metadata.  It is read by
-   :mod:`TB2J.interfaces.vasp_cso_dump`.
+1. a **v5/v6 collinear native export** (complex ``W%CPROJ``,
+   band eigenvalues/occupations, ``CDIJ`` spin difference), read by
+   :func:`TB2J.interfaces.vasp_native.read_vasp_native`;
+2. an appended **CSO dump**: per-ion one-center spin-orbit operator
+   ``CSO``, augmentation occupations ``COCC`` and spherical potential
+   ``POTAE`` with SAXIS Euler metadata. The dump reader
+   :mod:`TB2J.interfaces.vasp_cso_dump` also accepts legacy separate
+   ``tb2j_cso.bin`` files.
 
 The production chain is therefore::
 
    per leg d ∈ {x, y, z}:
-     patched collinear VASP strength-0 run (ISPIN=2, LSORBIT off, SAXIS = d)
-          → tb2j_native.bin (v5/v6 CPROJ export)  +  tb2j_cso.bin (CSO + COCC + POTAE)
+     patched collinear VASP strength-0 run (ISPIN=2, LSORBIT off, SAXIS = d, LWRITE_TB2J=T)
+          → tb2j_native.bin (v5/v6 CPROJ export + appended CSO/COCC/POTAE)
           → per-leg identity/pairing gates (native header, k-points, weights, COCC)
           → W^K_SO,d(k) = Σ_a B_a† CSO_a B_a   (all-atom, state-space, psi gauge)
           → measured transverse block of leg d  →  split_soc_leg.npz + provenance
@@ -53,6 +52,9 @@ Strength-zero recipe
    :math:`(\alpha, \beta)`, so the spin frame of the operator is
    unambiguous.  The strength-zero reference may also be an ``ICHARG=11``
    frozen-potential run.
+   Set ``LWRITE_TB2J = .TRUE.`` in **each** leg's INCAR to activate
+   the native PAW export and one-center SOC dump.  The switch defaults to
+   ``.FALSE.``; runs without it do not write TB2J artifacts.
 3. Pass the three leg artifact directories to the driver (below); converge
    the k-point set, ``Rcut``, ``nz`` and ``smearing``.
 
@@ -362,17 +364,22 @@ The driver consumes the three leg artifact directories, one per SAXIS run
        --output_path TB2J_results_vasp_split_soc \
        --Rcut 10.0 --nz 60 --smearing 0.05 --lam 1.0
 
+For new single-file runs, give the same path for native and CSO inputs::
+
+   --leg x=collinear_x/tb2j_native.bin:collinear_x/tb2j_native.bin
+
+The directory shorthand above remains valid for retained two-file fixtures.
+
 .. list-table:: Selected options
    :header-rows: 1
    :widths: 34 66
 
    * - Option
      - Meaning
-   * - ``--leg <axis>=<RUN_DIR>``
-     - One strength-0 run directory (native export + CSO dump) per
-       ``x``/``y``/``z``; give all three — the rank-nine merge needs the
-       three SAXIS references.  Each leg's pair is joined by the
-       run-identity and COCC gates before any physics.
+   * - ``--leg <axis>=<RUN_DIR>`` or ``--leg <axis>=<NATIVE>:<CSO>``
+     - Give three independent x/y/z references. For a new merged export,
+       pass its ``tb2j_native.bin`` path twice. Each leg is checked by
+       the run-identity and COCC gates before any physics.
    * - ``--lam``
      - Dimensionless SOC scaling.  ``1.0`` physical, ``0.0`` SOC-off
        calibration anchor.
