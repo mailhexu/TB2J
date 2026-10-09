@@ -80,11 +80,12 @@ The raw parser lives in ``TB2J.interfaces.qe_projector``:
    dump = parse_qe_dump("nscf_dump.bin")   # QEProjectorDump: raw records + metadata
 
 ``parse_qe_dump`` validates the magic/version string, ``nspin == 2``,
-``nkstot == nks``, the presence of US or PAW species, and every record
-shape; violations raise ``ValueError`` with an explicit message. It keeps the
+``nkstot == nks``, family/version compatibility and record shapes;
+violations raise ``ValueError`` with an explicit message. It keeps the
 raw records (``deeq``, ``dvan``, ``qq_at``, the beta Gram diagnostic,
-``becsum``, ``dbeta_xc``/``ddd_paw`` (v1.2), per-k coefficients, cell/species/ions metadata, ``et``/``wg`` and
-the smearing parameters) for inspection.
+``becsum``, v1.2 ``dbeta_xc``/``ddd_paw``, per-k coefficients,
+cell/species/ions metadata, ``et``/``wg`` and smearing parameters)
+for inspection. NC requires v1.2 for a nonzero exchange vertex.
 
 The normalized view is produced by
 :py:func:`TB2J.interfaces.qe_projector.read_qe_dump`, which returns a validated
@@ -107,10 +108,11 @@ The loader applies the QE conventions:
   with ``M`` the beta Gram: the projected multiplicative xc spin splitting
   (GPAW ``delta_xc`` analog, conjugated by the joint metric transformation)
   plus the augmentation-channel spin vertex (which already contains the PAW
-  ``ddd_paw`` one-center splitting). For v1.0/v1.1 dumps ``hij`` falls back
-  to the covariant separable operator ``deeq(up) - deeq(down)`` per
-  atom block, converted from Ry to eV together with the eigenvalues and Fermi
-  energies (factor 13.605693122994); coefficients are dimensionless;
+  ``ddd_paw`` one-center splitting). Earlier v1.0/v1.1 dumps are readable
+  for diagnostics, but their ``deeq``-only vertex failed the bccFe
+  exchange gate and ``qe2J.py`` rejects them for exchange. Energies and
+  Fermi levels are converted from Ry to eV (factor 13.605693122994);
+  coefficients are dimensionless;
 * each k-point is assigned to its spin channel via ``isk``;
 * provenance metadata is set to ``hij_definition =
   "qe_dbeta_xc_plus_deeq_spin_difference"`` (v1.2) or
