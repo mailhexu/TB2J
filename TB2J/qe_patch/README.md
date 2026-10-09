@@ -159,3 +159,21 @@ implemented in `TB2J/interfaces/qe_projector.py` (raw parser
 `parse_qe_dump` → `QEProjectorDump`) with normalization in
 `TB2J.interfaces.qe_projector.read_qe_dump` → `ProjectorGreenData`. The CLI is
 `TB2J/scripts/qe2J.py`.
+
+## Known quirks
+
+- Pure-NC nscf runs with random starting wavefunctions can abort in
+  `cdiaghg` ("S matrix not positive definite") with Davidson on some
+  ONCV setups; use `diagonalization = 'cg'` and
+  `startingwfc = 'atomic+random'` for the nscf step (validated:
+  `Fe_ONCV_PBE-1.0.upf`, bccFe).
+- `becsum` is zero-filled in NC-only runs (no augmentation charges); the
+  occupation-parity diagnostic applies to US/PAW dumps only.
+
+## Family support (validated on bccFe, dump v1.2 vertex)
+
+| Family | bccFe J1 (meV) | Status |
+|--------|----------------|--------|
+| PAW (`kjpaw`) | 14.76 | validated (GPAW reference 14.73) |
+| NC (ONCV) | 15.22 | validated |
+| US (`rrkjus`) | 16.15 (20^3) | validated (within cross-code spread) |

@@ -357,13 +357,19 @@ def parse_qe_dump(path) -> QEProjectorDump:
         nh = np.array(chunks["nh"], dtype=int)
         tvanp = np.array(chunks["tvanp"], dtype=int) != 0
         tpawp = np.array(chunks["tpawp"], dtype=int) != 0
-        if not (tvanp.any() or tpawp.any()):
-            raise ValueError(
-                f"QE dump {path}: no ultrasoft (US) or PAW species present; "
-                "NC+KB excluded: separable beta spin vertex vanishes "
-                "(deeq=dvan, Δ≡0); see research "
-                "2026-10-08-qe-export-surface-and-operators"
-            )
+        if version == "1.0" or version == "1.1":
+            # v1.2 carries the beta-projected dbeta_xc vertex which lifts the
+            # historical NC+KB blocker; older dumps only have the deeq-only
+            # vertex, which vanishes for NC (deeq = dvan, spin-independent).
+            if not (tvanp.any() or tpawp.any()):
+                raise ValueError(
+                    f"QE dump {path}: no ultrasoft (US) or PAW species "
+                    "present and no v1.2 dbeta_xc vertex record; NC+KB "
+                    "rejected for this dump version: deeq-only separable "
+                    "beta spin vertex vanishes (deeq=dvan, Δ≡0); provide a "
+                    "v1.2 dump or see research "
+                    "2026-10-08-qe-export-surface-and-operators"
+                )
         if nh.min() < 0:
             raise ValueError(f"QE dump {path}: negative nh entries {nh.tolist()}")
         if nh.max() > nhm:
@@ -720,6 +726,12 @@ def read_qe_dump(path) -> ProjectorGreenData:
             "v1.1 becsum: scf dumps hold converged sum_band occupations; "
             "nscf dumps hold hinit1 scf-mesh restart occupations, not "
             "dense-mesh weights"
+            + (
+                "; NC-only runs: becsum is zero-filled (no augmentation "
+                "charges) and is not an occupation-parity reference"
+                if not (dump.tvanp.any() or dump.tpawp.any())
+                else ""
+            )
         ),
     }
 

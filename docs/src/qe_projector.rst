@@ -163,21 +163,19 @@ Family support
    * - Family
      - Status
      - Notes
-   * - US (± KB)
-     - gated
-     - Supported code path; end-to-end validation is gated on the Fe US
-       golden-dump case.
-   * - PAW
-     - gated
-     - Supported code path; end-to-end validation is gated on the Cu PAW
-       golden-dump case.
-   * - NC (+ KB)
-     - excluded
-     - Blocker: without augmentation charges the separable operator reduces
-       to the spin-independent ``dvan``, so the spin vertex
-       :math:`\Delta = deeq_{\uparrow}-deeq_{\downarrow}\equiv 0` and the
-       exchange trace is identically zero. Use a Wannier-based interface
-       instead.
+   * - US (rrkjus)
+     - validated
+     - bccFe J1 = 16.15 meV at 20^3 full BZ, cutoff-insensitive 60-100 Ry
+       (GPAW reference 14.73 meV; within the cross-code spread).
+   * - PAW (kjpaw)
+     - validated
+     - bccFe J1 = 14.76 meV vs GPAW 14.73 meV (0.2%).
+   * - NC (+ KB, e.g. ONCV)
+     - validated
+     - bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons) J1 = 15.22 meV.
+       The historical ``deeq``-only :math:`\Delta \equiv 0` blocker is lifted
+       by the v1.2 ``dbeta_xc`` vertex; ``becsum`` is zero-filled in NC-only
+       runs and is not an occupation-parity reference.
 
 Limitations
 -----------
