@@ -120,8 +120,10 @@ vertex is `M^-1 dbeta_xc M^-1 + (deeq_up − deeq_dn)` (M = beta Gram record:
 joint metric transformation; the deeq term already contains the PAW `ddd_paw`
 splitting). The deeq-only vertex was falsified by the bccFe G3 gate.
 The TB2J reader rejects unknown magic/version strings, non-LSDA dumps
-(`nspin != 2`), pool-parallel dumps (`nkstot != nks`), dumps without any US or
-PAW species, and any record-length/shape mismatch.
+(`nspin != 2`), pool-parallel dumps (`nkstot != nks`), incompatible
+family/version combinations, and record-length/shape mismatches.
+Pre-v1.2 KB dumps can be inspected but are refused for exchange because
+the deeq-only vertex failed bccFe G3.
 
 ### Semantics and caveats
 
