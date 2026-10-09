@@ -30,6 +30,7 @@ Welcome to TB2J's documentation!
    src/magnon_theory.md
    src/magnon_band.rst
    src/projector_green.rst
+   src/qe_projector.rst
    src/split_soc_gpaw.rst
    src/split_soc_abinit_paw.rst
    src/split_soc_abinit_nc.rst

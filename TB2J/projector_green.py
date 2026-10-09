@@ -26,6 +26,8 @@ SUPPORTED_HIJ_EXCHANGE_DEFINITIONS = (
     "spin-dependent projector hamiltonian matrix",
     "spin-dependent projector potential matrix",
     "spinor 2x2 local operator (j-averaged basis)",
+    "qe_deeq_spin_difference",
+    "qe_dbeta_xc_plus_deeq_spin_difference",
 )
 SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
 PAULI_IDENTITY_AND_MATRICES = (
