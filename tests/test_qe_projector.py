@@ -504,6 +504,64 @@ def test_parse_v12_records():
     assert dump.ddd_paw is None  # US-only synthetic: no PAW record
 
 
+def test_nc_v12_accepted_vertex_is_conjugated_dbeta_only():
+    p = "/tmp/qe_nc_v12_synth.bin"
+    gt = write_qe_dump(
+        p,
+        magic=MAGIC_V12,
+        nspin=2,
+        nat=3,
+        nsp=1,
+        nhm=3,
+        atm=(b"Fe",),
+        ityp=(1, 1, 1),
+        nh=(3,),
+        tvanp=(0,),
+        tpawp=(0,),
+        include_becsum=True,
+        include_rho_bec=False,
+        include_dbeta_xc=True,
+        include_ddd_paw=False,
+    )
+    dump = parse_qe_dump(p)
+    assert dump.version == "1.2"
+    assert not dump.tvanp.any() and not dump.tpawp.any()
+    data = read_qe_dump(p)
+    data.validate(exchange_ready=True)
+    assert data.hij_definition == "qe_dbeta_xc_plus_deeq_spin_difference"
+    gram = np.asarray(gt.gram[:3, :3, 0])
+    expected = (
+        np.linalg.inv(gram) @ (gt.dbeta_xc[:3, :3, 0] * RYTOEV) @ np.linalg.inv(gram)
+        + (gt.deeq[:3, :3, 0, 0] - gt.deeq[:3, :3, 0, 1]) * RYTOEV
+    )
+    np.testing.assert_allclose(
+        np.asarray(data.get_operator_component("delta_total", site=0)),
+        expected,
+        rtol=1e-10,
+        atol=1e-12,
+    )
+    assert "zero-filled" in data.metadata["becsum_note"]
+
+
+def test_nc_v11_still_rejected_with_blocker():
+    p = "/tmp/qe_nc_v11_synth.bin"
+    with pytest.raises(ValueError, match="NC\+KB rejected"):
+        write_qe_dump(
+            p,
+            magic=MAGIC_V11,
+            nat=3,
+            nsp=1,
+            nhm=3,
+            atm=(b"Fe",),
+            ityp=(1, 1, 1),
+            nh=(3,),
+            tvanp=(0,),
+            tpawp=(0,),
+            include_becsum=True,
+        )
+        parse_qe_dump(p)
+
+
 def test_v12_delta_total_is_conjugated_vertex():
     p = "/tmp/qe_v12b_synth.bin"
     gt = write_qe_dump(p, magic=MAGIC_V12, include_dbeta_xc=True)

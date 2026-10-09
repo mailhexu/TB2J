@@ -10,9 +10,9 @@ These are the new features and changes  not yet included in the official release
   (``becp``/``deeq``/occupations plus the beta-projected spin-dependent
   xc potential, dump v1.2); ``TB2J.interfaces.qe_projector`` reads it
   into the shared projector Green workflow and the new ``qe2J.py`` CLI
-  computes exchange. Collinear US and PAW families validated on bcc Fe:
-  PAW J1 = 14.76 meV and US J1 = 16.15 meV vs the GPAW reference
-  14.73 meV. See ``docs/src/qe_projector.rst``.
+  computes exchange. Collinear US, PAW, and NC families validated on bcc Fe:
+  PAW J1 = 14.76 meV, NC (ONCV) J1 = 15.22 meV, and US J1 = 16.15 meV
+  vs the GPAW reference 14.73 meV. See ``docs/src/qe_projector.rst``.
 - The projector Green-function backend now prepares each k-point channel filter
   (overlap inverse, SVD truncation, Loewdin pairing, or Tikhonov damping) once per
   fixed configuration and reuses it across energies and spins, shared between the
