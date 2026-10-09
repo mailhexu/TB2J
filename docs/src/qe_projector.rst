@@ -1,17 +1,17 @@
 Quantum ESPRESSO projector-Green exchange
 =========================================
 
-TB2J can compute magnetic exchange from Quantum ESPRESSO (QE) ultrasoft (US)
-and PAW calculations through the projector-Green workflow. An instrumented QE
-build writes all spectral ingredients — projector coefficients
-:math:`P_{ni}=\langle\beta_n|\psi_{i}\rangle`, eigenvalues, occupations,
-k-points and the spin-split augmentation operator — into a single binary dump
+TB2J computes magnetic exchange from Quantum ESPRESSO (QE) collinear
+calculations using either separable KB beta channels (the default) or UPF
+atomic-wavefunction channels (``TB2J_PROJECTORS=atomic``). An instrumented QE
+build writes coefficients, eigenvalues, occupations, k-points and the
+spin-split projector operator into a versioned binary dump
 file at the end of a run. TB2J reads that dump into
 :class:`~TB2J.projector_green.ProjectorGreenData`, reconstructs
 :math:`G(R,E)` at runtime and traces the projector Green function into the
 standard ``exchange.out`` output.
 
-The dump format and the instrumented-build workflow are documented in
+The dump formats and instrumented-build workflow are documented in
 ``TB2J/qe_patch/README.md`` in the TB2J source tree.
 
 Prerequisites
@@ -31,8 +31,8 @@ Prerequisites
   TB2J reader (``nkstot != nks``).
 * **Collinear LSDA**: ``nspin = 2``. Noncollinear and spin-orbit runs are
   rejected; gamma-only runs are rejected as well.
-* **US or PAW pseudopotentials**: pure norm-conserving pseudopotentials
-  cannot be exported (see the support table below).
+* **Pseudopotential support depends on projector mode**: KB accepts NC, US,
+  and PAW; atomic mode requires ``PP_PSWFC`` atomic wavefunctions in every UPF.
 
 Workflow: scf + nscf with ``TB2J_DUMP``
 ---------------------------------------
@@ -68,8 +68,8 @@ diagnostics: the ``becsum`` record of an nscf dump holds restart occupations
 from the scf mesh, not dense-mesh weights (details in
 ``TB2J/qe_patch/README.md``).
 
-Reading a dump
---------------
+Reading a KB dump
+-----------------
 
 The raw parser lives in ``TB2J.interfaces.qe_projector``:
 
@@ -123,6 +123,32 @@ belongs to the wavefunction overlap operator
 :math:`S_\psi=I+\beta q_{at}\beta^\dagger`, **not** to the projector channel,
 and is never used as a channel metric.
 
+Atomic-wavefunction dumps
+-------------------------
+
+Select ``TB2J_PROJECTORS=atomic`` alongside ``TB2J_DUMP`` for both runs.
+QE constructs pseudo-atomic orbitals from each UPF's ``PP_PSWFC`` block;
+an UPF without atomic wavefunctions (including the tested SG15
+``Fe_ONCV_PBE-1.0.upf``) is rejected. The distinct
+``TB2JQEATWFC1.0`` format stores primal
+:math:`C_{ni}(k)=\langle\phi_n(k)|\psi_i(k)\rangle` and the full
+k-dependent Gram :math:`M_{nm}(k)=\langle\phi_n(k)|\phi_m(k)\rangle`,
+including intersite blocks. The onsite spin vertex is the full-BZ
+weighted :math:`R=0` projection of the smooth XC difference plus
+:math:`B(k)(D^\uparrow-D^\downarrow)B(k)^\dagger`, with
+:math:`B_{na}(k)=\langle\phi_n(k)|\beta_a(k)\rangle`. Keeping only the
+first (often Γ) point would fold neighboring periodic images into the
+onsite operator. The reader uses the same atomic basis for the coefficients,
+metric and vertex, converting Ry to eV; no KB-channel metric is applied.
+
+Use ``parse_qe_atomic_dump`` for raw records or ``read_qe_atomic_dump`` for
+normalized :class:`~TB2J.projector_green.ProjectorGreenData`. The CLI
+detects the format by magic. Atomic mode defaults to the full inverse of
+:math:`M(k)`; ``--overlap_mode`` selects ``inverse``, ``svd``,
+``lowdin``, ``tikhonov`` or ``plain`` and ``--overlap_rcond`` controls
+regularized modes. These flags are rejected for KB dumps, whose coefficients
+are already dual and need no channel metric.
+
 CLI usage
 ---------
 
@@ -130,33 +156,18 @@ CLI usage
 
 .. code-block:: bash
 
-   qe2J.py nscf_dump.bin --sites Fe -o TB2J_results_fe --nz 30
+   qe2J.py --input nscf_dump.bin --output_path TB2J_results_fe --elements Fe --Rcut 6 --nz 30
+   qe2J.py --input atomic_nscf.bin --output_path TB2J_results_atomic --elements Fe --Rcut 6 --overlap_mode inverse
 
-.. list-table:: Options
-   :header-rows: 1
-   :widths: 26 74
+``--index_magnetic_atoms`` accepts 1-based atom indices instead of
+``--elements``; ``--smearing`` is the contour smearing in eV (default
+0.05). See ``examples/qe/feo/`` for reproducible FeO US and PAW KB
+input decks and measured shell exchange.
 
-   * - Argument
-     - Meaning
-   * - ``dump`` (positional)
-     - Path to the nscf dump written with ``TB2J_DUMP``.
-   * - ``--sites``
-     - Element symbols selecting the magnetic sites that carry the spin
-       vertex (same semantics as ``--elements`` in the sibling CLIs).
-   * - ``-o``
-     - Output directory for the TB2J results (``exchange.out``, ``TB2J.pickle``).
-   * - ``--nz``
-     - Number of continued-fraction poles for the contour integration.
+KB family support
+-----------------
 
-``--overlap_mode`` and ``--overlap_rcond`` are deliberately **absent**. Those
-options exist for exporters whose coefficients are non-orthogonal; the QE
-``becp`` coefficients are already dual to the beta basis, so an overlap
-correction would be a no-op and offering it would invite silent misuse.
-
-Family support
---------------
-
-.. list-table:: Pseudopotential-family support
+.. list-table:: KB pseudopotential-family support
    :header-rows: 1
    :widths: 22 18 60
 
@@ -177,6 +188,16 @@ Family support
        by the v1.2 ``dbeta_xc`` vertex; ``becsum`` is zero-filled in NC-only
        runs and is not an occupation-parity reference.
 
+The optional atomic basis is **not validated as a quantitative
+replacement** by these KB comparisons. In matched bccFe UPF/12³ runs,
+atomic versus KB :math:`J_1` is PAW 20.4267 versus 14.7601 meV, US
+24.3862 versus 17.6958 meV, and NC with ``PP_PSWFC`` 24.5939 versus
+10.0730 meV. The latter UPF differs from the no-atomic-wavefunction
+ONCV one used in the KB table. A weighted :math:`R=0` atomic vertex
+removes a first-Γ periodic-image artifact but does not make the finite
+atomic and KB subspaces interchangeable. See the detailed comparison
+in ``TB2J/qe_patch/README.md``.
+
 Limitations
 -----------
 
@@ -188,5 +209,5 @@ Limitations
   compilers' unformatted ABI.
 * The full Brillouin zone must be present in the nscf run
   (``nosym = .true., noinv = .true.``).
-* ``becsum`` in nscf dumps carries scf-mesh restart occupations, not
+* ``becsum`` in KB nscf dumps carries scf-mesh restart occupations, not
   dense-mesh weights; occupation-based diagnostics must use scf dumps.

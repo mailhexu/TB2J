@@ -9,12 +9,12 @@ check out the branch, and build `pw.x` as usual.
 
 The exporter adds one file, `PW/src/becp_dump.f90`, plus small hooks in
 `electrons.f90` and `non_scf.f90` (and the corresponding source-list
-registrations). It writes no physics changes: at the end of a converged run it
-recomputes the ultrasoft/PAW projector coefficients
-`becp%k(nkb, nbnd)` for every k-point from the stored wavefunctions (the
-`pw2wannier90` pattern: `get_buffer` → `init_us_2` → explicit
-`P_ni = sum_G vkb_i^* evc_n`) and dumps them with all metadata needed by TB2J
-into one sequential-unformatted binary file.
+registrations). When enabled, it recomputes the selected projector
+coefficients for every k-point from stored wavefunctions. The default
+`TB2J_PROJECTORS=kb` exports `<beta|psi>` (the `pw2wannier90` pattern:
+`get_buffer` → `init_us_2` → explicit plane-wave dot product);
+`TB2J_PROJECTORS=atomic` exports `<atomic_wfc|psi>` and the full atomic
+Gram matrix at every k. The dump includes the metadata needed by TB2J.
 
 ## 1. Obtaining and building
 
@@ -32,9 +32,10 @@ section below), so use the gfortran-built binary that `make pw` produces.
 
 ## 2. Running: scf + nscf with `TB2J_DUMP`
 
-The dump is enabled purely through the environment variable `TB2J_DUMP` — no
-change to the QE input files is required. When the variable is unset the hook
-is a no-op.
+The dump is enabled with `TB2J_DUMP`; with this variable unset the hook is
+a no-op. Select `TB2J_PROJECTORS=atomic` for UPF atomic wavefunctions;
+unset it (or set `kb`) for the default KB beta channels. Use a different
+dump filename for each run and mode.
 
 Constraints enforced at dump time (`errore` aborts):
 
@@ -45,9 +46,8 @@ Constraints enforced at dump time (`errore` aborts):
   k-point mesh.
 * The run must be converged; the dump is written once, on the ionode, after
   the electronic loop finishes.
-* US **or** PAW species must be present (see the family support table in
-  `docs/src/qe_projector.rst`; pure NC pseudopotentials cannot be exported —
-  the separable beta spin vertex vanishes identically).
+* For atomic mode, every UPF must provide `PP_PSWFC` atomic wavefunctions;
+  the exporter rejects a species with none. KB mode supports NC, US and PAW.
 
 Recommended workflow — scf with the production mesh, then nscf on a denser
 mesh, each with its **own** dump filename:
@@ -99,7 +99,7 @@ for v1.2 (v1.1 = v1.2 minus `dbeta_xc`/`ddd_paw`; v1.0 = v1.1 minus `becsum`/`rh
 | 0 | magic + dims | `S16` magic (`'TB2JQEDUMPV1.2 '`, `'TB2JQEDUMPV1.1 '`, or `'TB2JQEDUMPV1   '`), then `i4 × 9`: `nspin, nks, nkstot, nbnd, nat, nsp, nhm, lmaxkb, nkb` |
 | 1 | Fermi/smearing | `f8 × 5`: `nelec, ef, ef_up, ef_dw, degauss`; then `i4 × 3`: `ngauss, ltetra, lgauss` (logicals as 0/1) |
 | 2 | cell | `f8`: `at(3,3), bg(3,3), alat, omega`; then `i4`: `ibrav` |
-| 3 | species labels | `S3 × nsp` (`atm`) |
+| 3 | species labels | QE `atm` fixed-capacity record (6-byte blank-padded labels in this fork; reader also accepts legacy `S3 × nsp`) |
 | 4 | ions | `i4 × nat` (`ityp`), `f8(3,nat)` (`tau`, cartesian, units of alat) |
 | 5 | projector metadata | `i4 × nsp` (`nh`), `i4 × nsp` (tvanp flags), `i4 × nsp` (tpawp flags) |
 | 6 | `deeq` | `f8(nhm,nhm,nat,nspin)` |
@@ -140,10 +140,10 @@ PAW species, and any record-length/shape mismatch.
   projector channel. Do not treat `qq_at` (or the record-9 Gram diagnostic)
   as a metric to dress the Green function; the dual coefficients already
   produce the dual-dual Green matrix.
-* **Operator and units.** The spin vertex is `hij = deeq(up) - deeq(down)`
-  per atom block; `deeq`, `dvan`, `et` and `ef` are in Ry and are converted
-  to eV by the reader with `RYTOEV = 13.605693122994`. Coefficients are
-  dimensionless.
+* **Operator and units.** In v1.2 the vertex is the joint-metric-dressed
+  smooth-XC splitting plus `deeq(up) - deeq(down)`; v1.0/v1.1 use the
+  `deeq` difference alone. Energies and operators are in Ry, converted
+  to eV by the reader with `RYTOEV = 13.605693122994`.
 * **Spin selection.** LSDA (`nspin = 2`): every k belongs to one spin channel
   via `isk` (1 = up, 2 = down).
 * **`becsum` scf-vs-nscf caveat.** In a v1.1 dump, scf dumps hold the
@@ -152,13 +152,82 @@ PAW species, and any record-length/shape mismatch.
   weights. Any occupation-based parity check (G2) must therefore use **scf**
   dumps; that is why the workflow above keeps `scf_dump.bin` around.
 
-## 4. Reading the dump with TB2J
+## 4. Atomic-wavefunction dump v1.0
 
-The Python side is documented in `docs/src/qe_projector.rst` (user guide) and
-implemented in `TB2J/interfaces/qe_projector.py` (raw parser
-`parse_qe_dump` → `QEProjectorDump`) with normalization in
-`TB2J.interfaces.qe_projector.read_qe_dump` → `ProjectorGreenData`. The CLI is
-`TB2J/scripts/qe2J.py`.
+Set `TB2J_PROJECTORS=atomic` and `TB2J_DUMP=atomic_nscf.bin` when
+running `pw.x`. QE `atomic_wfc` constructs Bloch-summed pseudo-atomic
+orbitals from the UPF `PP_PSWFC` block; this is a different **basis and
+binary schema** from KB mode. The tested SG15 `Fe_ONCV_PBE-1.0.upf`
+contains no atomic wavefunctions and is rejected; an NC UPF with
+`PP_PSWFC` is required. The reader auto-detects the magic.
+
+The magic is `TB2JQEATWFC1.0` (`S16` padded). Like the KB dump, records
+use gfortran sequential unformatted 4-byte little-endian markers and
+Fortran-ordered arrays. Atomic records are:
+
+| # | Content | Layout |
+|---|---------|--------|
+| 0 | header | `S16` magic; `i4 × 8`: `nspin,nks,nkstot,nbnd,nat,nsp,nproj,max_nsite` |
+| 1 | Fermi/smearing | `f8 × 5`: `nelec,ef,ef_up,ef_dw,degauss`; `i4 × 3`: `ngauss,ltetra,lgauss` |
+| 2 | cell | `f8`: `at(3,3),bg(3,3),alat,omega`; `i4`: `ibrav` |
+| 3 | species labels | QE fixed-capacity `CHARACTER(LEN=6)` labels |
+| 4 | ions | `i4(nat)` `ityp`; `f8(3,nat)` `tau` |
+| 5 | channels | `i4(nsp)` `nsite_species`; `i4(nproj)` each `projector_l,m_ordinal,radial_upf_index` |
+| 6 | k mesh | `f8(3,nks)` `xk`, `f8(nks)` `wk`, `i4(nks)` `isk` |
+| 7 | bands | `f8(nbnd,nks)` `et,wg` |
+| `8+2*ik` | k-point primal coefficients | `c16(nproj,nbnd)` `C=<atomic_wfc(k)|psi(k)>`, `ik=0…nks-1` |
+| `9+2*ik` | k-point full Gram | `c16(nproj,nproj)` `M=<atomic_wfc(k)|atomic_wfc(k)>` |
+| `8+2*nks` | onsite smooth XC | `c16(max_nsite,max_nsite,nat)` `cov_xc` (Ry) |
+| `9+2*nks` | onsite augmentation | same shape `cov_aug` (Ry) |
+
+Channels are ordered by atom, UPF atomic radial orbital, then QE real
+spherical-harmonic ordinal. `nsite_species` counts atomic orbitals only,
+not KB beta channels. `M(k)` includes intersite blocks; the coefficients
+are **primal**, so the TB2J projector-Green runtime applies its
+k-dependent inverse (or selected regularization). The covariant onsite
+vertex is `cov_xc + cov_aug`: the weighted full-BZ (up-spin copy only)
+`R=0` average of `<atomic(k)|Vxc_up−Vxc_dn|atomic(k)>` and
+`B(k)(deeq_up−deeq_dn)B(k)†`, with `B=<atomic(k)|beta(k)>`.
+Taking only the first, often Γ, point folds neighboring periodic images
+into the onsite operator. `cov_aug` is zero for NC; the format has no
+`becsum` or separate `deeq` record. Both operators are converted
+from Ry to eV by TB2J.
+
+`qe2J.py --input atomic_nscf.bin --output_path TB2J_atomic --elements Fe`
+uses a full inverse by default; atomic dumps alone accept
+`--overlap_mode {inverse,svd,lowdin,tikhonov,plain}` and
+`--overlap_rcond`. Passing these controls to a KB dump raises an error.
+See `docs/src/qe_projector.rst` for the CLI and
+`examples/qe/feo/` for reproducible two-atom US/PAW KB input decks.
+
+### bccFe atomic-basis validation boundary
+
+With a weighted full-BZ `R=0` vertex and an unregularized full `M(k)`
+inverse, the optional atomic basis remains **unvalidated** quantitatively
+on bccFe. Matched calculations use the same UPF within each row, 24 bands
+and a full-BZ 12³ mesh; US/PAW use 60 Ry and NC uses 100 Ry:
+
+| Fe UPF | KB `J1` (meV) | Atomic `J1` (meV) |
+|---|---:|---:|
+| PAW (`kjpaw`) | 14.7601 | 20.4267 |
+| US (`rrkjus`) | 17.6958 | 24.3862 |
+| NC (with `PP_PSWFC`) | 10.0730 | 24.5939 |
+
+The NC UPF here (`Fe_NC_PAO.upf`) is **not** the atomic-wavefunction-free
+SG15 ONCV UPF giving KB 15.22 meV below. An earlier first-Γ vertex gave
+PAW 26.2341 meV: averaging removes that periodic-image artifact but
+does not make the atomic and KB subspaces equivalent. These discrepancies
+are not corrected with a fitted scale or overlap cutoff. The selectable
+atomic mode is a research comparison surface, not a validated replacement
+for the KB exchange numbers in the following table.
+
+## 5. Reading the dump with TB2J
+
+The Python side is documented in `docs/src/qe_projector.rst`. The
+mode-specific raw parsers `parse_qe_dump` and `parse_qe_atomic_dump` and
+normalized readers `read_qe_dump` and `read_qe_atomic_dump` live in
+`TB2J/interfaces/qe_projector.py`. Both readers produce
+`ProjectorGreenData`; `TB2J/scripts/qe2J.py` auto-detects the file magic.
 
 ## Known quirks
 
@@ -170,7 +239,7 @@ implemented in `TB2J/interfaces/qe_projector.py` (raw parser
 - `becsum` is zero-filled in NC-only runs (no augmentation charges); the
   occupation-parity diagnostic applies to US/PAW dumps only.
 
-## Family support (validated on bccFe, dump v1.2 vertex)
+## KB family support (validated on bccFe, dump v1.2 vertex)
 
 | Family | bccFe J1 (meV) | Status |
 |--------|----------------|--------|
