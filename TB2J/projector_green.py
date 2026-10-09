@@ -28,6 +28,7 @@ SUPPORTED_HIJ_EXCHANGE_DEFINITIONS = (
     "spinor 2x2 local operator (j-averaged basis)",
     "qe_deeq_spin_difference",
     "qe_dbeta_xc_plus_deeq_spin_difference",
+    "qe_atomic_pao_projected_spin_vertex",
 )
 SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
 PAULI_IDENTITY_AND_MATRICES = (

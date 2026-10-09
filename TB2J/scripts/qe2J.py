@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for TB2J exchange calculations from a QE becp_dump file."""
+"""CLI for TB2J exchange calculations from a QE projector dump file."""
 
 from __future__ import annotations
 
@@ -14,10 +14,13 @@ def run_qe2J():
     parser = argparse.ArgumentParser(
         description=(
             "Calculate TB2J-style exchange parameters from a Quantum "
-            "ESPRESSO becp_dump file (QE fork branch TB2J, dump v1/v1.1)."
+            "ESPRESSO projector dump file (QE fork branch TB2J). Supports "
+            "KB/beta becp dumps (TB2JQEDUMPV1*) and atomic-wavefunction "
+            "dumps (TB2JQEATWFC1.0, TB2J_PROJECTORS=atomic); the family is "
+            "detected from the file magic."
         )
     )
-    parser.add_argument("--input", required=True, help="QE becp_dump file")
+    parser.add_argument("--input", required=True, help="QE projector dump file")
     parser.add_argument(
         "--output_path", default="TB2J_results_qe", help="output directory"
     )
@@ -49,6 +52,25 @@ def run_qe2J():
         default=None,
         help="1-based magnetic atom indices to include",
     )
+    parser.add_argument(
+        "--overlap_mode",
+        default=None,
+        choices=["inverse", "svd", "lowdin", "tikhonov", "plain"],
+        help=(
+            "how the runtime dresses primal atomic coefficients with the "
+            "k-dependent M(k)^-1 overlap (atomic-wavefunction dumps only; "
+            "default inverse)"
+        ),
+    )
+    parser.add_argument(
+        "--overlap_rcond",
+        type=float,
+        default=None,
+        help=(
+            "cutoff for small singular values of M(k) in svd/lowdin/"
+            "tikhonov overlap modes (atomic-wavefunction dumps only)"
+        ),
+    )
     args = parser.parse_args()
     indices = None
     if args.index_magnetic_atoms is not None:
@@ -61,6 +83,8 @@ def run_qe2J():
         smearing_eV=args.smearing,
         magnetic_elements=args.elements,
         index_magnetic_atoms=indices,
+        overlap_mode=args.overlap_mode,
+        overlap_rcond=args.overlap_rcond,
     )
     print(f"Wrote {exchange_out}")
 
