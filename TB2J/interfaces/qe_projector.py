@@ -661,9 +661,12 @@ def read_qe_dump(path) -> ProjectorGreenData:
         hij_definition = "qe_deeq_spin_difference"
         delta_definition = (
             "QE deeq spin difference (deeq_up - deeq_dn), the covariant "
-            "separable beta spin vertex of V_NL = beta D beta^dagger"
+            "separable beta spin vertex of V_NL = beta D beta^dagger. "
+            "FALSIFIED as an exchange vertex by the bccFe G3 gate "
+            "(J1 ~2.6x low): deeq carries only the augmentation-channel "
+            "spin term. Provide a v1.2 dump (dbeta_xc record) for exchange."
         )
-        delta_completeness = "partial_augmentation_channel_only"
+        delta_completeness = "partial_augmentation_channel_only_falsified"
     operator_component_metadata = {
         "delta_total": {
             "units": "eV",
@@ -672,7 +675,7 @@ def read_qe_dump(path) -> ProjectorGreenData:
             "source": HIJ_SOURCE,
             "operator_basis": OPERATOR_BASIS,
             "completeness": delta_completeness,
-            "exchange_ready": "true",
+            "exchange_ready": ("true" if dump.dbeta_xc is not None else "false"),
         }
     }
 

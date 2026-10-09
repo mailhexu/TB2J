@@ -523,10 +523,21 @@ def test_v12_delta_total_is_conjugated_vertex():
     np.testing.assert_allclose(np.asarray(delta), expected, rtol=1e-10, atol=1e-12)
 
 
-def test_v11_delta_total_remains_deeq_difference():
+def test_v11_delta_total_remains_deeq_difference_but_not_exchange_ready():
     p = "/tmp/qe_v11_synth.bin"
     gt = write_qe_dump(p, magic=MAGIC_V11)
     data = read_qe_dump(p)
+    meta = data.operator_component_metadata["delta_total"]
+    assert meta["exchange_ready"] == "false"
+    assert "FALSIFIED" in meta["definition"]
+    from TB2J.interfaces.gpaw_projector import component_local_operators
+
+    try:
+        component_local_operators(data, "delta_total", [0], "test")
+    except ValueError as exc:
+        assert "not exchange-ready" in str(exc)
+    else:
+        raise AssertionError("v1.1 deeq-only vertex must not be exchange-ready")
     delta = data.get_operator_component("delta_total", site=0)
     nh0 = int(gt.nh[gt.ityp[0] - 1])
     expected = (gt.deeq[:nh0, :nh0, 0, 0] - gt.deeq[:nh0, :nh0, 0, 1]) * RYTOEV
@@ -553,6 +564,12 @@ def _check_golden_v11(name, *, expect_rho_bec):
 
     data = read_qe_dump(path)
     data.validate(exchange_ready=True)
+    # v1.1 dumps are parseable but their deeq-only vertex is falsified as
+    # an exchange vertex (metadata-marked); only v1.2 is exchange-ready.
+    if dump.version == "1.1":
+        assert (
+            data.operator_component_metadata["delta_total"]["exchange_ready"] == "false"
+        )
     assert data.nproj == dump.nkb
     assert data.nkpt == dump.nks // 2  # dense spin-degenerate fold
     assert np.isfinite(data.kpoints).all()
