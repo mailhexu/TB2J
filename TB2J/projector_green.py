@@ -31,6 +31,9 @@ SUPPORTED_HIJ_EXCHANGE_DEFINITIONS = (
     "qe_atomic_pao_projected_spin_vertex",
 )
 SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
+#: Exact definition marker for explicit frozen-source tangent vertices
+#: (QE NC1.1 native source response); ``dH_mag/dtheta`` in eV.
+SPINOR_TANGENT_DEFINITION = "qe_nc11_frozen_source_tangent"
 PAULI_IDENTITY_AND_MATRICES = (
     np.eye(2, dtype=complex),
     np.array([[0, 1], [1, 0]], dtype=complex),
@@ -234,6 +237,8 @@ class ProjectorGreenData:
     nspinor: int = 1
     spinor_operator: np.ndarray | None = None
     spinor_operator_definition: str | None = None
+    spinor_tangent_vertices: np.ndarray | None = None
+    spinor_tangent_definition: str | None = None
 
     def __post_init__(self):
         self.kpoints = np.asarray(self.kpoints, dtype=float)
@@ -254,6 +259,10 @@ class ProjectorGreenData:
             raise ValueError("nspinor must be 1 or 2")
         if self.spinor_operator is not None:
             self.spinor_operator = np.asarray(self.spinor_operator, dtype=complex)
+        if self.spinor_tangent_vertices is not None:
+            self.spinor_tangent_vertices = np.asarray(
+                self.spinor_tangent_vertices, dtype=complex
+            )
 
         if self.cell is not None:
             self.cell = np.asarray(self.cell, dtype=float)
@@ -437,6 +446,16 @@ class ProjectorGreenData:
             self._validate_operator_components()
         if self.spinor_operator is not None:
             self._validate_spinor_operator()
+        if self.spinor_tangent_vertices is not None:
+            self._validate_spinor_tangent_vertices()
+        if (
+            str(self.metadata.get("qe_magic", "")).startswith("TB2JQEDUMPNC1.1")
+            and self.spinor_tangent_vertices is None
+        ):
+            raise ValueError(
+                "QE NC1.1 dataset requires explicit spinor_tangent_vertices; "
+                "refusing silent magnetic_tangent_vertices commutator fallback"
+            )
         if (
             exchange_ready
             and self.spinor_operator is None
@@ -511,6 +530,41 @@ class ProjectorGreenData:
             raise ValueError(
                 "spinor_operator nproj_site_max is smaller than site_nproj"
             )
+
+    def _validate_spinor_tangent_vertices(self):
+        if self.nspinor != 2:
+            raise ValueError("spinor_tangent_vertices requires nspinor=2")
+        if self.spinor_tangent_definition != SPINOR_TANGENT_DEFINITION:
+            raise ValueError(
+                "unsupported spinor_tangent_definition: "
+                f"{self.spinor_tangent_definition!r}"
+            )
+        if self.spinor_operator is None:
+            raise ValueError(
+                "spinor_tangent_vertices requires spinor_operator for the "
+                "local Pauli-trace direction"
+            )
+        if self.site_nproj is None or self.site_projector_indices is None:
+            raise ValueError(
+                "spinor_tangent_vertices requires site_nproj and "
+                "site_projector_indices"
+            )
+        if (
+            self.spinor_tangent_vertices.ndim != 6
+            or self.spinor_tangent_vertices.shape[0] != self.site_nproj.shape[0]
+            or self.spinor_tangent_vertices.shape[1] != 3
+            or self.spinor_tangent_vertices.shape[2]
+            != self.spinor_tangent_vertices.shape[3]
+            or self.spinor_tangent_vertices.shape[4:] != (2, 2)
+            or self.spinor_tangent_vertices.shape[2] != self.spinor_operator.shape[1]
+        ):
+            raise ValueError(
+                "spinor_tangent_vertices must have shape "
+                "(nsite, 3, nproj_site_max, nproj_site_max, 2, 2) matching "
+                "spinor_operator"
+            )
+        if not np.all(np.isfinite(self.spinor_tangent_vertices)):
+            raise ValueError("spinor_tangent_vertices contains nonfinite values")
 
     def _validate_operator_components(self):
         if self.site_nproj is None or self.site_projector_indices is None:
@@ -787,6 +841,25 @@ class ProjectorGreenData:
                 spin.definition = self.spinor_operator_definition
                 if self.operator_basis is not None:
                     spin.operator_basis = self.operator_basis
+            if self.spinor_tangent_vertices is not None:
+                tangent = operators.createVariable(
+                    "spinor_tangent_vertices",
+                    "f8",
+                    (
+                        "nsite",
+                        "three",
+                        "nproj_site_max",
+                        "nproj_site_max",
+                        "nspinor",
+                        "nspinor",
+                        "complex",
+                    ),
+                )
+                tangent[:] = encode_complex(self.spinor_tangent_vertices)
+                tangent.definition = self.spinor_tangent_definition
+                tangent.units = "eV"
+                if self.operator_basis is not None:
+                    tangent.operator_basis = self.operator_basis
 
     @staticmethod
     def _write_optional_projector_array(group, name, value):
@@ -877,11 +950,20 @@ class ProjectorGreenData:
             operator_component_metadata = None
             spinor_operator = None
             spinor_operator_definition = None
+            spinor_tangent_vertices = None
+            spinor_tangent_definition = None
             if operators is not None and "spinor_operator" in operators.variables:
                 spin_var = operators.variables["spinor_operator"]
                 spinor_operator = decode_complex(spin_var[:])
                 spinor_operator_definition = getattr(spin_var, "definition", None)
                 operator_basis = getattr(spin_var, "operator_basis", operator_basis)
+            if (
+                operators is not None
+                and "spinor_tangent_vertices" in operators.variables
+            ):
+                tangent_var = operators.variables["spinor_tangent_vertices"]
+                spinor_tangent_vertices = decode_complex(tangent_var[:])
+                spinor_tangent_definition = getattr(tangent_var, "definition", None)
             if operators is not None and "hij" in operators.variables:
                 hij_var = operators.variables["hij"]
                 hij = decode_complex(hij_var[:])
@@ -939,6 +1021,8 @@ class ProjectorGreenData:
                 nspinor=nspinor,
                 spinor_operator=spinor_operator,
                 spinor_operator_definition=spinor_operator_definition,
+                spinor_tangent_vertices=spinor_tangent_vertices,
+                spinor_tangent_definition=spinor_tangent_definition,
             )
 
     @staticmethod

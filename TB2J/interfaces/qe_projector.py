@@ -8,7 +8,8 @@ exchange workflow.
 Two dump families are supported (record schemas in
 ``TB2J/qe_patch/README.md``). Both use gfortran sequential unformatted
 records with 4-byte little-endian markers and Fortran/column-major
-arrays:
+arrays. A third, non-collinear spinor family is read by
+:func:`parse_qe_spinor_dump` / :func:`read_qe_spinor_dump`:
 
 KB/beta dumps (``TB2J_PROJECTORS=kb``, magic ``TB2JQEDUMPV1`` / ``V1.1`` /
 ``V1.2``)
@@ -29,6 +30,17 @@ Atomic-pseudo-wavefunction dumps (``TB2J_PROJECTORS=atomic``, magic
     ``cov_xc`` and ``cov_aug``.
     There is deliberately no ``deeq``/``qq_at``/``becsum`` physical field in
     this format.
+
+Non-collinear spinor KB dumps (magic ``TB2JQEDUMPNC1.0`` / ``NC1.1``)
+    Native ``becp%nc(nkb, 2, nbnd)`` per k in QE's dual beta basis;
+    native ``(uu, ud, du, dd)`` total and magnetic ``deeq_nc`` blocks,
+    Hermitian projected smooth fields, beta Gram and band occupations.
+    NC1.1 adds nine source-resolved magnetic response blocks, including
+    rotated PAW one-center sources, to construct explicit frozen-source
+    tangents without rotating the fixed ionic/SOC Hamiltonian. The beta
+    Gram conditions only the smooth-field projection, never the dual Green
+    coefficients or native nonlocal response. NC1.0 SO-bearing dumps are
+    rejected because they have no source-resolved tangents.
 
 Pinned physics contract (research memo ``2026-10-08-qe-export-surface-and-
 operators``, SymPy pin ``docs/sympy/qe_separable_beta_trace.py`` and the
@@ -70,6 +82,16 @@ Public API
 ``read_qe_atomic_dump(path)``
     Normalized atomic :class:`~TB2J.projector_green.ProjectorGreenData`
     with primal coefficients and full k-dependent ``overlap_k = M(k)``.
+``parse_qe_spinor_dump(path)`` / ``read_qe_spinor_dump(path)``
+    Strict non-collinear spinor parse (magics ``TB2JQEDUMPNC1.0`` /
+    ``TB2JQEDUMPNC1.1``) and normalized
+    :class:`~TB2J.projector_green.ProjectorGreenData` with dual spinor
+    coefficients and the magnetic-only ``spinor_operator``. NC1.1 adds the
+    nine native source-response blocks and explicit frozen-source tangent
+    vertices ``spinor_tangent_vertices`` (eV); a single dump yields one
+    transverse leg via ``compute_spinor_projector_exchange``, while
+    ``gen_exchange_qe({'x': ..., 'y': ..., 'z': ...})`` is required
+    for a standard full-tensor ``exchange.out``.
 """
 
 from __future__ import annotations
@@ -77,12 +99,20 @@ from __future__ import annotations
 import os
 import re
 import struct
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-from TB2J.projector_green import ProjectorGreenData
+from TB2J.projector_green import (
+    PAULI_MATRICES,
+    SPINOR_OPERATOR_DEFINITION,
+    SPINOR_TANGENT_DEFINITION,
+    ProjectorGreenData,
+    magnetic_tangent_vertices,
+    spinor_dense_block,
+)
 
 RYTOEV = 13.605693122994
 
@@ -97,6 +127,14 @@ _MAGIC_VERSIONS = {
 ATOMIC_MAGIC = "TB2JQEATWFC1.0"
 MAGIC_ATOMIC = b"TB2JQEATWFC1.0"
 _MAGIC_ATOMIC = MAGIC_ATOMIC
+
+SPINOR_MAGIC = "TB2JQEDUMPNC1.0"
+MAGIC_SPINOR = SPINOR_MAGIC.encode("ascii")
+#: NC1.1 adds record ``13+nks``: the nine native source-response blocks
+#: ``D_response(nhm, nhm, nat, 4, 3, 3)`` (ih, jh, na, spinblock, c, j).
+SPINOR_MAGIC_NC11 = "TB2JQEDUMPNC1.1"
+MAGIC_SPINOR_NC11 = SPINOR_MAGIC_NC11.encode("ascii")
+_SPINOR_MAGICS = {MAGIC_SPINOR: "1.0", MAGIC_SPINOR_NC11: "1.1"}
 
 HIJ_DEFINITION = "qe_deeq_spin_difference"
 HIJ_UNITS = "eV"
@@ -156,6 +194,11 @@ class _RecordReader:
     def read_raw(self, what: str) -> bytes:
         head = self.fh.read(4)
         size = self._unpack_marker(head, what)
+        if size < 0 or size > self.remaining_bytes() - 4:
+            raise ValueError(
+                f"QE dump {self.path}: invalid or truncated {what} record "
+                f"length {size}; expected a complete 4-byte-marker record"
+            )
         payload = self.fh.read(size)
         if len(payload) < size:
             raise ValueError(
@@ -1347,6 +1390,567 @@ def read_qe_atomic_dump(path) -> ProjectorGreenData:
     return data
 
 
+@dataclass
+class QESpinorDump:
+    """Native KB spinor records; energies/operators remain in Ry."""
+
+    path: Path
+    magic: str
+    version: str
+    nspin: int
+    nks: int
+    nkstot: int
+    nbnd: int
+    nat: int
+    nsp: int
+    nhm: int
+    lmaxkb: int
+    nkb: int
+    lspinorb: bool
+    domag: bool
+    nelec: float
+    ef: float
+    degauss: float
+    ngauss: int
+    ltetra: int
+    lgauss: int
+    at: np.ndarray
+    bg: np.ndarray
+    alat: float
+    omega: float
+    ibrav: int
+    atm: list
+    ityp: np.ndarray
+    tau: np.ndarray
+    nh: np.ndarray
+    tvanp: np.ndarray
+    tpawp: np.ndarray
+    has_so: np.ndarray
+    deeq_nc_total: np.ndarray
+    deeq_nc_magnetic: np.ndarray
+    gram: np.ndarray
+    xk: np.ndarray
+    wk: np.ndarray
+    et: np.ndarray
+    wg: np.ndarray
+    coefficients: np.ndarray
+    projected_field: np.ndarray
+    becsum: np.ndarray
+    d_response: np.ndarray | None = None
+
+    @property
+    def nh_per_atom(self):
+        return self.nh[self.ityp - 1]
+
+    @property
+    def ofsbeta(self):
+        return np.r_[0, np.cumsum(self.nh_per_atom[:-1])]
+
+
+def _require_qe_hermitian(matrix, what, path):
+    if not np.allclose(matrix, matrix.conj().T, rtol=1e-9, atol=1e-10):
+        raise ValueError(f"QE spinor dump {path}: {what} is not complex Hermitian")
+
+
+def _qe_native_spinor(block):
+    """Native (uu,ud,du,dd) to channel/channel/output-spin/input-spin."""
+    return block.reshape(block.shape[:2] + (2, 2))
+
+
+def _validate_qe_spinor_mesh(kpoints, weights, path):
+    """Reject reduced/nonuniform meshes; retain QE's k ordering."""
+    if np.any(weights <= 0) or not np.allclose(
+        weights, 1.0 / len(weights), rtol=1e-7, atol=1e-10
+    ):
+        raise ValueError(
+            f"QE spinor dump {path}: full-BZ spinor weights must be positive, "
+            "equal and sum to one; symmetry-reduced meshes are unsupported"
+        )
+    fractional = np.mod(kpoints, 1.0)
+    fractional[np.isclose(fractional, 1.0, atol=_KPOINT_MATCH_TOL, rtol=0)] = 0.0
+    labels = np.empty_like(fractional, dtype=int)
+    shape = []
+    for axis in range(3):
+        values = np.sort(fractional[:, axis])
+        unique = values[np.r_[True, np.diff(values) > _KPOINT_MATCH_TOL]]
+        gaps = np.diff(np.r_[unique, unique[0] + 1.0])
+        if not np.allclose(gaps, 1.0 / len(unique), atol=_KPOINT_MATCH_TOL, rtol=0):
+            raise ValueError(
+                f"QE spinor dump {path}: requires a complete uniform full-BZ grid"
+            )
+        labels[:, axis] = np.argmin(
+            np.abs(fractional[:, axis, None] - unique[None, :]), axis=1
+        )
+        shape.append(len(unique))
+    if np.prod(shape) != len(weights) or len(np.unique(labels, axis=0)) != len(weights):
+        raise ValueError(
+            f"QE spinor dump {path}: duplicate or incomplete full-BZ k mesh"
+        )
+
+
+def parse_qe_spinor_dump(path) -> QESpinorDump:
+    """Strictly parse the KB-only NC spinor ABI (NC1.0 or NC1.1).
+
+    NC1.0 ends after the reserved-zero ``becsum`` record; NC1.1 appends
+    record ``13+nks``: the nine native source-response blocks
+    ``D_response(nhm, nhm, nat, 4, 3, 3)`` in Fortran order
+    ``(ih, jh, na, spinblock, c, j)`` (``c`` = target Pauli slot,
+    ``j`` = original source axis), used to build the explicit
+    frozen-source tangent vertices. Both versions require finite values,
+    complex-Hermitian site blocks and exact EOF; NC1.1 additionally
+    enforces the diagonal identity gate
+    ``sum_j D_response(:,:,:,:,j,j) == deeq_nc_magnetic`` at 1e-8
+    relative tolerance per site.
+    """
+    path = Path(path)
+    with open(path, "rb") as fh:
+        reader = _RecordReader(path, fh)
+        header = reader.read_raw("spinor header")
+        version = _SPINOR_MAGICS.get(bytes(header[:16]).rstrip(b" "))
+        if version is None:
+            raise ValueError(
+                f"QE spinor dump {path}: unknown magic/version {header[:16]!r}; "
+                f"expected {SPINOR_MAGIC} or {SPINOR_MAGIC_NC11} "
+                "(KB only; atomic+noncolin unsupported)"
+            )
+        if len(header) != 60:
+            raise ValueError(f"QE spinor dump {path}: header must be S16 + 11 i4 dims")
+        names = (
+            "nspin",
+            "nks",
+            "nkstot",
+            "nbnd",
+            "nat",
+            "nsp",
+            "nhm",
+            "lmaxkb",
+            "nkb",
+            "lspinorb",
+            "domag",
+        )
+        dims = dict(zip(names, map(int, np.frombuffer(header[16:], dtype="<i4"))))
+        if dims["nspin"] != 4:
+            raise ValueError(f"QE spinor dump {path}: requires nspin=4")
+        if dims["nkstot"] != dims["nks"]:
+            raise ValueError(
+                f"QE spinor dump {path}: pool-parallel dumps require npool=1"
+            )
+        if (
+            min(dims[n] for n in ("nks", "nbnd", "nat", "nsp", "nhm", "nkb")) < 1
+            or dims["lmaxkb"] < 0
+            or dims["nsp"] > dims["nat"]
+        ):
+            raise ValueError(f"QE spinor dump {path}: invalid dimensions/site counts")
+        if dims["lspinorb"] not in (0, 1) or dims["domag"] != 1:
+            raise ValueError(
+                f"QE spinor dump {path}: requires domag=true and valid SOC flag"
+            )
+        nks, nbnd, nat, nsp, nhm, nkb = (
+            dims[n] for n in ("nks", "nbnd", "nat", "nsp", "nhm", "nkb")
+        )
+        fermi = reader.split_record(
+            "spinor fermi/smearing", [("energies", "<f8", 3), ("flags", "<i4", 3)]
+        )
+        nelec, ef, degauss = map(float, fermi["energies"])
+        ngauss, ltetra, lgauss = map(int, fermi["flags"])
+        if ltetra not in (0, 1) or lgauss not in (0, 1):
+            raise ValueError(f"QE spinor dump {path}: invalid smearing logical flags")
+        at, bg, alat, omega, ibrav = _read_cell_record(reader)
+        labels = reader.read_raw("species labels")
+        # QE Modules/ions_base.f90:47 declares CHARACTER(LEN=6) atm(ntypx);
+        # the producer writes the whole array, so unused entries beyond nsp
+        # carry undefined memory and are not validated.
+        if len(labels) < 6 * nsp or len(labels) % 6 or not labels[: 6 * nsp].isascii():
+            raise ValueError(
+                f"QE spinor dump {path}: invalid fixed-capacity S6 species record"
+            )
+        atm = [labels[i * 6 : (i + 1) * 6].decode("ascii").strip() for i in range(nsp)]
+        if not all(atm):
+            raise ValueError(f"QE spinor dump {path}: blank species label")
+        ityp, tau = _read_ions_record(reader, nat, nsp, path)
+        if len(np.unique(ityp)) != nsp:
+            raise ValueError(f"QE spinor dump {path}: species/site counts disagree")
+        meta = reader.split_record(
+            "spinor projector metadata",
+            [(name, "<i4", nsp) for name in ("nh", "tvanp", "tpawp", "has_so")],
+        )
+        nh = np.array(meta["nh"], dtype=int)
+        if np.any(nh <= 0) or int(nh.max()) != nhm or int(nh[ityp - 1].sum()) != nkb:
+            raise ValueError(f"QE spinor dump {path}: nh/nhm/nkb site counts disagree")
+        for name in ("tvanp", "tpawp", "has_so"):
+            if np.any((meta[name] != 0) & (meta[name] != 1)):
+                raise ValueError(f"QE spinor dump {path}: invalid {name} flags")
+        tvanp, tpawp, has_so = (
+            np.array(meta[n], dtype=bool) for n in ("tvanp", "tpawp", "has_so")
+        )
+        if dims["lspinorb"] and not has_so.any():
+            raise ValueError(
+                f"QE spinor dump {path}: SOC-on requires an SO-bearing UPF"
+            )
+        total = reader.array("deeq_nc_total", "<c16", (nhm, nhm, nat, 4))
+        magnetic = reader.array("deeq_nc_magnetic", "<c16", (nhm, nhm, nat, 4))
+        gram = reader.array("beta Gram", "<c16", (nhm, nhm, nat))
+        mesh = reader.split_record(
+            "spinor k data", [("xk", "<f8", 3 * nks), ("wk", "<f8", nks)]
+        )
+        xk = np.array(mesh["xk"].reshape((3, nks), order="F").T)
+        wk = np.array(mesh["wk"])
+        et, wg = _read_spectral_record(reader, nbnd, nks)
+        coefficients = np.empty((nks, nkb, 2, nbnd), dtype=complex)
+        for ik in range(nks):
+            coefficients[ik] = reader.array(
+                f"becp_nc k={ik + 1}", "<c16", (nkb, 2, nbnd)
+            )
+        field = reader.array("projected Pauli field", "<c16", (nhm, nhm, nat, 3))
+        becsum = reader.array("spinor becsum", "<f8", (nhm * (nhm + 1) // 2, nat, 4))
+        d_response = None
+        if version == "1.1":
+            d_response = reader.array(
+                "source response D", "<c16", (nhm, nhm, nat, 4, 3, 3)
+            )
+        if not reader.at_eof():
+            raise ValueError(
+                f"QE spinor dump {path}: trailing records beyond NC{version} schema"
+            )
+
+    for name, value in (
+        ("fermi", [nelec, ef, degauss]),
+        ("cell", at),
+        ("reciprocal cell", bg),
+        ("cell scalars", [alat, omega]),
+        ("ions", tau),
+        ("kpoints", xk),
+        ("weights", wk),
+        ("bands", et),
+        ("occupations", wg),
+        ("becp_nc", coefficients),
+        ("deeq_nc_total", total),
+        ("deeq_nc_magnetic", magnetic),
+        ("Gram", gram),
+        ("projected Pauli field", field),
+        ("becsum", becsum),
+    ) + ((("source response D", d_response),) if d_response is not None else ()):
+        if not np.all(np.isfinite(value)):
+            raise ValueError(f"QE spinor dump {path}: nonfinite {name}")
+    if (
+        alat <= 0
+        or omega <= 0
+        or nelec < 0
+        or degauss < 0
+        or not np.allclose(at.T @ bg, np.eye(3), atol=1e-7, rtol=1e-7)
+        or not np.isclose(abs(np.linalg.det(at)) * alat**3, omega, rtol=1e-6)
+    ):
+        raise ValueError(f"QE spinor dump {path}: invalid cell or physical scalars")
+    _validate_qe_spinor_mesh(xk @ at, wk, path)
+    magnetic_source_present = False
+    for site, count in enumerate(nh[ityp - 1]):
+        for name, array in (("deeq_nc_total", total), ("deeq_nc_magnetic", magnetic)):
+            block = _qe_native_spinor(array[:, :, site])
+            _require_qe_hermitian(
+                block.transpose(0, 2, 1, 3).reshape(2 * nhm, 2 * nhm), name, path
+            )
+        for axis in range(3):
+            _require_qe_hermitian(
+                field[:, :, site, axis], "projected Pauli field", path
+            )
+        _require_qe_hermitian(gram[:, :, site], "beta Gram", path)
+        if np.linalg.eigvalsh(gram[:count, :count, site]).min() <= 0:
+            raise ValueError(
+                f"QE spinor dump {path}: beta Gram must be positive definite"
+            )
+        magnetic_source_present |= bool(
+            np.any(field[:count, :count, site])
+            or np.any(magnetic[:count, :count, site])
+        )
+        if d_response is not None:
+            for c in range(3):
+                for j in range(3):
+                    block = _qe_native_spinor(d_response[:, :, site, :, c, j])
+                    _require_qe_hermitian(
+                        block.transpose(0, 2, 1, 3).reshape(2 * nhm, 2 * nhm),
+                        f"source response (c={c}, j={j})",
+                        path,
+                    )
+            diagonal = sum(d_response[:count, :count, site, :, j, j] for j in range(3))
+            reference = magnetic[:count, :count, site]
+            if not np.allclose(
+                diagonal,
+                reference,
+                rtol=1e-8,
+                atol=1e-8 * float(np.abs(reference).max(initial=0.0)),
+            ):
+                raise ValueError(
+                    f"QE spinor dump {path}: site {site} source response fails "
+                    "the diagonal identity gate sum_j D_response(:,:,:,:,j,j) "
+                    "== deeq_nc_magnetic (relative tolerance 1e-8)"
+                )
+    if not magnetic_source_present:
+        raise ValueError(f"QE spinor dump {path}: zero magnetic source")
+    return QESpinorDump(
+        path=path,
+        magic=SPINOR_MAGIC if version == "1.0" else SPINOR_MAGIC_NC11,
+        version=version,
+        **dims,
+        nelec=nelec,
+        ef=ef,
+        degauss=degauss,
+        ngauss=ngauss,
+        ltetra=ltetra,
+        lgauss=lgauss,
+        at=at,
+        bg=bg,
+        alat=alat,
+        omega=omega,
+        ibrav=ibrav,
+        atm=atm,
+        ityp=ityp,
+        tau=tau,
+        nh=nh,
+        tvanp=tvanp,
+        tpawp=tpawp,
+        has_so=has_so,
+        deeq_nc_total=total,
+        deeq_nc_magnetic=magnetic,
+        gram=gram,
+        xk=xk,
+        wk=wk,
+        et=et,
+        wg=wg,
+        coefficients=coefficients,
+        projected_field=field,
+        becsum=becsum,
+        d_response=d_response,
+    )
+
+
+_LEVI_CIVITA = np.zeros((3, 3, 3))
+_LEVI_CIVITA[0, 1, 2] = _LEVI_CIVITA[1, 2, 0] = _LEVI_CIVITA[2, 0, 1] = 1.0
+_LEVI_CIVITA[0, 2, 1] = _LEVI_CIVITA[2, 1, 0] = _LEVI_CIVITA[1, 0, 2] = -1.0
+
+
+def _qe_gram_inverse(gram_block, rcond=1.0e-6):
+    """SVD-conditioned dual transform for the smooth beta field.
+
+    Fully relativistic beta manifolds can be numerically rank-deficient
+    at a single k (measured Fe FR cond ~1.1e10 with min eigenvalue
+    ~5e-9 while the plain inverse explodes the smooth dressing to
+    ~1e8 Ry): j-split channels share l space. Truncating eigenvalues
+    below ``rcond`` times the largest leaves well-conditioned Grams
+    (bccFe scalar cond 58) bit-identical and bounds amplification,
+    the same bounded-amplification convention as the PAO metric.
+    """
+    return np.linalg.pinv(gram_block, rcond=rcond, hermitian=True)
+
+
+def _spinor_tangent_vertices_from_response(dump, operator, path):
+    """Build explicit frozen-source tangent vertices (eV) from NC1.1 blocks.
+
+    ``V_a = RYTOEV * sum_{c,j} K^{(a)}_{cj} [(M^+ A_j M^+) (x) sigma_c
+    + D_{c<-j}]`` with ``K^{(a)}_{cj} = sum_d eps_{cdj} (n x t_a)_d``; only
+    the smooth field ``A_j`` is Gram-dressed, the native dual response
+    ``D_{c<-j}`` is used raw. One Ry->eV conversion (``V = dH_mag/dtheta =
+    1/2 dDelta/dtheta``). Also validates per-(site, axis) Hermiticity and
+    the longitudinal identity ``sum_a n_a V^a = 0``.
+    """
+    nsite, nmax = operator.shape[0], operator.shape[1]
+    vertices = np.zeros((nsite, 3, nmax, nmax, 2, 2), dtype=complex)
+    for site, count in enumerate(dump.nh_per_atom):
+        n = magnetic_tangent_vertices(operator[site])["n"]
+        inverse = _qe_gram_inverse(dump.gram[:count, :count, site])
+        response = dump.d_response[:count, :count, site]
+        smooth_fields = tuple(
+            inverse @ dump.projected_field[:count, :count, site, j] @ inverse
+            for j in range(3)
+        )
+        for axis in range(3):
+            generator = np.cross(n, np.eye(3)[axis])
+            weights = np.einsum("cdj,d->cj", _LEVI_CIVITA, generator)
+            block = np.zeros((count, count, 2, 2), dtype=complex)
+            for c in range(3):
+                for j in range(3):
+                    if weights[c, j] == 0.0:
+                        continue
+                    smooth = smooth_fields[j]
+                    block += weights[c, j] * (
+                        np.einsum("ij,st->ijst", smooth, PAULI_MATRICES[c])
+                        + _qe_native_spinor(response[:, :, :, c, j])
+                    )
+            vertices[site, axis, :count, :count] = RYTOEV * block
+            dense = spinor_dense_block(vertices[site, axis])
+            scale = np.abs(dense).max(initial=0.0)
+            if not np.allclose(dense, dense.conj().T, rtol=1e-8, atol=1e-8 * scale):
+                raise ValueError(
+                    f"QE spinor dump {path}: site {site} tangent vertex axis "
+                    f"{axis} is not complex Hermitian"
+                )
+        longitudinal = np.einsum("a,aijst->ijst", n, vertices[site, :, :count, :count])
+        scale = np.abs(vertices[site, :, :count, :count]).max(initial=0.0)
+        if not np.allclose(longitudinal, 0.0, atol=1e-10 * max(scale, 1.0)):
+            raise ValueError(
+                f"QE spinor dump {path}: site {site} tangent vertices have a "
+                "nonzero longitudinal contraction sum_a n_a V^a"
+            )
+    return vertices
+
+
+def read_qe_spinor_dump(path) -> ProjectorGreenData:
+    """Map NC spinor coefficients to a spinor operator and tangent vertices.
+
+    NC1.0 stays scalar-relativistic only (SO-bearing rejected fail-closed);
+    NC1.1 additionally builds the explicit frozen-source tangent vertices
+    ``spinor_tangent_vertices`` (eV) from the nine native response blocks.
+    """
+    from TB2J.interfaces.abinit_paw import BOHR_TO_ANGSTROM
+
+    dump = parse_qe_spinor_dump(path)
+    if dump.version == "1.0" and (dump.lspinorb or np.any(dump.has_so)):
+        raise ValueError(
+            "QE NC1.0 SO-bearing projector dump lacks native source-resolved "
+            "magnetic tangents; fully relativistic exchange is unvalidated"
+        )
+    counts = dump.nh_per_atom
+    nmax = int(counts.max())
+    indices = np.full((dump.nat, nmax), -1, dtype=int)
+    operator = np.zeros((dump.nat, nmax, nmax, 2, 2), dtype=complex)
+    for site, count in enumerate(counts):
+        start = int(dump.ofsbeta[site])
+        indices[site, :count] = np.arange(start, start + count)
+        inverse = _qe_gram_inverse(dump.gram[:count, :count, site])
+        projected = np.array(
+            [
+                inverse @ dump.projected_field[:count, :count, site, axis] @ inverse
+                for axis in range(3)
+            ]
+        )
+        magnetic = _qe_native_spinor(dump.deeq_nc_magnetic[:count, :count, site])
+        operator[site, :count, :count] = (
+            2
+            * RYTOEV
+            * (np.einsum("aij,ast->ijst", projected, PAULI_MATRICES) + magnetic)
+        )
+    vertices = None
+    tangent_definition = None
+    if dump.version == "1.1":
+        vertices = _spinor_tangent_vertices_from_response(dump, operator, path)
+        tangent_definition = SPINOR_TANGENT_DEFINITION
+        if not dump.lspinorb:
+            # Scalar-relativistic explicit-versus-commutator identity.
+            for site, count in enumerate(dump.nh_per_atom):
+                if dump.has_so[dump.ityp[site] - 1]:
+                    continue
+                commutator = magnetic_tangent_vertices(operator[site])["vertices"]
+                for axis in range(3):
+                    explicit = spinor_dense_block(vertices[site, axis])
+                    reference = commutator[axis]
+                    scale = np.abs(reference).max(initial=0.0)
+                    residual = float(np.abs(explicit - reference).max(initial=0.0))
+                    if residual > 1e-6 * max(scale, 1e-30):
+                        raise ValueError(
+                            f"QE spinor dump {path}: scalar-relativistic site "
+                            f"{site} explicit tangent axis {axis} deviates from "
+                            "the magnetic_tangent_vertices commutator by "
+                            f"TB2J_TAN_PARITY_RESIDUAL={residual:.6e} "
+                            "(relative tolerance 1e-6)"
+                        )
+    sites = np.repeat(np.arange(dump.nat), counts)
+    data = ProjectorGreenData(
+        kpoints=dump.xk @ dump.at,
+        weights=dump.wk,
+        eigenvalues=dump.et[None] * RYTOEV,
+        occupations=_band_occupations(dump.wg, dump.wk)[None],
+        coefficients=dump.coefficients.transpose(0, 3, 2, 1)[None],
+        efermi=dump.ef * RYTOEV,
+        projector_site=sites,
+        projector_atom=sites.copy(),
+        cell=dump.at.T * dump.alat * BOHR_TO_ANGSTROM,
+        positions=dump.tau * dump.alat * BOHR_TO_ANGSTROM,
+        atomic_numbers=_atomic_numbers_for_labels(dump.atm)[dump.ityp - 1],
+        overlap_k=None,
+        site_nproj=counts,
+        site_projector_indices=indices,
+        nspinor=2,
+        spinor_operator=operator,
+        spinor_operator_definition=SPINOR_OPERATOR_DEFINITION,
+        spinor_tangent_vertices=vertices,
+        spinor_tangent_definition=tangent_definition,
+        coefficient_source="qe_becp_nc",
+        coefficient_projector=COEFFICIENT_PROJECTOR,
+        channel_interpretation=CHANNEL_INTERPRETATION,
+        operator_basis=OPERATOR_BASIS,
+        population_metric="QE spinor becsum reserved zero record; not an occupation reference",
+        metadata={
+            "source": f"QE PW/src/becp_dump.f90 NC{dump.version}",
+            "source_code": "qe",
+            "qe_magic": dump.magic,
+            "dump_version": dump.version,
+            "coefficient_convention": "dual_projector_no_inverse",
+            "native_spinor_order": ["uu", "ud", "du", "dd"],
+            "lspinorb": bool(dump.lspinorb),
+            "domag": bool(dump.domag),
+            "has_so": dump.has_so.tolist(),
+            "tvanp": dump.tvanp.tolist(),
+            "tpawp": dump.tpawp.tolist(),
+            "atm": dump.atm,
+            "ityp": dump.ityp.tolist(),
+            "nh": dump.nh.tolist(),
+            "nelec": dump.nelec,
+            "spinor_operator_source": (
+                "2 * [sum_i (M^+ <beta|B_i|beta> M^+) sigma_i "
+                "+ deeq_nc_magnetic]; Hermitian Gram pseudoinverse "
+                "rcond=1e-6 for smooth field only; Ry -> eV"
+            ),
+            **(
+                {
+                    "spinor_tangent_source": (
+                        "V_a = Ry->eV * sum_{c,j} eps_{cdj} (n x t_a)_d "
+                        "[(M^+ <beta|B_j|beta> M^+) (x) sigma_c "
+                        "+ D_response(:,:,:,:,c,j)]; smooth field only "
+                        "uses Hermitian Gram pseudoinverse rcond=1e-6; "
+                        "native dual response is raw; "
+                        "n from the existing Pauli-trace convention"
+                    ),
+                    "d_response_note": (
+                        "record 13+nks: native same-gauge zero-source-subtracted "
+                        "response D(nhm,nhm,nat,4,3,3) with c = target Pauli "
+                        "slot and j = original source axis"
+                    ),
+                }
+                if vertices is not None
+                else {}
+            ),
+            "magnetic_nonlocal_source": (
+                "same-density/gauge D(smooth B,PAW magnetic Hxc) minus "
+                "D(smooth B=0,PAW magnetic Hxc=0); fixed ionic/SOC excluded"
+            ),
+            "deeq_nc_total_note": (
+                "native total deeq_nc (uu,ud,du,dd) stays diagnostic only in the "
+                "raw QESpinorDump container; never a tangent vertex"
+            ),
+            "becsum_note": "NC four-component record zeroed by producer; NSCF accumulator uninitialized, not an occupation-parity reference",
+            "family_validation": (
+                "NC1.0 scalar-relativistic US/PAW only; native-action and "
+                "collinear G3 parities are required. SO-bearing fcoef "
+                "projectors need a new native source-tangent ABI"
+                if dump.version == "1.0"
+                else (
+                    "NC1.1: native nine-block source responses passed the "
+                    "diagonal identity gate, per-(site,axis) Hermiticity, the "
+                    "longitudinal identity and the scalar-relativistic "
+                    "explicit-versus-commutator parity on has_so=F species"
+                )
+            ),
+            "units": {
+                "eigenvalues": "eV",
+                "efermi": "eV",
+                "spinor_operator": "eV",
+                **({"spinor_tangent_vertices": "eV"} if vertices is not None else {}),
+            },
+        },
+    )
+    data.validate(exchange_ready=True)
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Exchange driver (mirrors gen_exchange_abinit_projector)
 # ---------------------------------------------------------------------------
@@ -1361,6 +1965,7 @@ def gen_exchange_qe(
     index_magnetic_atoms=None,
     overlap_mode=None,
     overlap_rcond=None,
+    leg_consistency_atol_eV=None,
 ):
     """Generate projector exchange output from a QE projector dump file.
 
@@ -1374,6 +1979,16 @@ def gen_exchange_qe(
     (``TB2JQEATWFC1.0``) carry primal atomic-wavefunction coefficients with
     the full per-k overlap ``M(k)``; there the controls select how the
     shared runtime dresses with ``M(k)^-1`` (default ``inverse``).
+
+    A mapping ``{x: dump_x, y: dump_y, z: dump_z}`` selects spinor
+    full-tensor output through the existing rank-nine writer; NC1.1 sets
+    carry the native source-response tangent, NC1.0 sets remain the
+    scalar-relativistic-only legacy family and the two may not be mixed.
+    ``leg_consistency_atol_eV`` (spinor three-leg only) bounds the
+    repeated-row gate of the merger; it must be finite, positive and
+    at most 1e-7 eV, and the measured worst repeated-row spread is
+    reported in the output description. A single NC spinor
+    dump is available only via ``read_qe_spinor_dump`` and the raw leg API.
     """
     from TB2J.interfaces.gpaw_projector import (
         _R_grid_for_cutoff,
@@ -1381,10 +1996,88 @@ def gen_exchange_qe(
         write_projector_exchange_out,
     )
 
+    if isinstance(filename, Mapping):
+        if set(filename) != {"x", "y", "z"}:
+            raise ValueError(
+                "full QE spinor exchange requires all x/y/z reference dumps"
+            )
+        if overlap_mode is not None or overlap_rcond is not None:
+            raise ValueError(
+                "overlap controls are invalid for KB spinor coefficients, already dual"
+            )
+        if leg_consistency_atol_eV is None:
+            leg_consistency_atol_eV = 5.0e-8
+        leg_consistency_atol_eV = float(leg_consistency_atol_eV)
+        if (
+            not np.isfinite(leg_consistency_atol_eV)
+            or leg_consistency_atol_eV <= 0.0
+            or leg_consistency_atol_eV > 1.0e-7
+        ):
+            raise ValueError(
+                "leg_consistency_atol_eV must be finite, positive and at most "
+                f"1e-7 eV; got {leg_consistency_atol_eV!r}"
+            )
+        from TB2J.interfaces.gpaw_spinor_projector import (
+            write_spinor_projector_exchange_out,
+        )
+
+        references = {
+            axis: read_qe_spinor_dump(filename[axis]) for axis in ("x", "y", "z")
+        }
+        baseline = references["z"].metadata
+        for axis, reference in references.items():
+            if any(
+                reference.metadata[key] != baseline[key]
+                for key in (
+                    "qe_magic",
+                    "lspinorb",
+                    "has_so",
+                    "tvanp",
+                    "tpawp",
+                    "atm",
+                    "ityp",
+                    "nh",
+                )
+            ):
+                raise ValueError(
+                    f"QE spinor reference {axis!r} differs in UPF/projector family"
+                )
+        return write_spinor_projector_exchange_out(
+            references,
+            path=output_path,
+            Rpts=Rpts,
+            Rcut=Rcut,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            magnetic_elements=magnetic_elements,
+            index_magnetic_atoms=index_magnetic_atoms,
+            leg_consistency_atol_eV=leg_consistency_atol_eV,
+            description=(
+                f"QE {baseline['qe_magic']} KB spinor full rank-nine exchange "
+                "from independent x/y/z "
+                "references; NC1.1 uses native frozen magnetic-source response "
+                "tangents and NC1.0 uses scalar-relativistic commutator tangents. "
+                "Native total deeq_nc (including fixed SOC) is diagnostic only; "
+                "coefficients are dual and overlap_k=None."
+            ),
+        )
+
+    if leg_consistency_atol_eV is not None:
+        raise ValueError(
+            "leg_consistency_atol_eV applies only to the spinor three-leg "
+            "merge (--input_x --input_y --input_z)"
+        )
+
     magic = _sniff_qe_dump_magic(filename)
+    if magic.rstrip(b" ") in (MAGIC_SPINOR, MAGIC_SPINOR_NC11):
+        raise ValueError(
+            "a single QE spinor dump measures only a transverse leg; standard "
+            "exchange.out requires independent x/y/z dumps (--input_x/y/z). "
+            "Use read_qe_spinor_dump and compute_spinor_projector_exchange for a raw leg"
+        )
     if magic.rstrip(b" \x00") == _MAGIC_ATOMIC:
         data = read_qe_atomic_dump(filename)
-    else:
+    elif magic.rstrip(b" ") in _MAGIC_VERSIONS:
         if overlap_mode is not None or overlap_rcond is not None:
             raise ValueError(
                 "overlap_mode/overlap_rcond apply only to atomic-wavefunction "
@@ -1395,6 +2088,8 @@ def gen_exchange_qe(
                 "control"
             )
         data = read_qe_dump(filename)
+    else:
+        raise ValueError(f"QE dump {filename}: unknown magic/version {magic!r}")
 
     sites = None
     if index_magnetic_atoms is not None:
@@ -1465,11 +2160,7 @@ def gen_exchange_qe(
 def _sniff_qe_dump_magic(filename) -> bytes:
     """Read the 16-byte magic of a QE projector dump without full parsing."""
     with open(filename, "rb") as fh:
-        head = fh.read(4)
-        if len(head) < 4:
-            raise ValueError(f"QE dump {filename}: file too short for a record marker")
-        size = struct.unpack("<i", head)[0]
-        payload = fh.read(size)
+        payload = _RecordReader(Path(filename), fh).read_raw("header")
         if len(payload) < 16:
             raise ValueError(
                 f"QE dump {filename}: header record too short ({len(payload)} bytes)"

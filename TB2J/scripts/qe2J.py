@@ -16,11 +16,15 @@ def run_qe2J():
             "Calculate TB2J-style exchange parameters from a Quantum "
             "ESPRESSO projector dump file (QE fork branch TB2J). Supports "
             "KB/beta becp dumps (TB2JQEDUMPV1*) and atomic-wavefunction "
-            "dumps (TB2JQEATWFC1.0, TB2J_PROJECTORS=atomic); the family is "
-            "detected from the file magic."
+            "dumps (TB2JQEATWFC1.0, TB2J_PROJECTORS=atomic). KB spinor "
+            "dumps (TB2JQEDUMPNC1.0/NC1.1) require independent x/y/z dumps."
         )
     )
-    parser.add_argument("--input", required=True, help="QE projector dump file")
+    parser.add_argument("--input", help="collinear KB or atomic QE projector dump")
+    for axis in ("x", "y", "z"):
+        parser.add_argument(
+            f"--input_{axis}", help=f"KB spinor dump with magnetization along {axis}"
+        )
     parser.add_argument(
         "--output_path", default="TB2J_results_qe", help="output directory"
     )
@@ -71,12 +75,36 @@ def run_qe2J():
             "tikhonov overlap modes (atomic-wavefunction dumps only)"
         ),
     )
+    parser.add_argument(
+        "--leg_consistency_atol_eV",
+        type=float,
+        default=5e-8,
+        help=(
+            "bounded repeated-row consistency gate in eV for the spinor "
+            "three-leg merge (spinor --input_x/y/z only; default 5e-8, "
+            "capped at 1e-7); the measured worst repeated-row spread is "
+            "reported in the output description"
+        ),
+    )
     args = parser.parse_args()
+    spinor_inputs = {axis: getattr(args, f"input_{axis}") for axis in ("x", "y", "z")}
+    if any(spinor_inputs.values()):
+        if args.input or not all(spinor_inputs.values()):
+            parser.error("use --input alone or --input_x --input_y --input_z together")
+        if args.overlap_mode is not None or args.overlap_rcond is not None:
+            parser.error(
+                "overlap controls are invalid for already-dual KB spinor dumps"
+            )
+        input_files = spinor_inputs
+    elif args.input:
+        input_files = args.input
+    else:
+        parser.error("supply --input or all --input_x --input_y --input_z")
     indices = None
     if args.index_magnetic_atoms is not None:
         indices = [i - 1 for i in args.index_magnetic_atoms]
     exchange_out, _ = gen_exchange_qe(
-        args.input,
+        input_files,
         output_path=args.output_path,
         Rcut=args.Rcut,
         nz=args.nz,
@@ -85,6 +113,9 @@ def run_qe2J():
         index_magnetic_atoms=indices,
         overlap_mode=args.overlap_mode,
         overlap_rcond=args.overlap_rcond,
+        leg_consistency_atol_eV=(
+            args.leg_consistency_atol_eV if any(spinor_inputs.values()) else None
+        ),
     )
     print(f"Wrote {exchange_out}")
 

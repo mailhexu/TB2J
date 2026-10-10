@@ -1,9 +1,14 @@
 Quantum ESPRESSO projector-Green exchange
 =========================================
 
-TB2J computes magnetic exchange from Quantum ESPRESSO (QE) collinear
-calculations using either separable KB beta channels (the default) or UPF
-atomic-wavefunction channels (``TB2J_PROJECTORS=atomic``). An instrumented QE
+TB2J computes magnetic exchange from Quantum ESPRESSO (QE) calculations
+using separable KB beta channels (the default) or, for collinear runs,
+UPF atomic-wavefunction channels (``TB2J_PROJECTORS=atomic``). The KB
+exporter also writes a distinct NC1.1 noncollinear spinor schema for magnetic
+US/PAW runs; SO-bearing families require native frozen-source/action
+checks and a three-reference tensor-consistency gate. Atomic mode
+remains collinear.
+An instrumented QE
 build writes coefficients, eigenvalues, occupations, k-points and the
 spin-split projector operator into a versioned binary dump
 file at the end of a run. TB2J reads that dump into
@@ -29,10 +34,14 @@ Prerequisites
 * **``npool = 1``**: plane-wave pools are not supported; run ``pw.x`` without
   ``-nk``. A pool-parallel dump is rejected by both QE (at dump time) and the
   TB2J reader (``nkstot != nks``).
-* **Collinear LSDA**: ``nspin = 2``. Noncollinear and spin-orbit runs are
-  rejected; gamma-only runs are rejected as well.
-* **Pseudopotential support depends on projector mode**: KB accepts NC, US,
-  and PAW; atomic mode requires ``PP_PSWFC`` atomic wavefunctions in every UPF.
+* **Magnetic source**: collinear KB/atomic requires ``nspin=2``;
+  noncollinear KB requires ``noncolin=.true.``, ``domag=.true.`` and
+  ``nspin=4`` internally. A ``lspinorb=.true.`` run requires an actual
+  SO-bearing UPF. Gamma-only runs are rejected for every mode.
+* **Pseudopotential support depends on projector mode**: collinear KB
+  accepts NC, US and PAW; noncollinear KB supports US and PAW after
+  native action/source checks. Atomic mode requires ``PP_PSWFC`` atomic
+  wavefunctions in every UPF and remains collinear.
 
 Workflow: scf + nscf with ``TB2J_DUMP``
 ---------------------------------------
@@ -151,6 +160,125 @@ detects the format by magic. Atomic mode defaults to the full inverse of
 regularized modes. These flags are rejected for KB dumps, whose coefficients
 are already dual and need no channel metric.
 
+Noncollinear KB spinor dumps
+----------------------------
+
+For ``noncolin=.true.`` with a magnetic source (``domag=.true.``), the
+KB exporter writes the separate ``TB2JQEDUMPNC1.0`` or ``NC1.1`` schema.
+NC1.0 remains scalar-relativistic-only. NC1.1 retains nine native
+magnetic-source responses for SO-bearing US/PAW: each original
+Cartesian field component is installed, in turn, into every Pauli
+destination slot at frozen density and fixed ionic/SOC Hamiltonian.
+PAW one-center magnetic source components are rotated/zeroed in
+lockstep. The exporter verifies ``add_vuspsi`` total/action parity,
+magnetic subtraction, diagonal response reconstruction, quarter-turn,
+tilted rotation and finite-difference source identities. Bare-spin
+conjugation fails for SO-bearing QE ``fcoef`` channels and is only an
+informational diagnostic, **not** the tangent.
+
+``parse_qe_spinor_dump`` retains native ``becp%nc`` coefficients,
+``deeq_nc_total`` diagnostic, separately field-dependent
+``deeq_nc_magnetic``, Hermitian projected smooth field and, for NC1.1,
+``D_response(nhm,nhm,nat,4,3,3)`` with axes
+``(beta_i,beta_j,atom,(uu,ud,du,dd),destination_c,source_j)``.
+``read_qe_spinor_dump`` returns ``ProjectorGreenData(nspinor=2)`` with
+already-dual coefficients, one full-BZ k set and a magnetic-only spinor
+operator. Only the projected smooth field uses a Hermitian beta-Gram
+pseudoinverse with relative eigenvalue cutoff ``1e-6``; QE's
+fully relativistic Fe beta Gram reaches condition number ``1.1e10``,
+which makes a direct inverse unphysical. Neither the dual Green
+coefficients nor native ``D_response`` are Gram dressed.
+
+With :math:`A_j=\langle\beta|B_j|\beta\rangle` and native
+:math:`D_{c\leftarrow j}`, the magnetic splitting and explicit
+site tangent are
+
+.. math::
+
+   \Delta &= 2 E_{\mathrm{Ry}}\left[
+      \sum_j(M^+A_jM^+)\otimes\sigma_j+D_{\mathrm{mag}}\right],\\
+   V_a &= E_{\mathrm{Ry}}\sum_{cj}
+      K^{(a)}_{cj}\left[(M^+A_jM^+)\otimes\sigma_c+
+      D_{c\leftarrow j}\right],\qquad
+   K^{(a)}_{cj}=\sum_d\epsilon_{cdj}(\mathbf n\times\mathbf e_a)_d .
+
+Here :math:`V_a=\partial H_{\rm mag}/\partial\theta_a
+=\frac12\partial\Delta/\partial\theta_a`; fixed ionic/SOC terms in
+``deeq_nc_total`` do not rotate. The reader validates Hermiticity,
+the longitudinal identity, the native diagonal reconstruction and
+the scalar-relativistic commutator limit. ``NC1.0`` SO-bearing dumps
+are refused. The final four-component record is deterministic zero:
+QE's NSCF ``becsum`` is uninitialized, **not** an occupation check;
+band occupations come from ``wg/wk``.
+
+At 12³ full-BZ points, 48 spinor bands, 30 poles and 0.05 eV
+smearing, the scalar-relativistic Fe US NC1.1 z transverse leg gives
+17.6997098 meV versus matched collinear 17.6957657 meV
+(difference 0.0039441 meV); PAW NC1.1 gives 14.7589664 meV
+versus matched collinear 14.7600550 meV (difference
+0.0010886 meV). Both meet the G3 bound of 0.01 meV. The three
+independent PBE fully relativistic Fe US x/y/z legs produce a
+nearest-neighbor-only full tensor at ``--Rcut 2.6``: the maximum
+repeated-row spread is ``8.367697e-9 eV`` below the ``5e-8 eV``
+gate and first-neighbor :math:`J_{\rm iso}=17.7174` meV.
+
+Independent scalar-relativistic US x/y/z references on the
+same 12³ mesh also pass nearest-neighbor rank-nine merging
+(spread ``1.012117e-8 eV``), but give
+:math:`|J^{\rm ani}_{yz}|<2.3\times10^{-15}` meV at
+:math:`R=(1,0,0)`, compared with the SO-bearing US
+``0.000863377 meV``. This is an independent nonzero
+anisotropy sensitivity control; the isotropic difference
+between distinct scalar/full-relativistic UPFs is not a
+pure SOC shift.
+
+At ``--Rcut 6``, the same family is **rejected** (far-shell
+spread ``2.586256e-5 eV``); no six-angstrom full tensor is
+validated. The unphysical self pair ``R=0,i=j`` is excluded before
+the repeated-row gate because it never enters ``exchange.out``.
+Do not raise the consistency tolerance merely to report a
+far-shell tensor.
+
+The SO-bearing Fe PAW x/y/z dumps also pass native response/action
+gates, but an initial SCF threshold of ``1e-8 Ry`` leaves a
+first-shell repeated-row spread of ``4.117504e-6 eV``:
+that three-leg output is **correctly refused**. Recomputing
+all three PAW SCF densities with ``conv_thr=1e-12`` and their
+full-BZ NSCF dumps reduces the first-shell spread to
+``2.086799e-8 eV``, below the same ``5e-8 eV`` gate.
+The validated nearest-neighbor-only PAW tensor gives
+:math:`J_{\rm iso}=14.7775026` meV, offdiagonal symmetric
+anisotropy :math:`J^{\rm ani}_{yz}=-0.006662556` meV
+for :math:`R=(1,0,0)`, maximum first-shell DMI norm
+``7.8915e-7 meV`` and pair reversal below ``4e-18 eV``.
+Its 6-Å far shell still fails (first inconsistent row
+``1.558e-5 eV``). Thus **both** US and tightly converged
+PAW have a validated first-shell tensor, but neither has
+a six-angstrom tensor from these reference densities.
+
+A GPAW 26.7 spinor x reference (LDA/PW92, 8³ k mesh,
+96 spinor bands, 1100 eV cutoff) yields a first-neighbor
+x-leg transverse diagonal ``13.804504 meV`` at 30 poles
+and 0.05 eV contour smearing; QE PBE US and the tightly
+converged PAW x legs give ``17.717442`` and
+``14.777512 meV`` respectively (12³, 48 bands, 80 Ry).
+These **single legs** differ in XC, setup, basis, k mesh
+and band window; no matched-functional quantitative
+comparison follows. GPAW's noncollinear SCF plane-wave
+path rejects PBE in this installation and lacks a matched
+PZ Fe setup.
+
+One spinor dump measures only a transverse leg; it cannot define a
+rank-nine ``exchange.out``. Compute independent x/y/z SCF densities,
+each followed by its own full-BZ NSCF with matching geometry, UPF,
+k mesh and band window. ``--input_x --input_y --input_z`` requires
+all references and reports the worst repeated-row spread;
+``--leg_consistency_atol_eV`` defaults to ``5e-8`` for QE and
+cannot exceed ``1e-7``. ``--overlap_mode`` and
+``--overlap_rcond`` are invalid for dual KB coefficients.
+See the six US input decks and official Fe UPF hash in
+``examples/qe/bccfe_spinor``.
+
 CLI usage
 ---------
 
@@ -160,14 +288,15 @@ CLI usage
 
    qe2J.py --input nscf_dump.bin --output_path TB2J_results_fe --elements Fe --Rcut 6 --nz 30
    qe2J.py --input atomic_nscf.bin --output_path TB2J_results_atomic --elements Fe --Rcut 6 --overlap_mode inverse
+   qe2J.py --input_x fe_x.bin --input_y fe_y.bin --input_z fe_z.bin --output_path TB2J_results_fe_spinor --elements Fe --Rcut 2.6
 
 ``--index_magnetic_atoms`` accepts 1-based atom indices instead of
 ``--elements``; ``--smearing`` is the contour smearing in eV (default
 0.05). See ``examples/qe/feo/`` for reproducible FeO US and PAW KB
 input decks and measured shell exchange.
 
-KB family support
------------------
+Collinear KB family support
+---------------------------
 
 .. list-table:: KB pseudopotential-family support
    :header-rows: 1
@@ -183,9 +312,9 @@ KB family support
    * - PAW (kjpaw)
      - validated
      - bccFe J1 = 14.76 meV vs GPAW 14.73 meV (0.2%).
-   * - NC (+ KB, e.g. ONCV)
-     - validated
-     - bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons) J1 = 15.22 meV.
+   * - NC (+ KB, e.g. ONCV; collinear only)
+     - validated for collinear v1.2, refused for spinor NC1.1
+     - Collinear bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons) J1 = 15.22 meV.
        The historical ``deeq``-only :math:`\Delta \equiv 0` blocker is lifted
        by the v1.2 ``dbeta_xc`` vertex; ``becsum`` is zero-filled in NC-only
        runs and is not an occupation-parity reference.
@@ -203,8 +332,9 @@ in ``TB2J/qe_patch/README.md``.
 Limitations
 -----------
 
-* Collinear LSDA only (``nspin = 2``); noncollinear and spin-orbit
-  calculations are rejected.
+* Atomic-wavefunction mode remains collinear; KB has a separate
+  noncollinear magnetic US/PAW path whose SO-bearing family is accepted
+  only after the native fixed-SOC covariance and action gates pass.
 * ``npool = 1``: no plane-wave pools, and no gamma-only runs.
 * The dump is gfortran sequential unformatted with 4-byte little-endian
   record markers; dumps are not portable across endianness or other

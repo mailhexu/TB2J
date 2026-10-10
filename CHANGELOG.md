@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Added QE NC1.1 noncollinear KB spinor export/reader with nine
+  native frozen-magnetic-source response blocks, PAW one-center
+  magnetic source rotation, complex beta fields, explicit
+  source-tangent vertices and x/y/z rank-nine CLI. Legacy NC1.0
+  is scalar-only; NC projected-vertex and atomic+noncollinear
+  combinations fail closed. A conditioned Hermitian beta-Gram
+  inverse acts only on smooth fields, not dual Green coefficients
+  or native nonlocal response.
+- bccFe same-UPF SOC-off G3 agrees within 0.00395 meV (US) and
+  0.00109 meV (PAW). Fully relativistic US and PAW x/y/z
+  produce nearest-neighbor-only (`Rcut=2.6 Å`) rank-nine
+  tensors with Jiso 17.71744/14.77750 meV and repeated-row
+  spreads 8.37e-9/2.09e-8 eV below the 5e-8-eV gate.
+  The PAW run needs `conv_thr=1e-12 Ry` in all three
+  SCF references; `1e-8 Ry` fails even the first shell.
+  Both 6-Å tensors fail the far-shell gate and yield
+  **no** extended-range output. Unphysical self and
+  out-of-cutoff pairs are excluded before the merge.
+  The GPAW LDA reference differs from QE PBE in XC/setup;
+  no matched quantitative cross-code claim is made.
+
 - VASP split-SOC exports now require `LWRITE_TB2J = .TRUE.` in each
   leg's INCAR. The new VASP patch switch defaults to `.FALSE.`; without
   it, neither native nor CSO export is written.

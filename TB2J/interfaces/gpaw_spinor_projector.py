@@ -244,6 +244,16 @@ def compute_spinor_projector_exchange(
     operators = green.get_local_operators_spinor(sites=sites)
     vert_info = {site: magnetic_tangent_vertices(op) for site, op in operators.items()}
     vertices = {site: entry["vertices"] for site, entry in vert_info.items()}
+    if data.spinor_tangent_vertices is not None:
+        # Explicit frozen-source tangents (QE NC1.1): densify once per site
+        # and bypass the commutator entirely. No silent fallback.
+        from TB2J.projector_green import spinor_dense_block
+
+        for site in sites:
+            stack = data.spinor_tangent_vertices[int(site)]
+            vertices[site] = np.stack(
+                [spinor_dense_block(stack[axis]) for axis in range(3)]
+            )
     directions = {site: entry["n"] for site, entry in vert_info.items()}
     n0 = directions[sites[0]]
     axis = int(np.argmax(np.abs(n0)))
@@ -299,8 +309,15 @@ def write_spinor_projector_exchange_out(
     Rcut=None,
     overlap_mode=None,
     overlap_rcond=None,
+    leg_consistency_atol_eV=None,
 ):
-    """Write SpinIO only after x/y/z transverse legs determine rank nine."""
+    """Write SpinIO only after x/y/z transverse legs determine rank nine.
+
+    ``leg_consistency_atol_eV`` (QE three-leg driver only) overrides the
+    merger's repeated-row gate; when given it must be finite, positive and
+    at most 1e-7 eV, and the measured worst repeated-row spread is appended
+    to the output description. The GPAW/ABINIT default (1e-8) is unchanged.
+    """
     from ase import Atoms
 
     from TB2J.interfaces.gpaw_projector import _magnetic_sites, _R_grid_for_cutoff
@@ -363,7 +380,31 @@ def write_spinor_projector_exchange_out(
             raise ValueError(
                 f"spinor {axis!r} reference is not axis-aligned; cannot merge rank nine"
             )
-    exchange = merge_transverse_legs(legs)["exchange"]
+    merge_atol = 1.0e-8
+    if leg_consistency_atol_eV is not None:
+        merge_atol = float(leg_consistency_atol_eV)
+        if not np.isfinite(merge_atol) or merge_atol <= 0.0 or merge_atol > 1.0e-7:
+            raise ValueError(
+                "leg_consistency_atol_eV must be finite, positive and at most "
+                f"1e-7 eV; got {leg_consistency_atol_eV!r}"
+            )
+    # Gate exactly the pairs written below. The grid includes a translation
+    # when *any* pair is in range; other pairs at that R can lie beyond Rcut.
+    # The onsite self pair is never an exchange interaction.
+    retained = {}
+    for key in legs["z"]["exchange"]:
+        R, i, j = key
+        vector = np.asarray(R) @ data.cell + atoms.positions[j] - atoms.positions[i]
+        distance = float(np.linalg.norm(vector))
+        if distance >= 1e-6 and (Rcut is None or distance < float(Rcut)):
+            retained[key] = (vector, distance)
+    for leg in legs.values():
+        leg["exchange"] = {
+            key: value for key, value in leg["exchange"].items() if key in retained
+        }
+    merged = merge_transverse_legs(legs, consistency_atol=merge_atol)
+    exchange = merged["exchange"]
+    worst_spread = float(merged["diagnostics"]["max_repeat_deviation"])
     if charges is None:
         charges = np.zeros(len(atoms), dtype=float)
     if spinat is None:
@@ -383,12 +424,7 @@ def write_spinor_projector_exchange_out(
     Jani_dict = {}
     distance_dict = {}
     for (R, i, j), entry in exchange.items():
-        vector = np.asarray(R) @ data.cell + atoms.positions[j] - atoms.positions[i]
-        distance = float(np.linalg.norm(vector))
-        if distance < 1e-6:
-            continue  # onsite pair: excluded (collinear-path cutover)
-        if Rcut is not None and distance >= float(Rcut):
-            continue
+        vector, distance = retained[(R, i, j)]
         key = (tuple(int(x) for x in R), site_to_spin[i], site_to_spin[j])
         distance_dict[key] = (vector, distance)
         exchange_Jdict[key] = float(entry["Jiso"])
@@ -398,6 +434,11 @@ def write_spinor_projector_exchange_out(
         description = (
             "Full rank-nine spinor exchange reconstructed from three independent "
             "x/y/z magnetic references by raw transverse-leg merge.\n"
+        )
+    if leg_consistency_atol_eV is not None:
+        description = (
+            f"{description}\nleg_consistency_atol_eV={merge_atol:.3e}; worst "
+            f"repeated-row spread TB2J_TAN_LEG_SPREAD={worst_spread:.6e} eV."
         )
     output = SpinIO(
         atoms=atoms,

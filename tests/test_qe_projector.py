@@ -20,13 +20,17 @@ import pytest
 from TB2J.interfaces.abinit_paw import BOHR_TO_ANGSTROM
 from TB2J.interfaces.qe_projector import (
     MAGIC_ATOMIC,
+    MAGIC_SPINOR,
+    MAGIC_SPINOR_NC11,
     RYTOEV,
     QEProjectorDump,
     gen_exchange_qe,
     parse_qe_atomic_dump,
     parse_qe_dump,
+    parse_qe_spinor_dump,
     read_qe_atomic_dump,
     read_qe_dump,
+    read_qe_spinor_dump,
 )
 from TB2J.projector_green import ProjectorGreen, ProjectorGreenData
 
@@ -1108,3 +1112,735 @@ def test_atomic_nonorthogonal_overlap_dressing_invariant(tmp_path):
     j01 = jdict[((0, 0, 0), 0, 1)]
     assert j01 != 0.0
     np.testing.assert_allclose(jdict_t[((0, 0, 0), 0, 1)], j01, rtol=1e-6)
+
+
+def _write_spinor_records(path, records):
+    with open(path, "wb") as fh:
+        for record in records:
+            _frecord(fh, *record)
+
+
+def write_qe_spinor_dump(path, axis="z", soc=False, total_shift=0.0, version="1.0"):
+    """Physical synthetic collinear spectra rotated into x/y/z references.
+
+    Complex orbital phases and a nontrivial beta Gram expose conjugation,
+    Pauli-y signs and primal/dual mistakes. Total fixed SOC is diagnostic.
+    ``version="1.1"`` appends record 13+nks, the nine native source-response
+    blocks: covariant ``D_{c<-p} = magnetic_block (x) sigma_c`` for the
+    scalar family, plus Hermitian off-diagonal-response contamination
+    (``c != p``) in the ``soc`` variant so the explicit tangent differs
+    from the commutator.
+    """
+    from TB2J.projector_green import PAULI_MATRICES
+
+    rng = np.random.default_rng(741)
+    nk, nbnd, nhm, nat, nkb = 2, 8, 2, 2, 4
+    sigma = PAULI_MATRICES["xyz".index(axis)]
+    _, spin_vectors = np.linalg.eigh(sigma)
+    spin_vectors = spin_vectors[:, ::-1]  # up (+1) first
+    orbital = np.empty((nk, 4, 4), dtype=complex)
+    coefficients = np.zeros((nk, nkb, 2, nbnd), dtype=complex)
+    for ik in range(nk):
+        orbital[ik], _ = np.linalg.qr(
+            rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+        )
+        for spin in range(2):
+            coefficients[ik, :, :, 4 * spin : 4 * (spin + 1)] = (
+                orbital[ik, :, None, :] * spin_vectors[None, :, spin, None]
+            )
+    gram_block = np.array([[1.4, 0.15j], [-0.15j, 1.1]])
+    field_block = np.array([[0.03, 0.009j], [-0.009j, 0.04]])
+    magnetic_block = np.array([[0.01, 0.003j], [-0.003j, 0.012]])
+    gram = np.repeat(gram_block[:, :, None], nat, axis=2)
+    field = np.zeros((nhm, nhm, nat, 3), dtype=complex)
+    field[:, :, :, "xyz".index(axis)] = field_block[:, :, None]
+    magnetic = np.repeat(
+        np.einsum("ij,st->ijst", magnetic_block, sigma).reshape(2, 2, 1, 4), nat, axis=2
+    )
+    fixed_spin = np.eye(2) * (0.2 + total_shift)
+    if soc:
+        fixed_spin = fixed_spin + 0.06 * PAULI_MATRICES[1]
+    fixed = np.einsum("ij,st->ijst", np.eye(2), fixed_spin).reshape(2, 2, 1, 4)
+    total = magnetic + fixed
+    xk = np.array([[0, 0.5], [0, 0], [0, 0]], dtype=float)
+    wk = np.full(nk, 0.5)
+    et = np.array(
+        [
+            [-0.12, -0.04, 0.03, 0.1, -0.08, -0.01, 0.06, 0.15],
+            [-0.11, -0.03, 0.04, 0.12, -0.07, 0.00, 0.07, 0.17],
+        ]
+    ).T
+    wg = (et < 0).astype(float) * wk
+    tau = np.array([[0, 0.5], [0, 0.5], [0, 0.5]])
+    d_response = None
+    if version == "1.1":
+        p = "xyz".index(axis)
+        d_response = np.zeros((nhm, nhm, nat, 4, 3, 3), dtype=complex)
+        for c in range(3):
+            resp = np.einsum("ij,st->ijst", magnetic_block, PAULI_MATRICES[c])
+            if soc and c != p:
+                off_block = np.array([[0.004, -0.002j], [0.002j, 0.007]])
+                resp = resp + np.einsum(
+                    "ij,st->ijst", off_block, PAULI_MATRICES[(c + 1) % 3]
+                )
+            d_response[:, :, :, :, c, p] = np.repeat(
+                resp.reshape(nhm, nhm, 1, 4), nat, axis=2
+            )
+    records = [
+        (
+            np.array([MAGIC_SPINOR.ljust(16, b" ")], dtype="S16"),
+            np.array([4, nk, nk, nbnd, nat, 1, nhm, 1, nkb, int(soc), 1], dtype="<i4"),
+        ),
+        (np.array([3.5, 0, 0.01]), np.array([-99, 0, 1], dtype="<i4")),
+        (np.eye(3), np.eye(3), np.array([4.0, 64.0]), np.array([1], dtype="<i4")),
+        (np.array([b"Fe    "] + [b"      "] * 9, dtype="S6"),),
+        (np.ones(nat, dtype="<i4"), tau),
+        tuple(np.array([v], dtype="<i4") for v in (nhm, 1, 0, int(soc))),
+        (total,),
+        (magnetic,),
+        (gram,),
+        (xk, wk),
+        (et, wg),
+        *[(coefficients[ik],) for ik in range(nk)],
+        (field,),
+        (np.zeros((3, nat, 4)),),
+    ]
+    if version == "1.1":
+        records.append((d_response,))
+        records[0] = (
+            np.array([MAGIC_SPINOR_NC11.ljust(16, b" ")], dtype="S16"),
+            records[0][1],
+        )
+    _write_spinor_records(path, records)
+    return SimpleNamespace(
+        path=path,
+        records=records,
+        coefficients=coefficients,
+        gram=gram,
+        field=field,
+        magnetic=magnetic,
+        total=total,
+        orbital=orbital,
+        et=et,
+        wg=wg,
+        xk=xk,
+        wk=wk,
+        tau=tau,
+        d_response=d_response,
+        magnetic_block=magnetic_block,
+        field_block=field_block,
+    )
+
+
+def test_spinor_complex_vertex_native_packing_and_dual_green(tmp_path):
+    from TB2J.projector_green import PAULI_MATRICES
+
+    gt = write_qe_spinor_dump(tmp_path / "y.bin", axis="y")
+    raw = parse_qe_spinor_dump(gt.path)
+    data = read_qe_spinor_dump(gt.path)
+    inverse = np.linalg.inv(gt.gram[:, :, 0])
+    smooth = inverse @ gt.field[:, :, 0, 1] @ inverse
+    expected = (
+        2
+        * RYTOEV
+        * (
+            np.einsum("ij,st->ijst", smooth, PAULI_MATRICES[1])
+            + gt.magnetic[:, :, 0].reshape(2, 2, 2, 2)
+        )
+    )
+    np.testing.assert_allclose(data.spinor_operator[0], expected)
+    flattened = expected.transpose(0, 2, 1, 3).reshape(4, 4)
+    np.testing.assert_allclose(flattened, flattened.conj().T)
+    assert np.max(np.abs(expected.imag)) > 0.1
+    np.testing.assert_allclose(raw.projected_field, gt.field)
+    np.testing.assert_allclose(data.eigenvalues[0], gt.et.T * RYTOEV)
+    np.testing.assert_allclose(data.occupations[0], gt.wg.T / gt.wk[:, None])
+    assert data.overlap_k is None
+    assert data.efermi_spin is None
+    data.validate(exchange_ready=True)
+    green = ProjectorGreen(data)
+    assert green.coefficients_are_dual
+    # A spectral Green contraction must preserve the complex coefficients
+    # without any extra Gram inverse. This is a consumer-level phase oracle.
+    energy = 1.3 + 0.7j
+    direct = np.einsum(
+        "psb,qtb,b->pqst",
+        gt.coefficients[1],
+        gt.coefficients[1].conj(),
+        1.0 / (energy - gt.et[:, 1] * RYTOEV),
+    )
+    np.testing.assert_allclose(green.get_Gk_spinor(1, energy), direct)
+
+
+def test_spinor_nc10_refuses_fully_relativistic_exchange(tmp_path):
+    soc = write_qe_spinor_dump(tmp_path / "soc.bin", soc=True)
+    raw = parse_qe_spinor_dump(soc.path)
+    assert raw.lspinorb and raw.has_so[0]
+    with pytest.raises(
+        ValueError, match="lacks native source-resolved magnetic tangents"
+    ):
+        read_qe_spinor_dump(soc.path)
+    references = {
+        axis: write_qe_spinor_dump(tmp_path / f"{axis}.bin", axis=axis, soc=True).path
+        for axis in "xyz"
+    }
+    with pytest.raises(
+        ValueError, match="lacks native source-resolved magnetic tangents"
+    ):
+        gen_exchange_qe(references, output_path=tmp_path / "no_exchange")
+    assert not (tmp_path / "no_exchange" / "exchange.out").exists()
+
+
+def _write_matching_collinear_dump(path, gt):
+    """Scalar-relativistic NC1.0 source written as validated KB v1.2.
+
+    Same spinor spectrum (orbital unitary per k, interleaved up/dn bands),
+    identity Gram, z field 0.015*I Ry -> reader vertex dbeta = 2*field.
+    """
+    dbeta = np.repeat(0.03 * np.eye(2)[:, :, None], 2, axis=2)
+    with open(path, "wb") as fh:
+        _frecord(
+            fh,
+            np.array([MAGIC_V12], dtype="S16"),
+            np.array([2, 4, 4, 4, 2, 1, 2, 1, 4], dtype="<i4"),
+        )
+        _frecord(
+            fh, np.array([3.5, 0.0, 0.0, 0.0, 0.01]), np.array([-99, 0, 1], dtype="<i4")
+        )
+        _frecord(
+            fh, np.eye(3), np.eye(3), np.array([4.0, 64.0]), np.array([1], dtype="<i4")
+        )
+        _frecord(fh, np.array([b"Fe"], dtype="S3"))
+        _frecord(fh, np.ones(2, dtype="<i4"), gt.tau)
+        _frecord(fh, *(np.array([v], dtype="<i4") for v in (2, 1, 0)))
+        _frecord(fh, np.zeros((2, 2, 2, 2)))
+        _frecord(fh, np.zeros((2, 2, 1)))
+        _frecord(fh, np.zeros((2, 2, 2)))
+        _frecord(fh, np.repeat(np.eye(2, dtype=complex)[:, :, None], 2, axis=2))
+        _frecord(
+            fh,
+            np.tile(gt.xk, (1, 2)),
+            np.tile(gt.wk, 2),
+            np.array([1, 1, 2, 2], dtype="<i4"),
+        )
+        _frecord(
+            fh,
+            np.concatenate([gt.et[:4], gt.et[4:]], axis=1),
+            np.concatenate([gt.wg[:4], gt.wg[4:]], axis=1),
+        )
+        for _spin in range(2):
+            for ik in range(2):
+                _frecord(fh, gt.orbital[ik])
+        _frecord(fh, np.zeros((3, 2, 2)))
+        _frecord(fh, dbeta)
+
+
+def test_spinor_scalar_relativistic_reduces_to_collinear_reader_and_exchange(tmp_path):
+    from TB2J.interfaces.gpaw_projector import compute_projector_exchange_jdict
+    from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
+
+    gt = write_qe_spinor_dump(tmp_path / "z.bin")
+    # Identity Gram, zero magnetic deeq, pure z field 0.015*I Ry: the exact
+    # scalar-relativistic operator kron(Delta sigma_z, I_orb), Delta=0.03 Ry.
+    gt.records[8] = (np.repeat(np.eye(2, dtype=complex)[:, :, None], 2, axis=2),)
+    gt.records[13][0][...] = 0
+    gt.records[13][0][:, :, :, 2] = 0.015 * np.eye(2)[:, :, None]
+    gt.records[7][0][...] = 0
+    _write_spinor_records(gt.path, gt.records)
+    collinear_path = tmp_path / "collinear.bin"
+    _write_matching_collinear_dump(collinear_path, gt)
+    collinear, spinor = read_qe_dump(collinear_path), read_qe_spinor_dump(gt.path)
+    delta = collinear.operator_components["delta_total"]
+    np.testing.assert_allclose(spinor.spinor_operator[..., 0, 0], delta)
+    np.testing.assert_allclose(spinor.spinor_operator[..., 1, 1], -delta)
+    kwargs = dict(Rpts=[[0, 0, 0], [1, 0, 0], [-1, 0, 0]], nz=8, smearing_eV=0.1)
+    jcol = compute_projector_exchange_jdict(
+        collinear, operator_component="delta_total", **kwargs
+    )
+    leg = compute_spinor_projector_exchange(spinor, **kwargs)
+    for key, value in jcol.items():
+        np.testing.assert_allclose(
+            leg[key]["J_leg"][0, 0], value, atol=1e-11, rtol=1e-8
+        )
+        np.testing.assert_allclose(
+            leg[key]["J_leg"][1, 1], value, atol=1e-11, rtol=1e-8
+        )
+    assert abs(jcol[((0, 0, 0), 0, 1)]) > 1e-8
+
+
+@pytest.mark.parametrize(
+    "record,part,index,value,message",
+    [
+        (0, 0, 0, b"TB2JQEDUMPNC9.0", "magic/version"),
+        (0, 1, 0, 2, "nspin=4"),
+        (0, 1, 2, 3, "pool-parallel"),
+        (0, 1, 4, 0, "dimensions/site"),
+        (0, 1, 8, 5, "site counts"),
+        (0, 1, 9, 1, "SO-bearing"),
+        (0, 1, 10, 0, "domag"),
+        (5, 0, 0, 0, "site counts"),
+        (5, 3, 0, 2, "has_so"),
+        (6, 0, (0, 0, 0, 0), 1j, "deeq_nc_total.*Hermitian"),
+        (7, 0, (0, 0, 0, 0), 1j, "deeq_nc_magnetic.*Hermitian"),
+        (8, 0, (0, 0, 0), -2, "positive definite"),
+        (9, 0, (0, 1), 0, "duplicate or incomplete"),
+        (9, 0, (0, 1), 0.3, "uniform full-BZ"),
+        (9, 1, 0, 0.7, "weights"),
+        (10, 0, (0, 0), np.nan, "nonfinite bands"),
+        (13, 0, (0, 1, 0, 2), 1j, "Pauli field.*Hermitian"),
+    ],
+)
+def test_spinor_rejects_invalid_physical_records(
+    tmp_path, record, part, index, value, message
+):
+    gt = write_qe_spinor_dump(tmp_path / "bad.bin")
+    gt.records[record][part][index] = value
+    _write_spinor_records(gt.path, gt.records)
+    with pytest.raises(ValueError, match=message):
+        read_qe_spinor_dump(gt.path)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["missing", "dummy", "trailing", "marker", "negative", "truncate", "real_field"],
+)
+def test_spinor_rejects_corrupt_schema(tmp_path, damage):
+    gt = write_qe_spinor_dump(tmp_path / "bad_schema.bin")
+    if damage == "missing":
+        del gt.records[7]
+    elif damage == "dummy":
+        gt.records[7] = (np.zeros(1, dtype="<i4"),)
+    elif damage == "trailing":
+        gt.records.append((np.zeros(1),))
+    elif damage == "real_field":
+        gt.records[13] = (gt.records[13][0].real,)
+    _write_spinor_records(gt.path, gt.records)
+    if damage in ("marker", "negative", "truncate"):
+        payload = bytearray(gt.path.read_bytes())
+        if damage == "marker":
+            payload[64:68] = struct.pack("<i", 61)
+        elif damage == "negative":
+            payload[:4] = struct.pack("<i", -60)
+        else:
+            payload = payload[:-10]
+        gt.path.write_bytes(payload)
+    with pytest.raises(ValueError):
+        parse_qe_spinor_dump(gt.path)
+
+
+def test_spinor_zero_source_and_cross_family_refusals(tmp_path):
+    gt = write_qe_spinor_dump(tmp_path / "zero.bin")
+    gt.records[7][0][...] = 0
+    gt.records[13][0][...] = 0
+    _write_spinor_records(gt.path, gt.records)
+    with pytest.raises(ValueError, match="zero magnetic source"):
+        parse_qe_spinor_dump(gt.path)
+    collinear = write_qe_dump(tmp_path / "kb.bin")
+    atomic = write_qe_atomic_dump(tmp_path / "atomic.bin")
+    for path in (collinear.path, atomic.path):
+        with pytest.raises(ValueError, match="KB only"):
+            parse_qe_spinor_dump(path)
+    good = write_qe_spinor_dump(tmp_path / "good.bin")
+    with pytest.raises(ValueError, match="transverse leg"):
+        gen_exchange_qe(good.path)
+    with pytest.raises(ValueError, match="x/y/z"):
+        gen_exchange_qe({"z": good.path})
+    for control in ({"overlap_mode": "inverse"}, {"overlap_rcond": 1e-8}):
+        with pytest.raises(ValueError, match="already dual"):
+            gen_exchange_qe(dict.fromkeys(("x", "y", "z"), good.path), **control)
+
+
+def _spinor_references(tmp_path):
+    return {
+        axis: write_qe_spinor_dump(tmp_path / f"{axis}.bin", axis=axis).path
+        for axis in "xyz"
+    }
+
+
+def test_spinor_three_leg_output_matches_raw_transverse_exchange(tmp_path):
+    from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
+
+    references = _spinor_references(tmp_path)
+    kwargs = dict(Rpts=[[0, 0, 0]], nz=8, smearing_eV=0.1)
+    output, jdict = gen_exchange_qe(references, output_path=tmp_path / "out", **kwargs)
+    leg = compute_spinor_projector_exchange(
+        read_qe_spinor_dump(references["z"]), **kwargs
+    )
+    np.testing.assert_allclose(
+        jdict[((0, 0, 0), 0, 1)],
+        leg[((0, 0, 0), 0, 1)]["J_leg"][0, 0],
+        atol=1e-10,
+        rtol=1e-8,
+    )
+    assert abs(jdict[((0, 0, 0), 0, 1)]) > 1e-8
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    stored = SpinIO.load_pickle(path=output.parent)
+    assert np.isclose(
+        stored.get_Jiso(0, 1, (0, 0, 0)), jdict[((0, 0, 0), 0, 1)], atol=1e-10
+    )
+
+
+@pytest.mark.parametrize(
+    "mismatch", ["axis", "weights", "mesh", "geometry", "field", "family"]
+)
+def test_spinor_three_leg_merge_refuses_inconsistent_references(tmp_path, mismatch):
+    references = _spinor_references(tmp_path)
+    if mismatch == "axis":
+        write_qe_spinor_dump(references["x"], axis="z")
+        message = "not axis-aligned"
+    else:
+        gt = write_qe_spinor_dump(references["x"], axis="x")
+        if mismatch == "weights":
+            gt.records[9][1][...] = [0.4, 0.6]
+            message = "weights"
+        elif mismatch == "mesh":
+            gt.records[9][0][0, 1] += 0.3
+            message = "uniform full-BZ"
+        elif mismatch == "geometry":
+            gt.records[4][1][0, 1] += 0.1
+            message = "geometry, k mesh, or band window"
+        elif mismatch == "field":
+            gt.records[13][0][...] *= 1.6
+            gt.records[7][0][...] *= 1.6
+            message = "leg diagonals disagree"
+        else:
+            gt.records[5][2][0] = 1
+            message = "UPF/projector family"
+        _write_spinor_records(gt.path, gt.records)
+    with pytest.raises(ValueError, match=message):
+        gen_exchange_qe(
+            references,
+            output_path=tmp_path / "refused",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+    assert not (tmp_path / "refused" / "exchange.out").exists()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [],
+        ["--input_x", "x"],
+        ["--input", "c", "--input_x", "x"],
+        [
+            "--input_x",
+            "x",
+            "--input_y",
+            "y",
+            "--input_z",
+            "z",
+            "--overlap_mode",
+            "inverse",
+        ],
+    ],
+)
+def test_qe_spinor_cli_requires_exclusive_complete_inputs(monkeypatch, argv):
+    from TB2J.scripts.qe2J import run_qe2J
+
+    monkeypatch.setattr("sys.argv", ["qe2J.py", *argv])
+    with pytest.raises(SystemExit) as failure:
+        run_qe2J()
+    assert failure.value.code == 2
+
+
+def test_qe_spinor_cli_writes_three_leg_exchange_without_mocking(tmp_path, monkeypatch):
+    from TB2J.scripts.qe2J import run_qe2J
+
+    references = _spinor_references(tmp_path)
+    output = tmp_path / "cli"
+    argv = ["qe2J.py", "--output_path", str(output), "--nz", "8"]
+    for axis, path in references.items():
+        argv.extend([f"--input_{axis}", str(path)])
+    monkeypatch.setattr("sys.argv", argv)
+    run_qe2J()
+    from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    stored = SpinIO.load_pickle(path=output)
+    leg = compute_spinor_projector_exchange(
+        read_qe_spinor_dump(references["z"]),
+        Rpts=[[0, 0, 0]],
+        nz=8,
+    )
+    assert np.isclose(
+        stored.get_Jiso(0, 1, (0, 0, 0)),
+        leg[((0, 0, 0), 0, 1)]["J_leg"][0, 0],
+        atol=1e-10,
+    )
+
+
+# ---------------------------------------------------------------------------
+# NC1.1 native source-response consumer (story 002)
+# ---------------------------------------------------------------------------
+def test_spinor_nc11_parse_records_and_diagonal_gate(tmp_path):
+    gt = write_qe_spinor_dump(tmp_path / "nc11.bin", version="1.1")
+    raw = parse_qe_spinor_dump(gt.path)
+    assert raw.version == "1.1" and raw.magic == "TB2JQEDUMPNC1.1"
+    assert raw.d_response is not None
+    np.testing.assert_allclose(raw.d_response, gt.d_response)
+    data = read_qe_spinor_dump(gt.path)
+    assert data.spinor_tangent_vertices is not None
+    assert data.metadata["qe_magic"] == "TB2JQEDUMPNC1.1"
+    # diagonal identity gate: corrupt one D_{z<-z} slab
+    bad = write_qe_spinor_dump(tmp_path / "bad.bin", version="1.1")
+    bad.records[-1][0][:, :, 0, :, 2, 2] += 1e-5
+    _write_spinor_records(bad.path, bad.records)
+    with pytest.raises(ValueError, match="diagonal identity gate"):
+        parse_qe_spinor_dump(bad.path)
+
+
+def test_spinor_nc11_strict_eof_and_mixed_version_refusals(tmp_path):
+    # NC1.0 file with an appended response record is refused
+    legacy = write_qe_spinor_dump(tmp_path / "legacy.bin")
+    with open(legacy.path, "ab") as fh:
+        _frecord(fh, np.zeros((2, 2, 2, 4, 3, 3), dtype=complex))
+    with pytest.raises(ValueError, match="trailing records beyond NC1.0"):
+        parse_qe_spinor_dump(legacy.path)
+    # NC1.1 file missing its response record is refused
+    short = write_qe_spinor_dump(tmp_path / "short.bin", version="1.1")
+    _write_spinor_records(short.path, short.records[:-1])
+    with pytest.raises(ValueError):
+        parse_qe_spinor_dump(short.path)
+    # a mixed NC1.0/NC1.1 reference set is refused
+    references = {
+        axis: write_qe_spinor_dump(
+            tmp_path / f"{axis}.bin",
+            axis=axis,
+            version="1.1" if axis == "z" else "1.0",
+        ).path
+        for axis in "xyz"
+    }
+    with pytest.raises(ValueError, match="UPF/projector family"):
+        gen_exchange_qe(
+            references,
+            output_path=tmp_path / "mixed",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+
+
+def test_spinor_nc11_scalar_tangent_factor_and_orientation_oracles(tmp_path):
+    from TB2J.projector_green import PAULI_MATRICES, magnetic_tangent_vertices
+
+    for axis in ("z", "x"):
+        gt = write_qe_spinor_dump(tmp_path / f"{axis}.bin", axis=axis, version="1.1")
+        data = read_qe_spinor_dump(gt.path)
+        p = "xyz".index(axis)
+        vertices = data.spinor_tangent_vertices
+        inverse = np.linalg.inv(gt.gram[:, :, 0])
+        q = inverse @ gt.field[:, :, 0, p] @ inverse + gt.magnetic_block
+        # longitudinal vertex vanishes; transverse vertex = RYTOEV * Q (x) sigma
+        np.testing.assert_allclose(vertices[0, p], 0.0, atol=1e-14)
+        for a in range(3):
+            if a == p:
+                continue
+            expected = RYTOEV * np.einsum("ij,st->ijst", q, PAULI_MATRICES[a])
+            np.testing.assert_allclose(vertices[0, a], expected, atol=1e-12)
+        # exact parity with the existing commutator tangent
+        commutator = magnetic_tangent_vertices(data.spinor_operator[0])["vertices"]
+        for a in range(3):
+            dense = np.stack([vertices[0, a].transpose(2, 0, 3, 1).reshape(4, 4)])
+            np.testing.assert_allclose(dense[0], commutator[a], atol=1e-9)
+
+
+def test_spinor_nc11_rank_deficient_beta_gram_keeps_vertex_bounded(tmp_path):
+    from TB2J.projector_green import PAULI_MATRICES
+
+    gt = write_qe_spinor_dump(tmp_path / "weak_beta.bin", version="1.1")
+    bright = np.array([1.0, 1.0j]) / np.sqrt(2.0)
+    dark = np.array([1.0, -1.0j]) / np.sqrt(2.0)
+    gram = 2.0 * np.outer(bright, bright.conj()) + 2e-9 * np.outer(dark, dark.conj())
+    # A tiny finite field in the nearly null channel would become enormous
+    # under an unconditioned inverse; only the resolved channel is physical.
+    field = 0.04 * np.outer(bright, bright.conj()) + 2e-7 * np.outer(dark, dark.conj())
+    gt.gram[...] = gram[:, :, None]
+    gt.field[:, :, :, 2] = field[:, :, None]
+    _write_spinor_records(gt.path, gt.records)
+    data = read_qe_spinor_dump(gt.path)
+    resolved = 0.01 * np.outer(bright, bright.conj()) + gt.magnetic_block
+    expected = 2 * RYTOEV * np.einsum("ij,st->ijst", resolved, PAULI_MATRICES[2])
+    np.testing.assert_allclose(data.spinor_operator[0], expected, atol=1e-9)
+    np.testing.assert_allclose(
+        data.spinor_tangent_vertices[0, 0],
+        RYTOEV * np.einsum("ij,st->ijst", resolved, PAULI_MATRICES[0]),
+        atol=1e-9,
+    )
+
+
+def test_spinor_nc11_soc_explicit_vertices_drive_exchange(tmp_path):
+    from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
+    from TB2J.projector_green import (
+        magnetic_tangent_vertices,
+        spinor_dense_block,
+        spinor_tangent_trace,
+    )
+
+    gt = write_qe_spinor_dump(tmp_path / "soc.bin", version="1.1", soc=True)
+    data = read_qe_spinor_dump(gt.path)
+    vertices = data.spinor_tangent_vertices
+    explicit = np.stack([spinor_dense_block(vertices[0, axis]) for axis in range(3)])
+    commutator = magnetic_tangent_vertices(data.spinor_operator[0])["vertices"]
+    # the off-diagonal response contamination must make the explicit vertex
+    # genuinely different from the commutator
+    assert np.abs(explicit - commutator).max() > 1e-3 * np.abs(explicit).max()
+    kwargs = dict(Rpts=[[0, 0, 0], [1, 0, 0], [-1, 0, 0]], nz=8, smearing_eV=0.1)
+    exchange = compute_spinor_projector_exchange(data, **kwargs)
+    # oracle: the computed exchange must equal the contour integral of the
+    # explicit-vertex tangent trace and differ from the commutator one
+    from TB2J.interfaces.gpaw_projector import _R_grid
+    from TB2J.mycfr import CFR
+    from TB2J.projector_green import ProjectorGreen
+
+    green = ProjectorGreen(data)
+    rpts = _R_grid(nmax=1)
+    explicit_stack = {
+        site: np.stack([spinor_dense_block(vertices[site, a]) for a in range(3)])
+        for site in range(data.site_nproj.shape[0])
+    }
+    commutator_stack = {
+        site: magnetic_tangent_vertices(data.spinor_operator[site])["vertices"]
+        for site in range(data.site_nproj.shape[0])
+    }
+    contour = CFR(nz=8, T=0.1 / 8.617333262e-5)
+    key = ((0, 0, 0), 0, 0)
+    matrices = []
+    for energy in contour.path:
+        trace = spinor_tangent_trace(
+            green,
+            rpts,
+            energy=energy,
+            vertices=explicit_stack,
+            sites=list(range(data.site_nproj.shape[0])),
+        )
+        matrices.append(trace["K_ijR"][key])
+    integrated = np.array(
+        [
+            [
+                contour.integrate_values(np.asarray([m[a, b] for m in matrices]))
+                for b in range(3)
+            ]
+            for a in range(3)
+        ]
+    )
+    np.testing.assert_allclose(exchange[key]["K_ijR"], integrated, atol=1e-10)
+    matrices_comm = []
+    for energy in contour.path:
+        trace = spinor_tangent_trace(
+            green,
+            rpts,
+            energy=energy,
+            vertices=commutator_stack,
+            sites=list(range(data.site_nproj.shape[0])),
+        )
+        matrices_comm.append(trace["K_ijR"][key])
+    integrated_comm = np.array(
+        [
+            [
+                contour.integrate_values(np.asarray([m[a, b] for m in matrices_comm]))
+                for b in range(3)
+            ]
+            for a in range(3)
+        ]
+    )
+    assert (
+        np.abs(np.imag(integrated) - np.imag(integrated_comm)).max()
+        > 1e-6 * np.abs(np.imag(integrated)).max()
+    )
+    # hermiticity gate: corrupt one response block
+    bad = write_qe_spinor_dump(tmp_path / "bad.bin", version="1.1", soc=True)
+    bad.records[-1][0][0, 1, 0, 0, 0, 2] += 0.01
+    _write_spinor_records(bad.path, bad.records)
+    with pytest.raises(ValueError, match="not complex Hermitian"):
+        parse_qe_spinor_dump(bad.path)
+
+
+def test_spinor_nc11_tangent_netcdf_roundtrip_and_required_field(tmp_path):
+    gt = write_qe_spinor_dump(tmp_path / "z.bin", version="1.1")
+    data = read_qe_spinor_dump(gt.path)
+    nc_path = tmp_path / "roundtrip.nc"
+    data.save_netcdf(nc_path)
+    loaded = ProjectorGreenData.load_netcdf(nc_path)
+    np.testing.assert_allclose(
+        loaded.spinor_tangent_vertices, data.spinor_tangent_vertices
+    )
+    assert loaded.spinor_tangent_definition == "qe_nc11_frozen_source_tangent"
+    loaded.validate(exchange_ready=True)
+    # a QE NC1.1-labeled dataset without its tangent fails closed
+    stripped = read_qe_spinor_dump(gt.path)
+    stripped.spinor_tangent_vertices = None
+    with pytest.raises(ValueError, match="NC1.1"):
+        stripped.validate(exchange_ready=True)
+
+
+def test_spinor_nc11_three_leg_exchange_and_tolerance_gate(tmp_path):
+    from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    references = {
+        axis: write_qe_spinor_dump(
+            tmp_path / f"{axis}.bin", axis=axis, version="1.1"
+        ).path
+        for axis in "xyz"
+    }
+    kwargs = dict(Rpts=[[0, 0, 0]], nz=8, smearing_eV=0.1)
+    output, jdict = gen_exchange_qe(
+        references, output_path=tmp_path / "out", leg_consistency_atol_eV=5e-8, **kwargs
+    )
+    stored = SpinIO.load_pickle(path=tmp_path / "out")
+    assert "leg_consistency_atol_eV=5.000e-08" in stored.description
+    assert "TB2J_TAN_LEG_SPREAD" in stored.description
+    leg = compute_spinor_projector_exchange(
+        read_qe_spinor_dump(references["z"]), **kwargs
+    )
+    np.testing.assert_allclose(
+        jdict[((0, 0, 0), 0, 1)],
+        leg[((0, 0, 0), 0, 1)]["J_leg"][0, 0],
+        atol=1e-10,
+        rtol=1e-8,
+    )
+    for bad in (0.0, -1e-8, 2e-7, float("nan")):
+        with pytest.raises(ValueError, match="leg_consistency_atol_eV"):
+            gen_exchange_qe(
+                references,
+                output_path=tmp_path / "refused",
+                leg_consistency_atol_eV=bad,
+                **kwargs,
+            )
+    # single NC1.1 dump still refuses full-tensor output
+    with pytest.raises(ValueError, match="transverse leg"):
+        gen_exchange_qe(references["z"], output_path=tmp_path / "single")
+    # legacy NC1.0 three-leg keeps working (SO rejection test already covers
+    # SOC NC1.0 refusal)
+
+
+def test_qe_spinor_cli_accepts_leg_consistency_flag(tmp_path, monkeypatch):
+    from TB2J.scripts.qe2J import run_qe2J
+
+    references = {
+        axis: write_qe_spinor_dump(
+            tmp_path / f"{axis}.bin", axis=axis, version="1.1"
+        ).path
+        for axis in "xyz"
+    }
+    output = tmp_path / "cli"
+    argv = [
+        "qe2J.py",
+        "--output_path",
+        str(output),
+        "--nz",
+        "8",
+        "--leg_consistency_atol_eV",
+        "1e-8",
+    ]
+    for axis, path in references.items():
+        argv.extend([f"--input_{axis}", str(path)])
+    monkeypatch.setattr("sys.argv", argv)
+    run_qe2J()
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    stored = SpinIO.load_pickle(path=output)
+    assert "leg_consistency_atol_eV=1.000e-08" in stored.description
