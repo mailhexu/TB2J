@@ -256,16 +256,27 @@ Its 6-Å far shell still fails (first inconsistent row
 PAW have a validated first-shell tensor, but neither has
 a six-angstrom tensor from these reference densities.
 
-A GPAW 26.7 spinor x reference (LDA/PW92, 8³ k mesh,
-96 spinor bands, 1100 eV cutoff) yields a first-neighbor
-x-leg transverse diagonal ``13.804504 meV`` at 30 poles
-and 0.05 eV contour smearing; QE PBE US and the tightly
-converged PAW x legs give ``17.717442`` and
-``14.777512 meV`` respectively (12³, 48 bands, 80 Ry).
-These **single legs** differ in XC, setup, basis, k mesh
-and band window; no matched-functional quantitative
-comparison follows. GPAW's noncollinear SCF plane-wave
-path rejects PBE in this installation and lacks a matched
+An independent GPAW 26.7 LDA/PW92 plane-wave spinor
+x/y/z reference family was also calculated (8³ k mesh,
+96 spinor bands, 1100 eV cutoff). Its initial three-leg
+nearest-shell merge fails the GPAW default repeated-row
+bound ``1e-8 eV`` (first inconsistent row
+``1.592e-7 eV``). Tightening all three GPAW SCFs to
+energy/density thresholds ``1e-8`` still fails (first
+row ``4.751e-8 eV``; measured **worst** first-shell
+spread ``5.241305e-6 eV`` and transverse-mask
+residual ``1.750664e-6 eV``). The GPAW rank-nine
+output is therefore **refused**, not compared as a
+certified tensor with the QE US/PAW outputs.
+At 30 poles and 0.05 eV contour smearing, the tight
+GPAW **single x leg** has first-neighbor transverse
+diagonal ``13.803708 meV``; QE PBE US and tight PAW x
+legs give ``17.717442`` and ``14.777512 meV``
+respectively (12³, 48 bands, 80 Ry). These diagnostic
+legs differ in XC, setup, beta basis, k mesh and band
+window; no matched-functional quantitative inference
+follows. GPAW's noncollinear SCF plane-wave path in
+this installation rejects PBE and lacks a matched
 PZ Fe setup.
 
 One spinor dump measures only a transverse leg; it cannot define a

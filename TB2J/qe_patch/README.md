@@ -346,14 +346,23 @@ the NC projected-vertex family before dump:
 The absence of US/PAW augmentation is not itself a derivation of a
 smooth-only NC site vertex.
 
-For a cross-code **single-leg** diagnostic at 30 poles / 0.05 eV,
-GPAW 26.7 LDA/PW92 (8³, 96 spinor bands, 1100 eV) gives
-first-neighbor x-leg `Jyy=13.8045 meV`; QE PBE (12³,
-48 bands, 80 Ry) gives US `17.71744` and tightly
-converged PAW `14.77751 meV`.
-Different XC, PAW setups, meshes and band windows prohibit
-a matched-functional tensor comparison; GPAW's self-consistent
-spinor PW mode in this installation rejects PBE.
+For a cross-code check, independent GPAW 26.7 LDA/PW92
+x/y/z spinor references (8³, 96 bands, 1100 eV) were
+generated. Their initial first-shell rank-nine merge
+**refuses** at `1.592e-7 eV` versus GPAW's unchanged
+`1e-8 eV` repeated-row bound. Tightening all three
+GPAW SCFs to energy/density `1e-8` still refuses
+(first row `4.751e-8 eV`; worst first-shell spread
+`5.241305e-6 eV`, transverse-mask residual
+`1.750664e-6 eV`). Do not construct a GPAW full
+tensor from these references. At 30 poles / 0.05 eV
+the **single x leg** gives first-neighbor transverse
+`Jyy=13.803708 meV`; QE PBE (12³, 48 bands, 80 Ry)
+gives US `17.717442` and tight PAW `14.777512 meV`.
+XC, PAW setups, beta subspaces, meshes and band
+windows differ, so this is not a matched-functional
+quantitative tensor comparison. GPAW's spinor PW SCF
+mode in this installation rejects PBE.
 
 ## 6. Reading the dump with TB2J
 

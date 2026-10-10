@@ -20,8 +20,10 @@
   Both 6-Å tensors fail the far-shell gate and yield
   **no** extended-range output. Unphysical self and
   out-of-cutoff pairs are excluded before the merge.
-  The GPAW LDA reference differs from QE PBE in XC/setup;
-  no matched quantitative cross-code claim is made.
+  GPAW LDA/PW92 x/y/z references themselves fail their
+  unchanged 1e-8-eV first-shell repeated-row gate even
+  after tighter SCF; no GPAW full tensor or matched
+  QE–GPAW quantitative claim is made.
 
 - VASP split-SOC exports now require `LWRITE_TB2J = .TRUE.` in each
   leg's INCAR. The new VASP patch switch defaults to `.FALSE.`; without
