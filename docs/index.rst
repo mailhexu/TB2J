@@ -32,6 +32,7 @@ Welcome to TB2J's documentation!
    src/projector_green.rst
    src/spiral.rst
    src/spin_lattice_lcao.md
+   src/unfold_epc.md
    src/abinit_savetb2j_schema.rst
    src/sprkkr_magnon.md
    src/edit.md
