@@ -62,6 +62,26 @@ def _indices(args):
     return [i - 1 for i in args.index_magnetic_atoms]
 
 
+def _paw_xml_arg(tokens):
+    """Normalize --paw_xml tokens to the str | Mapping form the interfaces take.
+
+    A single bare path (single-species WFK) passes through as a plain string;
+    ``SPECIES=PATH`` tokens become a per-species mapping.
+    """
+    if len(tokens) == 1 and "=" not in tokens[0]:
+        return tokens[0]
+    mapping = {}
+    for token in tokens:
+        species, sep, path = token.partition("=")
+        if not sep or not species or not path:
+            raise SystemExit(
+                "--paw_xml expects either one bare PATH (single-species WFK) "
+                "or SPECIES=PATH tokens for every species; got " + repr(tokens)
+            )
+        mapping[species] = path
+    return mapping
+
+
 _PAW_SAVETB2J_ONLY = ("population_mode",)
 _NC_ONLY = (
     "no_shell_filter",
@@ -171,11 +191,30 @@ def _run_orbitals(args):
 
 
 def _run_pawlog(args):
+    if args.spinor:
+        from TB2J.interfaces.abinit_paw_spinor import gen_exchange_abinit_paw_spinor
+
+        exchange_out, _ = gen_exchange_abinit_paw_spinor(
+            wfk_path=args.wfk,
+            paw_xml_path=_paw_xml_arg(args.paw_xml),
+            log_path=args.log,
+            projected_data_path=args.projected_data,
+            magnetic_elements=args.elements,
+            index_magnetic_atoms=_indices(args),
+            output_path=args.output_path or "TB2J_results_abinit_paw_spinor",
+            nz=args.nz,
+            smearing_eV=args.smearing,
+            Rcut=args.Rcut,
+            delta_unit=args.delta_unit,
+        )
+        print(f"Wrote {exchange_out}")
+        return
+
     from TB2J.interfaces.abinit_paw import gen_exchange_abinit_paw
 
     exchange_out, _ = gen_exchange_abinit_paw(
         wfk_path=args.wfk,
-        paw_xml_path=args.paw_xml,
+        paw_xml_path=_paw_xml_arg(args.paw_xml),
         log_path=args.log,
         projected_data_path=args.projected_data,
         magnetic_elements=args.elements,
@@ -337,6 +376,16 @@ def build_parser():
         nargs="+",
         required=True,
         help="PAW-XML pseudopotential per species",
+    )
+    p.add_argument(
+        "--spinor",
+        action="store_true",
+        help=(
+            "spinor channel (story 011): nspinor=2 WFK + nspden=4 pawprt D_ij "
+            "(four 'Component up-up/dwn-dwn/up-dwn/dwn-up' blocks per atom), "
+            "Pauli-decomposed into Delta=2*B.sigma and run through the "
+            "ExchangeNCL spinor kernel (J_iso/DMI/Jani)"
+        ),
     )
     p.add_argument(
         "--projected_data", default=None, help="precomputed abinao projection NetCDF"

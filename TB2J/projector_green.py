@@ -25,7 +25,32 @@ SUPPORTED_HIJ_EXCHANGE_DEFINITIONS = (
     "spin-splitting matrix in VASP LOCPROJ trial-function basis",
     "spin-dependent projector hamiltonian matrix",
     "spin-dependent projector potential matrix",
+    "spinor 2x2 local operator (j-averaged basis)",
+    "qe_deeq_spin_difference",
+    "qe_dbeta_xc_plus_deeq_spin_difference",
+    "qe_atomic_pao_projected_spin_vertex",
 )
+SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
+#: Exact definition marker for explicit frozen-source tangent vertices
+#: (QE NC1.1 native source response); ``dH_mag/dtheta`` in eV.
+SPINOR_TANGENT_DEFINITION = "qe_nc11_frozen_source_tangent"
+PAULI_IDENTITY_AND_MATRICES = (
+    np.eye(2, dtype=complex),
+    np.array([[0, 1], [1, 0]], dtype=complex),
+    np.array([[0, -1j], [1j, 0]], dtype=complex),
+    np.array([[1, 0], [0, -1]], dtype=complex),
+)
+
+PAULI_MATRICES = np.array(
+    [
+        [[0, 1], [1, 0]],
+        [[0, -1j], [1j, 0]],
+        [[1, 0], [0, -1]],
+    ],
+    dtype=complex,
+)
+
+_CARTESIAN_AXES = np.eye(3)
 
 
 def _jsonable(value):
@@ -209,6 +234,11 @@ class ProjectorGreenData:
     schema_name: str = SCHEMA_NAME
     schema_version: str = SCHEMA_VERSION
     efermi_spin: np.ndarray | None = None
+    nspinor: int = 1
+    spinor_operator: np.ndarray | None = None
+    spinor_operator_definition: str | None = None
+    spinor_tangent_vertices: np.ndarray | None = None
+    spinor_tangent_definition: str | None = None
 
     def __post_init__(self):
         self.kpoints = np.asarray(self.kpoints, dtype=float)
@@ -223,6 +253,16 @@ class ProjectorGreenData:
             if self.efermi_spin.shape == ():
                 self.efermi_spin = self.efermi_spin.reshape(1)
             self.efermi = float(np.mean(self.efermi_spin))
+
+        self.nspinor = int(self.nspinor)
+        if self.nspinor not in (1, 2):
+            raise ValueError("nspinor must be 1 or 2")
+        if self.spinor_operator is not None:
+            self.spinor_operator = np.asarray(self.spinor_operator, dtype=complex)
+        if self.spinor_tangent_vertices is not None:
+            self.spinor_tangent_vertices = np.asarray(
+                self.spinor_tangent_vertices, dtype=complex
+            )
 
         if self.cell is not None:
             self.cell = np.asarray(self.cell, dtype=float)
@@ -317,7 +357,7 @@ class ProjectorGreenData:
 
     @property
     def nproj(self):
-        return self.coefficients.shape[3]
+        return self.coefficients.shape[-1]
 
     def validate(self, exchange_ready=False):
         if self.schema_name != SCHEMA_NAME:
@@ -335,11 +375,27 @@ class ProjectorGreenData:
             raise ValueError("efermi_spin must have shape (nspin,)")
         if nkpt != self.kpoints.shape[0]:
             raise ValueError("eigenvalues and kpoints have inconsistent nkpt")
-        if self.coefficients.ndim != 4:
-            raise ValueError("coefficients must have shape (nspin, nkpt, nband, nproj)")
-        if self.coefficients.shape[:3] != (nspin, nkpt, nband):
-            raise ValueError("coefficients must have shape (nspin, nkpt, nband, nproj)")
-        nproj = self.coefficients.shape[3]
+        if self.nspinor == 2:
+            if nspin != 1:
+                raise ValueError("spinor data requires a single spin channel")
+            if (
+                self.coefficients.ndim != 5
+                or self.coefficients.shape[:3] != (1, nkpt, nband)
+                or self.coefficients.shape[3] != 2
+            ):
+                raise ValueError(
+                    "spinor coefficients must have shape (1, nkpt, nband, 2, nproj)"
+                )
+        else:
+            if self.coefficients.ndim != 4:
+                raise ValueError(
+                    "coefficients must have shape (nspin, nkpt, nband, nproj)"
+                )
+            if self.coefficients.shape[:3] != (nspin, nkpt, nband):
+                raise ValueError(
+                    "coefficients must have shape (nspin, nkpt, nband, nproj)"
+                )
+        nproj = self.coefficients.shape[-1]
         if self.projector_site.shape != (nproj,):
             raise ValueError("projector_site must have shape (nproj,)")
         if self.projector_atom.shape != (nproj,):
@@ -388,14 +444,27 @@ class ProjectorGreenData:
             self._validate_hij()
         if self.operator_components is not None:
             self._validate_operator_components()
+        if self.spinor_operator is not None:
+            self._validate_spinor_operator()
+        if self.spinor_tangent_vertices is not None:
+            self._validate_spinor_tangent_vertices()
+        if (
+            str(self.metadata.get("qe_magic", "")).startswith("TB2JQEDUMPNC1.1")
+            and self.spinor_tangent_vertices is None
+        ):
+            raise ValueError(
+                "QE NC1.1 dataset requires explicit spinor_tangent_vertices; "
+                "refusing silent magnetic_tangent_vertices commutator fallback"
+            )
         if (
             exchange_ready
+            and self.spinor_operator is None
             and self.hij is None
             and not self.has_operator_component("delta_total")
         ):
             raise ValueError(
-                "exchange-ready projector data requires spin-resolved hij "
-                "or delta_total operator component"
+                "exchange-ready projector data requires spin-resolved hij, "
+                "delta_total operator component, or a spinor operator"
             )
         return True
 
@@ -435,6 +504,68 @@ class ProjectorGreenData:
         if self.site_nproj is not None and np.any(self.site_nproj > self.hij.shape[2]):
             raise ValueError("hij nproj_site_max is smaller than site_nproj")
 
+    def _validate_spinor_operator(self):
+        if self.nspinor != 2:
+            raise ValueError("spinor_operator requires nspinor=2")
+        if self.spinor_operator_definition != SPINOR_OPERATOR_DEFINITION:
+            raise ValueError(
+                "unsupported spinor_operator_definition: "
+                f"{self.spinor_operator_definition!r}"
+            )
+        if self.site_nproj is None or self.site_projector_indices is None:
+            raise ValueError(
+                "spinor_operator requires site_nproj and site_projector_indices"
+            )
+        if (
+            self.spinor_operator.ndim != 5
+            or self.spinor_operator.shape[0] != self.site_nproj.shape[0]
+            or self.spinor_operator.shape[1] != self.spinor_operator.shape[2]
+            or self.spinor_operator.shape[3:] != (2, 2)
+        ):
+            raise ValueError(
+                "spinor_operator must have shape "
+                "(nsite, nproj_site_max, nproj_site_max, 2, 2)"
+            )
+        if np.any(self.site_nproj > self.spinor_operator.shape[1]):
+            raise ValueError(
+                "spinor_operator nproj_site_max is smaller than site_nproj"
+            )
+
+    def _validate_spinor_tangent_vertices(self):
+        if self.nspinor != 2:
+            raise ValueError("spinor_tangent_vertices requires nspinor=2")
+        if self.spinor_tangent_definition != SPINOR_TANGENT_DEFINITION:
+            raise ValueError(
+                "unsupported spinor_tangent_definition: "
+                f"{self.spinor_tangent_definition!r}"
+            )
+        if self.spinor_operator is None:
+            raise ValueError(
+                "spinor_tangent_vertices requires spinor_operator for the "
+                "local Pauli-trace direction"
+            )
+        if self.site_nproj is None or self.site_projector_indices is None:
+            raise ValueError(
+                "spinor_tangent_vertices requires site_nproj and "
+                "site_projector_indices"
+            )
+        if (
+            self.spinor_tangent_vertices.ndim != 6
+            or self.spinor_tangent_vertices.shape[0] != self.site_nproj.shape[0]
+            or self.spinor_tangent_vertices.shape[1] != 3
+            or self.spinor_tangent_vertices.shape[2]
+            != self.spinor_tangent_vertices.shape[3]
+            or self.spinor_tangent_vertices.shape[4:] != (2, 2)
+            or self.spinor_tangent_vertices.shape[2] != self.spinor_operator.shape[1]
+        ):
+            raise ValueError(
+                "spinor_tangent_vertices must have shape "
+                "(nsite, 3, nproj_site_max, nproj_site_max, 2, 2) matching "
+                "spinor_operator"
+            )
+        if not np.all(np.isfinite(self.spinor_tangent_vertices)):
+            raise ValueError("spinor_tangent_vertices contains nonfinite values")
+
     def _validate_operator_components(self):
         if self.site_nproj is None or self.site_projector_indices is None:
             raise ValueError("operator components require site projector indices")
@@ -442,7 +573,13 @@ class ProjectorGreenData:
         nmax = self.site_projector_indices.shape[1]
         nproj = self.coefficients.shape[-1]
         for name, value in self.operator_components.items():
-            if value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
+            if value.ndim == 5:
+                if value.shape != (nsite, nmax, nmax, 2, 2):
+                    raise ValueError(
+                        f"operator component {name!r} must have shape "
+                        "(nsite, nproj_site_max, nproj_site_max, 2, 2)"
+                    )
+            elif value.shape not in ((nsite, nmax, nmax), (nproj, nproj)):
                 raise ValueError(
                     f"operator component {name!r} must have shape "
                     "(nsite, nproj_site_max, nproj_site_max) or (nproj, nproj)"
@@ -498,6 +635,9 @@ class ProjectorGreenData:
         with Dataset(Path(filename), "w") as nc:
             nspin, nkpt, nband = self.eigenvalues.shape
             nproj = self.nproj
+            if self.nspinor == 2:
+                nc.createDimension("nspinor", 2)
+                nc.nspinor = 2
             nc.createDimension("nspin", nspin)
             nc.createDimension("nkpt", nkpt)
             nc.createDimension("nband", nband)
@@ -551,9 +691,16 @@ class ProjectorGreenData:
                 projectors.channel_interpretation = self.channel_interpretation
             if self.population_metric is not None:
                 projectors.population_metric = self.population_metric
-            projectors.createVariable(
-                "coefficients", "f8", ("nspin", "nkpt", "nband", "nproj", "complex")
-            )[:] = encode_complex(self.coefficients)
+            if self.nspinor == 2:
+                projectors.createVariable(
+                    "coefficients",
+                    "f8",
+                    ("nspin", "nkpt", "nband", "nspinor", "nproj", "complex"),
+                )[:] = encode_complex(self.coefficients)
+            else:
+                projectors.createVariable(
+                    "coefficients", "f8", ("nspin", "nkpt", "nband", "nproj", "complex")
+                )[:] = encode_complex(self.coefficients)
             projectors.createVariable("projector_site", "i4", ("nproj",))[:] = (
                 self.projector_site
             )
@@ -604,7 +751,11 @@ class ProjectorGreenData:
                     "site_projector_indices", "i4", ("nsite", "nproj_site_max")
                 )[:] = self.site_projector_indices
 
-            if self.hij is not None or self.operator_components is not None:
+            if (
+                self.hij is not None
+                or self.operator_components is not None
+                or self.spinor_operator is not None
+            ):
                 operators = nc.createGroup("operators")
 
             if self.hij is not None:
@@ -643,12 +794,24 @@ class ProjectorGreenData:
                             nc.createDimension("nsite", component.shape[0])
                         if "nproj_site_max" not in nc.dimensions:
                             nc.createDimension("nproj_site_max", component.shape[1])
-                        dimensions = (
-                            "nsite",
-                            "nproj_site_max",
-                            "nproj_site_max",
-                            "complex",
-                        )
+                        if component.ndim == 5:
+                            if "operator_spinor" not in nc.dimensions:
+                                nc.createDimension("operator_spinor", 2)
+                            dimensions = (
+                                "nsite",
+                                "nproj_site_max",
+                                "nproj_site_max",
+                                "operator_spinor",
+                                "operator_spinor",
+                                "complex",
+                            )
+                        else:
+                            dimensions = (
+                                "nsite",
+                                "nproj_site_max",
+                                "nproj_site_max",
+                                "complex",
+                            )
                     variable = components.createVariable(name, "f8", dimensions)
                     variable[:] = encode_complex(component)
                     if self.operator_component_metadata is not None:
@@ -656,6 +819,47 @@ class ProjectorGreenData:
                             name, {}
                         ).items():
                             setattr(variable, key, value)
+
+            if self.spinor_operator is not None:
+                if "nsite" not in nc.dimensions:
+                    nc.createDimension("nsite", self.spinor_operator.shape[0])
+                if "nproj_site_max" not in nc.dimensions:
+                    nc.createDimension("nproj_site_max", self.spinor_operator.shape[1])
+                spin = operators.createVariable(
+                    "spinor_operator",
+                    "f8",
+                    (
+                        "nsite",
+                        "nproj_site_max",
+                        "nproj_site_max",
+                        "nspinor",
+                        "nspinor",
+                        "complex",
+                    ),
+                )
+                spin[:] = encode_complex(self.spinor_operator)
+                spin.definition = self.spinor_operator_definition
+                if self.operator_basis is not None:
+                    spin.operator_basis = self.operator_basis
+            if self.spinor_tangent_vertices is not None:
+                tangent = operators.createVariable(
+                    "spinor_tangent_vertices",
+                    "f8",
+                    (
+                        "nsite",
+                        "three",
+                        "nproj_site_max",
+                        "nproj_site_max",
+                        "nspinor",
+                        "nspinor",
+                        "complex",
+                    ),
+                )
+                tangent[:] = encode_complex(self.spinor_tangent_vertices)
+                tangent.definition = self.spinor_tangent_definition
+                tangent.units = "eV"
+                if self.operator_basis is not None:
+                    tangent.operator_basis = self.operator_basis
 
     @staticmethod
     def _write_optional_projector_array(group, name, value):
@@ -739,11 +943,27 @@ class ProjectorGreenData:
             site_projector_indices = cls._optional_var(
                 projectors, "site_projector_indices"
             )
+            operator_basis = metadata.get("operator_basis")
+            operators = nc.groups.get("operators")
             hij = hij_definition = hij_units = hij_source = hij_projection = None
             operator_components = None
             operator_component_metadata = None
-            operator_basis = metadata.get("operator_basis")
-            operators = nc.groups.get("operators")
+            spinor_operator = None
+            spinor_operator_definition = None
+            spinor_tangent_vertices = None
+            spinor_tangent_definition = None
+            if operators is not None and "spinor_operator" in operators.variables:
+                spin_var = operators.variables["spinor_operator"]
+                spinor_operator = decode_complex(spin_var[:])
+                spinor_operator_definition = getattr(spin_var, "definition", None)
+                operator_basis = getattr(spin_var, "operator_basis", operator_basis)
+            if (
+                operators is not None
+                and "spinor_tangent_vertices" in operators.variables
+            ):
+                tangent_var = operators.variables["spinor_tangent_vertices"]
+                spinor_tangent_vertices = decode_complex(tangent_var[:])
+                spinor_tangent_definition = getattr(tangent_var, "definition", None)
             if operators is not None and "hij" in operators.variables:
                 hij_var = operators.variables["hij"]
                 hij = decode_complex(hij_var[:])
@@ -761,6 +981,7 @@ class ProjectorGreenData:
                     operator_component_metadata[name] = {
                         key: getattr(variable, key) for key in variable.ncattrs()
                     }
+            nspinor = int(getattr(nc, "nspinor", 1))
             return cls(
                 kpoints=kgrp.variables["kpoints"][:],
                 weights=kgrp.variables["weights"][:],
@@ -797,6 +1018,11 @@ class ProjectorGreenData:
                 population_metric=population_metric,
                 operator_basis=operator_basis,
                 metadata=metadata,
+                nspinor=nspinor,
+                spinor_operator=spinor_operator,
+                spinor_operator_definition=spinor_operator_definition,
+                spinor_tangent_vertices=spinor_tangent_vertices,
+                spinor_tangent_definition=spinor_tangent_definition,
             )
 
     @staticmethod
@@ -932,6 +1158,12 @@ class ProjectorGreen:
         )
         if not 0.0 <= self.overlap_rcond < 1.0:
             raise ValueError("overlap_rcond must satisfy 0 <= rcond < 1")
+        # Lazy, mutation-safe channel-filter cache (one active configuration).
+        # Entries: ik -> (source-overlap snapshot, filter). Invalidated by any
+        # change of overlap mode/rcond/threshold or of the cached source matrix;
+        # see _channel_filter.
+        self._filter_cache_config = None
+        self._filter_cache = {}
 
     def _fermi(self, ispin):
         if self.efermi_spin is not None:
@@ -947,7 +1179,7 @@ class ProjectorGreen:
             coeff = coeff[mask]
         inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
         Gk = np.einsum("np,nq,n->pq", coeff, coeff.conj(), inv_denom)
-        return self._contravariant_Gk(Gk, ik)
+        return self._apply_channel_filter(Gk, ik)
 
     def get_Gk_all(self, energy, ispin=0):
         if self.data.band_mask is not None:
@@ -960,9 +1192,10 @@ class ProjectorGreen:
         inv_denom = 1.0 / (energy + self._fermi(ispin) - evals)
         Gk_all = np.einsum("knp,knq,kn->kpq", coeff, coeff.conj(), inv_denom)
         if self.data.overlap_k is None:
+            self._release_filter_cache()
             return Gk_all
         return np.asarray(
-            [self._contravariant_Gk(Gk, ik) for ik, Gk in enumerate(Gk_all)],
+            [self._apply_channel_filter(Gk, ik) for ik, Gk in enumerate(Gk_all)],
             dtype=complex,
         )
 
@@ -974,15 +1207,60 @@ class ProjectorGreen:
             return self.data.overlap_metric
         return np.eye(self.nbasis, dtype=complex)
 
-    def _contravariant_Gk(self, Gk, ik):
-        if self.data.overlap_k is None or self.overlap_mode == "plain":
-            return Gk
-        Sk = self.get_Sk(ik)
-        Sinv = self._inverse_overlap(Sk, ik)
-        return Sinv @ Gk @ Sinv
+    def _release_filter_cache(self):
+        """Drop cached filters when no dressing applies.
 
-    def _inverse_overlap(self, Sk, ik):
-        """Construct the full or truncated inverse overlap for one k point."""
+        Dual coefficients (``overlap_k is None``) and ``plain`` mode never
+        consult the cache; release it so removed overlaps cannot leave stale
+        entries behind.
+        """
+        if self.data.overlap_k is None or self.overlap_mode == "plain":
+            self._filter_cache.clear()
+            self._filter_cache_config = None
+
+    def _channel_filter(self, ik):
+        """Return the energy-independent channel filter for one k point.
+
+        Lazy and mutation-safe: the entry is validated against the *current*
+        source matrix and the current mode/rcond/condition-threshold settings
+        on every request, so in-place edits of ``data.overlap_k`` or attribute
+        changes rebuild instead of returning stale filters. Only one active
+        configuration is retained; entries are evicted before rebuild and
+        stored only after successful construction.
+        """
+        self._release_filter_cache()
+        if self.data.overlap_k is None or self.overlap_mode == "plain":
+            return None
+        config = (
+            self.overlap_mode,
+            self.overlap_rcond,
+            self.overlap_condition_threshold,
+            self.data.overlap_k.shape,
+        )
+        if config != self._filter_cache_config:
+            self._filter_cache.clear()
+            self._filter_cache_config = config
+        Sk = self.get_Sk(ik)
+        entry = self._filter_cache.get(ik)
+        if entry is not None and np.array_equal(entry[0], Sk):
+            return entry[1]
+        self._filter_cache.pop(ik, None)
+        snapshot = np.array(Sk, dtype=complex, copy=True)
+        filt = self._build_channel_filter(snapshot, ik)
+        self._filter_cache[ik] = (snapshot, filt)
+        return filt
+
+    def _apply_channel_filter(self, Gk, ik):
+        """Dress one Green block on its two leading projector axes."""
+        filt = self._channel_filter(ik)
+        if filt is None:
+            return Gk
+        if Gk.ndim > 2:
+            return np.einsum("pa,ab...,bq->pq...", filt, Gk, filt)
+        return filt @ Gk @ filt
+
+    def _build_channel_filter(self, Sk, ik):
+        """Construct the full or truncated channel filter for one k point."""
         if self.overlap_mode == "inverse":
             condition = np.linalg.cond(Sk)
             if (
@@ -1053,6 +1331,74 @@ class ProjectorGreen:
         if Gk_all is None:
             Gk_all = self.get_Gk_all(energy, ispin=ispin)
         return self.compute_GR(Rpts, self.kpts, Gk_all)
+
+    @property
+    def is_spinor(self):
+        return self.data.nspinor == 2
+
+    def get_Gk_spinor(self, ik, energy):
+        """Spinor Green block G[p, q, s, t] at one k point."""
+        if not self.is_spinor:
+            raise ValueError("spinor Green functions require nspinor=2 data")
+        evals = self.data.eigenvalues[0, ik]
+        coeff = self.data.coefficients[0, ik]  # (nband, 2, nproj)
+        if self.data.band_mask is not None:
+            mask = self.data.band_mask[0, ik]
+            evals = evals[mask]
+            coeff = coeff[mask]
+        inv_denom = 1.0 / (energy + self.efermi - evals)
+        Gk = np.einsum("nsp,ntq,n->pqst", coeff, coeff.conj(), inv_denom)
+        return self._apply_channel_filter(Gk, ik)
+
+    def get_Gk_all_spinor(self, energy):
+        """Spinor Green blocks for all k: (nkpt, nproj, nproj, 2, 2)."""
+        if not self.is_spinor:
+            raise ValueError("spinor Green functions require nspinor=2 data")
+        if self.data.band_mask is not None or (
+            self.data.overlap_k is not None and self.overlap_mode != "plain"
+        ):
+            return np.asarray(
+                [self.get_Gk_spinor(ik, energy) for ik in range(self.data.nkpt)],
+                dtype=complex,
+            )
+        self._release_filter_cache()
+        evals = self.data.eigenvalues[0]
+        coeff = self.data.coefficients[0]
+        inv_denom = 1.0 / (energy + self.efermi - evals)
+        return np.einsum(
+            "knsp,kntq,kn->kpqst", coeff, coeff.conj(), inv_denom, optimize="optimal"
+        )
+
+    def get_GR_spinor(self, Rpts, energy, Gk_all=None):
+        """Fourier-transformed spinor Green blocks: (nR, nproj, nproj, 2, 2)."""
+        if Gk_all is None:
+            Gk_all = self.get_Gk_all_spinor(energy)
+        Rvecs = np.asarray(Rpts, dtype=float)
+        phase = np.exp(self.k2Rfactor * np.einsum("ri,ki->rk", Rvecs, self.kpts))
+        phase = phase * self.kweights[None, :]
+        return np.einsum("kpqst,rk->rpqst", Gk_all, phase, optimize="optimal")
+
+    def get_site_block_spinor(self, matrix, iatom, jatom):
+        """Spinor block connecting two sites: (nproj_i, nproj_j, 2, 2)."""
+        matrix = np.asarray(matrix)
+        if matrix.shape[0] != self.nbasis or matrix.shape[1] != self.nbasis:
+            raise ValueError("matrix must have leading shape (nproj, nproj, 2, 2)")
+        iproj = self.get_site_projectors(iatom)
+        jproj = self.get_site_projectors(jatom)
+        return matrix[np.ix_(iproj, jproj)]
+
+    def get_local_operator_spinor(self, site):
+        """Site-local 2x2-in-spin operator block: (nproj, nproj, 2, 2)."""
+        if self.data.spinor_operator is None:
+            raise ValueError("spinor exchange requires spinor_operator data")
+        site = int(site)
+        nproj = self.data.site_nproj[site]
+        return self.data.spinor_operator[site, :nproj, :nproj, :, :]
+
+    def get_local_operators_spinor(self, sites=None):
+        if sites is None:
+            sites = self.get_sites()
+        return {int(site): self.get_local_operator_spinor(site) for site in sites}
 
     def get_site_projectors(self, site):
         site = int(site)
@@ -1288,4 +1634,162 @@ def projector_charge_moments_from_green(green, contour, sites=None):
             if population_metric is not None
             else "projector_green_contour_diagonal"
         ),
+    }
+
+
+def spinor_dense_block(block):
+    """(nproj_i, nproj_j, 2, 2) -> spin-major dense (2*ni, 2*nj)."""
+    ni, nj = block.shape[0], block.shape[1]
+    return block.transpose(2, 0, 3, 1).reshape(2 * ni, 2 * nj)
+
+
+def site_magnetization_sign(operator_block):
+    """Sign of the z-projector trace (majority-spin direction)."""
+    block = np.asarray(operator_block)
+    ztrace = float(np.real(np.trace(block[:, :, 0, 0] - block[:, :, 1, 1])))
+    return 1.0 if ztrace >= 0.0 else -1.0
+
+
+def magnetic_tangent_vertices(operator_block, magnitude_tol=1.0e-10):
+    """Magnetic tangent rotation vertices for one site.
+
+    ``operator_block`` is the site-local *magnetic* spinor operator
+    ``(nproj, nproj, 2, 2)`` — the stored spin splitting (never the scalar
+    charge part, never the SOC operator).  With ``M`` the dense spin-major
+    operator and ``n = m/|m|`` the unit direction of the splitting vector
+    ``m_k = Tr[M kron(sigma_k, I)]/2``, the vertex generating a rotation of
+    the local magnetic field toward the Cartesian axis ``t_a`` is::
+
+        V^a = -(i/4) [ kron((n x t_a).sigma, I_orb), M ]
+
+    which is exactly the generator ``dH_mag/dtheta_a`` of the physical
+    rotation (docs/sympy/spinor_tangent_vertex_green.md).  For an
+    axis-aligned collinear operator ``M = kron(Delta sigma_n, W)`` this
+    reduces to ``V^a = |Delta|/2 kron(sigma_a, W)`` on the two axes
+    transverse to ``n`` and ``V^n = 0`` — for BOTH signs of ``Delta``, so
+    no site-sign factor enters anywhere downstream.
+
+    Returns ``{"n": (3,) unit splitting direction, "magnitude": |m|,
+    "vertices": (3, 2*nproj, 2*nproj) complex dense vertex stack}``.
+    """
+    block = np.asarray(operator_block, dtype=complex)
+    if block.ndim != 4 or block.shape[2:] != (2, 2):
+        raise ValueError(
+            "magnetic tangent vertices require a (nproj, nproj, 2, 2) operator, "
+            f"got shape {block.shape}"
+        )
+    dense = spinor_dense_block(block)
+    norb = block.shape[0]
+    orb_identity = np.eye(norb)
+    m = np.array(
+        [
+            0.5
+            * float(np.real(np.trace(dense @ np.kron(PAULI_MATRICES[k], orb_identity))))
+            for k in range(3)
+        ]
+    )
+    magnitude = float(np.linalg.norm(m))
+    if magnitude <= magnitude_tol:
+        raise ValueError(
+            "site has no magnetic splitting; magnetic tangent vertices are undefined"
+        )
+    scale = float(np.abs(dense).max(initial=0.0))
+    if not np.allclose(dense, dense.conj().T, rtol=1e-8, atol=1e-8 * scale):
+        raise ValueError("magnetic tangent vertices require a Hermitian operator")
+    n = m / magnitude
+    vertices = np.empty((3, dense.shape[0], dense.shape[1]), dtype=complex)
+    for a in range(3):
+        axis = np.cross(n, _CARTESIAN_AXES[a])
+        sigma_axis = np.einsum("kab,k->ab", PAULI_MATRICES, axis)
+        generator = np.kron(sigma_axis, orb_identity)
+        vertices[a] = -0.25j * (generator @ dense - dense @ generator)
+    return {"n": n, "magnitude": magnitude, "vertices": vertices}
+
+
+def spinor_tangent_pair_matrix(vertices_i, g_ij, vertices_j, g_ji):
+    """Tangent trace matrix ``K^{ab} = Tr[V_i^a G_ij V_j^b G_ji]`` for one pair.
+
+    All arguments are dense spin-major complex arrays: ``vertices_i`` is
+    the ``(3, 2*ni, 2*ni)`` site-i vertex stack from
+    :func:`magnetic_tangent_vertices`, ``g_ij`` the ``(2*ni, 2*nj)`` FULL
+    complex spinor Green block (no Pauli decomposition, no spin
+    transposition), ``g_ji`` the reverse block at the reversed lattice
+    vector.  Pair reversal holds before integration
+    (``K^{ab}_ij(R) = K^{ba}_ji(-R)``) by cyclicity of the trace.
+    """
+    v_i = np.asarray(vertices_i, dtype=complex)
+    v_j = np.asarray(vertices_j, dtype=complex)
+    left = v_i @ g_ij  # (3, 2*ni, 2*nj)
+    right = v_j @ g_ji  # (3, 2*nj, 2*ni)
+    return np.einsum("apq,bqp->ab", left, right, optimize=True)
+
+
+def spinor_tangent_trace(
+    green,
+    Rpts,
+    energy,
+    vertices=None,
+    sites=None,
+):
+    """Full-spinor magnetic tangent traces for one energy.
+
+    Evaluates, per (R, i, j), ``K^{ab}(z) = Tr[V_i^a G_ij(R,z) V_j^b
+    G_ji(-R,z)]`` on the unprojected, full complex spinor Green blocks.
+    The contour prescription applied by the callers is
+    ``J^{ab} = Im contour K^{ab} dz / (2 pi)`` — calibrated so that a
+    collinear z reference reproduces the existing collinear kernel
+    (:func:`projector_exchange_trace` with the ``s_i s_j`` site-sign
+    product) exactly in ``J^{xx}`` and ``J^{yy}``, with the ``n`` row and
+    column masked to zero.  A single reference therefore determines only
+    the transverse 2x2 block; full tensors require the three-leg merge.
+
+    This replaces the ExchangeNCL channel construction
+    (``spinor_pair_channels``), whose ``A0i - Ai0`` differences vanish
+    identically for collinear ``Delta sigma_z`` vertices even with SOC in
+    ``G``, and whose ``A^{zz}`` channel generates the self-pair Jani
+    spurion (docs/sympy/spinor_tangent_vertex_green.md).
+    """
+    for method in ("get_GR_spinor", "get_site_block_spinor", "get_sites"):
+        if not callable(getattr(green, method, None)):
+            raise TypeError(f"spinor tangent backend requires {method}()")
+    Rpts = np.asarray(Rpts, dtype=int)
+    if Rpts.ndim != 2 or Rpts.shape[1] != 3:
+        raise ValueError("Rpts must have shape (nR, 3)")
+    Rkeys = [tuple(int(x) for x in R) for R in Rpts]
+    R_index = {R: i for i, R in enumerate(Rkeys)}
+    missing_negative = [R for R in Rkeys if tuple(-x for x in R) not in R_index]
+    if missing_negative:
+        raise ValueError("Rpts must include each negative R vector")
+
+    if sites is None:
+        sites = green.get_sites()
+    sites = [int(site) for site in sites]
+    if vertices is None:
+        operators = green.get_local_operators_spinor(sites=sites)
+        vertices = {
+            site: magnetic_tangent_vertices(op)["vertices"]
+            for site, op in operators.items()
+        }
+    vertices = {int(site): np.asarray(v, dtype=complex) for site, v in vertices.items()}
+
+    GR = green.get_GR_spinor(Rpts, energy)
+    K_ijR = {}
+    for iR, R in enumerate(Rkeys):
+        iRm = R_index[tuple(-x for x in R)]
+        for iatom in sites:
+            for jatom in sites:
+                gij = spinor_dense_block(
+                    green.get_site_block_spinor(GR[iR], iatom, jatom)
+                )
+                gji = spinor_dense_block(
+                    green.get_site_block_spinor(GR[iRm], jatom, iatom)
+                )
+                K_ijR[(R, iatom, jatom)] = spinor_tangent_pair_matrix(
+                    vertices[iatom], gij, vertices[jatom], gji
+                )
+    return {
+        "K_ijR": K_ijR,
+        "method": "spinor_tangent_trace",
+        "operator": "magnetic_tangent",
+        "normalization": "raw trace; J^{ab} = Im contour K^{ab} dz/(2 pi)",
     }

@@ -208,6 +208,98 @@ the explicit XC-only field, while ``"delta_total"`` is the GPAW converged
 ``dH_asp`` spin difference for supported +U exports (and ABINIT's complete PAW
 operator).  ``"hij"`` remains a spin-resolved fallback.
 
+Split-SOC exchange from one strength-zero run
+---------------------------------------------
+
+The split-SOC workflows reconstruct magnetic exchange, DMI and symmetric
+anisotropy from a *single* collinear, spin-orbit-free reference calculation.
+The frozen density is never recomputed with SOC. Each magnetization direction
+is obtained by applying the code's second-variational strength-one SOC
+operator to the same strength-zero bands, so the all-atom SOC operator
+:math:`W_{SO}` enters only the KS-band propagator, while the PAW exchange
+vertex stays collinear on the selected magnetic sites. Each leg measures only
+the raw transverse :math:`2\times2` block of its right-handed
+:math:`(u, v, n)` triad; the block is rotated into the lattice frame,
+:math:`T_\chi = O T_\mathrm{leg} O^T` with
+:math:`O\mathbf e_z = \mathbf n_\chi`, and the three legs feed the raw
+rank-nine merge described next.
+
+.. _split-soc-rank9-merge:
+
+The raw rank-nine three-leg merge and its invariance gates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+(Contract ADR-9 of the split-soc-ks specification.)  One magnetic reference
+axis determines **only** the transverse
+:math:`2\times2` block and :math:`D_z` of its triad — never scalar
+:math:`J_\mathrm{iso}`, a DMI vector or a Jani tensor on its own.  The full
+lattice tensor comes exclusively from
+:py:func:`TB2J.split_soc_kernel.merge_transverse_legs`, which stacks the
+three x/y/z reference blocks into 12 constraints for the 9 entries of the
+real tensor (each diagonal entry is measured twice — *repeated rows*) and
+solves the consistent system by exact least squares.
+:math:`J_\mathrm{iso}`/DMI/Jani are decomposed afterwards with the TB2J
+:py:func:`TB2J.Jtensor.decompose_J_tensor` Levi-Civita convention.  The
+legacy scalar :py:mod:`TB2J.io_merge` averaging is deliberately **not**
+used on these legs: its independent scalar/traceless decomposition biases
+anisotropy (a true ``diag(1, 2, 3)`` target returns ``diag(7/6, 2, 17/6)``
+through that route).  Two invariance gates guard every merge and fail
+closed:
+
+* **rank gate** — the design matrix must have rank 9, i.e. three genuinely
+  independent reference axes are present;
+* **repeated-row gate** — the two measurements of every diagonal entry must
+  agree within a per-backend ``consistency_atol`` (:math:`5\times10^{-5}` eV
+  GPAW, :math:`10^{-4}` eV ABINIT PAW, :math:`10^{-6}` eV ABINIT NC); a
+  disagreement aborts the run before any merged tensor is written.
+
+The merge diagnostics also report the masked longitudinal residual
+(leakage into the unmeasured :math:`n` row/column, which is zero-masked,
+never treated as data) and the reciprocity residual
+:math:`J_{ij}(R) - J_{ji}(-R)^T`.  A merge that passes these gates is a
+consistent raw-tensor reconstruction; it is still subject to the per-leg
+band-window error bars below.
+
+All backends share one provenance contract: every leg records the
+strength-zero reference (input path and SHA-256), the SOC operator source and
+coverage, the spin frame, a real band-window convergence study with an
+explicit ``converged`` flag, and the merge mode.  Per-leg tensors are stored
+as raw ``split_soc_leg.npz`` blocks with a ``split_soc_provenance.json``
+alongside; the merged results (a rank-nine SpinIO output) and the merged
+provenance JSON keep the three leg records as distinct entries plus the
+merge diagnostics. A false ``converged`` flag is an unresolved error
+bar, **not** a convergence certificate.
+
+Per-backend recipes with the full option reference, output layout and
+diagnostics:
+
+* **GPAW** — ``gpaw_split_soc2J.py`` runs the three second-variational legs
+  and the MAE comparison from one old-API ``.gpw`` checkpoint:
+
+  .. code-block:: bash
+
+     gpaw_split_soc2J.py --input fe_collinear.gpw \
+         --output_path TB2J_results_gpaw_split_soc --Rcut 3 \
+         --nz 30 --smearing 0.05 --index_magnetic_atoms 1 2
+
+  See :doc:`split_soc_gpaw` for the strength-zero recipe, the MAE
+  comparison how-to and the fcc Ni gate example.
+
+* **ABINIT PAW** — one schema-1.1 ``savetb2j`` export
+  (``savetb2j 1`` with ``savetb2j_soc 1``) feeds
+  ``gen_exchange_abinit_paw_split_soc``; see :doc:`split_soc_abinit_paw`
+  and the file contract in :doc:`abinit_savetb2j_schema`.
+
+* **ABINIT NC (PAO)** — a collinear strength-0 WFK is exported by abinao
+  into an ``abinit.nc_pao_hs`` v2 projection file plus a versioned
+  ``abinao.nc_soc_ks`` v1 SOC sidecar; ``abinit_nc_split_soc2J.py`` joins
+  the two by SHA-256, dualizes the nonorthogonal PAO maps
+  :math:`B = S^{-1} C` and runs the same three-leg rotate/merge.  See
+  :doc:`split_soc_abinit_nc`, the sidecar contract in
+  :doc:`abinit_savetb2j_schema` and the iodine :math:`\mathrm{I}_2`
+  gate example.
+
+
 ABINIT PAW Export
 -----------------
 
@@ -232,6 +324,10 @@ default.  That component is the spin-up minus spin-down onsite PAW operator in
 the ABINIT native PAW projector basis.  Advanced users may select another
 component with ``--operator_component`` only when the file marks that component
 as complete and exchange-ready.
+
+The same export, written with ``savetb2j_soc 1`` (schema 1.1, ``soc_pauli``
+component), is also the input of the ABINIT PAW split-SOC workflow; see
+:doc:`split_soc_abinit_paw`.
 
 ABINIT NC PAO Export (Experimental)
 -----------------------------------
@@ -273,7 +369,31 @@ covariant spectral Green function from coefficients and then applies
 
    g(k,E)=S^{-1}(k)G_{cov}(k,E)S^{-1}(k)
 
-before the real-space Fourier transform.  Synthetic tests and optional
+before the real-space Fourier transform.
+
+The scalar and spinor reconstructions share one private channel-filter
+implementation.  For each k point the filter (exact inverse, SVD truncation,
+Loewdin pairing, or Tikhonov damping) is constructed lazily on first use and
+then cached per ``ProjectorGreen`` instance:
+
+* at most one cache configuration is retained; changing ``overlap_mode``,
+  ``overlap_rcond``, or ``overlap_condition_threshold``, or an edited or
+  replaced ``overlap_k`` with different content, discards prior entries;
+* each entry stores a snapshot of the source overlap and is validated by exact
+  comparison on every request, so an in-place edit of ``overlap_k`` rebuilds
+  the affected filter instead of returning a stale result;
+* preparation stays lazy: an ill-conditioned overlap raises only when its k
+  point is actually requested, as before;
+* when ``overlap_k`` is absent (dual PAW coefficients) or the mode is
+  ``plain``, no filtering is applied and cached entries are released.
+
+The cache is an internal performance detail: results are identical to
+recomputing the filter for every energy and spin, and raw coefficients keep
+their documented meanings (including the :math:`C^T g C^*` contraction).
+PAW augmentation (``overlap_metric``/``dO``) is a population- and
+augmentation-metric object, never a substitute for ``overlap_k``.
+
+Synthetic tests and optional
 real-fixture tests cover this behavior; set ``ABINIT_NC_PAO_FIXTURE`` to a real
 ABINIT NC PAO NetCDF file to enable the latter.
 
@@ -286,8 +406,15 @@ Current limitations:
   exchange;
 * diagnostic PAO ``H(k)`` arrays are not the primary TB2J exchange representation.
 
+The split-SOC extension of this path pairs the same ``abinit.nc_pao_hs``
+v2 file with a versioned ``abinao.nc_soc_ks`` v1 SOC sidecar
+(``abinao.soc_kernel``) and is consumed by ``abinit_nc_split_soc2J.py``;
+see :doc:`split_soc_abinit_nc` and the sidecar contract in
+:doc:`abinit_savetb2j_schema`.  That consumer remains collinear-only:
+spinor-flavor sidecars are refused with an explicit routing message.
+
 Projector Hamiltonian ``H_ij``
------------------------------
+------------------------------
 
 Exchange-like projector traces require a site-local spin-dependent operator in
 the same projector channel space as the Green function.  TB2J stores this as
@@ -396,3 +523,34 @@ Representative SrMnO3 ``exchange.out`` excerpt:
       Mn1   Mn1   (  0,   0,   1) -17.1433   ( 0.000,  0.000,  3.800)  3.800
 
 These GPAW examples require ``gpaw`` and ``gpaw-data``.
+
+Spinor Projector Green Data
+----------------------------
+
+Spinor files set ``nspinor=2`` and use a single spectral channel. The coefficient array has shape ``(1, nkpt, nband, 2, nproj)``; the spinor axis is between band and projector. A local spinor operator has shape ``(nsite, nproj_site_max, nproj_site_max, 2, 2)`` and is stored in eV. Its site-projector indices use the same global projector order.
+
+The spinor exchange trace is
+
+.. math::
+
+   J^{ab}(E) = -\operatorname{Tr}[ (\sigma_a\Delta_i)G_{ij}(E) (\sigma_b\Delta_j)G_{ji}(E) ],
+
+with the contour prescription and ``1/(4*pi)`` normalization defined in ``docs/sympy/spinor_projector_green.md``. The output decomposes the tensor as ``J = J_iso I + DMI_antisymmetric + J_ani_symmetric``. Onsite pairs are excluded from the reported exchange table.
+
+GPAW noncollinear export uses native ``P_ani[n, s, i]`` spinor projectors and the Pauli vector ``dH_asii[x:y:z]``. Use ``save_gpaw_spinor_projector_netcdf`` followed by ``gpaw_projector2J.py``; the CLI auto-detects ``nspinor=2``.
+
+ABINIT NC export is provided by ``abinao.spinor_export``:
+
+.. code-block:: python
+
+   from abinao.spinor_export import gen_exchange_abinit_nc_spinor
+
+   gen_exchange_abinit_nc_spinor(
+       "o_WFK.nc", "o_VXC.nc", ["Fe.upf", "O.upf"],
+       output_path="TB2J_results_abinit_spinor",
+       index_magnetic_atoms=[0], Rcut=10.0, nz=30,
+   )
+
+ABINIT ``nspden=4`` VXC components are packed as ``(V11, V22, Re V12, Im V12)``. The exporter reconstructs the Pauli field as ``Bx=c3``, ``By=-c4``, ``Bz=(c1-c2)/2`` and stores ``2*B.sigma`` so its collinear limit is the existing ``V_up-V_down`` NC-PAO operator. ABINIT spinor WFK input currently requires ``istwfk=1``; the unpinned spinor time-reversal component-exchange expansion is rejected rather than silently applying a scalar conjugation.
+
+VASP native v7 export writes spinor-major CPROJ halves, dense ``SL (x) conjg(RSSYMOP)`` expansion actions, the per-k ``RSSYMOP`` audit array, and the 2x2 CDIJ matrices. It requires the ``ncl`` build (the ``std`` binary contains ``-DNGZhalf``). ``vasp_native2J.py`` auto-detects v7.

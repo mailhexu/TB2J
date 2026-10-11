@@ -32,6 +32,11 @@ Welcome to TB2J's documentation!
    src/projector_green.rst
    src/spiral.rst
    src/spiral_response.md
+   src/qe_projector.rst
+   src/split_soc_gpaw.rst
+   src/split_soc_abinit_paw.rst
+   src/split_soc_abinit_nc.rst
+   src/split_soc_vasp.rst
    src/abinit_savetb2j_schema.rst
    src/sprkkr_magnon.md
    src/edit.md

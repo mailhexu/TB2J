@@ -4,6 +4,23 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- New Quantum ESPRESSO interface: a version-pinned ``becp_dump``
+  instrumentation on the ``TB2J`` branch of the QE fork
+  (gitlab.com/mailhexu/q-e) exports converged projector data
+  (``becp``/``deeq``/occupations plus the beta-projected spin-dependent
+  xc potential, dump v1.2); ``TB2J.interfaces.qe_projector`` reads it
+  into the shared projector Green workflow and the new ``qe2J.py`` CLI
+  computes exchange. Collinear US, PAW, and NC families validated on bcc Fe:
+  PAW J1 = 14.76 meV, NC (ONCV) J1 = 15.22 meV, and US J1 = 16.15 meV
+  vs the GPAW reference 14.73 meV. See ``docs/src/qe_projector.rst``.
+- The projector Green-function backend now prepares each k-point channel filter
+  (overlap inverse, SVD truncation, Loewdin pairing, or Tikhonov damping) once per
+  fixed configuration and reuses it across energies and spins, shared between the
+  collinear and spinor paths. Results are unchanged; repeated-energy contour work
+  no longer repeats O(nproj^3) overlap decompositions, and the cache stays
+  consistent under in-place edits of ``overlap_k`` or runtime option changes.
+  See ``docs/src/projector_green.rst``.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

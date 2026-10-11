@@ -777,10 +777,18 @@ def component_local_operators(data, component_name, sites, source_label="project
             f"{source_label} operator component is not exchange-ready: "
             f"{component_name} completeness={completeness!r}"
         )
-    return {
+    blocks = {
         int(site): data.get_operator_component(component_name, site=site)
         for site in sites
     }
+    if any(block.ndim != 2 for block in blocks.values()):
+        raise ValueError(
+            f"{source_label} operator component {component_name} is a "
+            "spinor (pauli_2x2) operator; it enters the split-SOC "
+            "propagator, not the collinear exchange vertex (use the "
+            "split-SOC leg builder)"
+        )
+    return blocks
 
 
 def compute_projector_exchange_jdict(
@@ -958,6 +966,21 @@ def gen_exchange_projector_netcdf(
 ):
     """Python interface for projector-NetCDF exchange calculation."""
     data = ProjectorGreenData.load_netcdf(filename)
+    if getattr(data, "nspinor", 1) == 2:
+        from TB2J.interfaces.gpaw_spinor_projector import (
+            gen_exchange_gpaw_spinor_netcdf,
+        )
+
+        return gen_exchange_gpaw_spinor_netcdf(
+            filename,
+            output_path=output_path,
+            Rcut=Rcut,
+            Rpts=Rpts,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            magnetic_elements=magnetic_elements,
+            index_magnetic_atoms=index_magnetic_atoms,
+        )
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
