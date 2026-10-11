@@ -2,7 +2,7 @@
 
 Assertion script: `q_phased_exchange_contraction.py`.
 
-Canonical counterpart: [nonorth-spin-lattice q-phased exchange mathdoc](../../../../memnotes/Projects/non-orthogonal-spin-lattice/mathdocs/q-phased-exchange-contraction.md). Producer phase authority: [two-index q transform](../../../../memnotes/Projects/non-orthogonal-spin-lattice/mathdocs/q-transform-phase.md). These links resolve in the research workspace, whose TB2J checkout has the shared `memnotes` sibling.
+Canonical counterpart: [nonorth-spin-lattice q-phased exchange mathdoc](../../../memnotes/Projects/non-orthogonal-spin-lattice/mathdocs/q-phased-exchange-contraction.md). Producer phase authority: [two-index q transform](../../../memnotes/Projects/non-orthogonal-spin-lattice/mathdocs/q-transform-phase.md). These links resolve from the canonical research-workspace checkout `non-orthogonal-spin-lattice/TB2J`, where the shared `memnotes` vault is a sibling of the repository; in other checkouts use the vault path `Projects/non-orthogonal-spin-lattice/mathdocs/`.
 
 Convention: $H(k)=\sum_R H(0,R)e^{2\pi ik\cdot R}$, displacement $e_a e^{-2\pi iq\cdot L}$, bra $k$, ket $k+q$. All bands and a fixed energy contour are required. Finite supercells certify commensurate q only.
 

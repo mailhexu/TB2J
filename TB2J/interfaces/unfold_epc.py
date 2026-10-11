@@ -94,6 +94,9 @@ def gen_exchange_spin_lattice_unfold_epc(
         raise ValueError("basis labels are required for a model without orbs")
     if magnetic_elements is None:
         magnetic_elements = sorted(set(atoms.get_chemical_symbols()))
+    # Explicit meshes may arrive as sequences; normalize before any .T/.index use.
+    kpts = None if kpts is None else np.asarray(kpts, dtype=float)
+    kweights = None if kweights is None else np.asarray(kweights, dtype=float)
     q = np.asarray(q, dtype=float)
     polarization = np.asarray(polarization, dtype=complex)
     if (
@@ -148,15 +151,24 @@ def gen_exchange_spin_lattice_unfold_epc(
                 smearing_width=smearing,
                 use_cache=False,
             )
-            transformed = [
-                transform(store, k, wavevector, polarization=eigenvector)
-                for k in self.G.kpts
-            ]
-            dh = np.asarray([pair[0] for pair in transformed]).transpose(1, 0, 2, 3)
-            ds = np.asarray([pair[1] for pair in transformed])
+            # Build the vertex in bounded k-chunks: no full-mesh list of
+            # per-k arrays and no duplicate full-mesh copies are retained.
+            nk = len(self.G.kpts)
+            dh = np.empty((store.nspin, nk, store.norb, store.norb), complex)
+            ds = np.empty((nk, store.norb, store.norb), complex)
+            chunk = max(1, (1024 * 1024) // max(1, store.norb * store.norb * 16))
+            for start in range(0, nk, chunk):
+                stop = min(start + chunk, nk)
+                for index, k in enumerate(self.G.kpts[start:stop]):
+                    pair = transform(store, k, wavevector, polarization=eigenvector)
+                    dh[:, start + index] = pair[0]
+                    ds[start + index] = pair[1]
             # Dropping overlap means dropping the WHOLE physical overlap channel,
             # including the -Ef_ref*dS gauge step, not only its z-dependent part.
-            self._q_dh = dh if drop_overlap else dh - store.reference_fermi * ds[None]
+            self._q_dh = dh
+            if not drop_overlap:
+                # MathDoc: .../q-phased-exchange-contraction#fixed_gauge_pencil_vertex
+                self._q_dh -= store.reference_fermi * ds[None]
             self._q_ds = ds
             onsite = _onsite(store, wavevector, eigenvector)
             self._q_onsite = (onsite[0] - onsite[1]) / 2
