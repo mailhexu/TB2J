@@ -23,9 +23,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-BUNDLE_VERSION = "1.0"
+BUNDLE_VERSION = "1.1"
 
-_SUPPORTED_SPIN_PACKINGS = frozenset({"H3=-ImH12"})
+_SUPPORTED_SPIN_PACKINGS = frozenset({"H4=-ImH12"})
 _SUPPORTED_PHASE_CONVENTIONS = frozenset({"q_half_per_spin_sector"})
 _SUPPORTED_HERMITIZATIONS = frozenset({"none_hamiltonian_path"})
 _SUPPORTED_FERMI_SHIFTS = frozenset({"none"})
@@ -47,13 +47,24 @@ class SpiralBundle:
         lattice vector, with the physical pairing ``(nu, mu, -R)``. The
         spin-diagonal components (H1, H2) must match their partner's
         exactly; the mixing components (H3, H4) may carry producer
-        texture and are not compared across partners.
+        texture and are not compared across partners. ``R`` is either a
+        signed 1D cell index (scalar path) or a 3-tuple of signed cell
+        indices (vector path, requires ``cell`` and
+        ``orbital_positions``).
     overlap : dict[(mu, nu, R) -> float]
         Spin-independent lab overlap values with the same pairing; every
         sparse key must have an overlap entry.
     pitch_sign : str
         Producer convention for the exported pitch: ``qphs_up_exp_minus``
         means the up sector carries ``exp(-i q x / 2)`` (diag2kspiral).
+    cell : tuple or None
+        Lattice vectors as 3 rows (Bohr); required for the vector path.
+        Phases use the full ``xij = R @ cell + pos[nu] - pos[mu]``
+        displacement (fixture-certified: dropping the intra-cell orbital
+        offset part breaks the eigenvalue oracle at the 1e-2 eV level).
+    orbital_positions : tuple or None
+        Per-orbital positions (Bohr, matching the sparse keys' orbital
+        indices); required for the vector path.
     """
 
     version: str
@@ -68,6 +79,14 @@ class SpiralBundle:
     sparse: dict
     overlap: dict
     metadata: dict = field(default_factory=dict)
+    cell: tuple | None = None
+    orbital_positions: tuple | None = None
+
+    @staticmethod
+    def _neg(R):
+        if isinstance(R, tuple):
+            return tuple(-v for v in R)
+        return -R
 
     def validate(self) -> None:
         if self.version != BUNDLE_VERSION:
@@ -94,15 +113,49 @@ class SpiralBundle:
                 "exported pitch-sign convention must be declared (diag2kspiral "
                 "applies exp(-i q x / 2) to the up sector)"
             )
+        vector_keys = any(isinstance(R, tuple) for _, _, R in self.sparse)
+        if vector_keys:
+            if self.cell is None or self.orbital_positions is None:
+                raise SpiralImportError(
+                    "3-tuple cell keys require cell and orbital_positions; "
+                    "refusing to guess the xij displacements"
+                )
+            if len(self.q) != 3:
+                raise SpiralImportError(
+                    f"vector path requires q of length 3, got {len(self.q)}"
+                )
+            cell = np.asarray(self.cell, dtype=float)
+            positions = np.asarray(self.orbital_positions, dtype=float)
+            if cell.shape != (3, 3) or not np.isfinite(cell).all():
+                raise SpiralImportError(
+                    "cell must contain three finite Cartesian lattice vectors"
+                )
+            if positions.shape != (self.norb, 3) or not np.isfinite(positions).all():
+                raise SpiralImportError(
+                    "orbital_positions must contain one finite 3-vector per orbital"
+                )
+            if any(not isinstance(R, tuple) or len(R) != 3 for _, _, R in self.sparse):
+                raise SpiralImportError(
+                    "vector bundles require consistent 3-tuple cell keys"
+                )
+        elif self.cell is not None or self.orbital_positions is not None:
+            raise SpiralImportError(
+                "cell/orbital_positions provided but all sparse keys are "
+                "scalar; refusing ambiguous geometry"
+            )
+        if not np.isfinite(self.q).all() or (not vector_keys and len(self.q) != 1):
+            raise SpiralImportError(
+                "pitch must be finite and match the scalar/vector geometry"
+            )
         for (mu, nu, R), value in self.overlap.items():
-            partner = self.overlap.get((nu, mu, -R))
+            partner = self.overlap.get((nu, mu, self._neg(R)))
             if partner is None or not np.isclose(partner, value):
                 raise SpiralImportError(
                     f"overlap pairing violated at (mu={mu}, nu={nu}, R={R}); "
                     "expected (nu, mu, -R) with the same value"
                 )
         for (mu, nu, R), comps in self.sparse.items():
-            partner_key = (nu, mu, -R)
+            partner_key = (nu, mu, self._neg(R))
             partner = self.sparse.get(partner_key)
             if partner is None:
                 raise SpiralImportError(
@@ -128,17 +181,44 @@ class SpiralBundle:
 class SpiralImporter:
     """Assemble rotating-frame pencils from a :class:`SpiralBundle`."""
 
-    def assemble_pencil(self, bundle: SpiralBundle, k: float):
-        """Return (H(k), S(k)) in the rotating frame at scalar 1D k."""
+    # MathDoc: docs/sympy/siesta_spiral_vector.py (skew cell, orbital offsets).
+    def assemble_pencil(self, bundle: SpiralBundle, k):
+        """Return (H(k), S(k)) in the rotating frame.
+
+        ``k`` is a scalar for the 1D scalar-cell path, or a 3-vector
+        (Cartesian, inverse Bohr) for the vector path. The vector path
+        uses the full displacement ``xij = R @ cell + pos[nu] - pos[mu]``
+        exactly as ``diag2kspiral``'s ``setup_k`` does, with
+        ``D11 = exp(-i (k + q/2) xij)`` on the up sector (row ``mu`` and
+        the H12 block) and ``D22 = exp(-i (k - q/2) xij)`` on the down
+        sector, applied to both H and S.
+        """
         bundle.validate()
         n = bundle.norb
-        q = bundle.q[0]
+        vector = bundle.cell is not None
+        if vector:
+            cell = np.asarray(bundle.cell, dtype=float)
+            pos = np.asarray(bundle.orbital_positions, dtype=float)
+            qvec = np.asarray(bundle.q, dtype=float)
+            kvec = np.atleast_1d(np.asarray(k, dtype=float))
+            if kvec.shape != (3,) or not np.isfinite(kvec).all():
+                raise SpiralImportError(
+                    f"vector bundle needs a 3-vector k, got shape {kvec.shape}"
+                )
+        else:
+            q = bundle.q[0]
         H = np.zeros((2 * n, 2 * n), complex)
         S = np.zeros((2 * n, 2 * n), complex)
         for (mu, nu, R), (h1, h2, h3, h4) in bundle.sparse.items():
-            x = R
-            kphs = np.exp(-1j * k * x)
-            qphs = np.exp(-1j * q * x / 2)
+            if vector:
+                xij = np.asarray(R, dtype=float) @ cell + pos[nu] - pos[mu]
+                kx = float(kvec @ xij)
+                qx = float(qvec @ xij)
+            else:
+                kx = k * R
+                qx = q * R
+            kphs = np.exp(-1j * kx)
+            qphs = np.exp(-1j * qx / 2)
             d11 = kphs * qphs
             d22 = kphs * np.conj(qphs)
             h12 = complex(h3, -h4)

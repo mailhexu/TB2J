@@ -49,7 +49,7 @@ def _build_ring_model(ncell=6, norb=2, nR=3, seed=20261012):
     return H_blocks, S_blocks
 
 
-def _make_bundle(ncell=6, norb=2, q_num=2, spin_packing="H3=-ImH12"):
+def _make_bundle(ncell=6, norb=2, q_num=2, spin_packing="H4=-ImH12"):
     H_blocks, S_blocks = _build_ring_model(norb=norb)
     # stored 4-component form: H1, H2 real; H3 = Re H12, H4 = -Im H12
     stored = {}

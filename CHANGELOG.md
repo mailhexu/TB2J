@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### SIESTA spiral import oracle
+
+- Assemble 3D rotating-frame H/S pencils using full orbital-center
+  displacements and q/2 phases. Lossless HSX reduction retains Hamiltonian
+  entries with zero overlap and undoes sisl's exact HSX Fermi shift.
+- Record Fe3 and gapped O2 native SIESTA fixtures, raw provenance/hashes,
+  independent eigenvalues and occupation counts. Oracle checks reject
+  non-Hermitian pencils and corrupted convention metadata before solving.
+  These certify import only, not stationary response or supercell equivalence.
+
 ### Magnon reference updates
 
 - Recompute J(q=0) from current exchange/reference arrays in Hq; the
@@ -52,6 +62,13 @@
   (42.80% in ±0.5 eV of the Fermi level). A numerical eigengap
   is insufficient: TB2J refuses SO-bearing and Gram-truncated NC
   production tensors, including SOC-off runs with the same FR UPF.
+  On the independent x-axis 12³/48-band full-BZ FR run,
+  every k discards ten of 34 modes; these carry 20.03% of
+  beta-projected occupied weight and 43.14% in the ±0.5 eV
+  Fermi window. Reconditioning the same x leg from `rcond=1e-6`
+  to `1e-3` shifts raw first-neighbor tensor components by at
+  most 0.0273345 meV. This does not bound the lost-state
+  physics or authorize a production FR tensor.
   Scalar NC spinor exchange passes the matched-band same-UPF
   G3 anchor: Jxx=Jyy=14.7910404 meV versus collinear
   14.7932825 meV at 12³ (48 spinor versus 24/spin bands),
