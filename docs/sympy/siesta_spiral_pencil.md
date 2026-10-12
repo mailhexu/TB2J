@@ -23,12 +23,15 @@ $$
   the source converts density/energy matrices only.
 - Spin-diagonal channels carry pure momenta `k ± q/2` — exactly the pinned
   TBUpy convention `diag(H(k−q/2), H(k+q/2))`.
-- **Hermiticity requirement on stored components:** the full `H(k)` is
-  Hermitian iff the partner entry `(ν,μ,−R)` stores `H12' = conj(H21)`
-  (stored-component form: `H4' = −H4`) at `x' = −x`; then the partner's
-  assembled block is the elementwise conjugate (verified symbolically).
-  Whether a producer's stored sparse components satisfy this is a
-  **fixture-certifiable** convention question (story-003 oracle).
+- **Hermiticity of the full `H(k)`** requires the partner entry block to be
+  the **adjoint** of this entry's. The spin-diagonal sectors satisfy this
+  exactly with identical stored components at `x' = −x`. The mixing sector
+  provably **cannot** satisfy it under any k-independent stored pairing:
+  the adjoint ratio carries `e^{+iqx}` and an `(H3,H4)`-dependent phase
+  (asserted as a symbolic negative control). Mixing-sector Hermiticity
+  therefore requires stored components whose own R-dependence carries the
+  SCF spiral texture — **exclusively fixture-certifiable** (story-003
+  oracle), not constructible from `diag2kspiral` alone.
 
 ## [B] Ring/folded equivalence (numeric; spin-diagonal blocks, even m)
 

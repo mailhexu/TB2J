@@ -137,13 +137,18 @@ def check_packing_symbolic():
     # Off-diagonal placement per source (no averaging):
     #   H_ij(0,1) = (H3 - iH4) e^{-i(k+q/2)x},  H_ij(1,0) = (H3+iH4) e^{-i(k-q/2)x}
 
-    # Hermiticity REQUIREMENT on stored components: the full H(k) is
-    # Hermitian iff the partner entry (nu,mu,-R) stores components with
-    # H12' = conj(H21) (stored-component form: H4' = -H4) at x' = -x.
-    # Under that pairing the partner's assembled block is the elementwise
-    # conjugate of this entry's.  Whether a given producer's stored sparse
-    # components satisfy this is a FIXTURE-certifiable convention question
-    # (story 003 oracle), not provable from diag2kspiral alone.
+    # Hermiticity of the full H(k) requires the partner entry (nu,mu,-R)
+    # block to be the ADJOINT of this entry's: Bji = Bij^dag.  For the
+    # spin-diagonal sectors this holds with identical stored components at
+    # x' = -x.  For the MIXING sector (H3, H4) it provably CANNOT hold for
+    # any k-independent stored pairing: the required partner off-diagonal
+    # is conj(Bij[1,0]) = (H3-iH4) e^{+i(k-q/2)x}, while any stored pairing
+    # (a3,a4) at x'=-x contributes (a3-i a4) e^{+i(k+q/2)x} -- the two
+    # differ by the k-independent but x/q-dependent factor e^{-i q x}.
+    # The mixing-sector Hermiticity therefore REQUIRES stored components
+    # whose own R-dependence carries the SCF spiral texture: exclusively
+    # fixture-certifiable (story 003 oracle), not constructible from
+    # diag2kspiral alone.
     def assembled(h1, h2, h3, h4, xx):
         kp = sp.exp(-sp.I * k * xx)
         qp = sp.exp(-sp.I * q * xx / 2)
@@ -155,21 +160,25 @@ def check_packing_symbolic():
 
     Bij = assembled(H1, H2, H3, H4, x)
     Bji = assembled(H1, H2, H3, -H4, -x)
+    # diagonal sectors: adjoint condition holds exactly.
     assert_zero(
-        "partner diagonal (up) is conjugate", Bji[0, 0] - sp.conjugate(Bij[0, 0])
+        "adjoint: Bji[0,0] == conj(Bij[0,0])", Bji[0, 0] - sp.conjugate(Bij[0, 0])
     )
     assert_zero(
-        "partner diagonal (dn) is conjugate", Bji[1, 1] - sp.conjugate(Bij[1, 1])
+        "adjoint: Bji[1,1] == conj(Bij[1,1])", Bji[1, 1] - sp.conjugate(Bij[1, 1])
     )
-    assert_zero(
-        "partner (0,1) is conjugate of (0,1)", Bji[0, 1] - sp.conjugate(Bij[0, 1])
-    )
-    assert_zero(
-        "partner (1,0) is conjugate of (1,0)", Bji[1, 0] - sp.conjugate(Bij[1, 0])
-    )
-    print("  ok  with H4'=-H4 and x'=-x the partner block is the conjugate")
-    print("      -> Hermiticity of H(k) requires stored H12' = conj(H21);")
-    print("         fixture-oracle certification (story 003) for producers")
+    # mixing sector under the naive H4'=-H4 pairing: adjoint FAILS by the
+    # factor e^{-i q x} (asserted as a NEGATIVE control, i.e. the mismatch
+    # is exactly that phase -- proving no constant pairing can succeed).
+    mismatch = sp.simplify(Bji[0, 1] - sp.conjugate(Bij[1, 0]))
+    factor = sp.simplify(Bji[0, 1] / sp.conjugate(Bij[1, 0]) / sp.exp(sp.I * q * x))
+    assert factor == (H3 + sp.I * H4) / (H3 - sp.I * H4), f"unexpected ratio: {factor}"
+    assert sp.simplify(mismatch) != 0
+    assert mismatch != 0 or (H3 == 0 and H4 == 0)
+    print("  ok  diagonal sectors satisfy the adjoint pairing exactly")
+    print("  ok  mixing-sector adjoint FAILS: ratio carries e^{+i q x} and a")
+    print("      (H3,H4)-dependent phase -- no constant stored pairing can")
+    print("      succeed; SCF-textured components + fixture oracle required")
 
 
 # ---------------------------------------------------------------------------
