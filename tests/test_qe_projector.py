@@ -2051,8 +2051,8 @@ def test_spinor_default_three_leg_excludes_zero_source_site(tmp_path):
         )
 
 
-def test_spinor_mixed_scalar_nc_soc_us_keeps_augmented_soc_path(tmp_path):
-    """A full-rank scalar NC site is not marked FR by its SO-bearing neighbor."""
+def test_spinor_mixed_scalar_nc_soc_us_readable_but_production_refused(tmp_path):
+    """A real zero-ligand smoke is required before mixed production exchange."""
     import warnings
 
     refs = {}
@@ -2076,16 +2076,52 @@ def test_spinor_mixed_scalar_nc_soc_us_keeps_augmented_soc_path(tmp_path):
         mixed = read_qe_spinor_dump(refs["z"])
     assert mixed.metadata["tvanp"] == [False, True]
     assert "nc_exchange_status" not in mixed.metadata
-    # The synthetic SOC-contaminated US legs fail their real merge gate.
-    # Reaching that gate proves the mixed family was not blocked as FR NC.
-    with pytest.raises(ValueError, match="leg diagonals disagree"):
+    # Parser retains per-site source checks; production must not infer
+    # nonmagnetic-ligand validation from a magnetic augmented-site fixture.
+    with pytest.raises(ValueError, match="mixed NC.*augmented"):
         gen_exchange_qe(
             refs,
-            output_path=tmp_path / "soc_us_inconsistent",
+            output_path=tmp_path / "mixed_uncertified",
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
         )
+    assert not (tmp_path / "mixed_uncertified").exists()
+
+
+def test_spinor_nc_with_zero_source_us_ligand_still_refuses_production(tmp_path):
+    refs = {}
+    for axis in "xyz":
+        dump = write_qe_spinor_dump(
+            tmp_path / f"nc_us_{axis}.bin", axis=axis, version="1.1"
+        )
+        dump.records[0][1][5] = 2
+        dump.records[3][0][1] = b"O     "
+        dump.records[4][0][1] = 2
+        dump.records[5] = tuple(
+            np.asarray(values, dtype="<i4")
+            for values in ([2, 2], [0, 1], [0, 0], [0, 0])
+        )
+        dump.records[7][0][:, :, 0, :] = 0
+        dump.records[-1][0][:, :, 0, :, :, :] = 0
+        dump.records[7][0][:, :, 1, :] = 0
+        dump.records[13][0][:, :, 1, :] = 0
+        dump.records[-1][0][:, :, 1, :, :, :] = 0
+        _write_spinor_records(dump.path, dump.records)
+        refs[axis] = dump.path
+    data = read_qe_spinor_dump(refs["z"])
+    assert data.metadata["tvanp"] == [False, True]
+    np.testing.assert_array_equal(data.spinor_operator[1], 0)
+    np.testing.assert_array_equal(data.spinor_tangent_vertices[1], 0)
+    with pytest.raises(ValueError, match="mixed NC.*augmented"):
+        gen_exchange_qe(
+            refs,
+            output_path=tmp_path / "zero_ligand_uncertified",
+            Rpts=[[-1, 0, 0], [1, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+    assert not (tmp_path / "zero_ligand_uncertified").exists()
 
 
 def test_spinor_gram_no_eigengap_refused(tmp_path):

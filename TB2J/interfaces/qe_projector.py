@@ -2192,6 +2192,16 @@ def gen_exchange_qe(
                 raise ValueError(
                     f"QE spinor reference {axis!r} differs in UPF/projector family"
                 )
+        augmented = [bool(t or p) for t, p in zip(baseline["tvanp"], baseline["tpawp"])]
+        if any(augmented) and not all(augmented):
+            raise ValueError(
+                "mixed NC and augmented QE spinor production exchange is "
+                "not certified: the real Fe NC + O US smoke has a magnetic "
+                "ligand, and a converged zero-source augmented ligand "
+                "reference has not passed the source/reader gate. The "
+                "per-site validated reader remains available for research; "
+                "do not publish a mixed-family tensor."
+            )
         if any(
             "nc_exchange_status" in reference.metadata
             for reference in references.values()

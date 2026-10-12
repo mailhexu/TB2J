@@ -113,3 +113,41 @@ or Gram-truncated NC until per-k physical weight and
 exchange-threshold sensitivity justify its error budget,
 including the same FR UPF with `lspinorb=F` (QE clears
 `has_so` but does not average its j-split beta radials).
+
+The independent 12³ full-BZ x/y/z references with that FR UPF
+(48 spinor bands each) discard ten of 34 beta modes at **every**
+k point at `rcond=1e-6`. Those modes carry 20.03% of the
+beta-projected occupied weight and 43.14% of the
+`|E-E_F|<=0.5 eV` weight in each reference. At
+`rcond=1e-5` and `1e-3`, 13 and 16 modes carry
+24.22% and 32.42% of the occupied weight.
+Reconditioning the same raw x leg at `rcond=1e-6`,
+`1e-5`, `1e-3` changes `Jyy(R=(1,0,0))` from
+9.6503205 to 9.6675615 to 9.6776549 meV;
+across all x/y/z raw legs and six first neighbors, the
+largest component shift over the full bracket is
+0.0273347 meV. Neither this shift nor the clean eigengap
+is a bound on the loss of normalized physical states.
+The actual three-reference production CLI refused before
+creating a tensor directory. A separate real Fe NC + O US
+FeO dump reads and passes per-site source gates, but O
+is induced magnetic (`DMAX=0.1074555 Ry`); no converged
+real zero-source US ligand was validated. The public
+three-reference CLI explicitly refuses mixed NC+US/PAW
+spinor families too, while the strict reader remains
+available for research diagnostics.
+
+The same FR UPF with `lspinorb=F` was also run using
+independent x/y/z 12³ SCFs and full-BZ 48-band NSCFs.
+Its weighted scalar `dion` leaves all 34 j-split
+beta channels and 43.1286% of Fermi-window
+beta-projected weight in the ten modes discarded
+at `rcond=1e-6`; the production three-leg CLI
+refuses this SOC-off control too. The matched raw
+transverse symmetric off-diagonal legs at
+`R=(1,0,0)` (x:yz, y:xz, z:xy) are
+`(+2.539e-9,-1.777e-9,+0.904e-9) meV` SOC-off
+against `(0.0001784051,0.0001779155,0.0001776593) meV`
+SOC-on. This is a research-only leg contrast:
+the substantial discarded physical weight forbids
+a certified anisotropy or SOC-only quantitative claim.

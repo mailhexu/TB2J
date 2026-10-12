@@ -374,8 +374,14 @@ G3 gate (US 0.0039, PAW 0.0011). An unmatched 24-vs-48 window
 artificially inflates the discrepancy to 0.300 meV.
 
 A real 2³ Fe NC + O US FeO run passes **per-site** writer/reader
-gates; the O site in that run has a nonzero induced source,
-so it is not a nonmagnetic-ligand benchmark. For the PseudoDojo
+gates, but O has a nonzero induced source (`DMAX=0.1074555 Ry`).
+Neither that run nor two nonconverged compensated-Fe trials provide
+the required real **nonmagnetic** augmented ligand. The production
+three-leg `qe2J.py` path therefore explicitly refuses mixed NC
+and augmented spinor references; the strict reader still admits their
+per-site diagnostics, not a publishable mixed-family tensor.
+
+For the PseudoDojo
 16-valence fully relativistic Fe NC UPF (SHA-256
 `b9b7671a2c667a6f87a7228d30fcc205e339b69f5568fe3f3dba567fdce59a19`),
 a genuine SOC-on 2³ NC1.1 dump passes the writer but
@@ -388,6 +394,58 @@ NC with truncated modes, including the same FR UPF run with
 SOC disabled (`average_pp` clears `has_so` but retains separate
 beta radials); `read_qe_spinor_dump` permits research-only raw
 legs with an explicit warning.
+
+Independent x/y/z **12³ full-BZ** SCFs and 48-band NSCFs
+with that same FR UPF pass the native writer gates. At every one of
+1728 k points in each reference, ten of 34 beta modes fall below
+`rcond=1e-6`; they carry 20.03% of beta-projected occupied
+weight and 43.14% within `|E-E_F|<=0.5 eV`.
+At `rcond=1e-5` and `1e-3`, 13 and 16 modes are discarded,
+carrying 24.22% and 32.42% of occupied weight. On the *same
+x-reference*, research-only `Jyy(R=(1,0,0))` is 9.6503205,
+9.6675615 and 9.6776549 meV at those three thresholds.
+Across the independent x/y/z raw legs, six first-neighbor
+translations and all components, the full threshold bracket
+changes at most 0.0273347 meV. The three-reference production
+CLI **refuses** before rank-nine output, with no tensor directory:
+the large discarded normalized-state weight has no justified
+physical error budget. The modest raw-leg shift is not an
+error bound and does not override that refusal.
+
+A cutoff **below** the first measured eigengap was also
+tested: `rcond=1e-10` retains all 34 modes at every k.
+The untruncated smooth operator reaches
+`3.4746e8 eV` (versus `8.6952e4 eV` at `1e-6`)
+and violates the unchanged Hermiticity gate in all
+three legs by `13.7–16.9 eV` absolute. No below-gap
+exchange component is defined by the validated trace;
+symmetrizing this unstable operator to manufacture a
+number would conceal a failure. The reported
+`1e-6`–`1e-3` raw sensitivity does **not** bracket
+the first eigengap or bound the missing physical
+weight; both sides of that gap now explicitly fail
+certification for different reasons.
+
+A **matched same-UPF SOC-off control** was run with
+`lspinorb=F`: independent x/y/z 12³ SCFs and full-BZ
+48-band NSCFs at the same 80/320 Ry cutoffs, Fermi–Dirac
+0.01 Ry smearing, 30 CFR poles and 0.05 eV contour.
+QE's weighted scalar `dion` clears `has_so` but retains
+the 34 j-split beta channels. At every k, the ten modes
+discarded at `rcond=1e-6` still carry 20.0307% of
+beta-projected occupied weight and 43.1286% of the
+±0.5 eV Fermi-window weight. The **three-distinct-leg
+SOC-off production CLI also refuses** before output.
+At `R=(1,0,0)`, the *research-only* symmetric
+transverse off-diagonal raw legs (x:yz, y:xz, z:xy)
+are `+0.0001784051`, `+0.0001779155`,
+`+0.0001776593 meV` with SOC on, versus
+`+2.539e-9`, `-1.777e-9`, `+0.904e-9 meV`
+with SOC off. These are not a rank-nine anisotropy
+tensor or a calibrated SOC effect: both conditioned
+beta spaces lose about 43% of the normalized near-Fermi
+weight, and disabling SOC changes QE's weighted
+nonlocal coefficients without averaging beta radials.
 
 For a cross-code check, independent GPAW 26.7 LDA/PW92
 x/y/z spinor references (8³, 96 bands, 1100 eV) were
