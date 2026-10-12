@@ -1,6 +1,6 @@
 """Recorded SIESTA spin-spiral pencils and independent producer oracles.
 
-MathDoc: docs/sympy/siesta_spiral_pencil.py [A, C, D]. Geometry and
+MathDoc: tb2j/siesta-spiral-vector. Geometry and
 momenta are Cartesian Bohr and inverse Bohr. sisl's orbital transpose
 and spin-component conversion define the imported sparse orientation;
 its HSX Fermi shift is undone using the HSX header, not rounded EIG data.

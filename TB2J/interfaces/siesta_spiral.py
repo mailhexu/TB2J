@@ -181,7 +181,7 @@ class SpiralBundle:
 class SpiralImporter:
     """Assemble rotating-frame pencils from a :class:`SpiralBundle`."""
 
-    # MathDoc: docs/sympy/siesta_spiral_vector.py (skew cell, orbital offsets).
+    # MathDoc: tb2j/siesta-spiral-vector (package docs/sympy authority).
     def assemble_pencil(self, bundle: SpiralBundle, k):
         """Return (H(k), S(k)) in the rotating frame.
 
