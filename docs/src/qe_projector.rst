@@ -8,8 +8,9 @@ exporter also writes a distinct NC1.1 noncollinear spinor schema
 for magnetic NC, US, PAW and mixed-family runs. SO-bearing US/PAW
 retain their validated source/action and three-reference
 tensor-consistency gates. NC reads use a smooth-only source;
-fully relativistic NC exchange additionally requires physical
-Gram-mode validation and otherwise refuses production output.
+fully relativistic NC exchange fails its physical Gram-mode
+certification, and mixed NC/augmented production exchange is
+explicitly refused pending a real nonmagnetic-ligand smoke.
 Atomic mode remains collinear. An instrumented QE
 build writes coefficients, eigenvalues, occupations, k-points and the
 spin-split projector operator into a versioned binary dump
@@ -42,9 +43,12 @@ Prerequisites
   SO-bearing UPF. Gamma-only runs are rejected for every mode.
 * **Pseudopotential support depends on projector mode**: collinear KB
   accepts NC, US and PAW; noncollinear KB writes NC, US, PAW and mixed
-  site families after native action/source checks. A readable NC dump
-  does not by itself certify exchange. Atomic mode requires ``PP_PSWFC``
-  atomic wavefunctions in every UPF and remains collinear.
+  site families after native action/source checks. The production
+  spinor tensor path refuses mixed NC + US/PAW even if a dump passes
+  per-site reader checks: the real Fe NC + O US control has an
+  induced O source, not the required nonmagnetic ligand. Atomic mode
+  requires ``PP_PSWFC`` atomic wavefunctions in every UPF and
+  remains collinear.
 
 Workflow: scf + nscf with ``TB2J_DUMP``
 ---------------------------------------
@@ -245,14 +249,67 @@ For the official PseudoDojo FR Fe NC UPF (16 valence electrons,
 a real **2³ pilot** has ten discarded Gram modes. They
 carry 20.19% of the beta-projected occupied weight and 42.80%
 of the stated Fermi-window weight over that pilot's entire
-mesh. Those coarse-mesh figures do not extrapolate to a
-12³ error bound. ``qe2J.py`` refuses a tensor while the
+mesh. The 2³ pilot alone cannot establish a 12³ error bound.
+
+Independent x/y/z **12³ full-BZ** SCFs and 48-band NSCFs
+for this same UPF provide a stronger negative gate: all
+1728 k points in each reference discard ten of 34 beta
+modes at ``rcond=1e-6``, carrying 20.03% of the
+beta-projected occupied weight and 43.14% within
+:math:`|E-E_F|\leq0.5` eV. At ``1e-5`` and ``1e-3``
+13 and 16 modes are discarded, carrying 24.22% and
+32.42% of occupied weight. Research-only x-leg
+:math:`J_{yy}(R=(1,0,0))` is 9.6503205, 9.6675615
+and 9.6776549 meV at these three cutoffs. Across all
+independent x/y/z legs, six first-neighbor translations
+and components, the largest full-bracket raw shift is
+0.0273347 meV. This does **not** bound the error from
+discarded normalized states. The real three-reference
+``qe2J.py`` invocation refused before rank-nine output
+and created no tensor directory.
+
+The below-gap control ``rcond=1e-10`` retains all 34 modes
+at every k. Its untruncated smooth operator reaches
+``3.4746e8 eV`` rather than ``8.6952e4 eV`` at
+``1e-6``; x/y/z fail the existing Hermiticity gate
+with absolute defects ``13.7–16.9 eV``. There is no
+valid below-gap raw exchange component to compare.
+The ``1e-6``–``1e-3`` bracket is restricted to
+truncated-mode diagnostics; symmetrizing the failed
+below-gap operator would mask the numerical failure
+and would not recover the substantial lost weight.
+
+A matched **same-FR-UPF SOC-off control** uses independent
+x/y/z 12³ SCFs and 48-band full-BZ NSCFs with the same
+80/320 Ry cutoffs, smearing and contour. QE's scalar
+``dion`` weighting clears ``has_so`` without merging
+the 34 j-split beta channels. At ``rcond=1e-6``,
+all three SOC-off legs still discard ten modes at every
+k, carrying 20.0307% occupied and 43.1286% Fermi-window
+beta-projected normalized weight. The actual three-leg
+SOC-off CLI refuses without output. At
+:math:`R=(1,0,0)`, the research-only symmetric
+transverse raw-leg off-diagonals (x:yz, y:xz, z:xy)
+are ``0.0001784051``, ``0.0001779155``,
+``0.0001776593`` meV with SOC on, versus
+``+2.539e-9``, ``-1.777e-9``, ``+0.904e-9``
+meV with SOC off. Neither side passes the physical
+mode-weight gate; these are **not** certified
+rank-nine anisotropy or a quantitative SOC-only shift.
+
+``qe2J.py`` refuses a tensor while the
 FR-NC conditioning error budget is unestablished; use
 ``read_qe_spinor_dump`` and the raw single-leg API for
 research diagnostics only. Scalar ONCV Fe NC spinor dumps pass
-the real source/action/rotation checks; matched same-UPF
-collinear/spinor G3 exchange requires **48 total spinor
-bands versus 24 bands per collinear spin**.
+the real source/action/rotation checks. With matched same-UPF
+12³ full-BZ data (48 total spinor bands versus 24 bands per
+collinear spin, 30 CFR poles and 0.05 eV contour smearing),
+the nearest-neighbor z transverse leg gives
+:math:`J_{xx}=J_{yy}=14.7910404` meV versus collinear v1.2
+:math:`14.7932825` meV: maximum difference :math:`0.0023220`
+meV over all six nearest-neighbor vectors, below the
+:math:`0.01` meV G3 gate. The earlier 24-spinor-band smoke
+was *not* a matched-band comparison (0.300 meV difference).
 
 At 12³ full-BZ points, 48 spinor bands, 30 poles and 0.05 eV
 smearing, the scalar-relativistic Fe US NC1.1 z transverse leg gives
@@ -349,8 +406,8 @@ CLI usage
 0.05). See ``examples/qe/feo/`` for reproducible FeO US and PAW KB
 input decks and measured shell exchange.
 
-Collinear KB family support
----------------------------
+KB family support
+-----------------
 
 .. list-table:: KB pseudopotential-family support
    :header-rows: 1
@@ -367,13 +424,24 @@ Collinear KB family support
      - validated
      - bccFe J1 = 14.76 meV vs GPAW 14.73 meV (0.2%).
    * - NC (+ KB, e.g. ONCV)
-     - collinear v1.2 validated; scalar NC1.1 writer verified; FR-NC tensor refused
-     - Collinear bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons) J1 = 15.22 meV.
-       The v1.2 ``dbeta_xc`` vertex removes the historical ``deeq``-only
-       :math:`\Delta\equiv0` blocker. Scalar NC spinor exchange remains
-       conditional on a matched-band G3 result; FR-NC additionally
-       requires per-k physical conditioning evidence. NC ``becsum``
-       is not an NSCF occupation reference.
+     - collinear v1.2 and scalar NC1.1 z transverse leg validated; FR-NC tensor refused
+     - Collinear bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons)
+       :math:`J_1=14.7932825` meV versus matched NC1.1 z
+       :math:`J_{xx}=J_{yy}=14.7910404` meV at 12³/48-spinor bands
+       (absolute difference 0.0023220 meV). The v1.2
+       ``dbeta_xc`` vertex removes the historical ``deeq``-only
+       :math:`\Delta\equiv0` blocker. FR-NC still requires
+       per-k physical conditioning evidence. NC ``becsum`` is
+       not an NSCF occupation reference.
+   * - Mixed NC + US/PAW (spinor)
+     - production refused
+     - A real 2³ Fe NC + O US dump passes per-site writer/reader
+       oracles, but the O ligand is magnetic (nonlocal source
+       ``DMAX=0.1074555 Ry``). Two compensated-Fe trial cells
+       did not converge to a validated zero-source US ligand.
+       The public three-leg CLI rejects this family until that
+       physical gate passes; research reading is not a tensor
+       certification.
 
 The optional atomic basis is **not validated as a quantitative
 replacement** by these KB comparisons. In matched bccFe UPF/12³ runs,

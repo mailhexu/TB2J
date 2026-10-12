@@ -614,23 +614,93 @@ def _R_grid(nmax=1):
     )
 
 
+def _infer_kmesh(kpoints, decimals=6):
+    """Infer the regular k-mesh divisions from fractional k-points.
+
+    The Bloch-sum Green function built from these k-points is exactly
+    periodic in the k-mesh supercell, so this mesh defines the largest
+    meaningful R window (the same convention as ``kmesh_to_R`` in the
+    Wannier path).  The gcd spacing of the projected fractional
+    coordinates is invariant under IBZ reduction, so an IBZ list infers
+    the same mesh as the full BZ.
+    """
+    kpts = np.asarray(kpoints, dtype=float)
+    if kpts.ndim != 2 or kpts.shape[1] != 3:
+        raise ValueError("kpoints must have shape (nkpt, 3)")
+    mesh = []
+    for d in range(3):
+        vals = np.sort(np.mod(np.round(kpts[:, d], decimals), 1.0))
+        vals = np.mod(vals + 0.5, 1.0) - 0.5
+        vals = np.sort(vals)
+        keep = np.concatenate(([True], np.diff(vals) > 10.0**-decimals))
+        vals = vals[keep]
+        if len(vals) <= 1:
+            mesh.append(1)
+            continue
+        spacing = np.diff(np.concatenate((vals, vals[:1] + 1.0)))
+        s = float(np.min(spacing))
+        n = int(round(1.0 / s))
+        if n < 1 or abs(n * s - 1.0) > 1.0e-4:
+            raise ValueError(
+                "k-points are not a regular mesh along axis %d "
+                "(spacing %.6g); cannot bound the R list by the "
+                "k-mesh supercell" % (d, s)
+            )
+        mesh.append(n)
+    return tuple(mesh)
+
+
 def _R_grid_for_cutoff(data, sites, Rcut):
-    """Build the lattice-vector grid needed to cover all pairs within Rcut."""
-    cell_lengths = np.linalg.norm(np.asarray(data.cell, dtype=float), axis=1)
+    """Build the lattice-vector grid needed to cover all pairs within Rcut.
+
+    The R list is bounded by the k-mesh supercell: G(R) from the Bloch
+    sum is exactly periodic under supercell translations, so cells
+    beyond it are aliases of cells inside it and listing both would
+    double-count those pairs.  Rcut only selects which pairs inside the
+    supercell window are kept; if Rcut reaches beyond the window, a
+    warning is emitted because distinct physical neighbours then fold
+    onto single table entries (the k mesh is too coarse for this Rcut).
+    """
+    cell = np.asarray(data.cell, dtype=float)
+    cell_lengths = np.linalg.norm(cell, axis=1)
     positions = np.asarray(data.positions, dtype=float)
     max_pair = 0.0
     for i in sites:
         for j in sites:
             max_pair = max(max_pair, float(np.linalg.norm(positions[j] - positions[i])))
-    nmax = int(np.ceil((float(Rcut) + max_pair) / np.min(cell_lengths)))
-    Rpts = _R_grid(nmax=nmax)
+
+    kmesh = _infer_kmesh(data.kpoints)
+    reach = (float(Rcut) + max_pair) / cell_lengths
+    # symmetric, alias-free fundamental window per axis: for even n the
+    # +-n/2 classes are congruent modulo the supercell (G(n/2)=G(-n/2)
+    # exactly), so keeping either would duplicate those pair rows while
+    # dropping the other breaks the kernel's R -> -R closure; both are
+    # excluded instead.  Odd n loses nothing.
+    windows = [
+        [0] if n <= 1 else list(range(-(n // 2) + (1 - n % 2), n // 2 + n % 2))
+        for n in kmesh
+    ]
+    folded = any(reach[d] > max(abs(x) for x in windows[d]) for d in range(3))
+    if folded:
+        print(
+            "WARNING: Rcut (%.3f A) exceeds the k-mesh supercell %dx%dx%d; "
+            "R vectors are truncated to the supercell and distinct "
+            "neighbours beyond it alias onto single entries. Use a denser "
+            "k mesh for a trustworthy exchange table at this Rcut."
+            % (float(Rcut), *kmesh)
+        )
+
+    Rpts = np.array(
+        [(i, j, k) for i in windows[0] for j in windows[1] for k in windows[2]],
+        dtype=int,
+    )
     selected = set()
     for R in Rpts:
         for sign in (1, -1):
             Rs = sign * R
             for i in sites:
                 for j in sites:
-                    vector = Rs @ data.cell + data.positions[j] - data.positions[i]
+                    vector = Rs @ cell + positions[j] - positions[i]
                     if float(np.linalg.norm(vector)) < float(Rcut):
                         selected.add(tuple(int(x) for x in R))
                         selected.add(tuple(int(-x) for x in R))
