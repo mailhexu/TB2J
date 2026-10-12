@@ -189,6 +189,7 @@ def _source_bundle_digest(bundle: SpiralBundle) -> str:
     return hasher.hexdigest()
 
 
+# MathDoc: tb2j/siesta-spiral-vertex (package docs/sympy authority).
 def extract_magnetic_vertex(
     bundle: SpiralBundle,
     *,
