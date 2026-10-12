@@ -11,39 +11,46 @@ Source conventions under test (diag2kspiral.F90, setup_k, ~lines 326-351):
 * sparse spin components: H1=H11 (up-up), H2=H22 (down-down),
   H3=Re H12, H4=-Im H12, i.e. H12 = H3 - i H4, H21 = H3 + i H4.
 * k-phase  kphs = exp(-i k.x_ij)  on every entry,
-* q-phase  qphs = exp(-i q.x_ij):
+* q-phase  qphs = exp(-i q.x_ij / 2)   (line 141: qwh = qw * 0.5):
       up-up   gets  kphs * qphs        (D11)
       down-dn gets  kphs * conj(qphs)  (D22)
-      H12 entry uses D11, H21 entry uses D22, then the spin box is
-      Hermitized:  D12 <- (D12 + conj(D21))/2.
+      H12 entry uses D11, H21 entry uses D22, with NO Hermitization on
+      the Hamiltonian path (the (D12+conj(D21))/2 averaging at lines
+      ~281/294 belongs to the DENSITY-MATRIX path only).
 * the SAME phase pair is applied to the OVERLAP blocks S (spin-independent
   in the lab frame): S11 gets D11, S22 gets D22.
 
 Pinned, with assertion checks:
 
-[A] spinor packing round-trip (symbolic): the 4 real components reconstruct
-    a Hermitian 2x2 lab block; the phased+Hermitized rotating-frame block is
-    Hermitian across the (i,j)/(j,i) pair under the physical pairing
-    W(nu,mu,-R) = W(mu,nu,R)^dag.
+[A] spinor packing and phase placement (symbolic, source-accurate): the 4
+    real components reconstruct a Hermitian 2x2 lab block; the spiral phase
+    uses q/2 (source line 141: qwh = qw/2), so the two spin-diagonal
+    channels carry pure momenta k +/- q/2 -- matching the pinned TBUpy
+    convention diag(H(k-q/2), H(k+q/2)).  setup_k applies NO Hermitization
+    on the Hamiltonian path (the (D12+conj(D21))/2 averaging belongs to
+    the density-matrix path only).  Hermiticity of the full H(k) is a
+    REQUIREMENT on stored components -- the partner entry (x -> -x) must
+    store H12' = conj(H21) (stored-component form H4' = -H4); whether a
+    producer's stored components satisfy this is fixture-certifiable
+    (story 003), not provable from diag2kspiral alone.
 
 [B] ring/folded equivalence through the SIESTA assembly (numeric, exact
-    construction, spin-diagonal stored blocks): the two spin channels are
-    plain Fourier transforms at k+q and k-q; since the commensurate k mesh
-    is invariant under the q-shift, the union of the generalized
-    eigenvalues of the SIESTA-assembled pencils (H(k), S(k)) over the
-    folded mesh equals the supercell ring pencil spectrum (agreement
-    1e-13 on random nonorthogonal multi-orbital models).  Blocks with
-    spin mixing (H3, H4 != 0) have their stored-component frame fixed by
-    the SCF (vmatsp/rhoofdsp), not by diag2kspiral alone: the full
-    textured-frame equivalence is deferred to the producer-fixture
-    stories (AC-001/AC-002); what IS pinned analytically for the mixing
-    channels is the packing/Hermitization structure of [A].
+    construction, spin-diagonal stored blocks, EVEN m in q = 2 pi m/N):
+    each channel is a plain Fourier transform at k +/- q/2 and the mesh is
+    invariant under the q/2-shift, so the union of the generalized
+    eigenvalues of the SIESTA-assembled pencils over the folded mesh
+    equals the supercell ring pencil spectrum (1e-14 on random
+    nonorthogonal multi-orbital models).  ODD m puts the shifted channels
+    on the magnetic-BZ (2N-point) mesh, and spin-mixing blocks (H3, H4 !=
+    0) have their stored-component frame fixed by the SCF
+    (vmatsp/rhoofdsp): both require a real producer fixture and are
+    deferred to stories 003/004 (AC-001/AC-002).
 
-[C] rotating-frame overlap is spin-dependent (symbolic + numeric): even
-    with a spin-independent lab S, the assembled S(k) is different in the
-    two spin channels, S_up(k) = S_lab(k+q), S_dn(k) = S_lab(k-q).  All
-    dual-basis formulas must therefore use the assembled spinor S, never
-    the scalar lab S.
+[C] rotating-frame overlap is spin-dependent (numeric): even with a
+    spin-independent lab S, the assembled S(k) differs per spin channel,
+    S_up(k) = S_lab(k+q/2), S_dn(k) = S_lab(k-q/2).  All dual-basis
+    formulas must therefore use the assembled spinor S, never the scalar
+    lab S.
 
 [D] dual-basis identities on the pencil (exact rational + numeric):
         Tr A  = Tr(S S^-1 A) = Tr(S^-1 A S)   (O18's two dual forms;
@@ -103,54 +110,48 @@ def assert_zero(name, expr):
 
 
 def check_packing_symbolic():
-    print("[A] spinor packing / Hermitization (symbolic)")
+    print("[A] spinor packing / phase placement (symbolic, source-accurate)")
     H1, H2, H3, H4 = sp.symbols("H1 H2 H3 H4", real=True)
     lab = sp.Matrix([[H1, H3 - sp.I * H4], [H3 + sp.I * H4, H2]])
     assert sp.simplify(lab - lab.H) == sp.zeros(2, 2), "lab block not Hermitian"
     print("  ok  4-component lab block is Hermitian")
 
+    # Source facts (diag2kspiral.F90): line 141 qwh = qw/2; setup_k lines
+    # ~339-348: D11 = kphs*qphs, D22 = kphs*conj(qphs) with qphs built from
+    # q/2; Haux(1,.,2,.) += (H3-iH4)*D11, Haux(2,.,1,.) += (H3+iH4)*D22 -- NO
+    # Hermitization on the Hamiltonian path (the (D12+conj(D21))/2 averaging
+    # at lines ~281/294 belongs to the DENSITY-MATRIX path only).
     k, q, x = sp.symbols("k q x", real=True)
     kphs = sp.exp(-sp.I * k * x)
-    qphs = sp.exp(-sp.I * q * x)
+    qphs = sp.exp(-sp.I * q * x / 2)  # qwh = qw / 2
     D11 = kphs * qphs
     D22 = kphs * sp.conjugate(qphs)
-    D12 = sp.Rational(1, 2) * (
-        (H3 - sp.I * H4) * D11 + sp.conjugate((H3 + sp.I * H4) * D22)
-    )
-    D21 = sp.conjugate(D12)
-    # Non-trivial pinned fact: the Hermitized off-diagonal reduces to the
-    # full-q phase times the AVERAGED k-weight:
-    #     D12 = (H3 - i H4) exp(-i q x) cos(k x)
-    C_ref = (H3 - sp.I * H4) * sp.exp(-sp.I * q * x) * sp.cos(k * x)
-    assert_zero("D12 == (H3 - i H4) e^{-i q x} cos(k x)", D12 - C_ref)
-    print("  ok  D12 = (H3 - i H4) e^{-i q x} cos(k x)")
 
-    # Spin-diagonal reduction: the two channels see k+q and k-q exactly.
-    diag_up = sp.simplify(sp.exp(sp.I * (k + q) * x) * H1 * D11)
-    diag_dn = sp.simplify(sp.exp(sp.I * (k - q) * x) * H2 * D22)
+    # Channel split: the two spin sectors carry k +/- q/2 exactly.
+    diag_up = sp.simplify(sp.exp(sp.I * (k + q / 2) * x) * H1 * D11)
+    diag_dn = sp.simplify(sp.exp(sp.I * (k - q / 2) * x) * H2 * D22)
     assert diag_up == H1 and diag_dn == H2, "channel momentum split wrong"
-    print("  ok  spin-diagonal channels carry e^{-i(k+q)x} / e^{-i(k-q)x}")
+    print("  ok  spin-diagonal channels carry e^{-i(k+q/2)x} / e^{-i(k-q/2)x}")
+    print("      (matches the pinned TBUpy convention diag(H(k-q/2), H(k+q/2)))")
 
-    # Hermiticity structure of the SIESTA assembly (two distinct mechanisms):
-    # (i) SPIN off-diagonal: hermitized WITHIN each stored entry -- the entry
-    #     contributes (C12, conj(C12)) as a conjugate pair, so the summed
-    #     H(k) spin box is Hermitian for any single entry.
-    assert sp.simplify(D21 - sp.conjugate(D12)) == 0
-    print("  ok  per-entry spin box contributes conjugate C12/C21 pair")
+    # Off-diagonal placement per source (no averaging):
+    #   H_ij(0,1) = (H3 - iH4) e^{-i(k+q/2)x},  H_ij(1,0) = (H3+iH4) e^{-i(k-q/2)x}
 
-    # (ii) ORBITAL off-diagonal: comes from the partner entry (nu,mu,-R) of
-    # W(nu,mu,-R) = W(mu,nu,R)^dag, whose stored components are
-    # H1'=H1, H2'=H2, H3'=H3, H4'=-H4 at x'=-x.  Its diagonal channels and
-    # spin off-diagonal must be the elementwise conjugates of this entry's.
+    # Hermiticity REQUIREMENT on stored components: the full H(k) is
+    # Hermitian iff the partner entry (nu,mu,-R) stores components with
+    # H12' = conj(H21) (stored-component form: H4' = -H4) at x' = -x.
+    # Under that pairing the partner's assembled block is the elementwise
+    # conjugate of this entry's.  Whether a given producer's stored sparse
+    # components satisfy this is a FIXTURE-certifiable convention question
+    # (story 003 oracle), not provable from diag2kspiral alone.
     def assembled(h1, h2, h3, h4, xx):
         kp = sp.exp(-sp.I * k * xx)
-        qp = sp.exp(-sp.I * q * xx)
+        qp = sp.exp(-sp.I * q * xx / 2)
         d11 = kp * qp
         d22 = kp * sp.conjugate(qp)
-        d12 = sp.Rational(1, 2) * (
-            (h3 - sp.I * h4) * d11 + sp.conjugate((h3 + sp.I * h4) * d22)
+        return sp.Matrix(
+            [[h1 * d11, (h3 - sp.I * h4) * d11], [(h3 + sp.I * h4) * d22, h2 * d22]]
         )
-        return sp.Matrix([[h1 * d11, d12], [sp.conjugate(d12), h2 * d22]])
 
     Bij = assembled(H1, H2, H3, H4, x)
     Bji = assembled(H1, H2, H3, -H4, -x)
@@ -160,8 +161,15 @@ def check_packing_symbolic():
     assert_zero(
         "partner diagonal (dn) is conjugate", Bji[1, 1] - sp.conjugate(Bij[1, 1])
     )
-    assert_zero("partner C12 is conjugate", Bji[0, 1] - sp.conjugate(Bij[0, 1]))
-    print("  ok  partner entry (x->-x, H4->-H4) is the elementwise conjugate")
+    assert_zero(
+        "partner (0,1) is conjugate of (0,1)", Bji[0, 1] - sp.conjugate(Bij[0, 1])
+    )
+    assert_zero(
+        "partner (1,0) is conjugate of (1,0)", Bji[1, 0] - sp.conjugate(Bij[1, 0])
+    )
+    print("  ok  with H4'=-H4 and x'=-x the partner block is the conjugate")
+    print("      -> Hermiticity of H(k) requires stored H12' = conj(H21);")
+    print("         fixture-oracle certification (story 003) for producers")
 
 
 # ---------------------------------------------------------------------------
@@ -202,14 +210,16 @@ def build_model(ncell=6, norb=2, nR=3):
 
 
 def siesta_assembly(W, S, ncell, norb, k, q):
-    """Assemble the rotating-frame pencil exactly as diag2kspiral does."""
+    """Assemble the rotating-frame pencil exactly as diag2kspiral setup_k
+    does: q/2 phases (qwh = qw/2), and NO hermitization on the Hamiltonian
+    path (that averaging belongs to the density-matrix path only)."""
     n = norb
     H = np.zeros((2 * n, 2 * n), complex)
     Sm = np.zeros((2 * n, 2 * n), complex)
     for (mu, nu, R), blk in W.items():
         x = R  # 1D lattice vector in primitive units
         kphs = np.exp(-1j * k * x)
-        qphs = np.exp(-1j * q * x)
+        qphs = np.exp(-1j * q * x / 2)  # qwh = qw / 2
         D11 = kphs * qphs
         D22 = kphs * np.conj(qphs)
         iu, ju = mu, nu
@@ -220,12 +230,6 @@ def siesta_assembly(W, S, ncell, norb, k, q):
         Sv = float(S[(mu, nu, R)][0, 0])
         Sm[iu, ju] += Sv * D11
         Sm[iu + n, ju + n] += Sv * D22
-    # Hermitize the spin off-diagonal boxes (source does this per entry)
-    H12 = H[:n, n:]
-    H21 = H[n:, :n]
-    H12h = 0.5 * (H12 + H21.conj().T)
-    H[:n, n:] = H12h
-    H[n:, :n] = H12h.conj().T
     return H, Sm
 
 
@@ -254,17 +258,18 @@ def gen_eigs(H, S):
     return scipy.linalg.eigh(H, S, eigvals_only=True)
 
 
-def check_ring_folded(ncell=6, norb=2, q_num=1, nR=3):
+def check_ring_folded(ncell=6, norb=2, q_num=2, nR=3):
     print("[B] SIESTA assembly vs supercell ring (numeric, spin-diagonal W)")
     # Scope (pinned by this derivation): for spin-diagonal stored blocks the
-    # two spin channels are plain Fourier transforms at k+q and k-q, and the
-    # commensurate mesh is invariant under the q-shift, so the union of the
-    # SIESTA-assembled pencils over the folded k mesh equals the ring pencil
-    # spectrum -- phases on H AND S included.  For blocks with spin mixing
-    # (H3, H4 != 0) the stored-component frame is fixed by the SCF
-    # (vmatsp/rhoofdsp), not by diag2kspiral alone; the full textured-frame
-    # equivalence therefore requires a real producer fixture and is deferred
-    # to stories 003/004 (AC-001/AC-002) -- see the paired report.
+    # two spin channels are plain Fourier transforms at k+/-q/2.  The union
+    # over the folded k mesh equals the ring pencil spectrum whenever the
+    # mesh is invariant under the q/2-shift, i.e. for EVEN m in q = 2 pi m/N
+    # (default here: m = 2, N = 6) -- phases on H AND S included.  For ODD m
+    # the shifted channels live on the magnetic-BZ (2N-point) mesh, and for
+    # blocks with spin mixing (H3, H4 != 0) the stored-component frame is
+    # fixed by the SCF (vmatsp/rhoofdsp), not by diag2kspiral alone: both
+    # cases require a real producer fixture and are deferred to stories
+    # 003/004 (AC-001/AC-002) -- see the paired report.
     W, S = build_model(ncell, norb, nR)
     for key, blk in list(W.items()):
         # spin-channel offsets ONLY (mu/nu-dependent offsets would break the
@@ -274,6 +279,7 @@ def check_ring_folded(ncell=6, norb=2, q_num=1, nR=3):
     for mu, nu, R in list(S.keys()):
         if R == 0 and mu == nu:
             S[(mu, nu, R)] = np.array([[float(S[(mu, nu, R)][0, 0]) + 4.0 * norb]])
+    assert q_num % 2 == 0, "even m required for the plain-ring equivalence"
     q = 2 * np.pi * q_num / ncell
     Hr, Sr = ring_assembly(W, S, ncell, norb)
     ev_ring = gen_eigs(Hr, Sr)
@@ -305,16 +311,16 @@ def check_spin_dependent_overlap():
     Sdn = Sk[2:, 2:]
     assert not np.allclose(Sup, Sdn), "spin channels of S(k) unexpectedly equal"
 
-    # explicit channel identities: S_up(k) = S_lab(k+q), S_dn(k) = S_lab(k-q)
+    # explicit channel identities: S_up(k) = S_lab(k+q/2), S_dn(k) = S_lab(k-q/2)
     def S_lab(kk):
         out = np.zeros((2, 2), complex)
         for (mu, nu, R), v in S.items():
             out[mu, nu] += float(v[0, 0]) * np.exp(-1j * kk * R)
         return out
 
-    assert_close("S_up(k) == S_lab(k+q)", Sup, S_lab(k + q))
-    assert_close("S_dn(k) == S_lab(k-q)", Sdn, S_lab(k - q))
-    print("  ok  assembled S(k) carries the full-q phases per spin channel")
+    assert_close("S_up(k) == S_lab(k+q/2)", Sup, S_lab(k + q / 2))
+    assert_close("S_dn(k) == S_lab(k-q/2)", Sdn, S_lab(k - q / 2))
+    print("  ok  assembled S(k) carries q/2 phases per spin channel")
 
 
 # ---------------------------------------------------------------------------
