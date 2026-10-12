@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- All projector interfaces (GPAW, ABINIT NC/PAW/savetb2j, VASP
+  native/split-SOC, QE) now bound the real-space pair list by the
+  k-mesh supercell instead of extending it purely from `Rcut`: the
+  Bloch-sum Green function is exactly periodic under supercell
+  translations, so cells beyond the supercell alias cells inside it
+  and listing both double-counts those pairs. `_R_grid_for_cutoff`
+  infers the mesh divisions from the (IBZ or full-BZ) k-points and
+  restricts R to a symmetric alias-free fundamental window; for even
+  divisions the mutually congruent +-n/2 classes are excluded to keep
+  the kernel's R -> -R closure without duplicates. A warning is
+  printed whenever `Rcut` reaches beyond the window (the k mesh is
+  then too coarse for that `Rcut`).
+
+Unreleased
+
 ### SIESTA spiral import oracle
 
 - Assemble 3D rotating-frame H/S pencils using full orbital-center
