@@ -65,6 +65,7 @@ def _make_bundle(ncell=6, norb=2, q_num=2, spin_packing="H3=-ImH12"):
         phase_convention="q_half_per_spin_sector",
         hermitization="none_hamiltonian_path",
         fermi_shift="none",
+        pitch_sign="qphs_up_exp_minus",
         sparse=stored,
         overlap=S_blocks,
     )
@@ -135,4 +136,24 @@ class TestFailClosed:
         bundle = _make_bundle()
         bundle.overlap[(0, 1, 2)] = 5.0
         with pytest.raises(SpiralImportError, match="overlap pairing"):
+            SpiralImporter().assemble_pencil(bundle, 0.0)
+
+    def test_inconsistent_sparse_diagonal_refused(self):
+        bundle = _make_bundle()
+        h1, h2, h3, h4 = bundle.sparse[(0, 1, 1)]
+        bundle.sparse[(1, 0, -1)] = (h1 + 0.5, h2, h3, h4)
+        with pytest.raises(SpiralImportError, match="spin-diagonal components"):
+            SpiralImporter().assemble_pencil(bundle, 0.0)
+
+    def test_missing_overlap_entry_refused(self):
+        bundle = _make_bundle()
+        del bundle.overlap[(0, 1, 1)]
+        del bundle.overlap[(1, 0, -1)]
+        with pytest.raises(SpiralImportError, match="missing overlap"):
+            SpiralImporter().assemble_pencil(bundle, 0.0)
+
+    def test_unknown_pitch_sign_refused(self):
+        bundle = _make_bundle()
+        bundle.pitch_sign = "opposite"
+        with pytest.raises(SpiralImportError, match="pitch_sign"):
             SpiralImporter().assemble_pencil(bundle, 0.0)

@@ -29,6 +29,7 @@ _SUPPORTED_SPIN_PACKINGS = frozenset({"H3=-ImH12"})
 _SUPPORTED_PHASE_CONVENTIONS = frozenset({"q_half_per_spin_sector"})
 _SUPPORTED_HERMITIZATIONS = frozenset({"none_hamiltonian_path"})
 _SUPPORTED_FERMI_SHIFTS = frozenset({"none"})
+_SUPPORTED_PITCH_SIGNS = frozenset({"qphs_up_exp_minus"})
 
 
 class SpiralImportError(RuntimeError):
@@ -43,10 +44,16 @@ class SpiralBundle:
     ----------
     sparse : dict[(mu, nu, R) -> (H1, H2, H3, H4)]
         Stored 4-component spin blocks keyed by orbital pair and signed
-        lattice vector, with the physical pairing
-        ``(nu, mu, -R) = (mu, nu, R)`` (same stored components).
+        lattice vector, with the physical pairing ``(nu, mu, -R)``. The
+        spin-diagonal components (H1, H2) must match their partner's
+        exactly; the mixing components (H3, H4) may carry producer
+        texture and are not compared across partners.
     overlap : dict[(mu, nu, R) -> float]
-        Spin-independent lab overlap values with the same pairing.
+        Spin-independent lab overlap values with the same pairing; every
+        sparse key must have an overlap entry.
+    pitch_sign : str
+        Producer convention for the exported pitch: ``qphs_up_exp_minus``
+        means the up sector carries ``exp(-i q x / 2)`` (diag2kspiral).
     """
 
     version: str
@@ -57,6 +64,7 @@ class SpiralBundle:
     phase_convention: str
     hermitization: str
     fermi_shift: str
+    pitch_sign: str
     sparse: dict
     overlap: dict
     metadata: dict = field(default_factory=dict)
@@ -80,6 +88,12 @@ class SpiralBundle:
                 f"fermi_shift {self.fermi_shift!r} unsupported; sisl shifts H by "
                 "-E_f on read -- undo or declare the shift explicitly"
             )
+        if self.pitch_sign not in _SUPPORTED_PITCH_SIGNS:
+            raise SpiralImportError(
+                f"pitch_sign {self.pitch_sign!r} unsupported: the producer's "
+                "exported pitch-sign convention must be declared (diag2kspiral "
+                "applies exp(-i q x / 2) to the up sector)"
+            )
         for (mu, nu, R), value in self.overlap.items():
             partner = self.overlap.get((nu, mu, -R))
             if partner is None or not np.isclose(partner, value):
@@ -87,11 +101,27 @@ class SpiralBundle:
                     f"overlap pairing violated at (mu={mu}, nu={nu}, R={R}); "
                     "expected (nu, mu, -R) with the same value"
                 )
-        for mu, nu, R in self.sparse:
-            if (nu, mu, -R) not in self.sparse:
+        for (mu, nu, R), comps in self.sparse.items():
+            partner_key = (nu, mu, -R)
+            partner = self.sparse.get(partner_key)
+            if partner is None:
                 raise SpiralImportError(
                     f"sparse pairing violated at (mu={mu}, nu={nu}, R={R}); "
-                    "expected partner (nu, mu, -R)"
+                    f"expected partner {partner_key}"
+                )
+            if not (
+                np.isclose(comps[0], partner[0]) and np.isclose(comps[1], partner[1])
+            ):
+                raise SpiralImportError(
+                    f"sparse spin-diagonal components differ between "
+                    f"{(mu, nu, R)} and {partner_key}; the pencil would not be "
+                    "Hermitian -- refusing inconsistent bundle"
+                )
+            if (mu, nu, R) not in self.overlap:
+                raise SpiralImportError(
+                    f"missing overlap entry for sparse key (mu={mu}, nu={nu}, "
+                    f"R={R}); every stored Hamiltonian block needs its phased "
+                    "overlap"
                 )
 
 
