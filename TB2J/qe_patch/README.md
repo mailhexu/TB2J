@@ -360,10 +360,20 @@ to manufacture a six-angstrom US or PAW tensor.
 Noncollinear `+U` is also rejected: the frozen Hubbard magnetic
 one-center source has no certified rotation derivative in this ABI.
 
-Real scalar ONCV Fe NC1.1 2³/8³ spinor NSCF runs pass the
-source, native-action and rotation gates. The 2³ nonmagnetic NC
-control has zero dressed field and refuses to write a dump. A
-real 2³ Fe NC + O US FeO run passes **per-site** writer/reader
+Real scalar ONCV Fe NC1.1 2³/8³/12³ spinor NSCF runs pass
+the source, native-action and rotation gates. The 2³ nonmagnetic
+NC control has zero dressed field and refuses to write a dump.
+Scalar NC exchange is **anchored**: with matched band windows
+(48 total spinor bands versus 24 per collinear spin), same
+`Fe_ONCV_PBE-1.0` UPF, 12³ full BZ, 30 poles and 0.05 eV
+smearing, the first-neighbor transverse legs give
+`Jxx=Jyy=14.7910404 meV` versus matched collinear v1.2
+`14.7932825 meV`; the maximum absolute difference over all six
+first-neighbor vectors is `0.0023220 meV`, inside the 0.01 meV
+G3 gate (US 0.0039, PAW 0.0011). An unmatched 24-vs-48 window
+artificially inflates the discrepancy to 0.300 meV.
+
+A real 2³ Fe NC + O US FeO run passes **per-site** writer/reader
 gates; the O site in that run has a nonzero induced source,
 so it is not a nonmagnetic-ligand benchmark. For the PseudoDojo
 16-valence fully relativistic Fe NC UPF (SHA-256
@@ -377,9 +387,7 @@ test cannot bound this error. `qe2J.py` refuses SO-bearing NC and
 NC with truncated modes, including the same FR UPF run with
 SOC disabled (`average_pp` clears `has_so` but retains separate
 beta radials); `read_qe_spinor_dump` permits research-only raw
-legs with an explicit warning. Scalar exchange readiness remains
-subject to the same-UPF G3 comparison with **matched bands**
-(48 total spinor versus 24 per collinear spin).
+legs with an explicit warning.
 
 For a cross-code check, independent GPAW 26.7 LDA/PW92
 x/y/z spinor references (8³, 96 bands, 1100 eV) were

@@ -78,6 +78,13 @@ print("R=(1,0,0) transverse Jxx (meV):",
       1000 * leg[((1, 0, 0), 0, 0)]["J_leg"][0, 0])
 ```
 
+With the pinned UPF, 12³ mesh, 30 poles and 0.05 eV contour,
+the matched collinear first-neighbor coupling is 14.7932825 meV;
+the NC1.1 z transverse leg is 14.7910404 meV at
+`R=(1,0,0)` and its symmetry partners. The maximum
+absolute difference over six first-neighbor vectors is
+0.0023220 meV, below the 0.01 meV G3 gate.
+
 NC NSCF uses `diagonalization='cg'`: on this UPF
 (`number_of_wfc=0`), random-wavefunction Davidson NSCF
 failed with `cdiaghg` even though the corresponding SCF

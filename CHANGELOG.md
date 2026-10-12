@@ -52,8 +52,10 @@
   (42.80% in ±0.5 eV of the Fermi level). A numerical eigengap
   is insufficient: TB2J refuses SO-bearing and Gram-truncated NC
   production tensors, including SOC-off runs with the same FR UPF.
-  Scalar NC spinor exchange remains gated by a matched-band
-  same-UPF collinear comparison.
+  Scalar NC spinor exchange passes the matched-band same-UPF
+  G3 anchor: Jxx=Jyy=14.7910404 meV versus collinear
+  14.7932825 meV at 12³ (48 spinor versus 24/spin bands),
+  maximum difference 0.0023220 meV below the 0.01 meV gate.
 
 - VASP split-SOC exports now require `LWRITE_TB2J = .TRUE.` in each
   leg's INCAR. The new VASP patch switch defaults to `.FALSE.`; without

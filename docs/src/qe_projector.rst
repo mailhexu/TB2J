@@ -250,9 +250,15 @@ mesh. Those coarse-mesh figures do not extrapolate to a
 FR-NC conditioning error budget is unestablished; use
 ``read_qe_spinor_dump`` and the raw single-leg API for
 research diagnostics only. Scalar ONCV Fe NC spinor dumps pass
-the real source/action/rotation checks; matched same-UPF
-collinear/spinor G3 exchange requires **48 total spinor
-bands versus 24 bands per collinear spin**.
+the real source/action/rotation checks. With matched same-UPF
+12³ full-BZ data (48 total spinor bands versus 24 bands per
+collinear spin, 30 CFR poles and 0.05 eV contour smearing),
+the nearest-neighbor z transverse leg gives
+:math:`J_{xx}=J_{yy}=14.7910404` meV versus collinear v1.2
+:math:`14.7932825` meV: maximum difference :math:`0.0023220`
+meV over all six nearest-neighbor vectors, below the
+:math:`0.01` meV G3 gate. The earlier 24-spinor-band smoke
+was *not* a matched-band comparison (0.300 meV difference).
 
 At 12³ full-BZ points, 48 spinor bands, 30 poles and 0.05 eV
 smearing, the scalar-relativistic Fe US NC1.1 z transverse leg gives
@@ -367,13 +373,15 @@ Collinear KB family support
      - validated
      - bccFe J1 = 14.76 meV vs GPAW 14.73 meV (0.2%).
    * - NC (+ KB, e.g. ONCV)
-     - collinear v1.2 validated; scalar NC1.1 writer verified; FR-NC tensor refused
-     - Collinear bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons) J1 = 15.22 meV.
-       The v1.2 ``dbeta_xc`` vertex removes the historical ``deeq``-only
-       :math:`\Delta\equiv0` blocker. Scalar NC spinor exchange remains
-       conditional on a matched-band G3 result; FR-NC additionally
-       requires per-k physical conditioning evidence. NC ``becsum``
-       is not an NSCF occupation reference.
+     - collinear v1.2 and scalar NC1.1 z transverse leg validated; FR-NC tensor refused
+     - Collinear bccFe (Fe_ONCV_PBE-1.0, 16 valence electrons)
+       :math:`J_1=14.7932825` meV versus matched NC1.1 z
+       :math:`J_{xx}=J_{yy}=14.7910404` meV at 12³/48-spinor bands
+       (absolute difference 0.0023220 meV). The v1.2
+       ``dbeta_xc`` vertex removes the historical ``deeq``-only
+       :math:`\Delta\equiv0` blocker. FR-NC still requires
+       per-k physical conditioning evidence. NC ``becsum`` is
+       not an NSCF occupation reference.
 
 The optional atomic basis is **not validated as a quantitative
 replacement** by these KB comparisons. In matched bccFe UPF/12³ runs,
