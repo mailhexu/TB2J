@@ -138,17 +138,16 @@ def check_packing_symbolic():
     #   H_ij(0,1) = (H3 - iH4) e^{-i(k+q/2)x},  H_ij(1,0) = (H3+iH4) e^{-i(k-q/2)x}
 
     # Hermiticity of the full H(k) requires the partner entry (nu,mu,-R)
-    # block to be the ADJOINT of this entry's: Bji = Bij^dag.  For the
-    # spin-diagonal sectors this holds with identical stored components at
-    # x' = -x.  For the MIXING sector (H3, H4) it provably CANNOT hold for
-    # any k-independent stored pairing: the required partner off-diagonal
-    # is conj(Bij[1,0]) = (H3-iH4) e^{+i(k-q/2)x}, while any stored pairing
-    # (a3,a4) at x'=-x contributes (a3-i a4) e^{+i(k+q/2)x} -- the two
-    # differ by the k-independent but x/q-dependent factor e^{-i q x}.
-    # The mixing-sector Hermiticity therefore REQUIRES stored components
-    # whose own R-dependence carries the SCF spiral texture: exclusively
-    # fixture-certifiable (story 003 oracle), not constructible from
-    # diag2kspiral alone.
+    # block to be the ADJOINT of this entry's: Bji = Bij^dag.  The
+    # spin-diagonal sectors satisfy this with identical stored components
+    # at x' = -x.  For the MIXING sector the naive constant-component
+    # pairing (H3, -H4) FAILS: the adjoint ratio carries e^{+i q x} and an
+    # (H3,H4)-dependent phase.  A k-independent partner DOES exist if the
+    # stored components themselves carry the spiral texture,
+    #     H12' = e^{-i q x} conj(H21),  H21' = e^{+i q x} conj(H12)
+    # -- precisely the structure a converged spiral SCF produces.  Actual
+    # producer stored values are therefore fixture-certifiable (story 003
+    # oracle), not constructible from diag2kspiral alone.
     def assembled(h1, h2, h3, h4, xx):
         kp = sp.exp(-sp.I * k * xx)
         qp = sp.exp(-sp.I * q * xx / 2)
@@ -176,9 +175,9 @@ def check_packing_symbolic():
     assert sp.simplify(mismatch) != 0
     assert mismatch != 0 or (H3 == 0 and H4 == 0)
     print("  ok  diagonal sectors satisfy the adjoint pairing exactly")
-    print("  ok  mixing-sector adjoint FAILS: ratio carries e^{+i q x} and a")
-    print("      (H3,H4)-dependent phase -- no constant stored pairing can")
-    print("      succeed; SCF-textured components + fixture oracle required")
+    print("  ok  naive constant-component pairing FAILS for the mixing sector")
+    print("      (ratio carries e^{+i q x}); adjoint partner requires stored")
+    print("      e^{-/+i q x} texture -- fixture-oracle certification (003)")
 
 
 # ---------------------------------------------------------------------------
