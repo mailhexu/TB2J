@@ -14,10 +14,10 @@
   native frozen-magnetic-source response blocks, PAW one-center
   magnetic source rotation, complex beta fields, explicit
   source-tangent vertices and x/y/z rank-nine CLI. Legacy NC1.0
-  is scalar-only; NC projected-vertex and atomic+noncollinear
-  combinations fail closed. A conditioned Hermitian beta-Gram
-  inverse acts only on smooth fields, not dual Green coefficients
-  or native nonlocal response.
+  is scalar-only; NC spinor smooth-source runs now have per-species
+  admission and native parity gates. A conditioned Hermitian
+  beta-Gram inverse acts only on smooth fields, not dual Green
+  coefficients or native nonlocal response.
 - bccFe same-UPF SOC-off G3 agrees within 0.00395 meV (US) and
   0.00109 meV (PAW). Fully relativistic US and PAW x/y/z
   produce nearest-neighbor-only (`Rcut=2.6 Å`) rank-nine
@@ -32,6 +32,28 @@
   unchanged 1e-8-eV first-shell repeated-row gate even
   after tighter SCF; no GPAW full tensor or matched
   QE–GPAW quantitative claim is made.
+
+### QE NC spinor smooth-source extension
+
+- QE NC1.1 now writes and TB2J strictly reads magnetic NC KB spinor
+  sites through their beta-projected smooth Pauli field. Native
+  nonlocal magnetic and nine-response NC slabs must be measured zero;
+  x/y quarter-turns, tilted rotations, finite-difference tangents,
+  retained-Gram reconstruction and site-local native Pauli action
+  fail closed. A real Fe NC + O US mixed dump reads with separate
+  site sources; US/PAW replayed from fixed wavefunctions remains
+  byte-identical, and existing first-shell US/PAW rank-nine
+  outputs still pass.
+- A campaign-only QE ``TB2J_NC_GRAM_DIAG`` sidecar records **per-k**
+  complex beta-Gram modes and their Gram-normalized band/occupation/
+  Fermi-window spectral weights without changing the NC1.1 binary
+  ABI. The official PseudoDojo FR NC Fe 2³ pilot carries 20.19%
+  of beta-projected occupied weight in ten discarded modes
+  (42.80% in ±0.5 eV of the Fermi level). A numerical eigengap
+  is insufficient: TB2J refuses SO-bearing and Gram-truncated NC
+  production tensors, including SOC-off runs with the same FR UPF.
+  Scalar NC spinor exchange remains gated by a matched-band
+  same-UPF collinear comparison.
 
 - VASP split-SOC exports now require `LWRITE_TB2J = .TRUE.` in each
   leg's INCAR. The new VASP patch switch defaults to `.FALSE.`; without

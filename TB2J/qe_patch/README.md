@@ -231,17 +231,22 @@ for the KB exchange numbers in the following table.
 ## 5. Noncollinear KB spinor dumps NC1.0 / NC1.1
 
 `TB2J_PROJECTORS=kb` plus `TB2J_DUMP=spinor_nscf.bin` instruments
-converged, magnetic `noncolin=.true.` US/PAW runs. Each independent
-x/y/z reference needs its own SCF density and full-BZ NSCF, identical
-geometry, pseudopotential, k mesh and spinor band window. Use
-`nosym=.true., noinv=.true.` on NSCF and no pools or gamma-only mode.
-The runnable 16-valence Fe US inputs and official UPF hash are in
-`examples/qe/bccfe_spinor/`. The exporter checks complex beta Gram
-and projected field parities, native total `add_vuspsi` action, the
-same-source total-minus-zero-field magnetic action, and rotated
-source/action parity. `s_psi` is only the generalized overlap and is
-never the action oracle. SO-bearing native `fcoef` is not spin-rotation
-closed: bare-spin conjugation fails and is **not** used as a SOC gate.
+converged, magnetic `noncolin=.true.` NC, US, PAW and mixed-family
+runs. Each independent x/y/z reference needs its own SCF density and
+full-BZ NSCF with identical geometry, pseudopotential, k mesh and
+spinor band window. Use `nosym=.true., noinv=.true.` on NSCF and no
+pools or gamma-only mode. The 16-valence Fe US and scalar NC decks
+live in `examples/qe/bccfe_spinor/`. The exporter checks complex beta
+Gram/field parity, native total `add_vuspsi` action, frozen magnetic
+source subtraction and source/action rotation. For NC, the measured
+nonlocal magnetic source and all nine native response slabs are zero;
+the per-site beta-projected **smooth** Pauli field carries its vertex.
+For mixed cells the native projected-local-action oracle uses
+site-local beta-built trials: a global trial contains intersite
+`<beta_i|B|beta_j>` terms absent from the onsite dump. `s_psi` is
+the generalized overlap, not a magnetic-action oracle. SO-bearing
+native `fcoef` is not bare-spin covariant; its conjugation residual
+is informational, not a gate.
 
 The sequential-unformatted spinor ABI uses separate magics
 `TB2JQEDUMPNC1.0` and `TB2JQEDUMPNC1.1`; neither overloads the
@@ -263,13 +268,17 @@ and little-endian gfortran four-byte record markers:
 
 TB2J normalizes one full-BZ spinor k set (`sum(wk)=1`), takes band
 occupations from `wg/wk`, and keeps already-dual beta coefficients
-without applying an overlap inverse to the Green function. The beta
-Gram dresses only the **projected smooth magnetic field**. Fully
-relativistic beta manifolds can be nearly dependent (measured Fe
-Gram condition number ~1.1e10); the smooth-field inverse is a Hermitian
-pseudoinverse with relative eigenvalue cutoff `1e-6`, preventing
-null-channel amplification. It does not modify `becp` or the native
-nonlocal blocks. The spinor splitting is
+without applying an overlap inverse to the Green function. The
+Hermitian beta-Gram pseudoinverse (`rcond=1e-6`) dresses only the
+**projected smooth magnetic field**; it never changes `becp` or the
+native nonlocal blocks. A numerical eigengap is necessary for stable
+truncation, but does **not** bound the physical weight of a
+Gram-normalized discarded mode. In the PseudoDojo SO-bearing Fe NC
+pilot, `rcond=1e-6` retains modes at eigenvalue `5.4e-6` and
+amplifies `max|M^+ A M^+|` to about `4535 Ry`. Neither a fitted
+scale nor an eigengap certifies that FR-NC exchange vertex.
+
+The spinor splitting is
 `Delta = 2 RYTOEV [sum_i (M^+ A_i M^+) tensor sigma_i + Dmag]`;
 fixed ionic/SOC terms from `deeq_nc_total` are excluded.
 For NC1.1, each source `j` is placed into every destination Pauli
@@ -282,8 +291,20 @@ For local moment direction `n`, the tangent for rotation axis `a` is
 `K_cj^(a) = sum_d epsilon_cdj (n cross e_a)_d`.
 This is `dHmag/dtheta = (1/2) dDelta/dtheta`; it rotates
 **only the magnetic source**, not the fixed SOC Hamiltonian.
+
 NC1.0 has no native source response and refuses SO-bearing data.
-The scalar-relativistic NC1.1 tangent matches its commutator control.
+For NC1.1 pure NC, `Dmag` and all `D_response` slabs are measured
+zero, and the smooth-source explicit tangent reduces exactly to
+the scalar spin commutator. The writer admits a magnetic NC site
+using `max|M^+ A M^+|`, checks the native smooth Pauli action on
+its beta span, x/y quarter-turn and tilted rotations, a central
+difference at `1e-3 rad`, and retained-subspace reconstruction.
+Its printed `TB2J_CPL_OUT` is a **per-site Euclidean plane-wave
+projection residual** on stored states; it includes discarded
+in-span content and does not measure completeness outside the
+full beta span separately. In mixed US/NC cells it is not a
+generalized-overlap norm or a bound on exchange error.
+
 A standard full tensor requires all three dumps:
 
 ```bash
@@ -339,12 +360,26 @@ to manufacture a six-angstrom US or PAW tensor.
 Noncollinear `+U` is also rejected: the frozen Hubbard magnetic
 one-center source has no certified rotation derivative in this ABI.
 
-An ONCV Fe norm-conserving noncollinear SCF (8³ k mesh,
-`2.38 µB` net moment) converged but `becp_write_nc` rejected
-the NC projected-vertex family before dump:
-`requires ultrasoft or PAW projectors; norm-conserving projected-vertex family is not validated`.
-The absence of US/PAW augmentation is not itself a derivation of a
-smooth-only NC site vertex.
+Real scalar ONCV Fe NC1.1 2³/8³ spinor NSCF runs pass the
+source, native-action and rotation gates. The 2³ nonmagnetic NC
+control has zero dressed field and refuses to write a dump. A
+real 2³ Fe NC + O US FeO run passes **per-site** writer/reader
+gates; the O site in that run has a nonzero induced source,
+so it is not a nonmagnetic-ligand benchmark. For the PseudoDojo
+16-valence fully relativistic Fe NC UPF (SHA-256
+`b9b7671a2c667a6f87a7228d30fcc205e339b69f5568fe3f3dba567fdce59a19`),
+a genuine SOC-on 2³ NC1.1 dump passes the writer but
+**cannot certify a tensor**: across the whole 2³ Brillouin zone,
+the ten Gram modes discarded at `rcond=1e-6` carry 20.19%
+of the beta-projected occupied-state weight and 42.80% of the
+`|E-E_F|<=0.5 eV` window weight. A single-k gap and rank-nine
+test cannot bound this error. `qe2J.py` refuses SO-bearing NC and
+NC with truncated modes, including the same FR UPF run with
+SOC disabled (`average_pp` clears `has_so` but retains separate
+beta radials); `read_qe_spinor_dump` permits research-only raw
+legs with an explicit warning. Scalar exchange readiness remains
+subject to the same-UPF G3 comparison with **matched bands**
+(48 total spinor versus 24 per collinear spin).
 
 For a cross-code check, independent GPAW 26.7 LDA/PW92
 x/y/z spinor references (8³, 96 bands, 1100 eV) were
@@ -377,10 +412,10 @@ spinor inputs explicitly.
 ## Known quirks
 
 - Pure-NC nscf runs with random starting wavefunctions can abort in
-  `cdiaghg` ("S matrix not positive definite") with Davidson on some
-  ONCV setups; use `diagonalization = 'cg'` and
-  `startingwfc = 'atomic+random'` for the nscf step (validated:
-  `Fe_ONCV_PBE-1.0.upf`, bccFe).
+  `cdiaghg` ("S matrix not positive definite") with Davidson on the
+  tested ONCV setup; `diagonalization='cg'` succeeds. In a mixed
+  Fe NC + O US 2³ NSCF, also set `diago_cg_maxiter=200` if the
+  default CG limit leaves six or more bands unconverged.
 - Collinear v1.2 `becsum` is zero-filled for norm-conserving runs;
   its US/PAW SCF occupation-parity diagnostic does **not** extend
   to NC1.0/NC1.1 spinor NSCF dumps. Their reserved four-component

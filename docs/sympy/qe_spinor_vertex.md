@@ -224,3 +224,52 @@ exports passes first-neighbor rank-nine merging
 Its six-angstrom far shell still fails (`1.558e-5 eV`
 at the first inconsistent pair). No extended US/PAW
 tensor follows from these exact identities.
+
+## NC smooth-only source, retained subspace, and the antisymmetric counterexample
+
+Story 002 adds three exact checks (`check_nc_smooth_only_source_and_tangent`,
+`check_gram_retained_subspace_reconstruction`,
+`check_normalized_antisymmetric_counterexample`).
+
+**NC smooth-only vertex (ADR-002).** With Gram $M$, projected smooth
+field $B_z$ and *measured-zero* native responses
+$D_{c\leftarrow j}=0$, the operator
+$\Delta=2E\,M^{-1}B_zM^{-1}\otimes\sigma_z$ and the explicit
+source-resolved tangent $V_x=E\,M^{-1}B_zM^{-1}\otimes\sigma_x$ satisfy
+the commutator law exactly; the longitudinal vertex vanishes; a nonzero
+$D_{c\leftarrow j}$ breaks the commutator equality (the SO-bearing
+case). Conjugating the source by $U_y$ ($\sigma_z\to\sigma_x$)
+conjugates the operator and rotates the tangent legs exactly — the
+covariance the reader asserts numerically on `has_so=F` species.
+
+**Retained-subspace reconstruction.** With the rcond-truncated
+transform $M_\tau^+$ the dual identity degrades to the retained
+projector, $M_\tau^+M=P$: a field supported on the retained subspace
+reconstructs exactly, while any component coupling into a discarded
+mode is annihilated instead of dressed. A conditioned pseudoinverse
+reconstructs only the principal retained subspace.
+
+**Normalized antisymmetric counterexample.** For
+$M=\begin{pmatrix}1&s\\ s&1\end{pmatrix}$ (eigenvalues $1+s$ retained,
+$1-s$ discarded), $u_-=(1,-1)^T/\sqrt2$, constant field $A=M$, and
+primal coefficients $x=u_-/\sqrt{1-s}$, the **physical** state
+$|\psi\rangle=\beta x$ has norm one:
+$x^\dagger Mx=1$, although $\|x\|^2=1/(1-s)$ diverges as $s\to1$.
+The dressed contraction $\langle Mx|\,M^+AM^+\,|Mx\rangle$ equals
+$1$ with the full inverse and $0$ when the antisymmetric mode
+is discarded, for every $0<s<1$ satisfying that truncation
+condition; numerical check at $s=0.99999999$ and
+$rcond=10^{-6}$ agrees. The prior universal $O(1-s)$ error
+bound silently assumed bounded, unnormalized primal coefficients
+and is disproved; it is not re-pinned. $(j,m_j)$ spinor projectors
+are not a square transform of QE's native channels.
+
+These are algebraic identities only. A clean Gram eigengap is a
+numerical-conditioning diagnostic: retained modes as small as
+$\sim5\times10^{-6}$ (measured PseudoDojo FR NC Fe, first k) amplify
+the $M^+AM^+$ dressing without bound, and discarded modes already
+carry $O(1)$ normalized occupied-projector weight. Production
+therefore refuses SO-bearing NC **and** NC with truncated Gram
+modes after QE clears `has_so` on an SOC-off FR UPF; a
+window-resolved spectral-weight and exchange-threshold-sensitivity
+certificate would be needed to lift that refusal.

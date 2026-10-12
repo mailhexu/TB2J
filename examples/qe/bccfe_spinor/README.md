@@ -42,3 +42,67 @@ for the same `--Rcut 2.6` command. Its `--Rcut 6`
 far shell still fails (`1.558e-5 eV` at the first
 inconsistent pair). US/PAW are separate projector bases;
 never merge their reference dumps.
+
+## Scalar norm-conserving (NC) beta control
+
+The four `nc_fe_*.in` decks use the **same** 16-electron SG15
+`Fe_ONCV_PBE-1.0.upf` (SHA-256
+`724ca3ae588400ca6936057e0dcf9f5966ea40d09a781a21c5732798c03dfb17`),
+80/320 Ry cutoffs, a primitive bcc cell and the complete 12³
+Brillouin zone. Place that UPF in `pseudo/` and create `tmp_nc/`
+and `tmp_nc_col/` before running. The collinear NC v1.2 control
+uses 24 bands **per spin**; its spinor NC1.1 z leg uses **48
+total spinor bands**, not the 24-band spinor smoke input. A
+24-versus-48-total comparison is not a matched band window.
+
+```bash
+pw.x -in nc_fe_col_scf.in > nc_fe_col_scf.out
+TB2J_PROJECTORS=kb TB2J_DUMP=nc_fe_col.bin pw.x -in nc_fe_col_nscf.in > nc_fe_col_nscf.out
+pw.x -in nc_fe_z_scf.in > nc_fe_z_scf.out
+TB2J_PROJECTORS=kb TB2J_DUMP=nc_fe_z.bin pw.x -in nc_fe_z_nscf.in > nc_fe_z_nscf.out
+qe2J.py --input nc_fe_col.bin --elements Fe --Rcut 2.6 --nz 30 --smearing 0.05 --output_path nc_fe_col_exchange
+```
+
+For the spinor z **transverse leg** use the public reader and raw-leg
+API; a single reference cannot create a rank-nine tensor:
+
+```python
+from TB2J.interfaces.qe_projector import read_qe_spinor_dump
+from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
+
+data = read_qe_spinor_dump("nc_fe_z.bin")
+leg = compute_spinor_projector_exchange(
+    data, Rpts=[[1, 0, 0], [-1, 0, 0]], nz=30, smearing_eV=0.05,
+)
+print("R=(1,0,0) transverse Jxx (meV):",
+      1000 * leg[((1, 0, 0), 0, 0)]["J_leg"][0, 0])
+```
+
+NC NSCF uses `diagonalization='cg'`: on this UPF
+(`number_of_wfc=0`), random-wavefunction Davidson NSCF
+failed with `cdiaghg` even though the corresponding SCF
+converged. The writer requires a **dressed smooth-source**
+presence check, native projected-Pauli action, complex
+Gram/field parity, source quarter-turn and tilted rotations,
+and a `1e-3 rad` central difference. A nonmagnetic NC site
+with zero dressed source is refused; a measured-zero nonlocal
+magnetic source is expected for NC, not a missing vertex.
+
+An SO-bearing NC control uses the *different* official
+[PseudoDojo fully relativistic Fe NC UPF](https://www.pseudo-dojo.org/pseudos/nc-fr-04_pbe_standard/Fe.upf.gz)
+(SHA-256 of decompressed `Fe.upf`:
+`b9b7671a2c667a6f87a7228d30fcc205e339b69f5568fe3f3dba567fdce59a19`).
+Independent x/y/z SCF densities and full-BZ NSCF dumps are
+required, not rotations of one reference. Setting
+`TB2J_NC_GRAM_DIAG` during each NSCF writes a separate
+**normalized per-k beta-mode** diagnostic; use a new filename
+distinct from `TB2J_DUMP`. On the 2³ FR Fe pilot, the ten
+discarded modes carry 20.19% of the beta-projected occupied
+spectral weight and 42.80% in the
+`|E-E_F|<=0.5 eV` window. Those coarse-mesh weights and
+the strongly threshold-sensitive dressed operator do **not**
+certify a FR tensor. `qe2J.py --input_x/y/z` refuses SO-bearing
+or Gram-truncated NC until per-k physical weight and
+exchange-threshold sensitivity justify its error budget,
+including the same FR UPF with `lspinorb=F` (QE clears
+`has_so` but does not average its j-split beta radials).

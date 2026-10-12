@@ -1,0 +1,33 @@
+&CONTROL
+ calculation='nscf'
+ prefix='nc_fe_col'
+ outdir='./tmp_nc_col'
+ pseudo_dir='./pseudo'
+/
+&SYSTEM
+ ibrav=3
+ celldm(1)=5.42
+ nat=1
+ ntyp=1
+ ecutwfc=80
+ ecutrho=320
+ nspin=2
+ starting_magnetization(1)=0.4
+ occupations='smearing'
+ smearing='fd'
+ degauss=0.01
+ nbnd=24
+ nosym=.true.
+ noinv=.true.
+/
+&ELECTRONS
+ conv_thr=1.0d-10
+ diagonalization='cg'
+ mixing_beta=0.3
+/
+ATOMIC_SPECIES
+Fe 55.845 Fe_ONCV_PBE-1.0.upf
+ATOMIC_POSITIONS crystal
+Fe 0.0 0.0 0.0
+K_POINTS automatic
+12 12 12 0 0 0

@@ -1844,3 +1844,374 @@ def test_qe_spinor_cli_accepts_leg_consistency_flag(tmp_path, monkeypatch):
 
     stored = SpinIO.load_pickle(path=output)
     assert "leg_consistency_atol_eV=1.000e-08" in stored.description
+
+
+# ---------------------------------------------------------------------------
+# Story 002: per-species NC strict validation and Gram-conditioning gates
+# ---------------------------------------------------------------------------
+def _write_spinor_dump_custom_gram(path, gram, version="1.0"):
+    """Three-channel US spinor dump for Gram-spectrum gate fixtures.
+
+    Nonzero z projected field carries the magnetic source; deeq magnetic
+    is zero. ``gram`` is a (3, 3) Hermitian positive-definite block.
+    """
+    from TB2J.interfaces.qe_projector import MAGIC_SPINOR, MAGIC_SPINOR_NC11
+
+    nk, nbnd, nhm, nat, nkb = 2, 2, 3, 1, 3
+    rng = np.random.default_rng(23)
+    coefficients = rng.normal(size=(nk, nkb, 2, nbnd)) + 1j * rng.normal(
+        size=(nk, nkb, 2, nbnd)
+    )
+    et = np.array([[-0.2, 0.3], [-0.1, 0.4]]).T
+    wg = (et < 0).astype(float) * 0.5
+    field = np.zeros((nhm, nhm, nat, 3), dtype=complex)
+    field[:, :, :, 2] = 0.02 * np.eye(nhm)[:, :, None]
+    magic = MAGIC_SPINOR if version == "1.0" else MAGIC_SPINOR_NC11
+    records = [
+        (
+            np.array([magic.ljust(16, b" ")], dtype="S16"),
+            np.array([4, nk, nk, nbnd, nat, 1, nhm, 1, nkb, 0, 1], dtype="<i4"),
+        ),
+        (np.array([3.5, 0, 0.01]), np.array([-99, 0, 1], dtype="<i4")),
+        (np.eye(3), np.eye(3), np.array([4.0, 64.0]), np.array([1], dtype="<i4")),
+        (np.array([b"Fe    "] + [b"      "] * 9, dtype="S6"),),
+        (np.ones(nat, dtype="<i4"), np.zeros((3, nat))),
+        tuple(np.array([v], dtype="<i4") for v in (nhm, 1, 0, 0)),
+        (np.zeros((nhm, nhm, nat, 4), dtype=complex),),
+        (np.zeros((nhm, nhm, nat, 4), dtype=complex),),
+        (gram[:, :, None].astype(complex),),
+        (np.array([[0, 0.5], [0, 0], [0, 0]]), np.full(nk, 0.5)),
+        (et, wg),
+        *[(coefficients[ik],) for ik in range(nk)],
+        (field,),
+        (np.zeros((nhm * (nhm + 1) // 2, nat, 4)),),
+    ]
+    if version == "1.1":
+        records.append((np.zeros((nhm, nhm, nat, 4, 3, 3), dtype=complex),))
+    _write_spinor_records(path, records)
+    return path
+
+
+def _gram_with_eigenvalues(eigenvalues, seed=5):
+    """Hermitian positive-definite block with the requested spectrum."""
+    rng = np.random.default_rng(seed)
+    q, _ = np.linalg.qr(rng.normal(size=(len(eigenvalues), len(eigenvalues))))
+    gram = q @ np.diag(eigenvalues) @ q.T
+    return (gram + gram.T) / 2
+
+
+def test_spinor_nc_species_measured_zero_source_oracles(tmp_path):
+    """Per-species NC gates: measured-zero required, nonzero slab rejected.
+
+    A pure NC species (tvanp=tpawp=0) is admitted only with an exactly
+    measured-zero nonlocal source while its nonzero projected smooth
+    field carries the magnetic presence; nonzero NC slabs are malformed.
+    """
+    # accepted: NC species, zero deeq magnetic, zero response slabs,
+    # nonzero smooth z field
+    good = write_qe_spinor_dump(tmp_path / "nc.bin", version="1.1")
+    good.records[5][1][0] = 0  # tvanp = 0
+    good.records[7][0][...] = 0
+    good.records[-1][0][...] = 0
+    _write_spinor_records(good.path, good.records)
+    data = read_qe_spinor_dump(good.path)
+    assert data.metadata["tvanp"] == [False]
+    # smooth-only explicit tangent equals the commutator tangent exactly
+    from TB2J.projector_green import magnetic_tangent_vertices, spinor_dense_block
+
+    commutator = magnetic_tangent_vertices(data.spinor_operator[0])["vertices"]
+    for axis in range(3):
+        np.testing.assert_allclose(
+            spinor_dense_block(data.spinor_tangent_vertices[0, axis]),
+            commutator[axis],
+            atol=1e-9,
+        )
+
+    # rejected: NC species with a nonzero native nonlocal source
+    for record, part, message in (
+        (7, 0, "nonzero deeq_nc_magnetic nonlocal"),
+        (None, None, "nonzero D_response slab"),
+    ):
+        bad = write_qe_spinor_dump(tmp_path / f"bad{record}.bin", version="1.1")
+        bad.records[5][1][0] = 0
+        bad.records[7][0][...] = 0
+        bad.records[-1][0][...] = 0
+        if record is None:
+            bad.records[-1][0][0, 0, 0, 0, 0, 1] = 1e-9
+        else:
+            bad.records[record][part][0, 0, 0, 0] = 1e-6
+        _write_spinor_records(bad.path, bad.records)
+        with pytest.raises(ValueError, match=message):
+            parse_qe_spinor_dump(bad.path)
+
+    # has_so=F explicit-versus-commutator parity is asserted: a Hermitian
+    # perturbation of an off-diagonal response slab passes the diagonal
+    # identity gate but must break the scalar-relativistic parity
+    parity = write_qe_spinor_dump(tmp_path / "parity.bin", version="1.1")
+    # slab (c=z, j=x): nonzero K weight for the x leg; real diagonal
+    # (uu) element keeps the block Hermitian and skips the diagonal gate
+    parity.records[-1][0][0, 0, 0, 0, 2, 0] += 1e-3
+    _write_spinor_records(parity.path, parity.records)
+    with pytest.raises(ValueError, match="deviates from"):
+        read_qe_spinor_dump(parity.path)
+
+
+def test_spinor_nc_requires_measured_response_and_dressed_source(tmp_path):
+    """NC1.0 lacks the oracle; an all-discarded smooth field is not magnetic."""
+    legacy = write_qe_spinor_dump(tmp_path / "nc10.bin", version="1.0")
+    legacy.records[5][1][0] = 0
+    legacy.records[7][0][...] = 0
+    _write_spinor_records(legacy.path, legacy.records)
+    with pytest.raises(ValueError, match="NC1.0 cannot certify"):
+        parse_qe_spinor_dump(legacy.path)
+
+    discard = write_qe_spinor_dump(tmp_path / "discard.bin", version="1.1")
+    discard.records[5][1][0] = 0
+    discard.records[7][0][...] = 0
+    discard.records[-1][0][...] = 0
+    discard.records[8][0][...] = np.diag([1.0, 1.0e-9])[:, :, None]
+    discard.records[13][0][...] = 0
+    discard.records[13][0][1, 1, 0, 2] = 1.0e-9
+    _write_spinor_records(discard.path, discard.records)
+    with pytest.raises(ValueError, match="zero conditioned magnetic source"):
+        read_qe_spinor_dump(discard.path)
+
+
+def test_spinor_nc_mixed_nonmagnetic_site_accepted(tmp_path):
+    """A nonmagnetic NC site with zero source is admitted (ADR-001)."""
+    mix = write_qe_spinor_dump(tmp_path / "mix.bin", version="1.1")
+    mix.records[5][1][0] = 0  # tvanp = 0
+    mix.records[7][0][...] = 0
+    mix.records[-1][0][...] = 0
+    mix.records[13][0][:, :, 1, :] = 0  # site 1 fully nonmagnetic
+    _write_spinor_records(mix.path, mix.records)
+    data = read_qe_spinor_dump(mix.path)
+    assert np.abs(data.spinor_operator[1]).max() == 0.0
+    np.testing.assert_allclose(data.spinor_tangent_vertices[1], 0.0, atol=0.0)
+    assert np.abs(data.spinor_operator[0]).max() > 0.0
+
+
+def test_spinor_nonmagnetic_site_with_response_or_traceless_field_refused(tmp_path):
+    """A zero moment must not silently erase a nonzero native tangent."""
+    bad_response = write_qe_spinor_dump(tmp_path / "response.bin", version="1.1")
+    bad_response.records[7][0][:, :, 1, :] = 0
+    bad_response.records[13][0][:, :, 1, :] = 0
+    bad_response.records[-1][0][:, :, 1, :, :, :] = 0
+    bad_response.records[-1][0][0, 0, 1, 0, 2, 0] = 1e-3
+    _write_spinor_records(bad_response.path, bad_response.records)
+    with pytest.raises(
+        ValueError, match="zero magnetic splitting but nonzero source response"
+    ):
+        read_qe_spinor_dump(bad_response.path)
+
+    traceless = write_qe_spinor_dump(tmp_path / "traceless.bin", version="1.1")
+    gram = traceless.records[8][0][:, :, 1]
+    traceless.records[13][0][:, :, 1, :] = 0
+    traceless.records[13][0][:, :, 1, 2] = gram @ np.diag([0.02, -0.02]) @ gram
+    traceless.records[7][0][:, :, 1, :] = 0
+    traceless.records[-1][0][:, :, 1, :, :, :] = 0
+    _write_spinor_records(traceless.path, traceless.records)
+    with pytest.raises(
+        ValueError, match="nonzero magnetic operator.*no well-defined moment"
+    ):
+        read_qe_spinor_dump(traceless.path)
+
+
+def test_spinor_default_three_leg_excludes_zero_source_site(tmp_path):
+    """Default selection keeps magnetic pairs and omits the true zero ligand."""
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    refs = {}
+    for axis in "xyz":
+        dump = write_qe_spinor_dump(tmp_path / f"{axis}.bin", axis=axis, version="1.1")
+        dump.records[7][0][:, :, 1, :] = 0
+        dump.records[13][0][:, :, 1, :] = 0
+        dump.records[-1][0][:, :, 1, :, :, :] = 0
+        _write_spinor_records(dump.path, dump.records)
+        refs[axis] = dump.path
+    output, jdict = gen_exchange_qe(
+        refs,
+        output_path=tmp_path / "default",
+        Rpts=[[-1, 0, 0], [0, 0, 0], [1, 0, 0]],
+        nz=8,
+        smearing_eV=0.1,
+    )
+    stored = SpinIO.load_pickle(path=output.parent)
+    assert list(stored.index_spin) == [0, -1]
+    assert ((1, 0, 0), 0, 0) in jdict
+    assert all(i == j == 0 for _, i, j in jdict)
+    with pytest.raises(ValueError, match="explicitly selected"):
+        gen_exchange_qe(
+            refs,
+            output_path=tmp_path / "invalid_selection",
+            Rpts=[[-1, 0, 0], [0, 0, 0], [1, 0, 0]],
+            index_magnetic_atoms=[1],
+            nz=8,
+            smearing_eV=0.1,
+        )
+
+
+def test_spinor_mixed_scalar_nc_soc_us_keeps_augmented_soc_path(tmp_path):
+    """A full-rank scalar NC site is not marked FR by its SO-bearing neighbor."""
+    import warnings
+
+    refs = {}
+    for axis in "xyz":
+        dump = write_qe_spinor_dump(
+            tmp_path / f"mixed_{axis}.bin", axis=axis, version="1.1", soc=True
+        )
+        dump.records[0][1][5] = 2  # two species, one NC and one US
+        dump.records[3][0][1] = b"O     "
+        dump.records[4][0][1] = 2
+        dump.records[5] = tuple(
+            np.asarray(values, dtype="<i4")
+            for values in ([2, 2], [0, 1], [0, 0], [0, 1])
+        )
+        dump.records[7][0][:, :, 0, :] = 0
+        dump.records[-1][0][:, :, 0, :, :, :] = 0
+        _write_spinor_records(dump.path, dump.records)
+        refs[axis] = dump.path
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        mixed = read_qe_spinor_dump(refs["z"])
+    assert mixed.metadata["tvanp"] == [False, True]
+    assert "nc_exchange_status" not in mixed.metadata
+    # The synthetic SOC-contaminated US legs fail their real merge gate.
+    # Reaching that gate proves the mixed family was not blocked as FR NC.
+    with pytest.raises(ValueError, match="leg diagonals disagree"):
+        gen_exchange_qe(
+            refs,
+            output_path=tmp_path / "soc_us_inconsistent",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+
+
+def test_spinor_gram_no_eigengap_refused(tmp_path):
+    """Ambiguous rcond truncation fails closed; a clean gap is accepted.
+
+    The gate is a numerical-conditioning diagnostic only: eigenvalues
+    (1, 1.5e-6, 9e-7) truncate at rcond=1e-6 with
+    smallest_retained/largest_discarded ~ 1.7 < 100 and are refused;
+    (1, 2, 1e-9) has a clean gap and reads normally.
+    """
+    refused = _write_spinor_dump_custom_gram(
+        tmp_path / "nogap.bin", _gram_with_eigenvalues([1.0, 1.5e-6, 9.0e-7])
+    )
+    with pytest.raises(ValueError, match="lack a clean eigengap"):
+        read_qe_spinor_dump(refused)
+    clean = _write_spinor_dump_custom_gram(
+        tmp_path / "gap.bin", _gram_with_eigenvalues([1.0, 2.0, 1.0e-9])
+    )
+    data = read_qe_spinor_dump(clean)
+    report = data.metadata["gram_spectrum"][0]
+    assert (report["retained"], report["discarded"]) == (2, 1)
+    assert report["cutoff"] == pytest.approx(2.0e-6)
+    assert np.all(np.isfinite(data.spinor_operator))
+
+
+def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
+    """FR NC reads for research (with warning) but production refuses.
+
+    A Gram eigengap certifies nothing: measured PseudoDojo FR NC Fe
+    carries O(1) normalized occupied-projector weight in discarded
+    modes, so SOC-bearing *NC-species* three-leg output fails closed
+    until a window spectral-weight and threshold-sensitivity
+    certificate exists. The refusal is scoped to tvanp=tpawp=0 species:
+    SO-bearing US/PAW references must still reach the merge.
+    """
+
+    def _nc_references(name):
+        references = {}
+        for axis in "xyz":
+            gt = write_qe_spinor_dump(
+                tmp_path / f"{name}{axis}.bin", axis=axis, version="1.1", soc=True
+            )
+            # pure NC species: measured-zero nonlocal source, smooth-only
+            gt.records[5][1][0] = 0
+            gt.records[7][0][...] = 0
+            gt.records[-1][0][...] = 0
+            _write_spinor_records(gt.path, gt.records)
+            references[axis] = gt.path
+        return references
+
+    soc = write_qe_spinor_dump(tmp_path / "soc_nc.bin", version="1.1", soc=True)
+    soc.records[5][1][0] = 0
+    soc.records[7][0][...] = 0
+    soc.records[-1][0][...] = 0
+    _write_spinor_records(soc.path, soc.records)
+    with pytest.warns(UserWarning, match="uncertified"):
+        data = read_qe_spinor_dump(soc.path)
+    assert "uncertified" in data.metadata["nc_exchange_status"]
+    with pytest.raises(ValueError, match="norm-conserving.*not.*certified"):
+        gen_exchange_qe(
+            _nc_references("nc"),
+            output_path=tmp_path / "refused",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+    assert not (tmp_path / "refused" / "exchange.out").exists()
+    # average_pp can clear has_so when SOC is disabled for an FR NC
+    # pseudopotential while leaving split radial betas intact. A clean
+    # numerical gap must not make that scalar-flagged truncation publishable.
+    off_refs = {}
+    for axis in "xyz":
+        gt = write_qe_spinor_dump(tmp_path / f"off{axis}.bin", axis=axis, version="1.1")
+        gt.records[5][1][0] = 0
+        gt.records[7][0][...] = 0
+        gt.records[-1][0][...] = 0
+        gt.records[8][0][:, :, 0] = np.diag([1.0, 1.0e-9])
+        _write_spinor_records(gt.path, gt.records)
+        off_refs[axis] = gt.path
+    with pytest.raises(ValueError, match="norm-conserving.*not certified"):
+        gen_exchange_qe(
+            off_refs,
+            output_path=tmp_path / "off_refused",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+    assert not (tmp_path / "off_refused" / "exchange.out").exists()
+    # SO-bearing US/PAW references are NOT hit by the NC refusal: they get
+    # past the family gate into the real merge, which then fails on its own
+    # known physics gate (the synthetic SOC legs are not exchange-consistent,
+    # max spread ~1.5e-4 eV). Asserting that exact gate proves the routing.
+    uspaw = {
+        axis: write_qe_spinor_dump(
+            tmp_path / f"uspaw{axis}.bin", axis=axis, version="1.1", soc=True
+        ).path
+        for axis in "xyz"
+    }
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")
+        read_qe_spinor_dump(uspaw["z"])
+    with pytest.raises(ValueError, match="leg diagonals disagree"):
+        gen_exchange_qe(
+            uspaw,
+            output_path=tmp_path / "uspaw_out",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+    assert not (tmp_path / "uspaw_out" / "exchange.out").exists()
+    # scalar NC1.1 production output still works
+    scalar = {
+        axis: write_qe_spinor_dump(
+            tmp_path / f"scalar{axis}.bin", axis=axis, version="1.1"
+        ).path
+        for axis in "xyz"
+    }
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error")
+        output, _ = gen_exchange_qe(
+            scalar,
+            output_path=tmp_path / "ok",
+            Rpts=[[0, 0, 0]],
+            nz=8,
+            smearing_eV=0.1,
+        )
+    assert (tmp_path / "ok" / "exchange.out").exists()

@@ -6,6 +6,7 @@ its native fixed-source action and rotation must be checked on real data.
 Run with the mydev environment: python docs/sympy/qe_spinor_vertex.py.
 """
 
+import numpy as np
 import sympy as sp
 
 I2 = sp.eye(2)
@@ -230,6 +231,150 @@ def check_collinear_limit_and_tangent():
     assert reversed_tangent == tangent_x
 
 
+def check_nc_smooth_only_source_and_tangent():
+    """ADR-002: an NC source/tangent is smooth-only with measured-zero D.
+
+    For a norm-conserving site with Gram ``M``, projected smooth Pauli
+    field ``B_z`` and *measured-zero* native responses ``D_{c<-j} = 0``,
+    the operator and tangent are exactly::
+
+        Delta = 2E kron(M^+ B_z M^+, sigma_z),   V_x = E kron(M^+ B_z M^+, sigma_x)
+
+    the explicit source-resolved vertex equals the commutator tangent of
+    the same operator, the longitudinal vertex vanishes, and rotating
+    the smooth source (and moment) by a Pauli quarter-turn conjugates
+    the vertex exactly. This is the algebraic identity the reader
+    asserts numerically on has_so=F species.
+    """
+    E = sp.symbols("E", real=True)
+    gram = sp.Matrix([[3, sp.I], [-sp.I, 4]])
+    smooth_bz = sp.Matrix(
+        [[sp.Rational(1, 50), 2 * sp.I], [-2 * sp.I, sp.Rational(3, 100)]]
+    )
+    assert gram == gram.H and smooth_bz == smooth_bz.H
+    q = gram.inv() * smooth_bz * gram.inv()
+
+    # measured-zero D: the smooth-only operator and explicit tangent.
+    delta = 2 * E * sp.kronecker_product(q, SZ)
+    # n = z, t = x -> generator axis n x t = y; weights K_{cj}=eps_{cdj} g_d
+    # select (c=x, j=z) with weight +1.
+    vertex_x = E * sp.kronecker_product(q, SX)
+    generator = sp.kronecker_product(I2, SY)
+    assert sp.simplify(
+        -sp.I / 4 * (generator * delta - delta * generator) - vertex_x
+    ) == sp.zeros(4)
+    # longitudinal vertex: n x n = 0.
+    generator_z = sp.kronecker_product(I2, SZ)
+    assert -sp.I / 4 * (generator_z * delta - delta * generator_z) == sp.zeros(4)
+    # a nonzero D_{c<-j} breaks the commutator equality (the SO-bearing case).
+    d_contamination = E * sp.kronecker_product(q, SY)
+    explicit_with_d = vertex_x + d_contamination
+    assert explicit_with_d != -sp.I / 4 * (generator * delta - delta * generator)
+
+    # Pauli covariance: conjugating the smooth source by U_y
+    # (SZ -> SX, SX -> -SZ, SY -> SY) conjugates the operator exactly and
+    # rotates the transverse tangent legs with it (z leg -> x-config z leg
+    # equals the conjugated y leg since R_y(-pi/2) fixes y).
+    uy = (I2 - sp.I * SY) / sp.sqrt(2)
+    pair = sp.kronecker_product(I2, uy)
+    delta_x = 2 * E * sp.kronecker_product(q, SX)
+    assert sp.simplify(delta_x - pair * delta * pair.H) == sp.zeros(4)
+    vertex_y = E * sp.kronecker_product(q, SY)
+    gen_z = sp.kronecker_product(I2, SZ)
+    tangent_z_of_rotated = -sp.I / 4 * (gen_z * delta_x - delta_x * gen_z)
+    assert sp.simplify(tangent_z_of_rotated - pair * vertex_y * pair.H) == sp.zeros(4)
+    # longitudinal leg of the rotated (x-moment) config vanishes
+    gen_x = sp.kronecker_product(I2, SX)
+    assert -sp.I / 4 * (gen_x * delta_x - delta_x * gen_x) == sp.zeros(4)
+    return vertex_x
+
+
+def check_gram_retained_subspace_reconstruction():
+    """Exact dual reconstruction holds only on the Gram-retained subspace.
+
+    With the rcond-truncated transform ``M^+_tau`` (eigenmode below the
+    cutoff replaced by zero) the dual identity ``M^+ M = I`` degrades to
+    the retained projector ``P``: a smooth field supported on the
+    retained subspace is reconstructed exactly, while any component on
+    a discarded mode is annihilated instead of dressed. This is the
+    principal-subspace restriction behind ADR-003.
+    """
+    m1 = sp.symbols("m1", positive=True)
+    M = sp.diag(m1, 2 * m1)
+    assert sp.simplify(M.inv() * M - sp.eye(2)) == sp.zeros(2)
+    # retained subspace = span(e1); truncated transform drops mode e2
+    M_trunc = sp.diag(1 / m1, 0)
+    P = sp.diag(1, 0)
+    assert sp.simplify(M_trunc * M - P) == sp.zeros(2)
+    # supported on the retained subspace: exact reconstruction
+    a = sp.symbols("a", real=True)
+    A_retained = a * P
+    assert sp.simplify(M_trunc * A_retained * M_trunc - (a / m1**2) * P) == sp.zeros(2)
+    # a component coupling into the discarded mode is annihilated by the
+    # truncated transform, not dressed
+    A_coupling = sp.Rational(3, 7) * sp.Matrix([[0, 1], [1, 0]])
+    assert M_trunc * A_coupling * M_trunc == sp.zeros(2)
+    full_dressed = M.inv() * A_coupling * M.inv()
+    assert sp.simplify(full_dressed - A_coupling / (2 * m1**2)) == sp.zeros(2)
+    return P
+
+
+def check_normalized_antisymmetric_counterexample():
+    """Normalized near-null antisymmetric mode: contraction exactly 1 vs 0.
+
+    For ``M = [[1, s], [s, 1]]`` (eigenvalues 1+s retained, 1-s
+    discarded), the antisymmetric mode ``u_- = (1, -1)/sqrt(2)`` and the
+    constant field ``A = M``, the primal state
+    ``x = u_-/sqrt(1-s)`` (norm squared ``1/(1-s)`` diverging as
+    ``s -> 1``) has the dressed quadratic
+    contraction ``<M x| M^+ A M^+ |M x>`` equal to **exactly 1** with the
+    full inverse and **exactly 0** with the rcond-truncated transform,
+    for every ``0 < s < 1``. The prior universal ``O(1-s)`` error bound
+    silently assumed bounded, unnormalized primal coefficients and is
+    disproved; nothing here re-pins it. A clean eigengap prevents
+    numerical ambiguity, not loss of normalized spectral states, and
+    the (j, m_j) spinor projectors are not claimed as a square
+    transform of the QE channels.
+    """
+    s = sp.symbols("s", positive=True)
+    pp = (I2 + SX) / 2
+    pm = (I2 - SX) / 2
+    M = (1 + s) * pp + (1 - s) * pm
+    assert M == sp.Matrix([[1, s], [s, 1]])
+    # exact check for 0 < s < 1: parameterize s = 1 - t**2 so
+    # sqrt(1-s) = t is a positive symbol and conjugates collapse.
+    t = sp.symbols("t", positive=True)
+    Mt = M.subs(s, 1 - t**2)
+    u = sp.Matrix([1, -1]) / sp.sqrt(2)
+    x = u / t
+    # the primal state norm diverges as s -> 1: ||x||^2 = 1/(1-s). This
+    # unbounded normalization is what defeats any universal O(1-s) bound.
+    assert sp.simplify((x.H * x)[0, 0] - 1 / (1 - (1 - t**2))) == 0
+    A = Mt
+    full = Mt.inv() * A * Mt.inv()
+    truncated = pp.subs(s, 1 - t**2) / (2 - t**2)  # retained-mode-only transform
+    Mx = sp.simplify(Mt * x)
+    contraction_full = sp.simplify((Mx.H * full * Mx)[0, 0])
+    contraction_truncated = sp.simplify((Mx.H * truncated * A * truncated * Mx)[0, 0])
+    assert contraction_full == 1
+    assert contraction_truncated == 0
+    # numerical spot check near degeneracy; 1-s below the rcond cutoff so
+    # the antisymmetric mode is genuinely truncated
+    s_num = sp.Float("0.99999999", 15)
+    Mn = np.array(M.subs(s, s_num).tolist(), dtype=float)
+    evals, vecs = np.linalg.eigh(Mn)
+    trunc_inv = (
+        vecs @ np.diag(np.where(evals > 1e-6 * evals.max(), 1 / evals, 0.0)) @ vecs.T
+    )
+    un = np.array(u, dtype=float).ravel()
+    xn = un / np.sqrt(float(1 - s_num))
+    Mxn = Mn @ xn
+    full_num = np.array(full.subs(t, sp.sqrt(1 - s_num)).tolist(), dtype=float)
+    assert abs(Mxn @ full_num @ Mxn - 1) < 1e-9
+    assert abs(Mxn @ (trunc_inv @ Mn @ trunc_inv) @ Mxn) < 1e-12
+    return contraction_full
+
+
 def main():
     check_qe_native_order()
     check_complex_field()
@@ -239,8 +384,13 @@ def main():
     check_paw_magnetic_source_separation()
     check_non_covariant_source_tangent()
     check_source_response_tensor()
+    check_nc_smooth_only_source_and_tangent()
+    check_gram_retained_subspace_reconstruction()
+    check_normalized_antisymmetric_counterexample()
     print(
-        "PASS: QE packing, complex field, PAW/SOC separation, SU2 signs, native source tangents"
+        "PASS: QE packing, complex field, PAW/SOC separation, SU2 signs, native "
+        "source tangents, NC smooth-only vertex, retained-subspace reconstruction, "
+        "normalized antisymmetric counterexample"
     )
 
 

@@ -99,6 +99,7 @@ from __future__ import annotations
 import os
 import re
 import struct
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -1587,6 +1588,11 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
             raise ValueError(
                 f"QE spinor dump {path}: SOC-on requires an SO-bearing UPF"
             )
+        if version == "1.0" and np.any(~(tvanp | tpawp)):
+            raise ValueError(
+                f"QE spinor dump {path}: NC1.0 cannot certify a norm-conserving "
+                "smooth-only source without NC1.1's nine measured responses"
+            )
         total = reader.array("deeq_nc_total", "<c16", (nhm, nhm, nat, 4))
         magnetic = reader.array("deeq_nc_magnetic", "<c16", (nhm, nhm, nat, 4))
         gram = reader.array("beta Gram", "<c16", (nhm, nhm, nat))
@@ -1658,6 +1664,25 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
             raise ValueError(
                 f"QE spinor dump {path}: beta Gram must be positive definite"
             )
+        # ADR-004 per-species family validation: pure NC species
+        # (tvanp=tpawp=0) assemble zero augmentation deeq, so the dump
+        # must carry a *measured* zero magnetic nonlocal source and zero
+        # response slabs; a nonzero NC slab is malformed, not magnetic.
+        species = ityp[site] - 1
+        if not (tvanp[species] or tpawp[species]):
+            if np.any(magnetic[:count, :count, site] != 0):
+                raise ValueError(
+                    f"QE spinor dump {path}: norm-conserving site {site} "
+                    "(tvanp=tpawp=0) has a nonzero deeq_nc_magnetic nonlocal "
+                    "source; NC species assemble exactly zero augmentation "
+                    "deeq and must measure a zero magnetic nonlocal source"
+                )
+            if d_response is not None and np.any(d_response[:count, :count, site] != 0):
+                raise ValueError(
+                    f"QE spinor dump {path}: norm-conserving site {site} "
+                    "(tvanp=tpawp=0) has a nonzero D_response slab; all nine "
+                    "native response blocks must measure zero for NC species"
+                )
         magnetic_source_present |= bool(
             np.any(field[:count, :count, site])
             or np.any(magnetic[:count, :count, site])
@@ -1728,18 +1753,63 @@ _LEVI_CIVITA[0, 1, 2] = _LEVI_CIVITA[1, 2, 0] = _LEVI_CIVITA[2, 0, 1] = 1.0
 _LEVI_CIVITA[0, 2, 1] = _LEVI_CIVITA[2, 1, 0] = _LEVI_CIVITA[1, 0, 2] = -1.0
 
 
-def _qe_gram_inverse(gram_block, rcond=1.0e-6):
+def _qe_gram_inverse(gram_block, rcond=1.0e-6, path=None, site=None):
     """SVD-conditioned dual transform for the smooth beta field.
 
     Fully relativistic beta manifolds can be numerically rank-deficient
     at a single k (measured Fe FR cond ~1.1e10 with min eigenvalue
     ~5e-9 while the plain inverse explodes the smooth dressing to
     ~1e8 Ry): j-split channels share l space. Truncating eigenvalues
-    below ``rcond`` times the largest leaves well-conditioned Grams
-    (bccFe scalar cond 58) bit-identical and bounds amplification,
-    the same bounded-amplification convention as the PAO metric.
+    below ``rcond`` times the largest keeps well-conditioned Grams
+    (bccFe scalar cond 58) bit-identical to the plain inverse.
+
+    This is a numerical-conditioning convention only, with NO physical
+    guarantee. ``rcond`` bounds the *discarded* modes, not the retained
+    ones: measured FR NC (PseudoDojo Fe) retains eigenvalues as small
+    as 5.4e-6 at rcond=1e-6, and ``M^+ A M^+`` dressing amplifies by
+    1/lambda^2 on those, so the dressed vertex is unbounded in
+    principle. The eigengap gate below is a necessary, not sufficient,
+    diagnostic; it certifies neither completeness of the retained
+    subspace nor exchange readiness. FR-NC exchange additionally
+    requires a window-resolved discarded-mode spectral-weight and
+    exchange-sensitivity campaign before any certification.
     """
+    spectrum = np.linalg.eigvalsh(gram_block)
+    cutoff = rcond * float(spectrum.max(initial=0.0))
+    retained = spectrum[spectrum > cutoff]
+    discarded = spectrum[spectrum <= cutoff]
+    if discarded.size:
+        largest_discarded = float(discarded.max())
+        smallest_retained = float(retained.min()) if retained.size else 0.0
+        gap = (
+            smallest_retained / largest_discarded if largest_discarded > 0.0 else np.inf
+        )
+        if not gap >= 100.0:
+            where = f"QE spinor dump {path}: " if path is not None else ""
+            which = f"site {site} " if site is not None else ""
+            raise ValueError(
+                f"{where}beta Gram {which}truncated modes lack a clean eigengap: "
+                f"smallest retained / largest discarded = {gap:.6e} < 100 at the "
+                f"rcond={rcond:g} cutoff {cutoff:.6e} (retained {retained.size}, "
+                "discarded {0}). A conditioned pseudoinverse reconstructs only "
+                "the retained subspace; refusing an ambiguous truncation.".format(
+                    discarded.size
+                )
+            )
     return np.linalg.pinv(gram_block, rcond=rcond, hermitian=True)
+
+
+def _qe_gram_spectrum_report(gram_block, rcond=1.0e-6):
+    """ADR-003 diagnostic: retained/discarded dimensions, cutoff, eigenvalues."""
+    spectrum = np.linalg.eigvalsh(gram_block)
+    cutoff = rcond * float(spectrum.max(initial=0.0))
+    retained = spectrum > cutoff
+    return {
+        "retained": int(retained.sum()),
+        "discarded": int((~retained).sum()),
+        "cutoff": cutoff,
+        "eigenvalues": [float(value) for value in spectrum],
+    }
 
 
 def _spinor_tangent_vertices_from_response(dump, operator, path):
@@ -1755,9 +1825,30 @@ def _spinor_tangent_vertices_from_response(dump, operator, path):
     nsite, nmax = operator.shape[0], operator.shape[1]
     vertices = np.zeros((nsite, 3, nmax, nmax, 2, 2), dtype=complex)
     for site, count in enumerate(dump.nh_per_atom):
-        n = magnetic_tangent_vertices(operator[site])["n"]
-        inverse = _qe_gram_inverse(dump.gram[:count, :count, site])
         response = dump.d_response[:count, :count, site]
+        try:
+            n = magnetic_tangent_vertices(operator[site])["n"]
+        except ValueError as exc:
+            # A nonmagnetic site can have zero tangents only if every
+            # source-response block vanishes. A zero diagonal sum does
+            # not rule out cancelling nonzero off-diagonal responses.
+            if "no magnetic splitting" not in str(exc):
+                raise
+            if np.any(operator[site] != 0):
+                raise ValueError(
+                    f"QE spinor dump {path}: site {site} has a nonzero "
+                    "magnetic operator but its Pauli trace has no "
+                    "well-defined moment direction"
+                ) from exc
+            if np.any(response != 0):
+                raise ValueError(
+                    f"QE spinor dump {path}: site {site} has zero magnetic "
+                    "splitting but nonzero source response"
+                ) from exc
+            continue
+        inverse = _qe_gram_inverse(
+            dump.gram[:count, :count, site], path=path, site=site
+        )
         smooth_fields = tuple(
             inverse @ dump.projected_field[:count, :count, site, j] @ inverse
             for j in range(3)
@@ -1809,13 +1900,31 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
             "magnetic tangents; fully relativistic exchange is unvalidated"
         )
     counts = dump.nh_per_atom
+    gram_spectrum = [
+        _qe_gram_spectrum_report(dump.gram[:count, :count, site])
+        for site, count in enumerate(counts)
+    ]
+    nc_sites = [
+        site
+        for site in range(dump.nat)
+        if not (dump.tvanp[dump.ityp[site] - 1] or dump.tpawp[dump.ityp[site] - 1])
+    ]
+    # QE average_pp clears has_so for an SOC-off FR NC UPF but retains
+    # j-split beta radials. A truncated NC Gram needs a physical weight
+    # certificate even when neither SOC flag identifies that UPF.
+    uncertified_nc = any(
+        dump.has_so[dump.ityp[site] - 1] or gram_spectrum[site]["discarded"]
+        for site in nc_sites
+    )
     nmax = int(counts.max())
     indices = np.full((dump.nat, nmax), -1, dtype=int)
     operator = np.zeros((dump.nat, nmax, nmax, 2, 2), dtype=complex)
     for site, count in enumerate(counts):
         start = int(dump.ofsbeta[site])
         indices[site, :count] = np.arange(start, start + count)
-        inverse = _qe_gram_inverse(dump.gram[:count, :count, site])
+        inverse = _qe_gram_inverse(
+            dump.gram[:count, :count, site], path=path, site=site
+        )
         projected = np.array(
             [
                 inverse @ dump.projected_field[:count, :count, site, axis] @ inverse
@@ -1828,6 +1937,11 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
             * RYTOEV
             * (np.einsum("aij,ast->ijst", projected, PAULI_MATRICES) + magnetic)
         )
+    if not np.any(operator != 0):
+        raise ValueError(
+            f"QE spinor dump {path}: zero conditioned magnetic source "
+            "after dressing the projected Pauli field"
+        )
     vertices = None
     tangent_definition = None
     if dump.version == "1.1":
@@ -1838,7 +1952,18 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
             for site, count in enumerate(dump.nh_per_atom):
                 if dump.has_so[dump.ityp[site] - 1]:
                     continue
-                commutator = magnetic_tangent_vertices(operator[site])["vertices"]
+                try:
+                    commutator = magnetic_tangent_vertices(operator[site])["vertices"]
+                except ValueError as exc:
+                    if "no magnetic splitting" not in str(exc):
+                        raise
+                    if np.any(operator[site] != 0) or np.any(vertices[site] != 0):
+                        raise ValueError(
+                            f"QE spinor dump {path}: site {site} has a "
+                            "nonzero magnetic operator or explicit tangent "
+                            "without a defined moment direction"
+                        ) from exc
+                    continue
                 for axis in range(3):
                     explicit = spinor_dense_block(vertices[site, axis])
                     reference = commutator[axis]
@@ -1887,6 +2012,23 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
             "native_spinor_order": ["uu", "ud", "du", "dd"],
             "lspinorb": bool(dump.lspinorb),
             "domag": bool(dump.domag),
+            # First-k numerical spectrum only. It cannot certify
+            # Brillouin-zone completeness or the physical lost weight.
+            "gram_spectrum": gram_spectrum,
+            **(
+                {
+                    "nc_exchange_status": (
+                        "uncertified: a norm-conserving species is SO-bearing "
+                        "or has truncated beta-Gram modes. A numerical "
+                        "eigengap does not bound discarded normalized-state "
+                        "spectral weight; per-k window weights and exchange "
+                        "threshold sensitivity are required. This also "
+                        "covers SOC-off FR UPFs whose has_so flag is cleared."
+                    ),
+                }
+                if uncertified_nc
+                else {}
+            ),
             "has_so": dump.has_so.tolist(),
             "tvanp": dump.tvanp.tolist(),
             "tpawp": dump.tpawp.tolist(),
@@ -1947,6 +2089,13 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
             },
         },
     )
+    if uncertified_nc:
+        warnings.warn(
+            "QE NC spinor dump is read for research only: SOC-bearing or "
+            "truncated NC beta modes have uncertified exchange "
+            "(see metadata 'nc_exchange_status')",
+            stacklevel=2,
+        )
     data.validate(exchange_ready=True)
     return data
 
@@ -1991,6 +2140,7 @@ def gen_exchange_qe(
     dump is available only via ``read_qe_spinor_dump`` and the raw leg API.
     """
     from TB2J.interfaces.gpaw_projector import (
+        _magnetic_sites,
         _R_grid_for_cutoff,
         component_local_operators,
         write_projector_exchange_out,
@@ -2042,6 +2192,52 @@ def gen_exchange_qe(
                 raise ValueError(
                     f"QE spinor reference {axis!r} differs in UPF/projector family"
                 )
+        if any(
+            "nc_exchange_status" in reference.metadata
+            for reference in references.values()
+        ):
+            raise ValueError(
+                "norm-conserving QE spinor exchange is not certified for "
+                "production output: an SO-bearing NC species or a truncated "
+                "NC beta Gram requires per-k window-resolved discarded-mode "
+                "spectral weights and measured exchange sensitivity across "
+                "conditioning thresholds. A clean first-k eigengap alone "
+                "does not bound normalized-state error. The PseudoDojo FR "
+                "NC Fe pilot retains ~5.4e-6 modes at rcond=1e-6 and "
+                "amplifies max|M^+ A M^+| to ~4.5e3 Ry. The same FR UPF "
+                "with SOC disabled clears has_so without averaging betas. "
+                "Use read_qe_spinor_dump and compute_spinor_projector_exchange "
+                "for research legs only."
+            )
+        selected_sites = _magnetic_sites(
+            references["z"],
+            magnetic_elements=magnetic_elements,
+            index_magnetic_atoms=index_magnetic_atoms,
+        )
+        automatic_sites = magnetic_elements is None and index_magnetic_atoms is None
+        active_sites = []
+        for site in selected_sites:
+            if site < 0 or site >= len(references["z"].site_nproj):
+                raise ValueError(f"QE spinor magnetic site index {site} is invalid")
+            present = [
+                bool(np.any(references[axis].spinor_operator[site] != 0))
+                for axis in ("x", "y", "z")
+            ]
+            if not any(present):
+                if automatic_sites:
+                    continue
+                raise ValueError(
+                    f"QE spinor site {site} was explicitly selected but "
+                    "has zero magnetic splitting in every reference"
+                )
+            if not all(present):
+                raise ValueError(
+                    f"QE spinor site {site} lacks magnetic splitting "
+                    "in one or more x/y/z reference directions"
+                )
+            active_sites.append(site)
+        if not active_sites:
+            raise ValueError("QE spinor references contain no magnetic site")
         return write_spinor_projector_exchange_out(
             references,
             path=output_path,
@@ -2050,7 +2246,7 @@ def gen_exchange_qe(
             nz=nz,
             smearing_eV=smearing_eV,
             magnetic_elements=magnetic_elements,
-            index_magnetic_atoms=index_magnetic_atoms,
+            index_magnetic_atoms=active_sites,
             leg_consistency_atol_eV=leg_consistency_atol_eV,
             description=(
                 f"QE {baseline['qe_magic']} KB spinor full rank-nine exchange "
