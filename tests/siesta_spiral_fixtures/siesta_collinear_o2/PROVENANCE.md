@@ -32,8 +32,11 @@ five-point mesh the new raw mixed Hessian is
 The repository's ordered-pair convention maps it to
 `J_stored = -K/2 = +0.311528935 eV`; the established-path image-summed
 `J_stored(O1,O2)` from **the same NC HSX** (H0±dx spin-channel adapter,
-Fermi-zero shifted) is `+0.311637068 eV`. The 0.108133 meV residual
-is *not* a second-SCF effect. The direct polarized-twin ExchangeCL2 run
+Fermi-zero shifted) is `+0.311637068 eV`. The adapter's up/down
+generalized eigenvalue union matches the original NC spinor pencil on
+all four recorded k-points to at most 1.066e-13 eV. The 0.108133 meV
+residual is *not* a second-SCF effect. The direct polarized-twin
+ExchangeCL2 run
 yields an image sum around `+0.3116437 eV` (Rcut 8 Å, five-point mesh,
 contour nz=100–800). Until the projector mismatch is dispositioned,
 this is research evidence, not a matched-projector pass.
