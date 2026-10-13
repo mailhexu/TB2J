@@ -36,10 +36,23 @@ Fermi-zero shifted) is `+0.311637068 eV`. The adapter's up/down
 generalized eigenvalue union matches the original NC spinor pencil on
 all four recorded k-points to at most 1.066e-13 eV. The 0.108133 meV
 residual is *not* a second-SCF effect. The direct polarized-twin
-ExchangeCL2 run
-yields an image sum around `+0.3116437 eV` (Rcut 8 Å, five-point mesh,
-contour nz=100–800). Until the projector mismatch is dispositioned,
-this is research evidence, not a matched-projector pass.
+ExchangeCL2 run yields an image sum around `+0.3116437 eV` (Rcut
+8 Å, five-point mesh, contour nz=100–800). This is research evidence,
+not a matched-projector or valid Heisenberg-anchor pass.
+
+**Stronger global-rotation failure:** in the declared production
+incident-block joint action, an O1–O2 magnetic block is in *both*
+site partitions. Rotating both sites through the same angle conjugates
+that block twice, but onsite blocks once (as explicitly specified in
+`docs/sympy/siesta_spiral_frozen_response.md`, section A). On the q=0,
+SOC-free O2 reference, simultaneously rotating both sites by 0.02,
+0.05, and 0.10 rad changes the occupied-band energy by -0.067370,
+-0.420975, and -1.682616 meV respectively. A true global spinor
+rotation leaves all generalized eigenvalues invariant (checked at
+Gamma to 5.86e-14 eV, and S to 1.11e-16). The q=0 production joint
+action therefore **fails global-spin-rotation covariance**. Its
+projected `J_stored` above is an exploratory convention number, not
+physics-certified exchange; no tolerance can cure this defect.
 
 Reproduce the NC producer in a fresh directory containing `O.psf`:
 `siesta < o2_fm.fdf > o2_fm.out` (likewise for `polarized/`).
