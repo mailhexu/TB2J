@@ -1,8 +1,9 @@
-from collections import OrderedDict, defaultdict
 import copy
-import numpy as np
-from pathlib import Path
 import re
+from collections import OrderedDict, defaultdict
+from pathlib import Path
+
+import numpy as np
 
 
 def symbol_number(symbols):
@@ -394,7 +395,6 @@ def trapz_nonuniform_weight(x):
 
 def test_simpson_nonuniform():
     x = np.array([0.0, 0.1, 0.3, 0.5, 0.8, 1.0])
-    w = simpson_nonuniform_weight(x)
     # assert np.allclose(w, [0.1, 0.4, 0.4, 0.4, 0.4, 0.1])
     assert np.allclose(simpson_nonuniform(x, x**8), 0.12714277533333335)
     print("simpson_weight:", simpson_nonuniform_weight(x) @ x**8, 0.12714277533333335)

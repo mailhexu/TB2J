@@ -3,6 +3,7 @@ parse the tb files in Wannier90
 """
 
 import re
+
 import numpy as np
 
 
@@ -51,9 +52,6 @@ def parse_tb_file(filename):
         Rvectors = np.zeros((n_Rvecs, 3), dtype=np.int32)
         # H = np.zeros((n_Rvecs,n_wann, n_wann), dtype=np.complex128)
         H = {}
-        r_x = np.zeros((n_Rvecs, n_wann, n_wann), dtype=np.complex128)
-        r_y = np.zeros((n_Rvecs, n_wann, n_wann), dtype=np.complex128)
-        r_z = np.zeros((n_Rvecs, n_wann, n_wann), dtype=np.complex128)
         pos_operator = np.zeros((n_Rvecs, n_wann, n_wann, 3), dtype=np.complex128)
 
         for iR in range(n_Rvecs):

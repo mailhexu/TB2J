@@ -28,19 +28,25 @@ class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
         self.integration_method = params.pop("integration_method", "CFR")
-        super().__init__(**params)
+        import inspect
+
+        sig = inspect.signature(ExchangeParams.__init__)
+        params_for_init = {k: v for k, v in params.items() if k in sig.parameters}
+        super().__init__(**params_for_init)
         self._prepare_kmesh(self._kmesh)
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        self._prepare_elist(method=self.integration_method)
+        method = params.get("method", self.integration_method)
+        self._prepare_elist(method=method)
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
 
-        # whether to calculate J and DMI with NJt method.
-        # self._prepare_NijR()
-        self._is_collinear = True
+        if hasattr(self, "backend_name") and self.backend_name == "DMFT":
+            pass  # Keep what was set in set_tbmodels
+        else:
+            self._is_collinear = True
         self.has_elistc = False
 
         # Store overlap matrix before cleaning tbmodels
@@ -333,12 +339,19 @@ class Exchange(ExchangeParams):
 
     def simplify_orbital_contributions(self, Jorbij, iatom, jatom):
         """
-        sum up the contribution of all the orbitals with same (n,l,m)
+        Contract the orbital-resolved exchange tensor over orbitals sharing the
+        same (n, l, m), i.e. over zeta, and drop orbitals not in ``include_orbs``.
+
+        This applies the reduction matrix built by :func:`map_orbs_matrix`
+        (``self.mmats``): ``Jorbij -> mmat_i.T @ Jorbij @ mmat_j``. The einsum
+        form accepts both a single 2D orbital matrix ``(..., ni, nj)``-with-no-batch
+        and a batched tensor such as the vectorized ``(nR, 4, 4, ni, nj)`` A-orbital
+        tensor, so the same contraction is used by every exchange path.
         """
         if self.backend_name.upper() in ["SIESTA", "ABACUS", "LCAOHAMILTONIAN"]:
             mmat_i = self.mmats[iatom]
             mmat_j = self.mmats[jatom]
-            Jorbij = mmat_i.T @ Jorbij @ mmat_j
+            Jorbij = np.einsum("...ij,ia,jb->...ab", Jorbij, mmat_i, mmat_j)
         return Jorbij
 
     def calculate_all(self):
@@ -374,6 +387,7 @@ class ExchangeNCL(Exchange):
             nproc=self.nproc,
             initial_emin=self.emin,
             smearing_width=self.smearing,
+            use_gpu=self.use_gpu,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -393,6 +407,9 @@ class ExchangeNCL(Exchange):
         self.Pdict = {}
         if self.write_density_matrix:
             self.G.write_rho_R()
+
+    def finalize(self):
+        self.G.clean_cache()
 
     def get_MAE(self, thetas, phis):
         """
@@ -661,7 +678,6 @@ class ExchangeNCL(Exchange):
             rho[iatom] = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)]).real
             self.charges[iatom] = rho[iatom][0]
             self.spinat[iatom, :] = rho[iatom][1:]
-            print(f"DEBUG: Atom {iatom} charge: {self.charges[iatom]}")
         self.rho_dict = rho
         return self.rho_dict
 
@@ -992,9 +1008,6 @@ class ExchangeNCL(Exchange):
         #    pickle.dump({'Jiso_orb': self.Jiso_orb,
         #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
-    def finalize(self):
-        self.G.clean_cache()
-
     def run(self, path="TB2J_results"):
         self.calculate_all()
         self.write_output(path=path)
@@ -1002,11 +1015,11 @@ class ExchangeNCL(Exchange):
 
 
 class ExchangeCL(ExchangeNCL):
-    def set_tbmodels(self, tbmodel):
+    def set_tbmodels(self, tbmodels):
         """
         only difference is a colinear tag.
         """
-        super().set_tbmodels(tbmodel)
+        super().set_tbmodels(tbmodels)
         self._is_collinear = True
 
     def write_output(self, path="TB2J_results"):

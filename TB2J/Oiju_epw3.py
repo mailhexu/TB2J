@@ -46,6 +46,9 @@ def gen_exchange_Oiju_epw3(
     Jonly: bool = False,
     integration_method: str = "CFR",
     density_method: str = "eigenvector",
+    use_gpu: bool = False,
+    vectorize_energy: bool = True,
+    e_batch_size: int = None,
 ):
     """Calculate spin-phonon coupling parameters using EPW data.
 
@@ -105,6 +108,16 @@ def gen_exchange_Oiju_epw3(
         Path for output files
     Jonly : bool, default=False
         Whether to compute only isotropic J without derivatives
+    integration_method : str, default='CFR'
+        Integration method for contour integration
+    density_method : str, default='eigenvector'
+        Method for density calculation
+    use_gpu : bool, default=False
+        Whether to use GPU acceleration via ExchangePert2GPU (JAX)
+    vectorize_energy : bool, default=True
+        Vectorize energy points for GPU (only used if use_gpu=True)
+    e_batch_size : int, optional
+        Batch size for energy points on GPU (only used if use_gpu=True)
 
     Returns
     -------
@@ -137,7 +150,15 @@ def gen_exchange_Oiju_epw3(
         cleaned_basis = [b.replace(".dn|", "|").replace(".up|", "|") for b in basis]
 
         print(f"Using efermi: {efermi}")
-        exchange = ExchangePert2(
+
+        if use_gpu:
+            from TB2J.gpu.exchange_pert2_gpu import ExchangePert2GPU
+
+            ExchangeClass = ExchangePert2GPU
+        else:
+            ExchangeClass = ExchangePert2
+
+        exchange = ExchangeClass(
             tbmodels=tbmodel,
             atoms=atoms,
             basis=cleaned_basis,
@@ -162,7 +183,15 @@ def gen_exchange_Oiju_epw3(
             J_only=Jonly,
             density_method=density_method,
         )
-        exchange.run(output_path)
+        if use_gpu:
+            exchange.run(
+                path=output_path,
+                use_gpu=True,
+                vectorize_energy=vectorize_energy,
+                e_batch_size=e_batch_size,
+            )
+        else:
+            exchange.run(output_path)
 
 
 if __name__ == "__main__":

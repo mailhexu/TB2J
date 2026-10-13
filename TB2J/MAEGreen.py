@@ -3,7 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import tqdm
-from HamiltonIO.abacus.abacus_wrapper import AbacusSplitSOCParser
+from HamiltonIO.abacus import (
+    AbacusSingleStepSOCParser,
+    AbacusSplitSOCParser,
+)
 from HamiltonIO.model.occupations import GaussOccupations
 from typing_extensions import DefaultDict
 
@@ -371,22 +374,34 @@ class MAEGreen(ExchangeNCL):
 
 
 def abacus_get_MAE(
-    path_nosoc,
-    path_soc,
-    kmesh,
-    thetas,
-    phis,
+    path_nosoc=None,
+    path_soc=None,
+    kmesh=None,
+    thetas=None,
+    phis=None,
     gamma=True,
     output_path="TB2J_anisotropy",
     nel=None,
     width=0.1,
     with_eigen=False,
+    path_single=None,
+    split_soc=None,
     **kwargs,
 ):
-    """Get MAE from Abacus with magnetic force theorem. Two calculations are needed. First we do an calculation with SOC but the soc_lambda is set to 0. Save the density. The next calculatin we start with the density from the first calculation and set the SOC prefactor to 1. With the information from the two calcualtions, we can get the band energy with magnetic moments in the direction, specified in two list, thetas, and phis."""
-    parser = AbacusSplitSOCParser(
-        outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
-    )
+    if split_soc not in (None, "single", "two"):
+        raise ValueError("split_soc must be None, 'single', or 'two'")
+
+    if split_soc == "single" or (split_soc is None and path_single is not None):
+        single_path = path_single or path_soc or path_nosoc
+        if single_path is None:
+            raise ValueError("path_single is required for split_soc='single'")
+        parser = AbacusSingleStepSOCParser(outpath=single_path, binary=False)
+    else:
+        if path_nosoc is None or path_soc is None:
+            raise ValueError("path_nosoc and path_soc are required for two-step MAE")
+        parser = AbacusSplitSOCParser(
+            outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
+        )
     model = parser.parse()
     model.set_so_strength(0.0)
     if nel is not None:

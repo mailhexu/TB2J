@@ -3,6 +3,7 @@ import copy
 
 import numpy as np
 from ase.io import read, write
+
 from TB2J.tensor_rotate import Rzx, Rzy, Rzz
 
 
@@ -16,7 +17,7 @@ def rotate_atom_xyz(atoms, noncollinear=False):
     will be generated.
     """
 
-    yield atoms
+    # yield atoms
     rotation_axes = [(1, 0, 0), (0, 1, 0)]
     if noncollinear:
         rotation_axes += [(1, 1, 0), (1, 0, 1), (0, 1, 1)]

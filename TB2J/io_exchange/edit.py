@@ -13,6 +13,7 @@ Example:
 """
 
 import os
+from copy import deepcopy
 
 import numpy as np
 
@@ -29,6 +30,7 @@ __all__ = [
     "toggle_exchange",
     "remove_sublattice",
     "symmetrize_exchange",
+    "make_supercell",
 ]
 
 
@@ -98,6 +100,262 @@ def save(spinio, path="modified_results"):
             content = content.replace("spin_sia_add = 1", "spin_sia_add = 0")
             with open(mb_in_path, "w") as f:
                 f.write(content)
+
+
+def _as_supercell_matrix(sc_matrix):
+    sc_matrix = np.array(sc_matrix, dtype=int)
+    if sc_matrix.size == 3:
+        return np.diag(sc_matrix.reshape(3))
+    if sc_matrix.shape == (3, 3):
+        return sc_matrix
+    if sc_matrix.size == 9:
+        return sc_matrix.reshape(3, 3)
+    raise ValueError("sc_matrix must contain either 3 or 9 integers")
+
+
+def _nspin_from_index_spin(index_spin):
+    magnetic_indices = [int(i) for i in index_spin if i >= 0]
+    if not magnetic_indices:
+        return 0
+    return max(magnetic_indices) + 1
+
+
+def _copy_array_like(values):
+    if values is None:
+        return None
+    copied = deepcopy(values)
+    if isinstance(values, np.ndarray):
+        return np.array(values, copy=True)
+    return copied
+
+
+def _tb2j_to_scm_terms(terms):
+    return {
+        (i, j, tuple(int(x) for x in R)): deepcopy(value)
+        for (R, i, j), value in terms.items()
+    }
+
+
+def _scm_to_tb2j_terms(terms):
+    return {
+        (tuple(int(x) for x in R), i, j): deepcopy(value)
+        for (i, j, R), value in terms.items()
+    }
+
+
+def _map_pair_dict(terms, scmaker, nspin):
+    if terms is None:
+        return None
+    if nspin == 0:
+        return {}
+    scm_terms = _tb2j_to_scm_terms(terms)
+    return _scm_to_tb2j_terms(scmaker.sc_ijR(scm_terms, nspin))
+
+
+def _repeat_atom_values(values, scmaker):
+    if values is None:
+        return None
+    repeated = scmaker.sc_trans_invariant(values)
+    if isinstance(values, np.ndarray):
+        return np.array(repeated, dtype=values.dtype)
+    return repeated
+
+
+def _build_supercell_mapping(index_spin, scmaker):
+    index_spin = [int(i) for i in index_spin]
+    nspin = _nspin_from_index_spin(index_spin)
+    sc_index_spin = []
+    atom_mapping = []
+    spin_mapping = []
+
+    for cell_index, cell_R in enumerate(scmaker.sc_vec):
+        for prim_atom, prim_spin in enumerate(index_spin):
+            sc_atom = cell_index * len(index_spin) + prim_atom
+            if prim_spin >= 0:
+                sc_spin = prim_spin + cell_index * nspin
+                spin_mapping.append(
+                    {
+                        "primitive_atom": prim_atom,
+                        "supercell_atom": sc_atom,
+                        "primitive_spin": prim_spin,
+                        "supercell_spin": sc_spin,
+                        "cell_index": cell_index,
+                        "cell_R": tuple(int(x) for x in cell_R),
+                    }
+                )
+            else:
+                sc_spin = -1
+            sc_index_spin.append(sc_spin)
+            atom_mapping.append(
+                {
+                    "primitive_atom": prim_atom,
+                    "supercell_atom": sc_atom,
+                    "primitive_spin": prim_spin if prim_spin >= 0 else None,
+                    "supercell_spin": sc_spin if sc_spin >= 0 else None,
+                    "cell_index": cell_index,
+                    "cell_R": tuple(int(x) for x in cell_R),
+                }
+            )
+
+    return {
+        "index_spin": sc_index_spin,
+        "atom_mapping": atom_mapping,
+        "spin_mapping": spin_mapping,
+        "nspin_primitive": nspin,
+        "nspin_supercell": nspin * scmaker.ncell,
+    }
+
+
+def _repeat_spin_sequence(values, spin_mapping, nspin_supercell):
+    if values is None:
+        return None
+    repeated = [None] * nspin_supercell
+    for entry in spin_mapping:
+        old_spin = entry["primitive_spin"]
+        new_spin = entry["supercell_spin"]
+        if old_spin < len(values):
+            repeated[new_spin] = deepcopy(values[old_spin])
+    return repeated
+
+
+def _repeat_spin_dict(values, spin_mapping):
+    if values is None:
+        return None
+    repeated = {}
+    for entry in spin_mapping:
+        old_spin = entry["primitive_spin"]
+        new_spin = entry["supercell_spin"]
+        if old_spin in values:
+            repeated[new_spin] = deepcopy(values[old_spin])
+    return repeated
+
+
+def _recompute_distance_dict(pair_dicts, atoms, index_spin):
+    keys = set()
+    for pair_dict in pair_dicts:
+        if pair_dict:
+            keys.update(pair_dict.keys())
+    if not keys:
+        return None
+
+    spin_to_atom = {
+        int(ispin): iatom for iatom, ispin in enumerate(index_spin) if ispin >= 0
+    }
+    positions = atoms.get_positions()
+    cell = atoms.get_cell()
+    distance_dict = {}
+    for R, i, j in keys:
+        if i not in spin_to_atom or j not in spin_to_atom:
+            continue
+        pos_i = positions[spin_to_atom[i]]
+        pos_jR = positions[spin_to_atom[j]] + np.dot(R, cell)
+        vec = pos_jR - pos_i
+        distance_dict[(tuple(R), i, j)] = (vec, float(np.linalg.norm(vec)))
+    return distance_dict
+
+
+def make_supercell(spinio, sc_matrix, center=False, map_optional=True):
+    """Map a ``SpinIO`` object to a supercell.
+
+    Atom-indexed fields are repeated by atom mapping, while spin-indexed fields
+    are repeated by explicit spin mapping so nonmagnetic atoms are handled safely.
+    """
+    from supercellmap import SupercellMaker
+
+    scmaker = SupercellMaker(_as_supercell_matrix(sc_matrix), center=center)
+    sc_atoms = scmaker.sc_atoms(spinio.atoms)
+    sc_atoms.set_pbc(spinio.atoms.get_pbc())
+
+    mapping = _build_supercell_mapping(spinio.index_spin, scmaker)
+    nspin = mapping["nspin_primitive"]
+    nspin_supercell = mapping["nspin_supercell"]
+
+    exchange_Jdict = _map_pair_dict(spinio.exchange_Jdict, scmaker, nspin)
+    dmi_ddict = _map_pair_dict(spinio.dmi_ddict, scmaker, nspin)
+    Jani_dict = _map_pair_dict(spinio.Jani_dict, scmaker, nspin)
+
+    optional_pair_names = (
+        "dJdx",
+        "dJdx2",
+        "biquadratic_Jdict",
+        "NJT_Jdict",
+        "NJT_ddict",
+    )
+    orbital_pair_names = ("Jiso_orb", "DMI_orb", "Jani_orb", "dJdx_orb")
+    mapped_optional = {}
+    if map_optional:
+        for name in optional_pair_names + orbital_pair_names:
+            mapped_optional[name] = _map_pair_dict(
+                getattr(spinio, name, None), scmaker, nspin
+            )
+    else:
+        for name in optional_pair_names + orbital_pair_names:
+            mapped_optional[name] = None
+
+    distance_dict = _recompute_distance_dict(
+        [
+            exchange_Jdict,
+            dmi_ddict,
+            Jani_dict,
+            *mapped_optional.values(),
+        ],
+        sc_atoms,
+        mapping["index_spin"],
+    )
+
+    sc_spinio = SpinIO(
+        atoms=sc_atoms,
+        spinat=_repeat_atom_values(spinio.spinat, scmaker),
+        charges=_repeat_atom_values(spinio.charges, scmaker),
+        index_spin=mapping["index_spin"],
+        orbital_names=deepcopy(getattr(spinio, "orbital_names", {})),
+        colinear=spinio.colinear,
+        distance_dict=distance_dict,
+        exchange_Jdict=exchange_Jdict,
+        Jiso_orb=mapped_optional["Jiso_orb"],
+        DMI_orb=mapped_optional["DMI_orb"],
+        Jani_orb=mapped_optional["Jani_orb"],
+        dJdx=mapped_optional["dJdx"],
+        dJdx2=mapped_optional["dJdx2"],
+        dmi_ddict=dmi_ddict,
+        Jani_dict=Jani_dict,
+        biquadratic_Jdict=mapped_optional["biquadratic_Jdict"],
+        debug_dict=deepcopy(getattr(spinio, "debug_dict", None)),
+        k1=None,
+        k1dir=None,
+        NJT_Jdict=mapped_optional["NJT_Jdict"],
+        NJT_ddict=mapped_optional["NJT_ddict"],
+        damping=_repeat_atom_values(getattr(spinio, "damping", None), scmaker),
+        gyro_ratio=_repeat_atom_values(getattr(spinio, "gyro_ratio", None), scmaker),
+        write_experimental=spinio.write_experimental,
+        description=spinio.description,
+        sia_tensor=_repeat_spin_dict(
+            getattr(spinio, "sia_tensor", None), mapping["spin_mapping"]
+        ),
+        dJdx_orb=mapped_optional["dJdx_orb"],
+    )
+    sc_spinio.supercell_mapping = mapping
+    sc_spinio.supercell_matrix = _as_supercell_matrix(sc_matrix)
+    # Store the primitive-cell structure so downstream tools (e.g. magnon
+    # band plotting) can recover the primitive BZ and fold the k-path.
+    sc_spinio.primitive_cell = spinio.atoms.copy()
+    # Build Rlist/ispin_list/nspin (normally done by load_pickle).
+    # Only call if exchange_Jdict is available; without it _build_Rlist
+    # cannot populate ispin_list and nspin.
+    if sc_spinio.exchange_Jdict is not None:
+        sc_spinio._build_Rlist()
+
+    if getattr(spinio, "k1", None) is not None:
+        sc_spinio.k1 = _repeat_spin_sequence(
+            spinio.k1, mapping["spin_mapping"], nspin_supercell
+        )
+        sc_spinio.has_uniaxial_anistropy = True
+    if getattr(spinio, "k1dir", None) is not None:
+        sc_spinio.k1dir = _repeat_spin_sequence(
+            spinio.k1dir, mapping["spin_mapping"], nspin_supercell
+        )
+
+    return sc_spinio
 
 
 def set_anisotropy(spinio, species, k1=None, k1dir=None):

@@ -390,33 +390,27 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if Ja is not None:
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
-        if np.linalg.norm(R) < 0.001 and i == j:
-            print(f"{SIA=} , {i=}")
-            print(f"{self.has_sia_tensor=}")
-
-        if (
-            SIA
-            and self.has_sia_tensor
-            and self.sia_tensor is not None
-            and i == j
-            and np.linalg.norm(R) < 0.001
-        ):
-            if i in self.sia_tensor:
-                print(f"Adding SIA tensor for {i}, with {self.sia_tensor[i]}")
+        if SIA and i == j and np.linalg.norm(R) < 0.001:
+            if (
+                self.has_sia_tensor
+                and self.sia_tensor is not None
+                and i in self.sia_tensor
+            ):
                 Jtensor += self.sia_tensor[i]
+            elif (
+                self.has_uniaxial_anistropy
+                and self.k1 is not None
+                and self.k1dir is not None
+                and i < len(self.k1)
+                and abs(self.k1[i]) > 1e-12
+            ):
+                e = np.array(self.k1dir[i])
+                norm = np.linalg.norm(e)
+                if norm > 1e-10:
+                    e = e / norm
+                    A = self.k1[i] * np.outer(e, e)
+                    Jtensor += A
 
-        # if iso_only:
-        #    J = self.get_Jiso(i, j, R)
-        #    if J is not None:
-        #        Jtensor = np.eye(3) * self.get_J(i, j, R)
-        #    else:
-        #        Jtensor = np.eye(3) * 0
-        # else:
-        #    Jtensor = combine_J_tensor(
-        #        Jiso=self.get_J(i, j, R),
-        #        D=self.get_DMI(i, j, R),
-        #        Jani=self.get_Jani(i, j, R),
-        #    )
         return Jtensor
 
     def get_full_Jtensor_for_one_R_i3j3(
@@ -467,7 +461,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
         returns:
-            Jmat: (nspin,nspin,3,3) matrix.
+            Jmat: (nspin,nspin) matrix.
         """
         if Jani or DMI or SIA:
             raise ValueError(
@@ -504,7 +498,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         elif order == "ij33":
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
             for iR, R in enumerate(self.Rlist):
-                print(f"R={R}")
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(
                     R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
@@ -578,7 +571,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_pickle(path=path)
         self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
         self.write_txt(path=path)
-        if self.Jiso_orb:
+        if self.Jiso_orb or self.DMI_orb or self.Jani_orb or self.dJdx_orb:
             self.write_txt(
                 path=path,
                 fname="exchange_orb_decomposition.out",
