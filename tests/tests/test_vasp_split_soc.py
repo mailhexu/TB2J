@@ -38,7 +38,7 @@ from TB2J.interfaces.vasp_native import read_vasp_native
 
 FE_LPS = [2, 0]  # Fe: d radial, s radial -> 5 + 1 = 6 projectors
 O_LPS = [1, 0]  # O: p radial, s radial -> 3 + 1 = 4 projectors
-NKPT = 4
+NKPT = 9  # 3x3x1 mesh: odd divisions keep a symmetric alias-free R window
 NBAND = 4
 HARTREE_TO_EV = 27.211386245988
 
@@ -95,7 +95,7 @@ def _write_test_native(
     if positions is None:
         positions = [[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]][:nions]
     positions = np.asarray(positions, dtype=float)
-    kpts_3d = np.array([[i * 0.5, j * 0.5, 0.0] for i in range(2) for j in range(2)])
+    kpts_3d = np.array([[i / 3.0, j / 3.0, 0.0] for i in range(3) for j in range(3)])
     wts = np.ones(nkpt) / nkpt
 
     with open(path, "wb") as f:
@@ -219,7 +219,7 @@ def _write_cso_dump(
         wi([v["lmmax"] for v in layout])  # nmax_ion
         if version >= 2:
             kpts_3d = np.array(
-                [[i * 0.5, j * 0.5, 0.0] for i in range(2) for j in range(2)]
+                [[i / 3.0, j / 3.0, 0.0] for i in range(3) for j in range(3)]
             )
             wr(kpts_3d.T)
             wr(np.ones(NKPT) / NKPT if wtkpt is None else np.asarray(wtkpt))
