@@ -22,37 +22,43 @@ The occupied–empty gap on the recorded four-point k-mesh is 2.49684889 eV
 ExchangeCL2, the sampled gap is 2.50146452945 eV. The reference is gapped.
 `SHA256SUMS` pins inputs, raw outputs and reduced NPZ.
 
-**Research caveat, not an approved AC-006 certificate:** the new response
-rotates the declared *total-H* magnetic operator, including intersite
-spin-dependent blocks (max |Re H12| = 0.2456934 eV), whereas established
-ExchangeCL2's `Delta` uses site-onsite orbital blocks at R=0. These
-magnetic-operator/projector definitions are not identical. On a common
-five-point mesh the new raw mixed Hessian is
-`K(O1,O2) = -0.623057870 eV/rad²` in both transverse directions.
-The repository's ordered-pair convention maps it to
-`J_stored = -K/2 = +0.311528935 eV`; the established-path image-summed
-`J_stored(O1,O2)` from **the same NC HSX** (H0±dx spin-channel adapter,
-Fermi-zero shifted) is `+0.311637068 eV`. The adapter's up/down
-generalized eigenvalue union matches the original NC spinor pencil on
-all four recorded k-points to at most 1.066e-13 eV. The 0.108133 meV
-residual is *not* a second-SCF effect. The direct polarized-twin
-ExchangeCL2 run yields an image sum around `+0.3116437 eV` (Rcut
-8 Å, five-point mesh, contour nz=100–800). This is research evidence,
-not a matched-projector or valid Heisenberg-anchor pass.
+**Repaired weighted rotation, numeric comparison only:** the production
+response rotates the saved total-H magnetic operator with onsite blocks
+fully owned and interatomic blocks split half to each endpoint. The
+largest interatomic $|H_3|$ at R=0 is 0.2456934 eV. Established
+`ExchangeCL2` instead constructs its rotation vertex from onsite
+R=0 blocks of Δ=H↑−H↓. Both engines use the same NC SCF H/S:
+the latter consumes H0±dx spin channels shifted by -Ef S. Their
+generalized spectra agree on all four recorded producer k-points
+to at most 1.066e-13 eV.
 
-**Stronger global-rotation failure:** in the declared production
-incident-block joint action, an O1–O2 magnetic block is in *both*
-site partitions. Rotating both sites through the same angle conjugates
-that block twice, but onsite blocks once (as explicitly specified in
-`docs/sympy/siesta_spiral_frozen_response.md`, section A). On the q=0,
-SOC-free O2 reference, simultaneously rotating both sites by 0.02,
-0.05, and 0.10 rad changes the occupied-band energy by -0.067370,
--0.420975, and -1.682616 meV respectively. A true global spinor
-rotation leaves all generalized eigenvalues invariant (checked at
-Gamma to 5.86e-14 eV, and S to 1.11e-16). The q=0 production joint
-action therefore **fails global-spin-rotation covariance**. Its
-projected `J_stored` above is an exploratory convention number, not
-physics-certified exchange; no tolerance can cure this defect.
+On the matched actual five-point mesh, repaired offsite curvature is
+`K(O1,O2) = -0.474663805554 eV/rad²` in both transverse directions.
+The repository's ordered-pair convention yields a **one-directed**
+stored value `J_new = -K/2 = +237.331902777 meV`; image-summed
+same-SCF `ExchangeCL2` gives `J_LKAG = +311.637068174 meV`.
+The signed LKAG-minus-new difference is **+74.305165397 meV**.
+Both opposite ordered directions are present in the legacy J dict;
+the image sum uses only O1→O2, never their double-counted total.
+The methods' magnetic operators, integration (occupied-band vs LKAG
+contour), ensemble (gapped T=0 step vs smearing), and phase gauges
+are recorded separately as unmatched. User selected numbers-only:
+**no agreement tolerance, no AC-006/NFR-005 compatibility claim**.
+The independent polarized-twin SCF total agrees at printed precision,
+but its H is not used for these values.
+
+**Why the previous values were retired:** the version-1 sequential
+full-incident action rotated a shared O1–O2 block twice for an
+equal-angle site rotation while onsite blocks rotated once. At q=0,
+SOC-free O2, a uniform 0.10-rad tilt gave -1.682616 meV energy
+change, violating global-spin covariance. The old curvature
+-0.623057870 eV/rad² and stored J +311.528935 meV are not valid
+oracles for the repaired convention. Version-2 weighted contributions
+restore exact common-angle covariance (occupied-band |ΔE| below
+3e-11 meV at 0.10 rad on the four-point producer mesh), while
+one site's rotation remains nontrivial (+2.373148 meV). The exact
+weighted formula is pinned under `docs/sympy/siesta_spiral_vertex.py`
+and `siesta_spiral_frozen_response.py`.
 
 Reproduce the NC producer in a fresh directory containing `O.psf`:
 `siesta < o2_fm.fdf > o2_fm.out` (likewise for `polarized/`).

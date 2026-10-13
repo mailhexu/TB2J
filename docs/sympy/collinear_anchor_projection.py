@@ -183,6 +183,12 @@ def main():
     test_afm_sign()
     test_numeric_projection()
     print("collinear_anchor_projection: ALL ASSERTIONS GREEN")
+    Kab, alignment, transverse_dot = sp.symbols(
+        "K_ab alignment transverse_dot", real=True, nonzero=True
+    )
+    stored_j = -Kab / (2 * alignment * transverse_dot)
+    assert sp.simplify(2 * alignment * transverse_dot * stored_j + Kab) == 0
+    return {"stored_ordered_pair_j": stored_j}
 
 
 if __name__ == "__main__":
