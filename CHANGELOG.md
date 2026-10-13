@@ -27,6 +27,18 @@ Unreleased
   non-Hermitian pencils and corrupted convention metadata before solving.
   These certify import only, not stationary response or supercell equivalence.
 
+### SIESTA spiral producer gate and magnetic vertex
+
+- Verified a four-cell same-density folding identity for the SIESTA GBT
+  pencil (spinor q/2 phases, coset-wrapped bonds) against a 16-atom
+  supercell at machine precision; the independent SCFs retain an
+  InitSpin-defined helix but differ in their magnetic amplitudes. The
+  SIESTA producer does not demonstrate q-controlled texture retention.
+- Added the Oroszlány total-H magnetic spin-split vertex, with explicit
+  site-orbital partitioning, Pauli sign convention, source H/S/pitch
+  provenance and certificate round-trip integrity. Spatial-XC
+  reconstruction remains an optional audit, not a production dependency.
+
 ### Magnon reference updates
 
 - Recompute J(q=0) from current exchange/reference arrays in Hq; the
