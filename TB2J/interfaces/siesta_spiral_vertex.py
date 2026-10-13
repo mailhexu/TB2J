@@ -461,6 +461,14 @@ def partition_variant_spread(
     }
 
 
+def _is_onsite_key(key):
+    """True for a stored onsite entry; R may be a tuple or a scalar (1D)."""
+    R = key[2]
+    if isinstance(R, (tuple, list)):
+        return key[0] == key[1] and all(r == 0 for r in R)
+    return key[0] == key[1] and R == 0
+
+
 def torque_state_report(bundle, vertex, *, transverse_tol=1e-6):
     """FR-008: record the reference's onsite transverse splitting verbatim.
 
@@ -478,11 +486,7 @@ def torque_state_report(bundle, vertex, *, transverse_tol=1e-6):
     sites = {}
     worst_transverse = 0.0
     for site, members in vertex.partition.items():
-        onsite = [
-            vertex.blocks[key]
-            for key in members
-            if key[0] == key[1] and all(r == 0 for r in key[2])
-        ]
+        onsite = [vertex.blocks[key] for key in members if _is_onsite_key(key)]
         if not onsite:
             raise SpiralImportError(
                 f"site {site!r} has no stored onsite entry; torque state "

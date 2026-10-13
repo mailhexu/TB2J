@@ -161,3 +161,19 @@ def test_collinear_reference_labeled_collinear(fe3, vertex):
     # collinear -- the label follows the recorded data, it never hides it
     assert report["torque_state"] == "onsite_splitting_within_tolerance"
     assert report["transverse_tol_eV"] == 1.0
+
+
+def test_torque_state_accepts_scalar_r_bundle_keys():
+    from TB2J.interfaces.siesta_spiral_vertex import (
+        MagneticVertex,
+        torque_state_report,
+    )
+
+    blocks = {(0, 0, 0): (0.5, -0.5, 0.0, 0.0), (1, 1, 0): (-0.25, 0.25, 0.0, 0.0)}
+    vertex = MagneticVertex(
+        blocks=blocks,
+        partition={"A": frozenset({(0, 0, 0)}), "B": frozenset({(1, 1, 0)})},
+    )
+    report = torque_state_report(None, vertex)
+    assert report["torque_state"] == "onsite_splitting_within_tolerance"
+    assert report["sites"]["A"]["longitudinal_rms_eV"] == pytest.approx(0.5)
