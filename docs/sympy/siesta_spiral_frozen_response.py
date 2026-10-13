@@ -4,22 +4,37 @@ Run in mydev: python docs/sympy/siesta_spiral_frozen_response.py
 Paired assumptions, signs, metric rules and derivation: same-name .md file.
 No production code is imported. Exact assertions never fall back to probes.
 
-Revision 3 (review STD-1/STD-2 plus the declared joint-action convention):
-the two-site model uses the story-005 incident partitions with the
-TWO-SIDED SAME-U declaration applied per incident site. A single pass p
-rotates every p-incident block two-sided, W -> U_p W U_p^dag; the joint
-perturbation composes the passes in the declared site order (A first, then
-B), so a shared AB/BA block receives the ordered composition
-W -> U_B U_A W U_A^dag U_B^dag. This is a per-block conjugation (Hermitian
-for arbitrary per-site end rotations), it is NOT the block-diagonal
-site rotation diag(U_A,U_B) (whose per-side sandwich is not even
-Hermitian; asserted), and on shared blocks it differs from the
-single-site actions of either end. First vertices, one-site kernels and
-the one-site torque are re-derived on this path; the mixed second vertices
-carry the composition. The one-site/two-site hierarchy is built from
-independent single-site and joint constructions with its conditional
-equality assumption stated and asserted; a spin-textured overlap
-counter-model breaks the identification.
+Revision 4 (weighted shared-bond joint action; q=0 global covariance
+repair): every spin-dependent block is allocated to its distinct owner
+sites P (the sites owning its row or column orbital) with weights
+w_p = 1/|P| -- onsite blocks w=1, shared AB/BA blocks w=1/2 -- and the
+joint action is the additive allocation
+
+    H(theta) = H_scalar + sum_p U_p B_p U_p^dag,   B_p = w_p B,
+    equivalently B(theta) = B + sum_p w_p (U_p B U_p^dag - B),
+
+with H_scalar and S frozen. It is a sum of conjugations, not a
+composition: site-order independent, Hermitian for arbitrary per-site
+angles, and its cross-site mixed second vertex vanishes identically
+(W_pq = 0 for p != q), so every two-site mixed Hessian entry is purely
+electronic response. Under a common rotation the weighted contributions
+sum to ONE conjugation, B(theta) = U B U^dag, and because the q=0
+assembled overlap and scalar Hamiltonian are spin-scalar the occupied
+band energy is exactly invariant: the all-site equal-angle joint action
+IS a single global spinor rotation. This replaces the revision-3 ordered
+two-sided composition (shared block conjugated twice as
+U_B U_A W U_A^dag U_B^dag), which broke that covariance -- documented
+defect: a q=0 SOC-free O2 all-site 0.1 rad y rotation drifted the band
+energy by -1.682616 meV where the exact global rotation leaves it zero.
+The serialized vertex certificate is VERTEX_VERSION "2.0" with
+partition_declaration "weighted site contributions, w=1/count of
+distinct endpoint owners, each conjugated by full U_site; scalar h0 and
+S untouched"; stale v1.0 certificates reject fail-closed. The response
+module mirrors this script: extract_magnetic_vertex tags each block with
+its owner set, FrozenResponseProblem._phased_blocks allocates the
+weighted shares, vertex_pencil/second_vertex_pencil build V_p = w_p
+phi_p(B) and the same-site W_pp, and rotated_pencil evaluates the
+weighted sum instead of sequential passes.
 """
 
 import hashlib
@@ -96,11 +111,24 @@ def incident_blocks(site):
     return [(i, j) for i in range(2) for j in range(2) if i == site or j == site]
 
 
-def site_generator(axis, site):
-    """Half-Pauli generator acting on `site` only (identity elsewhere)."""
-    blocks = [sp.zeros(2), sp.zeros(2)]
-    blocks[site] = axis / 2
-    return sp.Matrix(sp.diag(*blocks))
+def owner_count(row, col):
+    """|P| for the (row, col) spin-dependent block: distinct site owners."""
+    return len({row // 2, col // 2})
+
+
+def owned_share(site, magnetic):
+    """Weighted share B_p = w_p B: p-owned blocks carry w_p = 1/|P| of B.
+
+    Onsite blocks (single owner) carry the full amplitude; shared blocks
+    (two distinct endpoint owners) carry half at each end, so the shares
+    of all sites sum back to B exactly.
+    """
+    out = sp.zeros(4)
+    for r in range(4):
+        for c in range(4):
+            if r // 2 == site or c // 2 == site:
+                out[r, c] = magnetic[r, c] / owner_count(r, c)
+    return out
 
 
 def pass_two_sided(site, matrix, u):
@@ -135,38 +163,32 @@ def comm_pass(site, half_axis, matrix):
     return out
 
 
-def vertex_of(site, axis, inc):
-    """V = dH/dtheta on site `site`, blockwise two-sided on shared bonds."""
-    return phi_pass(site, axis / 2, inc)
+def vertex_of(site, axis, share):
+    """V_p = dH/dtheta: w-weighted blockwise generator on the site share."""
+    return phi_pass(site, axis / 2, share)
 
 
-def seagull_same_site(site, axis_a, axis_b, inc):
-    """Second vertex of one site's exponential chart (two-sided passes)."""
+def seagull_same_site(site, axis_a, axis_b, share):
+    """W_pp: second vertex of one site's share (shared blocks carry w=1/2)."""
     ta, tb = axis_a / 2, axis_b / 2
     return -HALF * (
-        comm_pass(site, ta, comm_pass(site, tb, inc))
-        + comm_pass(site, tb, comm_pass(site, ta, inc))
+        comm_pass(site, ta, comm_pass(site, tb, share))
+        + comm_pass(site, tb, comm_pass(site, ta, share))
     )
 
 
-def seagull_mixed_ordered(site_a, axis_a, site_b, axis_b, inc_a, magnetic_full):
-    """Mixed second vertex of the ordered joint action (A pass, then B).
+def joint_weighted(scalar, shares, u_a, u_b):
+    """Declared joint action: H_scalar + sum_p U_p B_p U_p^dag (S frozen).
 
-    d2H/dtheta_a dtheta_b = phi_B( V_A restricted to the B-incident
-    blocks ) = -[t_b,[t_a,W]] on the shared AB/BA blocks; it is a single
-    object (Clairaut), so the (b,a) Hessian entry reuses this matrix.
+    A sum of per-site conjugations of the weighted shares -- not a
+    composition -- so it is site-order independent, Hermitian for
+    arbitrary per-site angles, and the cross-site mixed second derivative
+    vanishes identically.
     """
-    v_a = vertex_of(site_a, axis_a, inc_a)
-    return phi_pass(site_b, axis_b / 2, v_a)
-
-
-def seagull_mixed_symmetric(site_a, axis_a, site_b, axis_b, magnetic_full):
-    """Unordered (symmetrized) reference form, for contrast assertions."""
-    ta, tb = axis_a / 2, axis_b / 2
-    return -HALF * (
-        comm_pass(site_a, ta, comm_pass(site_b, tb, magnetic_full))
-        + comm_pass(site_b, tb, comm_pass(site_a, ta, magnetic_full))
-    )
+    out = sp.Matrix(scalar)
+    for site, u in ((0, u_a), (1, u_b)):
+        out = out + pass_two_sided(site, shares[site], u)
+    return out
 
 
 def main():
@@ -258,40 +280,39 @@ def main():
         "[B] Eigenvalue and characteristic-polynomial derivatives agree, including factor two"
     )
 
-    # [C1] The declared joint action: ordered two-sided same-U passes.
-    # A single pass rotates every incident block two-sided with the same U
-    # (story-005 certificate); the joint perturbation composes the passes in
-    # the declared site order, A first then B. Quantified on shared blocks:
+    # [C1] The declared joint action: weighted site contributions on a
+    # shared block (w_A = w_B = 1/2), each conjugated by the FULL U_site.
     z_a, y_b = sp.symbols("z_A y_B", real=True)
     # Commuting axis: rotating A about z leaves b_z sigma_z unchanged.
     zero(rotation(SZ, z_a) * (bz * SZ) * rotation(SZ, z_a).H - bz * SZ)
-    # Non-commuting example W = sigma_x: the single-site A action is the
-    # vector rotation R_z; the ordered joint action is R_y R_z composed; the
-    # per-side sandwich is neither and is not even Hermitian.
-    single_a = rotation(SZ, z_a) * SX * rotation(SZ, z_a).H
-    zero(single_a - (sp.cos(z_a) * SX + sp.sin(z_a) * SY))
-    ordered_block = (
-        rotation(SY, y_b)
-        * rotation(SZ, z_a)
-        * SX
-        * rotation(SZ, z_a).H
-        * rotation(SY, y_b).H
+    # Non-commuting example W = sigma_x: a single contribution is the FULL
+    # vector rotation scaled by its weight; the shared-block joint action is
+    # the SUM of the two weighted rotations; the per-side sandwich
+    # U_A W U_B^dag is neither and is not even Hermitian.
+    single_a = HALF * rotation(SZ, z_a) * SX * rotation(SZ, z_a).H
+    zero(single_a - HALF * (sp.cos(z_a) * SX + sp.sin(z_a) * SY))
+    joint_block = (
+        HALF * rotation(SZ, z_a) * SX * rotation(SZ, z_a).H
+        + HALF * rotation(SY, y_b) * SX * rotation(SY, y_b).H
     )
+    zero(joint_block - joint_block.H)
+    # Common rotation: the weighted contributions sum to ONE conjugation.
     zero(
-        ordered_block
-        - (
-            sp.cos(z_a) * sp.cos(y_b) * SX
-            + sp.sin(z_a) * SY
-            - sp.cos(z_a) * sp.sin(y_b) * SZ
-        )
+        HALF * rotation(SY, y_b) * SX * rotation(SY, y_b).H
+        + HALF * rotation(SY, y_b) * SX * rotation(SY, y_b).H
+        - rotation(SY, y_b) * SX * rotation(SY, y_b).H
     )
     per_side_block = rotation(SZ, z_a) * SX * rotation(SY, y_b).H
+    ordered_block = rotation(SY, y_b) * per_side_block * rotation(SY, y_b).H
     assert any_nonzero(per_side_block - per_side_block.H)
-    assert any_nonzero(ordered_block - per_side_block)
+    assert any_nonzero(joint_block - per_side_block)
+    # The revision-3 ordered composition is gone: no U_B U_A W U_A^dag U_B^dag.
+    assert any_nonzero(joint_block - ordered_block)
     assert any_nonzero(single_a - per_side_block)
     print(
-        "[C1] Ordered two-sided joint action: Hermitian conjugation per block; "
-        "per-side sandwich is not (half-angle, non-Hermitian)"
+        "[C1] Weighted shared-bond action: full-U conjugations scaled by w "
+        "sum to one conjugation under common U; per-side sandwich is not "
+        "Hermitian; no ordered composition remains"
     )
 
     # [C2] Exact two-site, one spinor orbital per site, gapped reference.
@@ -309,6 +330,7 @@ def main():
     h0 = l.T * q * diagonal * q.T * l
     scalar, full_magnetic = decompose(h0)
     b_inc = [incident(0, full_magnetic), incident(1, full_magnetic)]
+    b_share = [owned_share(0, full_magnetic), owned_share(1, full_magnetic)]
     zero(q.T * q - sp.eye(4))
     zero(coefficients.H * overlap * coefficients - sp.eye(4))
     zero(h0 * coefficients - overlap * coefficients * diagonal)
@@ -323,13 +345,25 @@ def main():
     zero(shared[2:4, 2:4])
     assert any_nonzero(shared[:2, 2:4])
     assert any_nonzero(b_inc[1][:2, 2:4])
+    # Weighted owner allocation: onsite blocks w=1, shared blocks w=1/2 at
+    # each end; the weighted shares reconstruct B0 exactly (certificate:
+    # partition_declaration "weighted site contributions, w=1/count of
+    # distinct endpoint owners, each conjugated by full U_site; scalar h0
+    # and S untouched").
+    zero(b_share[0] + b_share[1] - full_magnetic)
+    zero(b_share[0][:2, :2] - full_magnetic[:2, :2])
+    zero(b_share[1][2:4, 2:4] - full_magnetic[2:4, 2:4])
+    zero(2 * b_share[0][:2, 2:4] - full_magnetic[:2, 2:4])
+    zero(2 * b_share[1][:2, 2:4] - full_magnetic[:2, 2:4])
+    zero(b_share[0][2:4, 2:4])
+    zero(b_share[1][:2, :2])
 
     # Coordinate order: Ax, Ay, Bx, By. Vertices and seagulls are derivatives
-    # of the ordered two-sided production path; S and H_scalar are frozen.
+    # of the declared weighted-sum path; S and H_scalar are frozen.
     vertices, seagulls = [], {}
     for site in range(2):
         for axis in (SX, SY):
-            vertices.append(vertex_of(site, axis, b_inc[site]))
+            vertices.append(vertex_of(site, axis, b_share[site]))
     for v in vertices[:2]:
         zero(v[2:4, 2:4])  # site-A vertex has no BB support
     for v in vertices[2:]:
@@ -341,62 +375,83 @@ def main():
             site_a, site_b = aindex // 2, bindex // 2
             axis_a, axis_b = (SX, SY)[aindex % 2], (SX, SY)[bindex % 2]
             if site_a == site_b:
-                w = seagull_same_site(site_a, axis_a, axis_b, b_inc[site_a])
-            elif site_a == 0:
-                w = seagull_mixed_ordered(
-                    site_a, axis_a, site_b, axis_b, b_inc[site_a], full_magnetic
-                )
+                # Same-site second vertex; shared blocks carry w = 1/2.
+                w = seagull_same_site(site_a, axis_a, axis_b, b_share[site_a])
             else:
-                # Clairaut: one mixed object per axis pair; the (b,a) entry
-                # reuses the (a,b) vertex computed with the declared order.
-                w = seagulls[bindex, aindex]
+                # Cross-site second vertex of the additive allocation: the
+                # mixed d2H/dtheta_a dtheta_b vanishes identically.
+                w = sp.zeros(4)
             seagulls[aindex, bindex] = sp.expand(w)
     for aindex in range(4):
         for bindex in range(4):
             zero(seagulls[aindex, bindex] - seagulls[aindex, bindex].H)
             zero(seagulls[aindex, bindex] - seagulls[bindex, aindex])
-    # Shared-bond mixed seagulls: nonzero; equal to the symmetrized form
-    # exactly when the end generators commute (same axis); the mixed-axis
-    # ordered vertex differs from the symmetrized reference form.
-    assert any_nonzero(seagulls[1, 3])
-    assert any_nonzero(seagulls[0, 3])
-    zero(seagulls[1, 3] - seagull_mixed_symmetric(0, SY, 1, SY, full_magnetic))
-    zero(seagulls[0, 2] - seagull_mixed_symmetric(0, SX, 1, SX, full_magnetic))
-    sym03 = seagull_mixed_symmetric(0, SX, 1, SY, full_magnetic)
-    assert any_nonzero(sym03 - seagulls[0, 3])
+    # The two-site mixed seagull is exactly zero; same-site seagulls survive
+    # with the half-weighted shared blocks.
+    zero(seagulls[1, 3])
+    zero(seagulls[0, 2])
+    zero(seagulls[0, 3])
+    assert any_nonzero(seagulls[1, 1])
+    assert any_nonzero(seagulls[3, 3])
 
-    # Single-site paths (theta_other = 0) reproduce V and W_pp.
+    # Single-site paths (theta_other = 0) reproduce V_p and W_pp.
     for site in range(2):
         u = rotation(SY, theta)
-        path = pass_two_sided(site, scalar + full_magnetic, u)
+        path = scalar + pass_two_sided(site, b_share[site], u)
         zero(path.diff(theta).subs(theta, 0) - vertices[2 * site + 1])
         zero(path.diff(theta, 2).subs(theta, 0) - seagulls[2 * site + 1, 2 * site + 1])
         zero(path - path.H)
         zero(pass_two_sided(site, scalar, u) - scalar)
-    # Joint ordered path reproduces every vertex kind through order two.
+    # Joint weighted path reproduces every vertex kind through order two;
+    # the cross-site mixed derivative vanishes on the path itself.
     t_a, t_b = sp.symbols("t_A t_B", real=True)
-    joint_ordered = pass_two_sided(
+    u_path_a, u_path_b = rotation(SY, t_a), rotation(SY, t_b)
+    joint = joint_weighted(scalar, b_share, u_path_a, u_path_b)
+    zero(joint.diff(t_a).subs({t_a: 0, t_b: 0}) - vertices[1])
+    zero(joint.diff(t_b).subs({t_a: 0, t_b: 0}) - vertices[3])
+    zero(joint.diff(t_a, 2).subs({t_a: 0, t_b: 0}) - seagulls[1, 1])
+    zero(joint.diff(t_b, 2).subs({t_a: 0, t_b: 0}) - seagulls[3, 3])
+    zero(joint.diff(t_a, t_b).subs({t_a: 0, t_b: 0}))
+    zero(joint - joint.H)
+    # The equivalent declared form B + sum_p w_p (U_p B U_p^dag - B).
+    joint_delta = sp.Matrix(full_magnetic)
+    for site, u in ((0, u_path_a), (1, u_path_b)):
+        joint_delta = joint_delta + owned_share(
+            site, pass_two_sided(site, full_magnetic, u) - full_magnetic
+        )
+    zero(scalar + joint_delta - joint)
+    # Site-order independence has content: the revision-3 sequential
+    # ordered composition is NOT the declared action.
+    joint_sequential = pass_two_sided(
         1,
         pass_two_sided(0, scalar + full_magnetic, rotation(SY, t_a)),
         rotation(SY, t_b),
     )
-    zero(joint_ordered.diff(t_a).subs({t_a: 0, t_b: 0}) - vertices[1])
-    zero(joint_ordered.diff(t_b).subs({t_a: 0, t_b: 0}) - vertices[3])
-    zero(joint_ordered.diff(t_a, 2).subs({t_a: 0, t_b: 0}) - seagulls[1, 1])
-    zero(joint_ordered.diff(t_b, 2).subs({t_a: 0, t_b: 0}) - seagulls[3, 3])
-    zero(joint_ordered.diff(t_a, t_b).subs({t_a: 0, t_b: 0}) - seagulls[1, 3])
-    zero(joint_ordered - joint_ordered.H)
-    # The ordered composition is NOT the block-diagonal site rotation.
-    joint_diag = (
-        scalar
-        + sp.diag(rotation(SY, t_a), rotation(SY, t_b))
-        * full_magnetic
-        * sp.diag(rotation(SY, t_a), rotation(SY, t_b)).H
+    assert any_nonzero(joint - joint_sequential)
+    # Nor is it the per-side block-diagonal site rotation.
+    diag_u = sp.diag(rotation(SY, t_a), rotation(SY, t_b))
+    assert any_nonzero(joint - (scalar + diag_u * full_magnetic * diag_u.H))
+    # Global uniform rotation: the joint action IS one global spinor
+    # rotation (q=0 covariance of the shared bonds).
+    theta_u = sp.Symbol("theta_u", real=True)
+    u_common = sp.kronecker_product(sp.eye(2), rotation(SY, theta_u))
+    joint_uniform = joint_weighted(
+        scalar, b_share, rotation(SY, theta_u), rotation(SY, theta_u)
     )
-    assert any_nonzero(joint_ordered - joint_diag)
+    zero(joint_uniform - u_common * (scalar + full_magnetic) * u_common.H)
+    # A common-angle shift of the joint path is an exact conjugation.
+    shift = sp.Symbol("shift", real=True)
+    u_shift = sp.kronecker_product(sp.eye(2), rotation(SY, shift))
+    joint_shift = joint_weighted(
+        scalar,
+        b_share,
+        rotation(SY, t_a + shift),
+        rotation(SY, t_b + shift),
+    )
+    zero(u_shift * joint * u_shift.H - joint_shift)
     print(
-        "[C] Ordered two-sided passes on incident partitions; vertices, seagulls, "
-        "single-site and joint paths asserted"
+        "[C] Weighted site contributions on owner partitions; vertices, "
+        "seagulls, single-site and joint paths, uniform covariance asserted"
     )
 
     # [D] Pencil identities including an assembled spin-dependent metric probe.
@@ -529,29 +584,38 @@ def main():
             )
     curvature = onsite + response
     zero(curvature - curvature.T)
+    # Exact uniform-rotation gauge (q=0 covariance): equal-angle equal-axis
+    # directions are exact zero modes of gradient and Hessian.
+    zero(gradient[0] + gradient[2])
+    zero(gradient[1] + gradient[3])
+    zero(curvature[0, 0] + 2 * curvature[0, 2] + curvature[2, 2])
+    zero(curvature[1, 1] + 2 * curvature[1, 3] + curvature[3, 3])
+    zero(curvature[0, 1] + curvature[0, 3] + curvature[2, 1] + curvature[2, 3])
     assert sp.simplify(gradient[1]) != 0
     assert sp.simplify(gradient[3]) != 0
     assert sp.simplify(onsite[1, 1]) != 0
     assert sp.simplify(response[1, 1]) != 0
-    assert sp.simplify(onsite[1, 3]) != 0
-    assert sp.simplify(response[1, 3]) != 0
+    zero(onsite[1, 3])  # the mixed seagull contributes exactly nothing
+    assert sp.simplify(response[1, 3]) != 0  # cross kernel is pure response
     assert sp.simplify(onsite[3, 3]) != 0
     print(f"[F] gradient = {gradient.T}, residual checks follow in [G2]")
     print(f"[F] K = {curvature}")
+    print(f"[F] onsite = {onsite}")
+    print(f"[F] response = {response}")
     print(
-        "[F] Incident-partition torques and full 16-entry Hessian: exact contour/eigenbasis equivalence"
+        "[F] Owner-weighted torques and full 16-entry Hessian: exact contour/eigenbasis equivalence"
     )
 
-    # [G1] Nonstationary counterexample under the two-sided convention:
-    # ordered local x,z rotations on A versus the declared exponential chart.
+    # [G1] Nonstationary counterexample (survives the weighted rule): two
+    # noncommuting axes on ONE site are chart-dependent -- ordered local
+    # x,z rotations on A versus the exponential chart, applied to the
+    # site-A weighted share.
     x, zz = sp.symbols("x zz", real=True)
-    ux = rotation(SX, x)
-    uz = rotation(SZ, zz)
-    ordered = scalar + pass_two_sided(0, pass_two_sided(0, full_magnetic, uz), ux)
+    ordered = scalar + pass_two_sided(0, b_share[0], rotation(SX, x) * rotation(SZ, zz))
     ordered_w = ordered.diff(x, zz).subs({x: 0, zz: 0})
     generator_xz2 = x * SX / 2 + zz * SZ / 2
     symmetric_u2 = sp.eye(2) - I * generator_xz2 - generator_xz2**2 / 2
-    symmetric_path2 = scalar + pass_two_sided(0, full_magnetic, symmetric_u2)
+    symmetric_path2 = scalar + pass_two_sided(0, b_share[0], symmetric_u2)
     symmetric_w = symmetric_path2.diff(x, zz).subs({x: 0, zz: 0})
     for coordinate in (x, zz):
         zero(
@@ -566,35 +630,27 @@ def main():
         f"[G1] Nonstationary g_Ay={gradient[1]}, torque=-g_Ay; chart correction={-gradient[1]/2}"
     )
 
-    # [G2] One-site/two-site hierarchy (review STD-2) on the ordered path.
+    # [G2] One-site/two-site hierarchy (review STD-2) on the weighted path.
     # One-site kernels come from the single-site paths; the cross kernel from
-    # the joint ordered action. Under the ordered two-sided convention the
-    # common-angle shift is NOT a conjugation of the joint path (asserted),
-    # so no symmetry forces kappa_A = -K_AB = kappa_B; the identification is
-    # a conditional property requiring the shared-bond composition to act as
-    # a single rotation, which the declared two-sided composition does not.
-    # All three misfits are computed nonzeros, never dropped.
-    shift = sp.Symbol("shift", real=True)
-    u_shift = sp.diag(rotation(SY, shift), rotation(SY, shift))
-    t_p, t_q = sp.symbols("t_p t_q", real=True)
-    joint_y = pass_two_sided(
-        1, pass_two_sided(0, full_magnetic, rotation(SY, t_p)), rotation(SY, t_q)
-    )
-    joint_y_shifted = pass_two_sided(
-        1,
-        pass_two_sided(0, full_magnetic, rotation(SY, t_p + shift)),
-        rotation(SY, t_q + shift),
-    )
-    assert any_nonzero(u_shift * joint_y * u_shift.H - joint_y_shifted)
+    # the joint weighted action. The exact gauge zero mode E(theta + s*u) =
+    # E(theta) with u the uniform direction forces d_a(g_u) = 0 identically,
+    # so the Hessian annihilates u on BOTH sides (Ward identities): at q=0
+    # with spin-scalar S the weighted rule gives kappa_A = -K_AB = kappa_B
+    # EXACTLY, with no site-symmetry assumption, and the equal-angle sum
+    # rule is the (u,u) component. The revision-3 counterexample relied on
+    # the ordered double action and is gone; the identification fails only
+    # when the metric loses its spin-scalar character (textured-S
+    # counter-model below).
     kappa_a, kappa_b, cross_k = curvature[1, 1], curvature[3, 3], curvature[1, 3]
     sum_residual = sp.simplify(kappa_a + 2 * cross_k + kappa_b)
-    assert sp.simplify(kappa_a + cross_k) != 0
-    assert sp.simplify(kappa_b + cross_k) != 0
-    assert sum_residual != 0
-    assert sp.simplify(kappa_a - kappa_b) != 0
+    zero(sum_residual)
+    zero(kappa_a + cross_k)
+    zero(kappa_b + cross_k)
+    zero(kappa_a - kappa_b)
     print(
         f"[G2] primary: kappa_A={kappa_a}, K_AB={cross_k}, kappa_B={kappa_b}, "
-        f"sum-rule residual={sum_residual} (one-site identification fails)"
+        f"Ward identities kappa_A + K_AB = kappa_B + K_AB = 0 exact, "
+        f"sum-rule residual={sum_residual}"
     )
 
     def spin_block_scalar(matrix):
@@ -627,21 +683,23 @@ def main():
     green_t = (
         coefficients_t * (z * sp.eye(4) - diagonal).inv() * coefficients_t.H
     ).applyfunc(sp.cancel)
-    inc_t = [incident(0, magnetic_t), incident(1, magnetic_t)]
-    v_ay_t = vertex_of(0, SY, inc_t[0])
-    v_by_t = vertex_of(1, SY, inc_t[1])
+    share_t = [owned_share(0, magnetic_t), owned_share(1, magnetic_t)]
+    v_ay_t = vertex_of(0, SY, share_t[0])
+    v_by_t = vertex_of(1, SY, share_t[1])
     g_ay_t = residue_sum(sp.trace(green_t * v_ay_t), occupied, z)
     g_by_t = residue_sum(sp.trace(green_t * v_by_t), occupied, z)
     assert sp.simplify(g_ay_t + g_by_t) != 0
-    w_ay_t = seagull_same_site(0, SY, SY, inc_t[0])
+    w_ay_t = seagull_same_site(0, SY, SY, share_t[0])
     kappa_a_t = residue_sum(sp.trace(green_t * w_ay_t), occupied, z) + residue_sum(
         sp.trace(green_t * v_ay_t * green_t * v_ay_t), occupied, z
     )
-    w_by_t = seagull_same_site(1, SY, SY, inc_t[1])
+    w_by_t = seagull_same_site(1, SY, SY, share_t[1])
     kappa_b_t = residue_sum(sp.trace(green_t * w_by_t), occupied, z) + residue_sum(
         sp.trace(green_t * v_by_t * green_t * v_by_t), occupied, z
     )
-    w_cross_t = seagull_mixed_ordered(0, SY, 1, SY, inc_t[0], magnetic_t)
+    # Cross-site second vertex is zero by declaration; the cross kernel is
+    # the pure electronic response coupling.
+    w_cross_t = sp.zeros(4)
     cross_t = residue_sum(sp.trace(green_t * w_cross_t), occupied, z) + residue_sum(
         sp.trace(green_t * v_ay_t * green_t * v_by_t), occupied, z
     )
@@ -649,20 +707,21 @@ def main():
     assert sp.simplify(kappa_a_t + 2 * cross_t + kappa_b_t) != 0
     assert sp.simplify(cross_t + kappa_a_t) != 0
     assert sp.simplify(cross_t + kappa_b_t) != 0
-    # Conditional assumption: the mixed seagull vanishes exactly when the
-    # shared-bond splitting is zero, while the response coupling survives.
+    # Cross kernel without shared amplitude: the mixed seagull vanishes
+    # identically by declaration (cross-site W == 0, with or without shared
+    # amplitude), yet the two-site electronic response coupling survives on
+    # its own.
     variant = sp.Matrix(full_magnetic)
     variant[:2, 2:] = sp.zeros(2)
     variant[2:, :2] = sp.zeros(2)
-    variant_inc = [incident(0, variant), incident(1, variant)]
-    zero(phi_pass(1, SY / 2, phi_pass(0, SY / 2, variant)))
+    variant_share = [owned_share(0, variant), owned_share(1, variant)]
     variant_num = numeric(scalar + variant)
     evals_v, c_v = la.eigh(variant_num, numeric(overlap))
     # T=0 gapped ensemble: the two lowest eigenstates are occupied and are
     # separated from the empty ones (the split need not sit at zero energy).
     assert evals_v[1] < evals_v[2]
-    vav = c_v.conj().T @ numeric(vertex_of(0, SY, variant_inc[0])) @ c_v
-    vbv = c_v.conj().T @ numeric(vertex_of(1, SY, variant_inc[1])) @ c_v
+    vav = c_v.conj().T @ numeric(vertex_of(0, SY, variant_share[0])) @ c_v
+    vbv = c_v.conj().T @ numeric(vertex_of(1, SY, variant_share[1])) @ c_v
     response_v = sum(
         (occupations[n] - occupations[m])
         / (evals_v[n] - evals_v[m])
@@ -675,7 +734,7 @@ def main():
     # Stationary collinear control: zero torque and a valid one-site kernel.
     stationary_h = sp.diag(-3, -1, 2, 4)
     stationary_scalar, stationary_b = decompose(stationary_h)
-    stationary_inc = [incident(0, stationary_b), incident(1, stationary_b)]
+    stationary_share = [owned_share(0, stationary_b), owned_share(1, stationary_b)]
 
     def divided(n, m):
         return (
@@ -687,14 +746,13 @@ def main():
         )
 
     def stationary_curvature(site_a, axis_a, site_b, axis_b):
-        va = vertex_of(site_a, axis_a, stationary_inc[site_a])
-        vb = vertex_of(site_b, axis_b, stationary_inc[site_b])
+        va = vertex_of(site_a, axis_a, stationary_share[site_a])
+        vb = vertex_of(site_b, axis_b, stationary_share[site_b])
         if site_a == site_b:
-            wa = seagull_same_site(site_a, axis_a, axis_b, stationary_inc[site_a])
+            wa = seagull_same_site(site_a, axis_a, axis_b, stationary_share[site_a])
         else:
-            wa = phi_pass(
-                site_b, axis_b / 2, phi_pass(site_a, axis_a / 2, stationary_b)
-            )
+            # Cross-site second vertex vanishes by declaration.
+            wa = sp.zeros(4)
         return sp.simplify(
             sum(occupations[n] * wa[n, n] for n in range(4))
             + sum(
@@ -705,7 +763,7 @@ def main():
     stat_kappa_a = stationary_curvature(0, SY, 0, SY)
     stat_kappa_b = stationary_curvature(1, SY, 1, SY)
     stat_cross = stationary_curvature(0, SY, 1, SY)
-    stationary_v = vertex_of(0, SY, stationary_inc[0])
+    stationary_v = vertex_of(0, SY, stationary_share[0])
     zero(sp.trace(sp.diag(1, 1, 0, 0) * stationary_v))
     zero(stat_kappa_a + 2 * stat_cross + stat_kappa_b)
     zero(stat_kappa_a - stat_kappa_b)
@@ -718,7 +776,8 @@ def main():
     # [H] Direct numerical generalized eigensolves, independent of contour sums.
     sn, hn = numeric(overlap), numeric(h0)
     cn = numeric(coefficients)
-    scalar_n, magnetic_n = numeric(scalar), numeric(full_magnetic)
+    scalar_n = numeric(scalar)
+    share_a_n, share_b_n = numeric(b_share[0]), numeric(b_share[1])
     e, c = la.eigh(hn, sn)
     np.testing.assert_allclose(e, eigenvalues, atol=2e-14)
     zn = 0.31 + 0.73j
@@ -767,16 +826,32 @@ def main():
         return out
 
     def band_energy(parameters):
-        """Production path: ordered two-sided passes, S and scalar frozen."""
+        """Production path: weighted site contributions, S and scalar frozen."""
         ua = la.expm(-1j * (parameters[0] * sx_n + parameters[1] * sy_n) / 2)
         ub = la.expm(-1j * (parameters[2] * sx_n + parameters[3] * sy_n) / 2)
-        total = pass_numeric(pass_numeric(scalar_n + magnetic_n, 0, ua), 1, ub)
+        total = (
+            scalar_n + pass_numeric(share_a_n, 0, ua) + pass_numeric(share_b_n, 1, ub)
+        )
         values = la.eigvalsh(total, sn)
         assert values[1] < 0 < values[2], values
         return values[:2].sum()
 
     reference_energy = band_energy(np.zeros(4))
     np.testing.assert_allclose(reference_energy, -4, atol=2e-14)
+    # q=0 global covariance numerically: an equal-angle same-axis joint
+    # rotation is ONE global spinor rotation and leaves the occupied band
+    # energy exactly unchanged (the revision-3 defect drifted it).
+    for uniform_angle in (0.37, -0.82, 1.13):
+        np.testing.assert_allclose(
+            band_energy(np.array([uniform_angle, 0.0, uniform_angle, 0.0])),
+            reference_energy,
+            atol=2e-13,
+        )
+        np.testing.assert_allclose(
+            band_energy(np.array([0.0, uniform_angle, 0.0, uniform_angle])),
+            reference_energy,
+            atol=2e-13,
+        )
     # Every Hessian element is independently checked by finite rotations.
     step = 2e-4
     for ai in range(4):
@@ -827,23 +902,26 @@ def main():
     np.testing.assert_allclose(kappa_a_n, knum[1, 1], atol=1e-6)
     np.testing.assert_allclose(kappa_b_n, knum[3, 3], atol=1e-6)
     np.testing.assert_allclose(cross_n, knum[1, 3], atol=1e-6)
-    np.testing.assert_allclose(
-        kappa_a_n + 2 * cross_n + kappa_b_n,
-        float(kappa_a + 2 * cross_k + kappa_b),
-        atol=1e-6,
-    )
-    assert abs(kappa_a_n + 2 * cross_n + kappa_b_n) > 1e-4
-    assert abs(kappa_a_n + cross_n) > 1e-4
-    assert abs(kappa_b_n + cross_n) > 1e-4
-    assert abs(kappa_a_n - kappa_b_n) > 1e-4
+    # Exact equal-angle sum rule and Ward identities (gauge zero mode,
+    # [C]/[G2]): the finite-rotation residuals are pure truncation/round-off
+    # around zero.
+    np.testing.assert_allclose(kappa_a_n + 2 * cross_n + kappa_b_n, 0.0, atol=2e-5)
+    np.testing.assert_allclose(kappa_a_n + cross_n, 0.0, atol=2e-5)
+    np.testing.assert_allclose(kappa_b_n + cross_n, 0.0, atol=2e-5)
+    np.testing.assert_allclose(kappa_a_n - kappa_b_n, 0.0, atol=2e-5)
     # The textured-S counter-model numerically: identification fails.
     overlap_tn = numeric(overlap_t)
-    scalar_tn, magnetic_tn = numeric(scalar_t), numeric(magnetic_t)
+    scalar_tn = numeric(scalar_t)
+    share_a_tn, share_b_tn = numeric(share_t[0]), numeric(share_t[1])
 
     def band_energy_textured(parameters):
         ua = la.expm(-1j * (parameters[0] * sx_n + parameters[1] * sy_n) / 2)
         ub = la.expm(-1j * (parameters[2] * sx_n + parameters[3] * sy_n) / 2)
-        total = pass_numeric(pass_numeric(scalar_tn + magnetic_tn, 0, ua), 1, ub)
+        total = (
+            scalar_tn
+            + pass_numeric(share_a_tn, 0, ua)
+            + pass_numeric(share_b_tn, 1, ub)
+        )
         values = la.eigvalsh(total, overlap_tn)
         assert values[1] < 0 < values[2], values
         return values[:2].sum()
@@ -905,7 +983,9 @@ def main():
             if ordered_chart
             else la.expm(-1j * (px * sx_n + pz * numeric(SZ)) / 2)
         )
-        total = scalar_n + pass_numeric(magnetic_n, 0, u)
+        # Site B keeps its share at the reference value, so the theta=0
+        # point of the chart probe is the gapped reference H0 itself.
+        total = scalar_n + pass_numeric(share_a_n, 0, u) + share_b_n
         values = la.eigvalsh(total, sn)
         assert values[1] < 0 < values[2], values
         return values[:2].sum()

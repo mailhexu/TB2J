@@ -182,6 +182,62 @@ def test_inequivalent_frames_all_gradients_and_intra_inter_site_curvature():
     assert max(abs(v) for v in cross) > 1e-5
 
 
+def test_uniform_q0_o2_rotation_is_one_global_spin_rotation():
+    path = (
+        Path(__file__).parent
+        / "siesta_spiral_fixtures"
+        / "siesta_collinear_o2"
+        / "o2_fm_q0.npz"
+    )
+    bundle, reference = load_fixture(path)
+    assert np.allclose(bundle.q, 0.0)
+    n = bundle.norb
+    vertex = extract_magnetic_vertex(
+        bundle,
+        orbitals_by_site={"O1": range(n // 2), "O2": range(n // 2, n)},
+    )
+    problem = FrozenResponseProblem(
+        bundle,
+        vertex,
+        axes_by_site={"O1": (("y", (0, 1, 0)),), "O2": (("y", (0, 1, 0)),)},
+    )
+    ensemble = Ensemble(
+        kind=ENSEMBLE_GAPPED_T0,
+        n_occupied=12,
+        electron_count=12.0,
+        fermi_energy_ev=reference["ef"],
+        smearing_width_ev=0.0,
+        gap_ev=2.49684889,
+    )
+    angle = 0.1
+    both = {"O1": {"y": angle}, "O2": {"y": angle}}
+    u = np.kron(
+        np.array(
+            [
+                [np.cos(angle / 2), -np.sin(angle / 2)],
+                [np.sin(angle / 2), np.cos(angle / 2)],
+            ]
+        ),
+        np.eye(n),
+    )
+    for k in reference["kp"]:
+        h, s = problem.pencil(k)
+        rotated, unchanged_s = problem.rotated_pencil(k, both)
+        np.testing.assert_allclose(rotated, u @ h @ u.conj().T, atol=1e-10, rtol=0)
+        np.testing.assert_array_equal(unchanged_s, s)
+    energy = problem.occupied_energy(
+        reference["kp"], reference["kp_weight"], {}, ensemble
+    )
+    uniform = problem.occupied_energy(
+        reference["kp"], reference["kp_weight"], both, ensemble
+    )
+    local = problem.occupied_energy(
+        reference["kp"], reference["kp_weight"], {"O1": {"y": angle}}, ensemble
+    )
+    assert abs(uniform - energy) < 1e-8
+    assert abs(local - energy) > 1e-4
+
+
 def test_full_four_point_o2_producer_mesh():
     bundle, reference = load_fixture(FIXTURE)
     assert len(reference["kp"]) == 4

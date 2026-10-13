@@ -13,12 +13,17 @@ story-005 production vertex.  Conventions are pinned by
   differentiated matrix is re-packed into real-space four-component data.
   Each incident magnetic block transforms as ``B -> U B U^dag`` with its
   spin-scalar trace part and the complete assembled S(k) frozen;
-* the joint perturbation composes the passes in the declared site order
-  (A first, then B); a shared block receives the ordered composition, and
-  the mixed second vertex is ``-i[T_b, -i[T_a, W]]`` on shared blocks only;
+* the joint perturbation allocates every magnetic block additively to its
+  distinct endpoint owners (weighted site contributions,
+  ``w = 1/count`` per block, each contribution conjugated by the full
+  ``U_site``): ``B(theta) = sum_p w_p U_p B U_p^dag`` against the original
+  block. Onsite blocks carry ``w = 1``, a shared bond ``w = 1/2`` per
+  endpoint, so a common rotation is exactly one global conjugation and
+  finite rotations are independent of the site order;
 * two transverse axes on ONE site use the declared exponential chart, so
-  the same-site second vertex is the symmetric seagull
-  ``-1/2 ([T_a,[T_b,W]] + [T_b,[T_a,W]])``;
+  the same-site second vertex is the symmetric seagull evaluated on the
+  once-weighted blocks; the mixed second vertex of two different sites is
+  identically zero because additive site contributions never compose;
 * first-order torques are ``tau = -dE/dtheta`` (nonzero reference torques
   are carried verbatim, FR-008); second-order curvature
   ``K = onsite_seagull + response_kernel`` retains the onsite seagull
@@ -57,11 +62,12 @@ from .siesta_spiral_vertex import (
     _source_bundle_digest,
 )
 
-RESPONSE_VERSION = "1.0"
+RESPONSE_VERSION = "2.0"
 RESPONSE_CONVENTION = (
-    "frozen_total_h_ordered_two_sided: two-sided same-U incident rotations, "
-    "ordered joint passes in declared site order, S and scalar part frozen, "
-    "exponential chart per site"
+    "frozen_total_h_weighted_site_owned: additive magnetic allocation "
+    "B(theta)=sum_p w_p U_p B U_p^dag with w_p=1/count of distinct endpoint "
+    "owners, each contribution conjugated by full U_site, S and scalar part "
+    "frozen, exponential chart per site, mixed cross-site second vertex zero"
 )
 ENSEMBLE_GAPPED_T0 = "gapped_fixed_occupations"
 TORQUE_BUDGET_EV_PER_RAD = 1e-3
@@ -106,58 +112,39 @@ def _half_generator(axis):
     return 0.5 * (n[0] * _PAULI[0] + n[1] * _PAULI[1] + n[2] * _PAULI[2])
 
 
-def _su2(axis, angle):
-    """U = cos(theta/2) I - i sin(theta/2) (axis.sigma), story-008 rotation."""
-    angle = float(angle)
-    if not np.isfinite(angle):
-        raise SpiralResponseError("rotation angles must be finite")
-    t = _half_generator(axis)
-    return np.cos(angle / 2.0) * np.eye(2, dtype=complex) - 1j * np.sin(angle / 2.0) * (
-        2.0 * t
-    )
-
-
 def _comm(t, block):
     return t @ block - block @ t
 
 
 # ---------------------------------------------------------------------------
 # block algebra on generic partition keys (derivation-engine level)
+#
+# The helpers are pure: they never apply site weights themselves.  Callers
+# pass the once-weighted blocks ``B_p = w_p B`` declared per problem
+# (``w_p = 1/count`` of the distinct endpoint owners of each block).
 # ---------------------------------------------------------------------------
-def rotate_blocks(blocks, keys, axis, angle):
-    """Two-sided same-U conjugation on the selected blocks (one pass)."""
-    u = _su2(axis, angle)
-    return {
-        key: u @ np.asarray(blocks[key], dtype=complex) @ u.conj().T for key in keys
-    }
-
-
 def first_vertex_blocks(blocks, keys, axis):
     """V = dW/dtheta at 0 = -i[T, W] on every selected block."""
     t = _half_generator(axis)
     return {key: -1j * _comm(t, np.asarray(blocks[key], dtype=complex)) for key in keys}
 
 
-def second_vertex_blocks(blocks, keys_a, keys_b, axis_a, axis_b, *, same_site=None):
-    """d2W/dtheta_a dtheta_b of the declared composed action.
+def second_vertex_blocks(blocks, keys, axis_a, axis_b):
+    """Same-site d2W/dtheta_a dtheta_b: symmetric seagull per block.
 
-    Same site (identical incidence sets): symmetric seagull of the
-    exponential chart.  Different sites: the ordered A-then-B mixed
-    vertex on the shared blocks only (story-008 [C]).
+    ``blocks`` carry their site weight exactly once, so a shared block
+    (w = 1/2 per endpoint) enters the seagull at w = 1/2, never w**2.
+    Under the weighted site-owned declaration two different sites never
+    compose -- each site contribution is added separately -- so the mixed
+    second vertex of two different sites is identically zero and only
+    same-site pairs have a second vertex at all.
     """
-    keys_a = frozenset(keys_a)
-    keys_b = frozenset(keys_b)
-    ta = _half_generator(axis_a)
-    tb = _half_generator(axis_b)
+    t_a = _half_generator(axis_a)
+    t_b = _half_generator(axis_b)
     out = {}
-    if same_site if same_site is not None else keys_a == keys_b:
-        for key in keys_a:
-            w = np.asarray(blocks[key], dtype=complex)
-            out[key] = -0.5 * (_comm(ta, _comm(tb, w)) + _comm(tb, _comm(ta, w)))
-        return out
-    for key in keys_a & keys_b:
+    for key in keys:
         w = np.asarray(blocks[key], dtype=complex)
-        out[key] = -1j * _comm(tb, -1j * _comm(ta, w))
+        out[key] = -0.5 * (_comm(t_a, _comm(t_b, w)) + _comm(t_b, _comm(t_a, w)))
     return out
 
 
@@ -479,6 +466,16 @@ class FrozenResponseProblem:
             site: frozenset((mu, nu) for mu, nu, _r in keys)
             for site, keys in vertex.partition.items()
         }
+        # Weighted site contributions are fixed once per problem: each
+        # block is owned by the distinct sites holding one of its
+        # endpoints' orbitals, and each owner contributes w = 1/count of
+        # the block, conjugated by its full U_site.
+        owners = {}
+        for site, keys in self._partition.items():
+            for key in keys:
+                owners.setdefault(key, []).append(site)
+        self._owners = {key: tuple(sites) for key, sites in owners.items()}
+        self._weights = {key: 1.0 / len(sites) for key, sites in self._owners.items()}
         self._axes = {}
         for site in self.site_order:
             if not vertex.partition[site]:
@@ -565,24 +562,35 @@ class FrozenResponseProblem:
         return h, s
 
     def vertex_pencil(self, k, coord):
-        """Assembled first-order vertex V_coord(k)."""
+        """Assembled first-order vertex V_coord(k).
+
+        Each incident block enters at its site weight exactly once, so a
+        shared bond contributes w = 1/2 to each endpoint's vertex.
+        """
         axis = self.axis_of(coord)
         keys = self._partition[coord[0]]
         _h, _s, _scalar, blocks = self._phased_blocks(k)
-        pieces = first_vertex_blocks(blocks, keys, axis)
+        weighted = {key: self._weights[key] * blocks[key] for key in keys}
+        pieces = first_vertex_blocks(weighted, keys, axis)
         return _require_hermitian(self._place(pieces), "V(k)")
 
     def second_vertex_pencil(self, k, coord_a, coord_b):
-        """Assembled second-order vertex W_ab(k) in site order (Clairaut)."""
+        """Assembled second-order vertex W_ab(k), Clairaut-symmetric.
+
+        Same site: the symmetric seagull of the exponential chart on the
+        once-weighted incident blocks (shared bonds at w = 1/2).  Different
+        sites: identically zero -- additive site contributions never
+        compose under the weighted site-owned declaration.
+        """
         a, b = self._ordered_pair(coord_a, coord_b)
         axis_a = self.axis_of(a)
         axis_b = self.axis_of(b)
-        keys_a = self._partition[a[0]]
-        keys_b = self._partition[b[0]]
         _h, _s, _scalar, blocks = self._phased_blocks(k)
-        pieces = second_vertex_blocks(
-            blocks, keys_a, keys_b, axis_a, axis_b, same_site=a[0] == b[0]
-        )
+        if a[0] != b[0]:
+            return _require_hermitian(self._place({}), "W(k)")
+        keys = self._partition[a[0]]
+        weighted = {key: self._weights[key] * blocks[key] for key in keys}
+        pieces = second_vertex_blocks(weighted, keys, axis_a, axis_b)
         return _require_hermitian(self._place(pieces), "W(k)")
 
     def _ordered_pair(self, coord_a, coord_b):
@@ -595,7 +603,14 @@ class FrozenResponseProblem:
         return coord_b, coord_a
 
     def rotated_pencil(self, k, thetas):
-        """Pencil under finite rotations: ordered two-sided passes."""
+        """Pencil under finite rotations: weighted site contributions.
+
+        Every incident magnetic block receives
+        ``sum_p w_p U_p B U_p^dag`` computed against the ORIGINAL block,
+        so the result is independent of the site order, Hermitian for
+        arbitrary per-site angles, and a rotation common to all sites is
+        exactly one global conjugation of the magnetic operator.
+        """
         site_thetas = {}
         for site, entries in dict(thetas).items():
             if site not in self._axes:
@@ -618,14 +633,20 @@ class FrozenResponseProblem:
             if generators:
                 site_thetas[site] = sum(generators)
         _h, s, scalar, blocks = self._phased_blocks(k)
-        rotated = dict(blocks)
-        for site in self.site_order:
-            generator = site_thetas.get(site)
-            if generator is None:
-                continue
-            u = _pass_unitary(generator)
-            for key in self._partition[site]:
-                rotated[key] = u @ rotated[key] @ u.conj().T
+        unitaries = {
+            site: _pass_unitary(generator) for site, generator in site_thetas.items()
+        }
+        rotated = {}
+        for key, block in blocks.items():
+            weight = self._weights[key]
+            total = np.zeros(block.shape, dtype=complex)
+            for site in self._owners[key]:
+                u = unitaries.get(site)
+                if u is None:
+                    total += weight * block
+                else:
+                    total += weight * (u @ block @ u.conj().T)
+            rotated[key] = total
         h = scalar + self._place(rotated)
         return _require_hermitian(h, "rotated H(k)"), s
 
@@ -665,12 +686,14 @@ class FrozenResponseProblem:
                 gradient[coord] += w * float(
                     np.sum(f * np.real(np.diag(v_mats[coord])))
                 )
+            kernel = _divided_difference(eigenvalues, f)
             for pair in pairs:
                 a, b = self._ordered_pair(*pair)
-                w_mat = self.second_vertex_pencil(k, a, b)
-                wx = c.conj().T @ w_mat @ c
-                value_onsite = w * float(np.sum(f * np.real(np.diag(wx))))
-                kernel = _divided_difference(eigenvalues, f)
+                value_onsite = 0.0
+                if a[0] == b[0]:
+                    w_mat = self.second_vertex_pencil(k, a, b)
+                    wx = c.conj().T @ w_mat @ c
+                    value_onsite = w * float(np.sum(f * np.real(np.diag(wx))))
                 value_response = w * float(
                     np.sum((kernel * v_mats[a] * v_mats[b].T).real)
                 )
@@ -701,21 +724,23 @@ class FrozenResponseProblem:
                 pairs.append((a, b))
         onsite = {pair: 0.0 for pair in pairs}
         response = {pair: 0.0 for pair in pairs}
+        onsite_pairs = [pair for pair in pairs if pair[0][0] == pair[1][0]]
         for k, w in zip(pts, weights):
             h, s = self.pencil(k)
             v_mats = {coord: self.vertex_pencil(k, coord) for coord in coords}
-            w_mats = {}
-            for pair in pairs:
-                a, b = self._ordered_pair(*pair)
-                w_mats[pair] = self.second_vertex_pencil(k, a, b)
+            w_mats = {
+                pair: self.second_vertex_pencil(k, *self._ordered_pair(*pair))
+                for pair in onsite_pairs
+            }
             for z, weight in zip(contour.nodes, contour.weights):
                 lu, piv = lu_factor(z * s - h)
                 x_mats = {coord: lu_solve((lu, piv), v_mats[coord]) for coord in coords}
                 for coord in coords:
                     gradient[coord] += w * weight * np.trace(x_mats[coord])
-                for pair in pairs:
+                for pair in onsite_pairs:
                     y = lu_solve((lu, piv), w_mats[pair])
                     onsite[pair] += w * weight * np.trace(y)
+                for pair in pairs:
                     response[pair] += (
                         w * weight * np.trace(x_mats[pair[0]] @ x_mats[pair[1]])
                     )
@@ -1184,7 +1209,6 @@ def evaluate_response_set(
             "q": list(problem._bundle.q),
             "derivation_authority": "docs/sympy/siesta_spiral_frozen_response.py",
             "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            "rotation_order": list(problem.site_order),
             "metric": "G=(zS-H)^-1; Tr(G V)=Tr((G S)(S^-1 V))",
         },
         integration={

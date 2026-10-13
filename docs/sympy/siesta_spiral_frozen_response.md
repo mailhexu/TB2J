@@ -11,12 +11,27 @@ Run from the TB2J repository in the `mydev` environment:
 ```
 
 A successful run terminates with `ALL ASSERTIONS GREEN`; an assertion failure
-exits nonzero. Section labels below match the executable checks. Revision 3
-implements the review findings STD-1 (story-005 incident partitions), STD-2
-(independent one-site/two-site constructions with explicitly asserted
-conditional equality) and the declared **joint-action convention**: the
-story-005 two-sided same-U declaration applied per incident site, with the
-passes composed in the declared site order (A first, then B).
+exits nonzero. Section labels below match the executable checks. Revision 4
+implements the **weighted shared-bond joint action** (the q=0 global
+covariance repair): every spin-dependent block is allocated to its distinct
+owner sites with weight $1/|P|$, and the joint action is the additive
+allocation $B(\boldsymbol\theta)=B+\sum_p w_p(U_pBU_p^\dagger-B)$, replacing
+the revision-3 ordered two-sided composition. The serialized vertex
+certificate is `VERTEX_VERSION = "2.0"` with `partition_declaration`
+
+```text
+weighted site contributions, w=1/count of distinct endpoint owners, each conjugated by full U_site; scalar h0 and S untouched
+```
+
+(undeclared case unchanged: `undeclared; rotation gates must refuse`;
+`VERTEX_CONVENTION` stays `oroszlany_total_h_spin_split`, which pins
+extraction, not rotation). The declaration string is hash-pinned into the
+certificate digest, so stale revision-3 (`v1.0`) vertices reject fail-closed.
+The response module mirrors this script: `extract_magnetic_vertex` tags each
+block with its owner set, `FrozenResponseProblem._phased_blocks` allocates
+the weighted shares, `vertex_pencil`/`second_vertex_pencil` build
+$V_p=w_p\varphi_p(B)$ and the same-site $W_{pp}$, and `rotated_pencil`
+evaluates the weighted sum instead of sequential passes.
 
 ## Scope, frozen quantities and normalization
 
@@ -49,92 +64,103 @@ passes composed in the declared site order (A first, then B).
   implementation sums these expressions with its normalized $\mathbf k$
   weights, giving energy per declared reference cell.
 
-## A. The declared joint action: ordered two-sided same-U passes
+## A. The declared joint action: weighted site contributions
 
-The declared partitions are the story-005 **incident-bond** partitions
-(review STD-1): a block belongs to site $p$'s vertex when a side (row $\mu$
-or column $\nu$) sits on $p$. For the two-site shadow,
-$B_A=\{AA,AB,BA\}$ and $B_B=\{BB,BA,AB\}$: the shared AB/BA bond belongs to
-**both** vertices.
+**Owner sets and weights.** For a spin-dependent block $(\mu,\nu,R)$ let
+$P$ be its set of **distinct owner sites**: the sites owning the row
+orbital and the column orbital. Onsite blocks have $|P|=1$; cross-site
+blocks have $|P|=2$. Each owner $p\in P$ receives weight
+$w_p=1/|P|$ — onsite blocks carry the full amplitude, shared blocks carry
+**half at each end** — and the weighted share $B_p$ is $w_pB$ on the
+$p$-owned blocks and zero elsewhere. The shares reconstruct the reference
+splitting exactly, $\sum_p B_p=B$ (asserted).
 
-**Declared convention (matching the story-005 two-sided same-U
-certificate).** A single pass $p$ rotates every $p$-incident block
-two-sided with the same $U_p$,
-
-$$
-W\mapsto U_p\,W\,U_p^\dagger\quad\text{for all blocks in }B_p,
-$$
-
-and the joint perturbation composes the passes in the declared site order,
-A first then B:
+**Declared convention (revision 4).** With per-site rotations
+$U_p=U_p(\boldsymbol\theta)$ acting by full two-sided conjugation,
 
 $$
-H(\boldsymbol\theta)=H_{\rm scalar}+
-\mathcal P_B\!\left(\mathcal P_A\!\left(B\right)\right),
+H(\boldsymbol\theta)=H_{\rm scalar}+\sum_p U_pB_pU_p^\dagger
+\;=\;H_{\rm scalar}+B+\sum_pw_p\bigl(U_pBU_p^\dagger-B\bigr),
 \qquad S(\boldsymbol\theta)=S,
 $$
 
-with $H_{\rm scalar}$ and $S$ frozen. Per block this gives
+with $H_{\rm scalar}$ and $S$ frozen. Per block this is
 
 $$
-AA:\ U_AW_{AA}U_A^\dagger,\qquad
-BB:\ U_BW_{BB}U_B^\dagger,\qquad
-AB,BA:\ U_BU_A\,W\,U_A^\dagger U_B^\dagger .
+AA:\ U_AB_{AA}U_A^\dagger,\qquad
+BB:\ U_BB_{BB}U_B^\dagger,\qquad
+AB,BA:\ \tfrac12\bigl(U_AWU_A^\dagger+U_BWU_B^\dagger\bigr).
 $$
 
-Every block action is a **conjugation**, so all blocks stay Hermitian under
-arbitrary per-site end rotations; the ordered composition is therefore the
-convention consistent with the certificate. Contrast assertions pinned in
-the script on a shared block $W=\sigma_x$ (A about $z$, B about $y$):
+Every contribution is a conjugation by a **full** $U_p$ scaled by its
+weight, so the action is a **sum**, not a composition. Pinned properties
+(all asserted exactly in the script):
 
-- single-site A action: $R_z\,\hat x\cdot\boldsymbol\sigma\,R_z^\dagger
-  =\cos\theta_A\,\sigma_x+\sin\theta_A\,\sigma_y$ (vector rotation);
-- ordered joint action: $(R_yR_z\hat x)\cdot\boldsymbol\sigma
-  =\cos\theta_A\cos\theta_B\,\sigma_x+\sin\theta_A\,\sigma_y
-  -\cos\theta_A\sin\theta_B\,\sigma_z$ — **both end frames compose**;
-- the per-side sandwich $U_AWU_B^\dagger$ is **neither of these and is not
-  even Hermitian** (asserted): the block-diagonal site rotation
-  $\mathcal U=\mathrm{diag}(U_A,U_B)$ is a *different*, undeclared
-  convention, and $\mathcal P_B\mathcal P_A(H_0)
-  \ne\mathcal U(H_{\rm scalar}+B)\mathcal U^\dagger$ on shared bonds
-  (asserted nonzero).
+- **Hermiticity** for arbitrary independent per-site angles.
+- **Site-order independence**: there is no composition order to declare.
+  The script pins this with content: the declared sum differs from the
+  revision-3 sequential ordered composition
+  $U_BU_AWU_A^\dagger U_B^\dagger$ on shared blocks (asserted nonzero), and
+  from the per-side block-diagonal rotation $\mathcal U B\mathcal
+  U^\dagger$, $\mathcal U=\mathrm{diag}(U_A,U_B)$, whose shared-block
+  sandwich $U_AWU_B^\dagger$ is **not even Hermitian** (asserted). The two
+  algebraic forms of the declaration — share conjugations and the
+  $\delta$-allocation $B+\sum_pw_p(U_pBU_p^\dagger-B)$ — agree exactly
+  (asserted).
+- **q=0 global covariance (the repair).** Under a common rotation the
+  weighted contributions sum to **one** conjugation,
+  $B(\theta,\theta)=UBU^\dagger$ once (asserted on a shared block and on
+  the full joint path). At $\mathbf q=0$ the assembled overlap and the
+  scalar Hamiltonian are spin-scalar, $[\,\mathcal U,S\,]=[\,\mathcal
+  U,H_{\rm scalar}\,]=0$, so $H(\theta,\theta)=\mathcal
+  U(H_{\rm scalar}+B)\mathcal U^\dagger$ with $S$ fixed: the all-site
+  equal-angle action **is** a single global spinor rotation and the
+  occupied band energy is exactly invariant. This is the normative
+  assertion failed by revision 3, whose ordered double action drifted a
+  q=0 SOC-free O$_2$ all-site $0.1$ rad $y$ rotation by $-1.682616$ meV;
+  here the covariance is asserted symbolically and numerically
+  (band energy exactly unchanged at several angles).
+- **Common-shift covariance (Ward parent).** For any joint path, shifting
+  all site angles of a common axis by the same amount is an exact
+  conjugation,
+  $H(\mathbf t+\vartheta\mathbf 1)=\mathcal
+  U(\vartheta)H(\mathbf t)\mathcal U(\vartheta)^\dagger$
+  (asserted; revision 3 asserted the *negation* of this identity). The
+  section-G2 Ward identities are its derivatives.
 
-For coordinate $a=(p,\alpha)$ the blockwise two-sided pass derivative is
-$\varphi_p(W)=-i(t_\alpha W-Wt_\alpha)$ (with $t_\alpha=\sigma_\alpha/2$)
-applied to every $p$-incident block, and
+**Vertices.** With $\varphi_p(M)=-i(t_\alpha M-Mt_\alpha)$,
+$t_\alpha=\sigma_\alpha/2$, applied blockwise to the $p$-owned blocks:
 
 $$
-V_a=\varphi_p(B_p),\qquad
+V_a=\varphi_p(B_p)=w_p\,\varphi_p(B),\qquad
 W_{aa}=\varphi_{p,\alpha}\!\bigl(\varphi_{p,\alpha}(B_p)\bigr)
 =-[t_\alpha,[t_\alpha,B_p]],
 $$
 
-(the mixed same-site entry for $\beta\ne\alpha$ is the separate symmetrized
-composition $\tfrac12(\varphi_{p,\alpha}\varphi_{p,\beta}
-+\varphi_{p,\beta}\varphi_{p,\alpha})(B_p)$, which is nonzero in general;
-the diagonal entry above is the pure double commutator),
+(the mixed same-site entry for $\beta\ne\alpha$ is the symmetrized
+$\tfrac12(\varphi_{p,\alpha}\varphi_{p,\beta}
++\varphi_{p,\beta}\varphi_{p,\alpha})(B_p)$, nonzero in general; shared
+blocks carry $w=\tfrac12$ — **not** $w^2$, the map is linear in $B_p$), and
 
 $$
-W_{a\in A,\,b\in B}
-=\varphi_B\!\left(V_A\big|_{B\text{-incident}}\right)
-=-[t_b,[t_a,W]]\quad\text{on the shared blocks}.
+W_{ab}=0\qquad\text{for }a\ne b\text{ on different sites:}
 $$
 
-All of these are derivatives of actual trigonometric SU(2) matrices asserted
-in the script (all three axes, the quadratic exponential chart, single-site
-paths, and the joint ordered path through second order), not transcribed
-formulas. Signs are pinned: positive rotation about $y$ sends $+z$ toward
-$+x$. The shared-bond mixed seagull is asserted nonzero; the seagull
-matrices are Hermitian and exactly symmetric in $(a,b)$ (Clairaut: one
-mixed object per axis pair). For **same-axis** end rotations the ordered
-mixed vertex coincides with the symmetrized form
-$-\tfrac12([t_a,[t_b,W]]+[t_b,[t_a,W]])$ (asserted zero difference); for
-**mixed axes** it does not (asserted nonzero) — the declared composition
-order is a genuine convention there, and the ordered vertex is the
-authority. At nonzero spiral $q$, derivatives must be applied to the same
-declared lab-block rotation and linear assembly map with its pinned sector
-phases; the exact model here is the $q=0$ shadow where conjugation and the
-scalar Fourier phases commute.
+the joint action is a sum of single-parameter conjugations, so the
+cross-site mixed second vertex **vanishes identically** — with or without
+shared magnetic amplitude. Consequently every off-site Hessian entry is
+**purely electronic response**. All of these are derivatives of actual
+trigonometric SU(2) matrices asserted in the script (all three axes, the
+quadratic exponential chart, single-site paths, and the joint weighted
+path through second order), not transcribed formulas. Signs are pinned:
+positive rotation about $y$ sends $+z$ toward $+x$. The seagull matrices
+are Hermitian and exactly symmetric in $(a,b)$. What survives of
+chart dependence is **single-site and nonstationary**: two noncommuting
+axes on one site still have chart-dependent second vertices (section G1).
+At nonzero spiral $q$, derivatives must be applied to the same declared
+weighted lab-block allocation and linear assembly map with its pinned
+sector phases; the exact model here is the $q=0$ shadow where the
+conjugations and the scalar Fourier phases commute.
 
 ## B–E. Resolvent, metric placement and signed first variation
 
@@ -201,9 +227,11 @@ $$
 $$
 
 The first term is the **onsite/seagull** contribution, required even for
-fixed-length moment rotations, and — under the incident partitions — it
-includes the **shared-bond mixed seagull** $W_{ab}$ for $a\ne b$. In the
-gapped eigenbasis,
+fixed-length moment rotations; under the weighted allocation it is
+**diagonal in sites**, because $W_{ab}=0$ for $a\ne b$ on different sites.
+Every off-site Hessian entry — in particular $K_{A_yB_y}$ — is therefore
+the pure response term $\langle\operatorname{tr}(\widetilde GV_a\widetilde
+GV_b)\rangle_\Gamma$. In the gapped eigenbasis,
 
 $$
 K_{ab}=\sum_n f_n(W_{ab})_{nn}
@@ -239,16 +267,18 @@ matching the assembled lab overlap of the pinned $q=0$ shadow.
 $Q^TQ=I$, $C^\dagger SC=I$ and $H_0C=SCD$ are exact assertions; the
 occupied/empty gap is 3 energy units with the split at $\mu=0$. Each
 $2\times2$ block is split into its scalar spin trace and traceless magnetic
-part, and the incident partitions of section A are applied. The result is a
-genuinely nonorthogonal, noncollinear, **nonstationary** frozen reference.
+part, and the weighted owner shares of section A are applied. The result is
+a genuinely nonorthogonal, noncollinear, **nonstationary** frozen
+reference.
 
 ## G1. Nonstationary counterexample: ordered versus exponential chart
 
-For two axes on one site the declared chart is exponential
-$U_A=\exp[-i(\theta_x\sigma_x+\theta_z\sigma_z)/2]$; contrast the ordered
-product $U_x(\theta_x)U_z(\theta_z)$ (both applied as two-sided passes; B
-frozen). First vertices coincide (asserted); the second mixed vertices
-differ by a Jacobi identity,
+For two noncommuting axes on **one** site the declared chart is
+exponential $U_A=\exp[-i(\theta_x\sigma_x+\theta_z\sigma_z)/2]$, applied
+to the site-A weighted share while site B keeps its share at the reference
+value; contrast the ordered product $U_x(\theta_x)U_z(\theta_z)$. First
+vertices coincide (asserted); the second mixed vertices differ by a Jacobi
+identity,
 
 $$
 W^{\mathrm{ordered}}_{xz}-W^{\mathrm{exp}}_{xz}
@@ -258,88 +288,102 @@ K^{\mathrm{ordered}}_{xz}-K^{\mathrm{exp}}_{xz}
 =-\tfrac12g_y=\tfrac12\tau_y .
 $$
 
-For the rational model $g_{Ay}=-212344/357075=-0.594676188476$ and
-$\tau_{Ay}=+0.594676188476$; the failed identity's retained correction is
-$106172/357075=+0.297338094238$ energy/radian squared, checked by finite
-rotations. A separate collinear stationary control asserts $g_y=0$ and a
+For the rational model $g_{Ay}=-5104/15525=-0.328760064412238$ and
+$\tau_{Ay}=+0.328760064412238$; the failed identity's retained correction
+is $2552/15525=+0.164380032206119$ energy/radian squared, checked by
+finite rotations. This is genuine nonstationary physics of the frozen
+reference and survives the weighted rule; it involves no cross-site
+composition. A separate collinear stationary control asserts $g_y=0$ and a
 vanishing correction under that stated assumption.
 
-## G2. One-site/two-site hierarchy (STD-2) on the ordered path
+## G2. One-site/two-site hierarchy (STD-2) and the exact Ward identities
 
-The one-site kernels $\kappa_p=K_{pp}$ come from the **single-site paths**
-(the other pass is the identity there, so they are convention-independent
-objects); the two-site cross kernel $K_{AB}=K_{A_yB_y}$ comes from the
-**joint ordered action** with its shared-bond composition. These are
-independent constructions, never a Taylor identity.
+The one-site kernels $\kappa_p=K_{pp}$ come from the **single-site paths**;
+the two-site cross kernel $K_{AB}=K_{A_yB_y}$ comes from the **joint
+weighted action**. These are independent constructions, never a Taylor
+identity — and under revision 4 they are linked by an exact Ward identity
+instead of a conditional assumption.
 
-Under the declared two-sided convention the common-angle shift is **not** a
-conjugation of the joint path: shared blocks rotate by the composed
-$U(t_p+\vartheta)U(t_q+\vartheta)$ while onsite blocks rotate by
-$U(t_p+\vartheta)$, $U(t_q+\vartheta)$ (asserted nonzero difference). Hence
-no symmetry forces $\kappa_A=-K_{AB}=\kappa_B$, and on the rational model
-the identification **fails exactly**:
+Because the uniform direction $\mathbf u$ (equal angle, equal axis on all
+sites) is an exact zero mode, $E(\boldsymbol\theta+s\mathbf u)=
+E(\boldsymbol\theta)$ for all $s$, the directional gradient
+$g_{\mathbf u}$ vanishes **identically**; differentiating gives
 
 $$
-\kappa_A=\frac{5254549055516}{37188245390625}=+0.141295965979,\qquad
-K_{AB}=\frac{570363769048}{12396081796875}=+0.0460116170895,
+\sum_bK_{ab}\,u_b=0\quad\text{for every }a,
 $$
 
-$$
-\kappa_B=-\frac{430648886956}{4132027265625}=-0.104222182884,
-$$
+i.e. the Hessian annihilates $\mathbf u$ on **both** sides. At $\mathbf
+q=0$ with spin-scalar $S$ the weighted rule therefore yields, exactly and
+without any site-symmetry assumption,
 
 $$
-\kappa_A+K_{AB}=+0.187307583069\ne0,\quad
-\kappa_B+K_{AB}=-0.058210565794\ne0,
+g_{Ax}+g_{Bx}=0,\qquad g_{Ay}+g_{By}=0,
 $$
 
 $$
-\kappa_A+2K_{AB}+\kappa_B=\frac{27433666784}{212504259375}
-=+0.129102\ne0 .
+K_{Ax Ax}+2K_{AxB x}+K_{BxB x}=0,\qquad
+K_{Ay Ay}+2K_{AyBy}+K_{ByBy}=0,
 $$
 
-**Conditional statement.** The one-site/two-site identification
-$K_{AB}=-\kappa_A=-\kappa_B$ would require the shared-bond composition to
-act as a *single* rotation of the shared amplitude (commuting, single-sided
-end action). The declared two-sided composition does not have that
-property, so the two-site kernel is the authority; one-site curvatures must
-never be substituted for it. The equal-angle sum rule
-$\kappa_A+2K_{AB}+\kappa_B=0$ is likewise **not** a property of this
-convention (the nonzero residual above is retained, never dropped), and the
-gradient sum $g_{Ay}+g_{By}=-0.531832\ne0$ fails with it: a uniform
-rotation of both sublattices is not an energy gauge direction under the
-declared shared-bond action.
+$$
+\boxed{\;\kappa_A=-K_{AB}=\kappa_B\;}\qquad\text{(per-axis Ward identity),}
+$$
+
+and likewise $K_{Ax Ay}+K_{Ax By}+K_{Bx Ay}+K_{Bx By}=0$. On the rational
+model (all values exact SymPy rationals):
+
+$$
+\kappa_A=\kappa_B=\frac{31540700264}{70299140625}=+0.448664094377043,
+\qquad
+K_{AB}=-\frac{31540700264}{70299140625}=-0.448664094377043,
+$$
+
+with $K_{AyAy}=\text{onsite }49991/31050=+1.61001610305958+
+\text{response }-1.16135200868254$,
+$K_{ByBy}=\text{onsite }36259/31050=+1.16776167471820+
+\text{response }-0.719097580341154$, and
+$K_{AyBy}=\text{onsite }0+\text{response }-0.448664094377043$: the
+cross-site seagull is exactly zero (asserted), so the cross kernel is pure
+electronic response. The $x$ sector satisfies the same Ward structure,
+$K_{AxAx}=K_{BxBx}=-20906104/312440625=-0.0669122461267641$,
+$K_{AxBx}=+0.0669122461267641$, and all mixed-axis Hessian entries vanish.
 
 **Counter-model (assembled-S caveat).** Rebuilding the same construction
 with a genuinely spin-textured frozen overlap (full-rank rational
-whitening; texture asserted nonzero) breaks the residual structure
-further: $g_{Ay}+g_{By}=-165358547/131090400=-1.26141\ne0$,
-$\kappa_A=-0.231349$, $K_{AB}=-0.514353$, $\kappa_B=-0.106595$ — all three
-identifications and the sum rule fail again, with different mechanisms
-(metric texture on top of the shared-bond composition). Numerically
-re-verified by independent finite-rotation extractions.
+whitening; texture asserted nonzero) breaks the gauge — $S$ no longer
+commutes with a global spinor rotation — and with it every Ward identity:
+$g_{Ay}+g_{By}=1127089/6426000=+0.175395113600996\ne0$,
+$\kappa_A=+0.449967575998023$, $K_{AB}=-0.556399814999610$,
+$\kappa_B=+0.360179473265550$; the per-site identifications and the sum
+rule fail by computed nonzeros (never dropped), numerically re-verified by
+independent finite-rotation extractions. The Ward identities are thus a
+consequence of the **spin-scalar assembled metric at $\mathbf q=0$** plus
+the weighted allocation — not of site symmetry.
 
-**Conditional assumption on the mixed seagull.** Zeroing the shared AB/BA
-magnetic splitting makes the mixed seagull vanish **exactly** (asserted
-symbolically: it is carried solely by the shared blocks), while the
-two-site electronic response coupling survives (asserted numerically on the
-gapped variant, whose occupation split is the two lowest eigenstates). A
-vanishing cross kernel therefore requires more than the absence of shared
-magnetic amplitude.
+**Cross kernel without shared amplitude.** Zeroing the shared AB/BA
+magnetic splitting leaves the cross kernel nonzero
+($-0.110065$ on the gapped variant): the mixed seagull is zero by
+declaration whether or not shared amplitude exists, and the two-site
+electronic response coupling survives on its own.
 
 **Stationary collinear control.** A spin-diagonal, collinear orthogonal
 reference has $g=0$, $\kappa_A=\kappa_B$ and $K_{AB}=-\kappa_A$; there the
-identification is valid under the stated stationarity/symmetry assumption
-because no shared magnetic amplitude exists to compose.
+Ward identities hold trivially under the stated stationarity/symmetry
+assumption because no shared magnetic amplitude exists to allocate.
 
 ## H. Finite-rotation convergence and acceptance evidence
 
-The numerical oracle applies the ordered two-sided passes with matrix
+The numerical oracle applies the weighted site contributions with matrix
 exponentials, keeps $H_{\rm scalar}$ and $S$ unchanged, and recomputes the
 occupied sum using `scipy.linalg.eigvalsh`. All numerical rotation samples
 retain $\varepsilon_2<0<\varepsilon_3$. All 16 Hessian entries and 4
 gradients are checked against central finite rotations at step
-$2\times10^{-4}$, and against independent generalized eigensolves.
+$2\times10^{-4}$, and against independent generalized eigensolves. The
+q=0 covariance is checked numerically: equal-angle same-axis joint
+rotations leave the occupied band energy exactly $-4$ at several angles,
+and the finite-rotation Ward residuals at step $10^{-3}$ are pure
+truncation ($\lesssim10^{-7}$, asserted $\le2\times10^{-5}$).
 
 For the nonzero-torque $A_y$ direction, compare
 $D_g(h)=\frac{E(h)-E(-h)}{2h}$ and
@@ -355,27 +399,30 @@ Observed with SymPy 1.14.0 in `mydev`: exit 0, `ALL ASSERTIONS GREEN`.
 
 | $h$ (radian) | central $g$ error | central $K$ error | Richardson $g$ error | Richardson $K$ error |
 |---:|---:|---:|---:|---:|
-| 0.20 | $3.02526\,10^{-3}$ | $1.82813\,10^{-3}$ | $2.50374\,10^{-6}$ | $1.26061\,10^{-6}$ |
-| 0.10 | $7.54440\,10^{-4}$ | $4.56090\,10^{-4}$ | $1.56578\,10^{-7}$ | $7.95948\,10^{-8}$ |
-| 0.05 | $1.88490\,10^{-4}$ | $1.13960\,10^{-4}$ | $9.78737\,10^{-9}$ | $4.98508\,10^{-9}$ |
+| 0.20 | $8.6966\,10^{-4}$ | $5.9423\,10^{-4}$ | $3.59300\,10^{-7}$ | $1.03708\,10^{-7}$ |
+| 0.10 | $2.1769\,10^{-4}$ | $1.4864\,10^{-4}$ | $2.24780\,10^{-8}$ | $6.48279\,10^{-9}$ |
+| 0.05 | $5.44382\,10^{-5}$ | $3.71639\,10^{-5}$ | $1.40530\,10^{-9}$ | $3.94478\,10^{-10}$ |
 
-Key values of the main model (incident partitions, ordered two-sided
-shared-bond action):
+(measured ratios $\approx4$ and $\approx16$, within the asserted symbolic
+convergence laws).
 
-- $g_{Ay}=-212344/357075=-0.594676188476$,
-  $\tau_{Ay}=+0.594676188476$,
-  $g_{By}=1496/23805=+0.0628439403487$,
-  $g_{Ax}=g_{Bx}=0$. The gradient sum
-  $g_{Ay}+g_{By}=-0.531832$ is a nonzero, retained consequence of the
-  declared shared-bond composition.
-- $K_{AyAy}=+0.141295965979
-  =\text{onsite }+2.53481901561+\text{response }-2.39352304963$.
+Key values of the main model (owner-weighted allocation):
+
+- $g_{Ay}=-5104/15525=-0.328760064412238$,
+  $\tau_{Ay}=+0.328760064412238$,
+  $g_{By}=+5104/15525=+0.328760064412238$,
+  $g_{Ax}=g_{Bx}=0$. The gradient sums vanish **exactly** — a uniform
+  rotation of both sublattices is an exact energy gauge direction under
+  the weighted shared-bond action.
+- $K_{AyAy}=+0.448664094377043
+  =\text{onsite }+1.61001610305958+\text{response }-1.16135200868254$.
   Dropping the onsite/seagull term would reverse the sign.
-- $K_{AyBy}=+0.0460116170895
-  =\text{onsite }+1.84960582511+\text{response }-1.80359420802$: the
-  shared-bond mixed seagull is required and nonzero.
-- $K_{ByBy}=-0.104222182884$.
+- $K_{AyBy}=-0.448664094377043=\text{onsite }0+\text{response
+  }-0.448664094377043$: the cross-site mixed seagull is exactly zero and
+  the cross kernel is pure response.
+- $K_{ByBy}=+0.448664094377043$; Ward:
+  $\kappa_A+K_{AB}=\kappa_B+K_{AB}=0$ exactly.
 
 The report's formulas, signs, metric rules, convention statements and
-conditional identities are backed by exact assertions; numerical spot
-checks supplement them rather than substitute for the derivation.
+Ward identities are backed by exact assertions; numerical spot checks
+supplement them rather than substitute for the derivation.

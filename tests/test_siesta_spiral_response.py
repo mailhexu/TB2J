@@ -1,9 +1,11 @@
 """Story-009 frozen response core tests: primitive-cell torque and curvature.
 
-Engine-level tests run the pinned story-008 derivation model
-(``docs/sympy/siesta_spiral_frozen_response.py``, exact [F] fractions)
-directly on general spin blocks. Production-path tests run a spinor-form
-synthetic bundle end to end and an O2 fixture smoke on a reduced k subset.
+Engine-level tests run the weighted site-owned declaration on the rational
+story-008 [C2] model (exact fractions, re-derived for the additive
+allocation: per block ``B(theta) = sum_p w_p U_p B U_p^dag`` with
+``w_p = 1/count`` of the distinct endpoint owners; cross-site second
+vertices exactly zero). Production-path tests run a spinor-form synthetic
+bundle end to end and an O2 fixture smoke on a reduced k subset.
 """
 
 from __future__ import annotations
@@ -44,31 +46,35 @@ FIXTURE = Path(__file__).parent / "siesta_spiral_fixtures" / "siesta_spiral_o2.n
 AXES = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0)}
 COORDS = (("A", "x"), ("A", "y"), ("B", "x"), ("B", "y"))
 
-# Pinned story-008 quantities (docs/sympy/siesta_spiral_frozen_response.py,
-# section [F] exact fractions; coordinate order Ax, Ay, Bx, By).
+# Pinned weighted-site-owned quantities (story-008 [C2] rational model,
+# exact fractions; coordinate order Ax, Ay, Bx, By).  Shared bonds enter
+# every vertex at w = 1/2 per endpoint; cross-site pairs have an exactly
+# zero seagull; the global-uniform sum rule
+# kappa_Ay + 2 K_AyBy + kappa_By = 0 holds exactly because a rotation
+# common to all sites is one global conjugation of a spin-scalar S pencil.
 PINNED_GRADIENT = {
-    ("A", "x"): 0.0,
-    ("A", "y"): -212344 / 357075,
-    ("B", "x"): 0.0,
-    ("B", "y"): 1496 / 23805,
+    ("A", "x"): 0,
+    ("A", "y"): -5104 / 15525,
+    ("B", "x"): 0,
+    ("B", "y"): 5104 / 15525,
 }
 PINNED_CURVATURE = {
-    (("A", "x"), ("A", "x")): -18257448196 / 165281090625,
-    (("A", "x"), ("A", "y")): 0.0,
-    (("A", "x"), ("B", "x")): 20164131016 / 165281090625,
-    (("A", "x"), ("B", "y")): 0.0,
-    (("A", "y"), ("A", "y")): 5254549055516 / 37188245390625,
-    (("A", "y"), ("B", "x")): 0.0,
-    (("A", "y"), ("B", "y")): 570363769048 / 12396081796875,
-    (("B", "x"), ("B", "x")): -6803141836 / 165281090625,
-    (("B", "x"), ("B", "y")): 0.0,
-    (("B", "y"), ("B", "y")): -430648886956 / 4132027265625,
+    (("A", "x"), ("A", "x")): -20906104 / 312440625,
+    (("A", "x"), ("A", "y")): 0,
+    (("A", "x"), ("B", "x")): 20906104 / 312440625,
+    (("A", "x"), ("B", "y")): 0,
+    (("A", "y"), ("A", "y")): 31540700264 / 70299140625,
+    (("A", "y"), ("B", "x")): 0,
+    (("A", "y"), ("B", "y")): -31540700264 / 70299140625,
+    (("B", "x"), ("B", "x")): -20906104 / 312440625,
+    (("B", "x"), ("B", "y")): 0,
+    (("B", "y"), ("B", "y")): 31540700264 / 70299140625,
 }
-PINNED_ONSITE_AYAY = 2.53481901561
-PINNED_RESPONSE_AYAY = -2.39352304963
-PINNED_ONSITE_AYBY = 1.84960582511
-PINNED_RESPONSE_AYBY = -1.80359420802
-PINNED_SUM_RESIDUAL = 27433666784 / 212504259375
+PINNED_ONSITE_AYAY = 49991 / 31050
+PINNED_RESPONSE_AYAY = -163284096347 / 140598281250
+# cross-site pair: seagull exactly zero, response kernel carries everything
+PINNED_ONSITE_AYBY = 0
+PINNED_RESPONSE_AYBY = -31540700264 / 70299140625
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +99,20 @@ def _derivation_model():
     return blocks, s_blocks, partition
 
 
+def _site_weights(partition):
+    """w = 1/count of distinct endpoint owners, computed once per model."""
+    count = {}
+    for keys in partition.values():
+        for key in keys:
+            count[key] = count.get(key, 0) + 1
+    return {key: 1.0 / count[key] for key in count}
+
+
+def _weighted(blocks, weights, keys):
+    """Declare the once-weighted blocks B_p = w_p B of one site."""
+    return {key: weights[key] * blocks[key] for key in keys}
+
+
 def _place(pieces, dim=4):
     out = np.zeros((dim, dim), dtype=complex)
     for (i, j), blk in pieces.items():
@@ -103,39 +123,70 @@ def _place(pieces, dim=4):
 def _model_observables(blocks, s_blocks, partition):
     h = _place(blocks)
     s = _place(s_blocks)
+    weights = _site_weights(partition)
     vertices = {
-        coord: _place(first_vertex_blocks(blocks, partition[coord[0]], AXES[coord[1]]))
+        coord: _place(
+            first_vertex_blocks(
+                _weighted(blocks, weights, partition[coord[0]]),
+                partition[coord[0]],
+                AXES[coord[1]],
+            )
+        )
         for coord in COORDS
     }
     curvatures = {}
     for i, ca in enumerate(COORDS):
         for cb in COORDS[i:]:
-            w_pieces = second_vertex_blocks(
-                blocks, partition[ca[0]], partition[cb[0]], AXES[ca[1]], AXES[cb[1]]
-            )
+            if ca[0] == cb[0]:
+                w_mat = _place(
+                    second_vertex_blocks(
+                        _weighted(blocks, weights, partition[ca[0]]),
+                        partition[ca[0]],
+                        AXES[ca[1]],
+                        AXES[cb[1]],
+                    )
+                )
+            else:
+                # additive site contributions never compose: exact zero
+                w_mat = np.zeros((4, 4), dtype=complex)
             curvatures[(ca, cb)] = pencil_curvature(
-                h, s, _place(w_pieces), vertices[ca], vertices[cb], 2
+                h, s, w_mat, vertices[ca], vertices[cb], 2
             )
     return h, s, vertices, curvatures
 
 
 def _rotated_model_energy(blocks, s_blocks, partition, thetas):
-    """Ordered two-sided passes on the model blocks, then occupied sum.
+    """Weighted site-owned contributions to the ORIGINAL blocks.
 
     ``thetas`` maps site -> list of (axis vector, angle) generators summed
-    into one exponential chart per site, composed in declared site order.
+    into one exponential chart per site.  Every block receives
+    ``sum_p w_p U_p B U_p^dag`` against the original block, so the result
+    is independent of the site order and a rotation common to all sites is
+    exactly one global conjugation of the magnetic operator.
     """
     from scipy.linalg import expm
 
-    rotated = {key: blk.copy() for key, blk in blocks.items()}
-    for site in ("A", "B"):
-        entries = thetas.get(site, ())
-        if not entries:
-            continue
-        generator = sum(angle * _pauli(axis) for axis, angle in entries)
-        u = expm(-1j * generator / 2.0)
-        for key in partition[site]:
-            rotated[key] = u @ rotated[key] @ u.conj().T
+    owners = {}
+    for site, keys in partition.items():
+        for key in keys:
+            owners.setdefault(key, []).append(site)
+    weights = _site_weights(partition)
+    unitaries = {
+        site: expm(-1j * sum(angle * _pauli(axis) for axis, angle in entries) / 2.0)
+        for site, entries in thetas.items()
+        if entries
+    }
+    rotated = {}
+    for key, blk in blocks.items():
+        total = np.zeros_like(blk)
+        for site in owners[key]:
+            u = unitaries.get(site)
+            total = total + (
+                weights[key] * blk
+                if u is None
+                else weights[key] * (u @ blk @ u.conj().T)
+            )
+        rotated[key] = total
     values = eigh(_place(rotated), _place(s_blocks), eigvals_only=True)
     assert values[1] < 0.0 < values[2], values
     return float(values[:2].sum())
@@ -158,9 +209,11 @@ def test_engine_reproduces_pinned_fractions():
     for coord in COORDS:
         gradient = pencil_gradient(h, s, vertices[coord], 2)
         assert gradient == pytest.approx(PINNED_GRADIENT[coord], abs=1e-12)
-        # torque convention tau = -gradient (story-008: tau_Ay = +0.594676...)
+        # torque convention tau = -gradient (weighted: tau_Ay = +0.328760...)
         assert -gradient == pytest.approx(-PINNED_GRADIENT[coord], abs=1e-12)
-    assert -PINNED_GRADIENT[("A", "y")] == pytest.approx(0.594676188476, abs=1e-11)
+    assert -PINNED_GRADIENT[("A", "y")] == pytest.approx(0.3287600644122, abs=1e-11)
+    # a rotation common to all sites carries no torque: g_Ay + g_By = 0
+    assert PINNED_GRADIENT[("A", "y")] + PINNED_GRADIENT[("B", "y")] == 0
 
     assert set(curvatures) == set(PINNED_CURVATURE)
     for pair, (total, onsite, response) in curvatures.items():
@@ -174,22 +227,23 @@ def test_engine_reproduces_pinned_fractions():
     assert ayay[1] == pytest.approx(PINNED_ONSITE_AYAY, abs=1e-9)
     assert ayay[2] == pytest.approx(PINNED_RESPONSE_AYAY, abs=1e-9)
     ayby = curvatures[(("A", "y"), ("B", "y"))]
-    assert ayby[1] == pytest.approx(PINNED_ONSITE_AYBY, abs=1e-9)
+    # cross-site pair: additive contributions never compose, so the seagull
+    # is exactly zero and the response kernel carries the whole curvature
+    assert ayby[1] == pytest.approx(PINNED_ONSITE_AYBY, abs=1e-12)
     assert ayby[2] == pytest.approx(PINNED_RESPONSE_AYBY, abs=1e-9)
 
-    # the ordered-convention sum-rule misfit is a retained nonzero
+    # global-uniform sum rule: a common rotation is one global conjugation
+    # of a spin-scalar-S pencil, so the energy is exactly invariant
     kappa_a = curvatures[(("A", "y"), ("A", "y"))][0]
     kappa_b = curvatures[(("B", "y"), ("B", "y"))][0]
     cross = curvatures[(("A", "y"), ("B", "y"))][0]
-    assert kappa_a + 2.0 * cross + kappa_b == pytest.approx(
-        PINNED_SUM_RESIDUAL, abs=1e-9
-    )
-    assert abs(PINNED_SUM_RESIDUAL) > 1e-4
+    assert kappa_a + 2.0 * cross + kappa_b == pytest.approx(0.0, abs=1e-12)
 
 
 def test_engine_contour_identity_within_approved_budget():
     blocks, s_blocks, partition = _derivation_model()
     h, s, vertices, curvatures = _model_observables(blocks, s_blocks, partition)
+    weights = _site_weights(partition)
     contour = EnergyContour.declared(
         z0=0.5, occupied_min=-3.0, gap_ev=3.0, margin_ev=0.4, n_nodes=256
     )
@@ -199,20 +253,24 @@ def test_engine_contour_identity_within_approved_budget():
         circ = contour_gradient(h, s, vertices[coord], contour)
         assert abs(band - circ) <= RESPONSE_IDENTITY_TOL_EV, coord
     for pair, (total, onsite, response) in curvatures.items():
+        a, b = pair
+        if a[0] == b[0]:
+            w_mat = _place(
+                second_vertex_blocks(
+                    _weighted(blocks, weights, partition[a[0]]),
+                    partition[a[0]],
+                    AXES[a[1]],
+                    AXES[b[1]],
+                )
+            )
+        else:
+            w_mat = np.zeros((4, 4), dtype=complex)
         c_total, c_onsite, c_response = contour_curvature(
             h,
             s,
-            _place(
-                second_vertex_blocks(
-                    blocks,
-                    partition[pair[0][0]],
-                    partition[pair[1][0]],
-                    AXES[pair[0][1]],
-                    AXES[pair[1][1]],
-                )
-            ),
-            vertices[pair[0]],
-            vertices[pair[1]],
+            w_mat,
+            vertices[a],
+            vertices[b],
             contour,
         )
         assert abs(total - c_total) <= RESPONSE_IDENTITY_TOL_EV, pair
@@ -263,6 +321,18 @@ def test_engine_finite_rotation_convergence_orders():
             + energy(-step, -step)
         ) / (4.0 * step**2)
 
+    # a rotation common to all sites is exactly one global conjugation of
+    # the spin-scalar-S pencil: the occupied energy is invariant for ANY
+    # angle, not only to second order
+    for angle in (0.1, 0.7):
+        uniform = _rotated_model_energy(
+            blocks,
+            s_blocks,
+            partition,
+            {"A": [(AXES["y"], angle)], "B": [(AXES["y"], angle)]},
+        )
+        assert uniform == pytest.approx(energy0, abs=1e-10)
+
     steps = (8e-3, 4e-3, 2e-3)
     tau_errors = [abs(torque(h_) - exact_tau) for h_ in steps]
     k_errors = [abs(curvature(h_) - exact_k) for h_ in steps]
@@ -286,7 +356,10 @@ def test_engine_same_site_cross_axis_seagull_is_symmetric():
         s,
         _place(
             second_vertex_blocks(
-                blocks, partition["A"], partition["A"], AXES["y"], AXES["x"]
+                _weighted(blocks, _site_weights(partition), partition["A"]),
+                partition["A"],
+                AXES["y"],
+                AXES["x"],
             )
         ),
         vertices[("A", "y")],
@@ -419,6 +492,12 @@ def test_spinor_bundle_response_set_end_to_end():
     wrong_version["version"] = "0.9"
     with pytest.raises(SpiralResponseError, match="version"):
         ResponseSet.from_dict(wrong_version)
+    # a serialized record of the retired ordered two-sided convention is
+    # rejected by the convention gate, not silently reinterpreted
+    stale_convention = response.to_dict()
+    stale_convention["convention"] = "frozen_total_h_ordered_two_sided"
+    with pytest.raises(SpiralResponseError, match="convention"):
+        ResponseSet.from_dict(stale_convention)
 
 
 def test_spinor_bundle_band_matches_finite_rotation():
@@ -444,6 +523,37 @@ def test_spinor_bundle_band_matches_finite_rotation():
     assert finite_k == pytest.approx(
         band["curvature"][(coords[0], coords[0])], abs=1e-4
     )
+
+
+# ---------------------------------------------------------------------------
+# production path: weighted site-owned finite rotations
+# ---------------------------------------------------------------------------
+def test_uniform_common_rotation_is_one_global_conjugation():
+    """q=0 synthetic bundle: both sites at the same angle act once.
+
+    The weighted site contributions of every shared and onsite block sum to
+    the full ``U B U^dag``, so the pencil transforms by exactly one global
+    spinor conjugation (S is spin-scalar here), while a single-site
+    rotation remains a genuine physical change.
+    """
+    _, _, problem, _eig = _bundle_problem()
+    angle = 0.13
+    c, sn = np.cos(angle / 2.0), np.sin(angle / 2.0)
+    u = np.kron(np.array([[c, -sn], [sn, c]]), np.eye(problem.bundle.norb))
+    h, s = problem.pencil(0.0)
+    rotated, s_rot = problem.rotated_pencil(0.0, {"A": {"y": angle}, "B": {"y": angle}})
+    np.testing.assert_allclose(rotated, u @ h @ u.conj().T, atol=1e-12, rtol=0)
+    np.testing.assert_array_equal(s_rot, s)
+    # order of the per-site angles is irrelevant: additive contributions
+    rotated_again, s_again = problem.rotated_pencil(
+        0.0, {"B": {"y": angle}, "A": {"y": angle}}
+    )
+    np.testing.assert_array_equal(rotated_again, rotated)
+    np.testing.assert_array_equal(s_again, s_rot)
+    # a single-site rotation is NOT a global conjugation: it must move the
+    # pencil (local response stays nontrivial)
+    local, _s_local = problem.rotated_pencil(0.0, {"A": {"y": angle}})
+    assert not np.allclose(local, h, atol=1e-8)
 
 
 # ---------------------------------------------------------------------------

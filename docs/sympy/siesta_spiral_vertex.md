@@ -52,27 +52,38 @@ negative control in the script shows the untextured $h_4'=-h_4$ partner
 textured partner the assembled $H(\mathbf k)$ is exactly Hermitian
 (symbolic).
 
-## 3. Local SU(2) rotation on sublattice A
+## 3. Local SU(2) rotations and the weighted declared partition (vertex 2.0)
 
-With $U_A = \exp(-i\theta\,\sigma_{\hat n}/2)$, the block-level identity
+With $U_p = \exp(-i\theta_p\,\sigma_{\hat n}/2)$, the block-level identity
 (symbolic for axes $z$ and $x$, exact rational for a generic unit axis via
 Rodrigues, and numeric for a random axis) is
 
 $$
-U_A\,(\mathbf h\cdot\boldsymbol\sigma)\,U_A^\dagger
-= \bigl(R_{\hat n}(\theta)\,\mathbf h\bigr)\cdot\boldsymbol\sigma ,
+U_p\,(\mathbf h\cdot\boldsymbol\sigma)\,U_p^\dagger
+= \bigl(R_{\hat n}(\theta_p)\,\mathbf h\bigr)\cdot\boldsymbol\sigma ,
 \qquad
-U_A\,\sigma_0\,U_A^\dagger = \sigma_0 .
+U_p\,\sigma_0\,U_p^\dagger = \sigma_0 .
 $$
 
-**Declared partition (ADR-004).** Every sparse entry $(\mu,\nu,R)$ with
-$\mu\in A$ or $\nu\in A$ *carries A's rotation*, applied two-sided with the
-same $U_A$:
+**Declared partition (vertex 2.0).** Each magnetic block $(\mu,\nu,R)$ has
+*distinct endpoint-owner sites* $P = \{\mathrm{own}(\mu), \mathrm{own}(\nu)\}$
+(the sites owning the row and the column orbital). The rotation is allocated
+additively over $P$,
 
 $$
-W \mapsto U_A\,W\,U_A^\dagger
-= h_0\sigma_0 + U_A(\mathbf h\cdot\sigma)U_A^\dagger .
+W \;\mapsto\; W' = \sum_{p\in P} w_p\, U_p W U_p^\dagger
+= W + \sum_{p\in P} w_p\bigl(U_p W U_p^\dagger - W\bigr),
+\qquad w_p = \frac{1}{|P|},
 $$
+
+each contribution conjugated by the **full** $U_p$ (two-sided, same $U$);
+the scalar part $h_0$ and the overlap $S$ are untouched. Same-site blocks
+($|P| = 1$) carry $w = 1$ and get the full conjugation. Cross-site (shared)
+blocks carry $w = 1/2$ per endpoint site: **one site's rotation changes only
+its weighted half**, not the whole block. The old full-incidence reading
+(every entry incident to A conjugated by $U_A W U_A^\dagger$, and the shared
+bond double-conjugated when both endpoint sites rotate) is false; it is
+removed and rejected by negative control below.
 
 Consequences (all asserted):
 
@@ -80,12 +91,26 @@ Consequences (all asserted):
   traceless — the scalar part and $H_{\rm scalar}(\mathbf k)$ are exactly
   invariant; only the vertex rotates.
 - $S(\mathbf k)$ is never conjugated: its lab blocks are $\delta_{ab}$
-  (spin scalars) and the implementation applies the rotation to the vertex
+  (spin scalars) and the implementation applies the allocation to the vertex
   only.
-- Inventory on the model: onsite A $(0,0)$ conjugated $U_A W U_A^\dagger$;
-  intersite $(0,1)$ ("row in A") and $(1,0)$ ("column in A") carry the
-  rotation; $(1,1)$ untouched. Adding a B-sublattice rotation changes only
-  the $(1,1)$ entry (partition locality).
+- **Global covariance:** under a common $U_p = U$ the weighted
+  contributions of a shared block sum to $U W U^\dagger$ exactly — the
+  joint equal-angle action transforms each block *once*. Asserted
+  symbolically per block, and at pencil level at $\mathbf q = 0$ against
+  $\mathcal W H(\mathbf k)\mathcal W^\dagger$ with nonzero intersite $B$
+  ($\mathcal W=\mathrm{diag}(U,U)$; max defect $<10^{-12}$ on the model).
+- **Second vertex:** on a shared block the same-site second vertex carries
+  $w = 1/2$ (not $w^2$, not unweighted), and the mixed cross-site second
+  vertex vanishes identically,
+  $\partial^2 W'/\partial\theta_A\,\partial\theta_B = 0$. Negative control:
+  the double conjugation $U_B U_A W U_A^\dagger U_B^\dagger$ carries a
+  spurious mixed second vertex and is rejected.
+- Inventory on the model: onsite $(0,0)$ owned by A and $(1,1)$ owned by B
+  ($w = 1$); the intersite pair $(0,1)$ and its $(1,0)$ partner is shared by
+  both endpoint sites ($w = 1/2$ each). Adding a B rotation adds exactly
+  $w_B (U_B W U_B^\dagger - W)$ to every B-owned half (onsite B: $w_B = 1$;
+  shared bond pair: $w_B = 1/2$); A-owned blocks are untouched (partition
+  locality).
 - Negative control: a **one-sided** row- or column-only application
   ($U_A\sigma_0 \neq \sigma_0$, $\mathrm{Tr}(U_A\,\mathbf h\cdot\sigma)\neq0$)
   mixes the scalar part in and is *not* the production convention;
@@ -118,8 +143,9 @@ $H$, $H_{\rm scalar}$ and $B$. Pinned checks:
 
 - at $\mathbf q\to 0$, $B(\mathbf k)$ reduces to the collinear vertex
   Fourier sum $\sum (\mathbf h\cdot\sigma)\,e^{-i\mathbf k\cdot\mathbf x}$;
-- at $\mathbf q=0$ (scalar phases), entrywise two-sided rotation of a
-  partition covering all entries equals the global conjugation
+- at $\mathbf q=0$ (scalar phases), the weighted partition under a common
+  $U$ ($w = 1/2 + 1/2$ on shared bonds, nonzero intersite $B$ included)
+  equals the global conjugation
   $\mathcal W H(\mathbf k)\mathcal W^\dagger$, $\mathcal W=\mathrm{diag}(U,U)$;
 - at $\mathbf q\neq0$ the same comparison differs by $O(q)$
   (max defect $9.98\times10^{-2}$ on the model): the phase placement *is*
@@ -132,9 +158,10 @@ The implementation must emit and round-trip:
 
 | field | content |
 |---|---|
+| `vertex_version` | `2.0` (serialized v1.0 vertices reject at the gate) |
 | `vertex_convention` | `oroszlany_total_h_spin_split` |
 | `vertex_convention_value` | spin-dependent part of saved total H; no XC reconstruction; $h_x=h_3$, $h_y=h_4$, $h_z=(h_1-h_2)/2$ |
-| `partition_declaration` | sublattices $A$; every entry with $\mu\in A$ or $\nu\in A$ carries $A$'s rotation (two-sided $U_A W U_A^\dagger$); others untouched |
+| `partition_declaration` | weighted site contributions, w=1/count of distinct endpoint owners, each conjugated by full U_site; scalar h0 and S untouched |
 | `packing_convention` | $H_{12}=h_3-i h_4$ |
 | `sector_phase_convention` | $d_{11}=e^{-i(\mathbf k+\mathbf q/2)\cdot x}$, $d_{22}=e^{-i(\mathbf k-\mathbf q/2)\cdot x}$ |
 | `projector_convention` | coefficient form $A^\sim=S^{-1}A$; $\mathrm{Tr}\,A=\mathrm{Tr}(S A^\sim)$ |

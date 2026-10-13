@@ -12,9 +12,12 @@ Conventions pinned symbolically by ``docs/sympy/siesta_spiral_vertex.py``:
   ``W = h0*sigma0 + h.sigma`` with ``h0 = (H1+H2)/2``,
   ``hx = H3``, ``hy = +H4`` (``H12 = H3 - 1j*H4 = hx - 1j*hy``),
   ``hz = (H1-H2)/2``; the vertex block is the traceless part ``h.sigma``.
-* Local rotation of a declared partition acts as a two-sided same-U
-  conjugation ``U_A W U_A^dag`` on every entry whose ``mu`` or ``nu``
-  belongs to site A (one-sided variants are non-production, story 007).
+* Local rotation of declared site A contributes a weighted share of each
+  incident entry: ``B + sum_p w_p (U_p B U_p^dag - B)`` with symmetric
+  weight ``w_p = 1/count`` of the entry's distinct endpoint owners (onsite
+  w=1, cross-site w=1/2); under a common U the contributions sum to the
+  full two-sided conjugation ``U B U^dag`` (one-sided variants are
+  non-production, story 007).
 * Certificate fields: vertex convention, packing, sector phases,
   projector/metric conventions, allocation, and a content digest.
 """
@@ -30,9 +33,14 @@ import numpy as np
 
 from .siesta_spiral import SpiralBundle, SpiralImportError
 
-VERTEX_VERSION = "1.0"
+VERTEX_VERSION = "2.0"
 VERTEX_CONVENTION = "oroszlany_total_h_spin_split"
 PACKING_CONVENTION = "H12=H3-1j*H4;hy=+H4"
+PARTITION_DECLARATION = (
+    "weighted site contributions, w=1/count of distinct endpoint owners, "
+    "each conjugated by full U_site; scalar h0 and S untouched"
+)
+PARTITION_DECLARATION_UNDECLARED = "undeclared; rotation gates must refuse"
 
 
 @dataclass(frozen=True)
@@ -49,7 +57,9 @@ class MagneticVertex:
     partition : Mapping[site, frozenset[key]]
         Declared spatial partition: for each site label, the entry keys
         whose ``mu`` or ``nu`` orbital belongs to that site (ADR-004);
-        local rotations act as two-sided same-U conjugation there.
+        local rotations contribute the site's weighted share of each
+        incident entry (``w = 1/count`` of the entry's distinct endpoint
+        owners), not a per-site full conjugation.
     certificate : dict
         Provenance: conventions, bundle identity, partition declaration,
         and ``vertex_sha256`` content digest.
@@ -126,10 +136,7 @@ class MagneticVertex:
             ),
             "allocation": "DZP channels retained",
             "partition_declaration": (
-                "two-sided same-U conjugation on entries with mu or nu in the "
-                "declared site"
-                if partition
-                else "undeclared; rotation gates must refuse"
+                PARTITION_DECLARATION if partition else PARTITION_DECLARATION_UNDECLARED
             ),
         }
         for field_name, expected_value in expected_fields.items():
@@ -259,10 +266,9 @@ def extract_magnetic_vertex(
         ),
         "allocation": "DZP channels retained",
         "partition_declaration": (
-            "two-sided same-U conjugation on entries with mu or nu in the "
-            "declared site"
+            PARTITION_DECLARATION
             if partition_declared
-            else "undeclared; rotation gates must refuse"
+            else PARTITION_DECLARATION_UNDECLARED
         ),
     }
     certificate["vertex_sha256"] = _content_digest(blocks, partition, certificate)
@@ -286,12 +292,15 @@ def _rodrigues(axis, angle):
 
 
 def rotate_site_blocks(vertex, site, *, axis=(0.0, 0.0, 1.0), angle=0.0):
-    """Finite physical local rotation of one declared site's magnetic blocks.
+    """Weighted magnetic contribution of one declared site's rotation.
 
-    Two-sided same-U conjugation on every partition entry of ``site``: the
-    magnetic vector h = (v3, v4, v_up) = (hx, hy, hz) of each stored spinor
-    block is rotated by R(axis, angle); the scalar part h0 and every other
-    site's entries are untouched. Returns a new blocks mapping.
+    Each entry incident to ``site`` moves from ``B`` toward the rotated
+    ``U B U^dag`` by the site's symmetric share: ``B + w (U B U^dag - B)``
+    with ``w = 1/count`` of the entry's distinct endpoint owners (onsite
+    entries w=1, entries shared with another declared site w=1/2). The
+    scalar part h0 and every other site's sole entries are untouched, and
+    under a common U at every owner the contributions sum to the full
+    conjugation ``U B U^dag``. Returns a new blocks mapping.
     """
     if not vertex.partition:
         raise SpiralImportError(
@@ -302,13 +311,23 @@ def rotate_site_blocks(vertex, site, *, axis=(0.0, 0.0, 1.0), angle=0.0):
             f"rotation requested for unknown site {site!r}; declared sites: "
             f"{sorted(vertex.partition)}"
         )
+    endpoint_owner_count = {}
+    for members in vertex.partition.values():
+        for key in members:
+            endpoint_owner_count[key] = endpoint_owner_count.get(key, 0) + 1
     rot = _rodrigues(axis, float(angle))
     rotated = dict(vertex.blocks)
     for key in vertex.partition[site]:
+        weight = 1.0 / endpoint_owner_count[key]
         v_up, _v_dn, v3, v4 = vertex.blocks[key]
-        h = np.array([v3, v4, v_up], dtype=float)
-        hx, hy, hz = rot @ h
-        rotated[key] = (hz, -hz, hx, hy)
+        hx, hy, hz = rot @ np.array([v3, v4, v_up], dtype=float)
+        v_up_rotated = v_up + weight * (hz - v_up)
+        rotated[key] = (
+            v_up_rotated,
+            -v_up_rotated,
+            v3 + weight * (hx - v3),
+            v4 + weight * (hy - v4),
+        )
     return rotated
 
 
@@ -385,7 +404,10 @@ def rotation_legitimacy_report(
         "untouched_sites_unchanged": bool(untouched_ok),
         "max_trace_deviation": float(max_trace),
         "rotated_entries": len(vertex.partition[site]),
-        "convention": "two-sided same-U conjugation (production, ADR-004)",
+        "convention": (
+            "weighted site contributions, w=1/count of distinct endpoint "
+            "owners, each conjugated by full U_site"
+        ),
     }
 
 

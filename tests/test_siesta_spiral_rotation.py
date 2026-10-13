@@ -20,6 +20,7 @@ import pytest
 from TB2J.interfaces.siesta_spiral import SpiralImportError
 from TB2J.interfaces.siesta_spiral_io import load_fixture
 from TB2J.interfaces.siesta_spiral_vertex import (
+    MagneticVertex,
     extract_magnetic_vertex,
     partition_variant_spread,
     rotate_site_blocks,
@@ -64,18 +65,73 @@ def test_rotation_changes_magnetic_operator_only(fe3, vertex):
 def test_rotation_matches_explicit_su2_conjugation(vertex):
     rotated = rotate_site_blocks(vertex, "Fe1", axis=(0.0, 0.0, 1.0), angle=np.pi / 3)
     theta = np.pi / 3
-    key = next(iter(vertex.partition["Fe1"]))
-    v_up, _v_dn, v3, v4 = vertex.blocks[key]
-    hz, hx, hy = v_up, v3, v4
-    # R_z(theta) acting on (hx, hy, hz)
-    hx_r = np.cos(theta) * hx - np.sin(theta) * hy
-    hy_r = np.sin(theta) * hx + np.cos(theta) * hy
-    got = rotated[key]
-    assert got[2] == pytest.approx(hx_r, abs=1e-12)
-    assert got[3] == pytest.approx(hy_r, abs=1e-12)
-    assert got[0] == pytest.approx(hz, abs=1e-12)
+
+    def expected(block, weight):
+        v_up, _v_dn, v3, v4 = block
+        hx_r = np.cos(theta) * v3 - np.sin(theta) * v4
+        hy_r = np.sin(theta) * v3 + np.cos(theta) * v4
+        hz_r = v_up
+        return (
+            v_up + weight * (hz_r - v_up),
+            -(v_up + weight * (hz_r - v_up)),
+            v3 + weight * (hx_r - v3),
+            v4 + weight * (hy_r - v4),
+        )
+
+    for key in vertex.partition["Fe1"]:
+        owners = sum(1 for m in vertex.partition.values() if key in m)
+        assert rotated[key] == pytest.approx(expected(vertex.blocks[key], 1.0 / owners))
+    # onsite entries take the full conjugation, shared entries exactly half
+    onsite = next(k for k in vertex.partition["Fe1"] if k[0] == k[1])
+    shared = next(
+        k
+        for k in vertex.partition["Fe1"]
+        if sum(1 for m in vertex.partition.values() if k in m) == 2
+    )
+    assert rotated[onsite] == pytest.approx(expected(vertex.blocks[onsite], 1.0))
+    assert rotated[shared] == pytest.approx(expected(vertex.blocks[shared], 0.5))
     outside = next(k for k in vertex.blocks if k not in vertex.partition["Fe1"])
     assert rotated[outside] == vertex.blocks[outside]
+
+
+def test_shared_cross_site_entry_takes_half_rotation():
+    blocks = {
+        (0, 0, 0): (0.5, -0.5, 0.3, -0.2),
+        (1, 1, 0): (-0.25, 0.25, 0.1, 0.4),
+        (0, 1, 0): (0.2, -0.2, -0.35, 0.15),
+    }
+    vertex = MagneticVertex(
+        blocks=blocks,
+        partition={
+            "A": frozenset({(0, 0, 0), (0, 1, 0)}),
+            "B": frozenset({(1, 1, 0), (0, 1, 0)}),
+        },
+    )
+    theta = np.pi / 5
+
+    def fully_rotated(block):
+        v_up, v_dn, v3, v4 = block
+        hx_r = np.cos(theta) * v3 - np.sin(theta) * v4
+        hy_r = np.sin(theta) * v3 + np.cos(theta) * v4
+        return (v_up, v_dn, hx_r, hy_r)
+
+    rotated = rotate_site_blocks(vertex, "A", axis=(0.0, 0.0, 1.0), angle=theta)
+    # site A's sole entry: full conjugation
+    assert rotated[(0, 0, 0)] == pytest.approx(fully_rotated(blocks[(0, 0, 0)]))
+    # the shared bond moves exactly halfway: B + 1/2 (U B U^dag - B)
+    assert rotated[(0, 1, 0)] == pytest.approx(
+        tuple(
+            0.5 * (b + r)
+            for b, r in zip(blocks[(0, 1, 0)], fully_rotated(blocks[(0, 1, 0)]))
+        )
+    )
+    # site B's sole entry is untouched
+    assert rotated[(1, 1, 0)] == vertex.blocks[(1, 1, 0)]
+    # with the same U at both owners, the 1/2 + 1/2 weighted shares sum to
+    # the full conjugation on the shared bond
+    full = fully_rotated(blocks[(0, 1, 0)])
+    both_sites = tuple(b + 2.0 * 0.5 * (f - b) for b, f in zip(blocks[(0, 1, 0)], full))
+    assert both_sites == pytest.approx(full)
 
 
 def test_undeclared_partition_and_unknown_site_refuse(fe3, vertex):

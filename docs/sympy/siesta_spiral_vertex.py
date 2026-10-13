@@ -22,24 +22,32 @@ Pinned, with assertions, on a minimal 2-orbital 2-site symbolic model:
     With the textured partner the assembled k-space pencil is exactly
     Hermitian.
 
-[C] Local SU(2) rotation U_A = exp(-i*theta*sigma_n/2) on sublattice A.
-    The sector phases d11 = e^{-i(k+q/2)x}, d22 = e^{-i(k-q/2)x} attach
-    to ROW-spin components, so at q != 0 they do not commute with a spin
-    rotation on spin-mixing blocks; the rotating frame is DEFINED by
-    carrying the q/2 gauge in the same d11/d22 placement for H,
-    H_scalar and B (pinned, not derived).  The
-    DECLARED PARTITION (ADR-004) marks every entry with mu in A or nu
-    in A as carrying A's rotation, applied two-sided with the same U_A,
-        W -> U_A W U_A^dag = h0*sigma0 + U_A (h.sigma) U_A^dag,
-    i.e. per entry
-        U_A (h.sigma) U_A^dag = (R_n(theta) h).sigma,
-    while the scalar part h0 and the overlap S are invariant and the
-    pencil stays Hermitian.  (A one-sided row- or column-only
-    application mixes the scalar part in via Tr(U_A h.sigma) != 0 and
-    is NOT the production convention; audit story 007 quantifies such
-    convention differences.)  Inventory: onsite mu=nu in A and every
-    intersite entry incident to A is conjugated; (B,B) entries are
-    untouched, and adding a B rotation changes only the (B,B) entry.
+[C] Local SU(2) rotations U_p = exp(-i*theta_p*sigma_n/2) and the
+    DECLARED PARTITION (vertex 2.0).  A magnetic block (mu,nu,R) has
+    distinct endpoint-owner sites P = {owner(mu), owner(nu)}; the
+    rotation is allocated additively,
+        W' = sum_p w_p U_p W U_p^dag
+           = W + sum_p w_p (U_p W U_p^dag - W),   w_p = 1/|P|,
+    each contribution conjugated by the FULL U_p (two-sided, same U);
+    the scalar part h0 and the overlap S are untouched and the pencil
+    stays Hermitian.  Same-site blocks (|P| = 1) carry w = 1 (full
+    conjugation); cross-site (shared) blocks carry w = 1/2 per
+    endpoint site, so one site's rotation changes only its weighted
+    half -- NOT the whole block.  Under a common U_p = U the weighted
+    contributions of a shared block sum to U W U^dag exactly (global
+    covariance: the joint equal-angle action transforms the block
+    once), and the mixed second vertex d^2 W'/dtheta_p dtheta_q
+    (p != q) vanishes identically; the rejected double-conjugation
+    (full-incidence) reading carries a spurious mixed second vertex.
+    Per contribution U_p (h.sigma) U_p^dag = (R_n(theta_p) h).sigma.
+    The sector phases d11 = e^{-i(k+q/2)x}, d22 = e^{-i(k-q/2)x}
+    attach to ROW-spin components, so at q != 0 they do not commute
+    with a spin rotation on spin-mixing blocks; the rotating frame is
+    DEFINED by carrying the q/2 gauge in the same d11/d22 placement
+    for H, H_scalar and B (pinned, not derived).  (A one-sided row-
+    or column-only application mixes the scalar part in via
+    Tr(U_p h.sigma) != 0 and is NOT the production convention; audit
+    story 007 quantifies such convention differences.)
 
 [D] Rotating-frame statement: the vertex is the k-space operator
         B(k) = H(k) - H_scalar(k),
@@ -251,9 +259,9 @@ assert sp.simplify(Hp_shadow - Hp_shadow.H) == sp.zeros(4)
 check("q.x = 2*pi*n shadow in the assembled pencil stays Hermitian", True)
 
 # ---------------------------------------------------------------------------
-# [C] Local SU(2) rotation on sublattice A
+# [C] Local SU(2) rotations and the weighted declared partition
 # ---------------------------------------------------------------------------
-print("[C] local SU(2) rotation U_A = exp(-i theta sigma_n / 2)")
+print("[C] local SU(2) rotations and the weighted declared partition (vertex 2.0)")
 
 
 def gen(nvec):
@@ -337,17 +345,54 @@ err = np.abs(
 assert err < 1e-13, err
 check("random numeric axis/angle conjugation identity", True, f"max|diff| = {err:.2e}")
 
-# -- pencil level: the DECLARED PARTITION rotation.  Convention (ADR-004):
-#    every entry with mu in A or nu in A "carries A's rotation", applied
-#    as the two-sided same-U conjugation W -> U_A W U_A^dag; entries with
-#    neither end in A are untouched.  This is the unique choice that
-#    keeps the decomposition exact: the magnetic part stays traceless,
-#    the scalar part and S are invariant, and the pencil stays Hermitian.
-#    (One-sided row- or column-only application mixes the scalar part in
-#    via Tr(U_A h.sigma) != 0 and is a different convention -- audit
-#    story 007 quantifies such differences; the certificate must declare
-#    which one is used.)
+# -- pencil level: the DECLARED PARTITION rotation (vertex 2.0).  A
+#    magnetic block (mu,nu,R) has distinct endpoint-owner sites
+#    P = {owner(mu), owner(nu)}; the rotation is allocated additively,
+#        W' = sum_p w_p U_p W U_p^dag = W + sum_p w_p (U_p W U_p^dag - W),
+#    w_p = 1/|P|, each contribution conjugated by the FULL U_p
+#    (two-sided, same U).  Same-site blocks (|P| = 1) carry w = 1: full
+#    conjugation.  Cross-site (shared) blocks carry w = 1/2 per endpoint
+#    site: one site's rotation changes only its weighted half, NOT the
+#    whole block.  Under a common U_p = U the contributions sum to
+#    U W U^dag exactly (global covariance: the joint equal-angle action
+#    transforms the block once).  The scalar part h0 and S are untouched
+#    and the pencil stays Hermitian.  (One-sided row- or column-only
+#    application mixes the scalar part in via Tr(U_p h.sigma) != 0 and
+#    is a different convention -- audit story 007 quantifies such
+#    differences; the certificate must declare which one is used.)
 UA = rot_mat((0, 0, 1), sp.Symbol("thetaA", real=True))
+UB = rot_mat((0, 0, 1), sp.Symbol("thetaB", real=True))
+
+
+def block_owners(e):
+    """Distinct endpoint-owner sites: owners of the row and column orbital."""
+    return (e["mu"], e["nu"]) if e["mu"] != e["nu"] else (e["mu"],)
+
+
+def owner_weights(e):
+    P = block_owners(e)
+    return {p: sp.Rational(1, len(P)) for p in P}
+
+
+def rotate_block(W, e, rot):
+    """Declared partition allocation, additive form (vertex 2.0):
+    W + sum_p w_p (U_p W U_p^dag - W) with w_p = 1/count of distinct
+    endpoint owners; sites absent from `rot` act as identity."""
+    U = {p: rot.get(p, sp.eye(2)) for p in owner_weights(e)}
+    return sp.expand(
+        W
+        + sum(
+            (w * (U[p] * W * U[p].H - W) for p, w in owner_weights(e).items()),
+            sp.zeros(2),
+        )
+    )
+
+
+def rotate_entries(entries, rot):
+    return [{**e, "W": rotate_block(e["W"], e, rot)} for e in entries]
+
+
+rotA = {0: UA}  # declared case: only sublattice A rotates
 
 assert sp.simplify(UA * S0 * UA.H - S0) == sp.zeros(2)
 check(
@@ -361,32 +406,127 @@ check(
 )
 
 
-def carries_A(e):
-    return e["mu"] == 0 or e["nu"] == 0
+# owner/weight partition of the model
+_wt = {(e["mu"], e["nu"]): owner_weights(e) for e in ENTRIES}
+assert _wt[(0, 0)] == {0: sp.Rational(1)}
+assert _wt[(1, 1)] == {1: sp.Rational(1)}
+assert _wt[(0, 1)] == {0: sp.Rational(1, 2), 1: sp.Rational(1, 2)}
+assert _wt[(1, 0)] == {1: sp.Rational(1, 2), 0: sp.Rational(1, 2)}
+check(
+    "owner partition: onsite blocks single-owner w=1; intersite "
+    "(0,1)/(1,0) shared by both endpoint sites, w=1/2 each",
+    True,
+    str(_wt),
+)
 
-
-def rotate_entries(entries, UA_):
-    out = []
-    for e in entries:
-        if carries_A(e):
-            out.append({**e, "W": sp.expand(UA_ * e["W"] * UA_.H)})
-        else:
-            out.append(e)
-    return out
-
-
-# per declared entry: rotated block = scalar part + rotated magnetic part
+# additive and weighted-sum forms agree entry by entry
 for e in ENTRIES:
-    if not carries_A(e):
-        continue
+    closed = sp.zeros(2)
+    for p, w in owner_weights(e).items():
+        Up = rotA.get(p, sp.eye(2))
+        closed += w * (Up * e["W"] * Up.H)
+    assert sp.simplify(rotate_block(e["W"], e, rotA) - closed) == sp.zeros(2)
+check(
+    "allocation is additive: W' = W + sum_p w_p (U_p W U_p^dag - W) "
+    "= sum_p w_p U_p W U_p^dag",
+    True,
+    "symbolic",
+)
+
+# per entry under the A-only declared case: rotated block = scalar part
+# + weighted rotated magnetic part; h0 and the trace are invariant
+for e in ENTRIES:
     W, w0 = e["W"], sp.simplify((e["W"][0, 0] + e["W"][1, 1]) / 2)
     Wm = W - w0 * S0
-    Wrot = UA * W * UA.H
-    assert sp.simplify(Wrot - (w0 * S0 + UA * Wm * UA.H)) == sp.zeros(2)
+    Wrot = rotate_block(W, e, rotA)
+    magrot = sp.zeros(2)
+    for p, w in owner_weights(e).items():
+        Up = rotA.get(p, sp.eye(2))
+        magrot += w * (Up * Wm * Up.H)
+    assert sp.simplify(Wrot - (w0 * S0 + magrot)) == sp.zeros(2)
     assert sp.simplify(Wrot[0, 0] + Wrot[1, 1] - 2 * w0) == 0
 check(
-    "every declared entry: W' = h0 sigma0 + U_A (h.sigma) U_A^dag, "
-    "trace (h0) preserved, magnetic part traceless",
+    "every entry: W' = h0 sigma0 + sum_p w_p U_p (h.sigma) U_p^dag; "
+    "h0 invariant, magnetic part traceless",
+    True,
+    "symbolic",
+)
+
+# same-site vs shared blocks under the A-only declared case
+_WA = onsiteA["W"]
+assert sp.simplify(rotate_block(_WA, onsiteA, rotA) - UA * _WA * UA.H) == sp.zeros(2)
+_WB = onsiteB["W"]
+assert sp.simplify(rotate_block(_WB, onsiteB, rotA) - _WB) == sp.zeros(2)
+_Wbd = bond["W"]
+assert sp.simplify(
+    rotate_block(_Wbd, bond, rotA) - (_Wbd / 2 + UA * _Wbd * UA.H / 2)
+) == sp.zeros(2)
+assert sp.simplify(rotate_block(_Wbd, bond, rotA) - UA * _Wbd * UA.H) != sp.zeros(2)
+_wp = partner["W"]
+assert sp.simplify(
+    rotate_block(_wp, partner, rotA) - (_wp / 2 + UA * _wp * UA.H / 2)
+) == sp.zeros(2)
+check(
+    "same-site blocks: w=1 full conjugation (onsite A) / untouched under "
+    "A-only (onsite B); shared bond+partner: one site moves only its "
+    "w=1/2 half, NOT the full conjugation (old full-incidence claim "
+    "rejected)",
+    True,
+    "symbolic",
+)
+
+# first/second vertex structure on the shared bond (B' = the allocation,
+# angles thetaA, thetaB on the two endpoint sites)
+thA = sp.Symbol("thetaA", real=True)
+thB = sp.Symbol("thetaB", real=True)
+_at0 = {thA: 0, thB: 0}
+Wb = bond["W"].subs(c12, H3 - I * H4)
+alloc_t = (
+    Wb
+    + sp.Rational(1, 2) * (UA * Wb * UA.H - Wb)
+    + sp.Rational(1, 2) * (UB * Wb * UB.H - Wb)
+)
+template1 = sp.expand(sp.diff(UA * Wb * UA.H, thA).subs(_at0))
+assert sp.simplify(
+    sp.diff(alloc_t, thA).subs(_at0) - sp.Rational(1, 2) * template1
+) == sp.zeros(2)
+check("single-site first vertex on a shared block carries w=1/2", True, "symbolic")
+template2 = sp.expand(sp.diff(UA * Wb * UA.H, thA, 2).subs(_at0))
+assert sp.simplify(
+    sp.diff(alloc_t, thA, 2).subs(_at0) - sp.Rational(1, 2) * template2
+) == sp.zeros(2)
+check(
+    "same-site second vertex on a shared block carries w=1/2 "
+    "(not w^2, not unweighted)",
+    True,
+    "symbolic",
+)
+_mixed = sp.diff(sp.diff(alloc_t, thA), thB).subs(_at0)
+assert sp.simplify(_mixed) == sp.zeros(2)
+check(
+    "cross-site second vertex vanishes: d^2 B'/dtheta_A dtheta_B = 0",
+    True,
+    "symbolic",
+)
+# negative control: the rejected double-conjugation reading has a
+# spurious mixed second vertex on the shared block
+dbl_t = sp.expand(UB * UA * Wb * UA.H * UB.H)
+assert sp.simplify(sp.diff(sp.diff(dbl_t, thA), thB).subs(_at0)) != sp.zeros(2)
+check(
+    "negative control: double conjugation U_B U_A W U_A^dag U_B^dag "
+    "carries a spurious mixed second vertex",
+    True,
+    "symbolic",
+)
+
+# global covariance: a common U on all endpoint owners acts once
+Ucov = rot_mat((0, 0, 1), th)
+for e in ENTRIES:
+    Wuni = rotate_block(e["W"], e, {0: Ucov, 1: Ucov})
+    assert sp.simplify(Wuni - Ucov * e["W"] * Ucov.H) == sp.zeros(2)
+check(
+    "global covariance: common U_p = U sums the weighted contributions "
+    "to U W U^dag (joint equal-angle action transforms the block once)",
     True,
     "symbolic",
 )
@@ -418,7 +558,7 @@ assert sp.simplify(S0p - S0p.subs(c12, H3 - I * H4)) == sp.zeros(4)
 check("S(k) carries no magnetic components and is never rotated", True)
 
 H_base = pencil(ENTRIES).subs(c12, H3 - I * H4)
-H_rot = pencil(rotate_entries(ENTRIES, UA)).subs(c12, H3 - I * H4)
+H_rot = pencil(rotate_entries(ENTRIES, rotA)).subs(c12, H3 - I * H4)
 # by linearity of the assembly, H_rot - H_base is the pencil of the
 # per-entry block differences W' - W; those are purely magnetic (checked
 # above), so H_scalar is untouched:
@@ -426,10 +566,7 @@ mag_rot_entries = []
 for e in ENTRIES:
     w0 = (e["W"][0, 0] + e["W"][1, 1]) / 2
     Wm = e["W"] - w0 * S0
-    if carries_A(e):
-        mag_rot_entries.append({**e, "W": sp.expand(UA * Wm * UA.H)})
-    else:
-        mag_rot_entries.append({**e, "W": Wm})
+    mag_rot_entries.append({**e, "W": rotate_block(Wm, e, rotA)})
 assert sp.simplify(
     (H_rot - H_scalar - pencil(mag_rot_entries)).subs(c12, H3 - I * H4)
 ) == sp.zeros(4)
@@ -443,42 +580,44 @@ Brot = H_rot - H_scalar
 assert sp.simplify(Brot - Brot.H) == sp.zeros(4)
 check("B(k) remains Hermitian after the partition rotation " "(symbolic theta)", True)
 
-# inventory: which entries carry A's rotation (mu=0 sublattice A).
-inv = {"onsite_A": [], "intersite_A_row": [], "intersite_A_col": [], "untouched": []}
-for e in ENTRIES:
-    mu, nu = e["mu"], e["nu"]
-    if mu == nu == 0:
-        inv["onsite_A"].append((mu, nu))
-    elif mu == 0:
-        inv["intersite_A_row"].append((mu, nu))
-    elif nu == 0:
-        inv["intersite_A_col"].append((mu, nu))
-    else:
-        inv["untouched"].append((mu, nu))
-assert inv["onsite_A"] == [(0, 0)]
-assert inv["intersite_A_row"] == [(0, 1)]
-assert inv["intersite_A_col"] == [(1, 0)]
-assert inv["untouched"] == [(1, 1)]
+# inventory: endpoint owners of each entry (vertex 2.0 partition).
+inv = {(e["mu"], e["nu"]): block_owners(e) for e in ENTRIES}
+assert inv[(0, 0)] == (0,)
+assert inv[(1, 1)] == (1,)
+assert inv[(0, 1)] == (0, 1)
+assert inv[(1, 0)] == (1, 0)
 check(
-    "inventory: entries with mu in A or nu in A carry the rotation "
-    "(two-sided U_A conjugation); (B,B) untouched",
+    "inventory: onsite blocks have a single endpoint owner (w=1); the "
+    "shared (0,1)/(1,0) bond pair is owned by both sites (w=1/2 each)",
     True,
     str(inv),
 )
 
-# partition locality: giving the (B,B) entry its own rotation changes
-# ONLY that entry; the A-carrying entries are exactly as declared.
-UB = rot_mat((0, 0, 1), sp.Symbol("thetaB", real=True))
-bb = [e for e in ENTRIES if not carries_A(e)][0]
-rot_bb = {**bb, "W": UB * bb["W"] * UB.H}
-only_A = pencil(rotate_entries(ENTRIES, UA))
-with_B = pencil(
-    [{**e, "W": rot_bb["W"]} if e is bb else e for e in rotate_entries(ENTRIES, UA)]
-)
+# partition locality: adding B's rotation adds exactly its weighted
+# increment w_B (U_B W U_B^dag - W) to every B-owned half; entries with
+# owner set (0,) are untouched.
+only_A = pencil(rotate_entries(ENTRIES, rotA))
+with_B = pencil(rotate_entries(ENTRIES, {0: UA, 1: UB}))
+expected_incr = sp.zeros(4)
+for e in ENTRIES:
+    wB = owner_weights(e).get(1, 0)
+    if wB == 0:
+        continue
+    dW = sp.expand(wB * (UB * e["W"] * UB.H - e["W"]))
+    mu, nu, xx = e["mu"], e["nu"], e["x"]
+    expected_incr[2 * mu + 0, 2 * nu + 0] += dW[0, 0] * d11(xx)
+    expected_incr[2 * mu + 0, 2 * nu + 1] += dW[0, 1] * d11(xx)
+    expected_incr[2 * mu + 1, 2 * nu + 0] += dW[1, 0] * d22(xx)
+    expected_incr[2 * mu + 1, 2 * nu + 1] += dW[1, 1] * d22(xx)
 assert sp.simplify(
-    (with_B - only_A - pencil([rot_bb]) + pencil([bb])).subs(c12, H3 - I * H4)
+    (with_B - only_A - expected_incr).subs(c12, H3 - I * H4)
 ) == sp.zeros(4)
-check("partition locality: A-declared entries unaffected by a B rotation", True)
+check(
+    "partition locality: adding B's rotation contributes exactly "
+    "w_B (U_B W U_B^dag - W) on B-owned halves (onsite B: w=1; shared "
+    "bond pair: w=1/2); A-owned blocks untouched",
+    True,
+)
 
 # ---------------------------------------------------------------------------
 # [D] Rotating-frame vertex operator and the q/2 gauge
@@ -537,8 +676,10 @@ subs_num = {
 }
 Hn = np.array(sp.N(H_base.subs(subs_num), 30).tolist(), dtype=complex)
 Uall = sp.Matrix(Un.tolist())
-# partition covering BOTH sublattices with the same U:
-all_rot = [{**e, "W": sp.expand(Uall * e["W"] * Uall.H)} for e in ENTRIES]
+# partition covering BOTH sublattices with the same U: the weighted
+# contributions (w = 1/2 + 1/2 on the shared bond) sum to the full
+# conjugation on every block -- nonzero intersite B included.
+all_rot = rotate_entries(ENTRIES, {0: Uall, 1: Uall})
 Hn_rot = np.array(
     sp.N(pencil(all_rot).subs(c12, H3 - I * H4).subs(subs_num), 30).tolist(),
     dtype=complex,
@@ -546,8 +687,8 @@ Hn_rot = np.array(
 err = np.abs(Hn_rot - W_glob @ Hn @ W_glob.conj().T).max()
 assert err < 1e-12, err
 check(
-    "q = 0: entrywise two-sided rotation == global conjugation "
-    "W H(k) W^dag (scalar phases pass through)",
+    "q = 0: weighted partition under common U == global conjugation "
+    "W H(k) W^dag (w = 1/2 + 1/2 = full; nonzero intersite B)",
     True,
     f"max|diff| = {err:.2e}",
 )
@@ -557,7 +698,7 @@ subs_q[q] = sp.Rational(2, 5)
 Hn_q = np.array(sp.N(H_base.subs(subs_q), 30).tolist(), dtype=complex)
 Hn_rot_q = np.array(
     sp.N(
-        pencil([{**e, "W": sp.expand(Uall * e["W"] * Uall.H)} for e in ENTRIES])
+        pencil(rotate_entries(ENTRIES, {0: Uall, 1: Uall}))
         .subs(c12, H3 - I * H4)
         .subs(subs_q),
         30,
@@ -580,22 +721,27 @@ check(
 print("[E] provenance certificate fields")
 
 REQUIRED_CERT_FIELDS = (
+    "vertex_version",  # "2.0"; serialized v1.0 vertices reject at the gate
     "vertex_convention",  # "Oroszlany spin-dependent part of saved total H"
     "vertex_convention_value",  # e.g. "spin-split of stored total H; no XC reconstruction"
-    "partition_declaration",  # which (mu,nu,R) entries rotate with sublattice A
+    "partition_declaration",  # weighted site contributions, w=1/count of endpoint owners
     "packing_convention",  # H12 = h3 - i h4; hx=h3, hy=h4, hz=(h1-h2)/2
     "sector_phase_convention",  # d11 = e^{-i(k+q/2)x}, d22 = e^{-i(k-q/2)x}
     "projector_convention",  # dual-basis: S on which side (Tr(S A~), S^-1 right in resolvent)
     "metric_convention",  # overlap used in generalized eigenproblem
     "allocation",  # DZP channels retained flag
 )
+VERTEX_VERSION = "2.0"
+PARTITION_DECLARATION = (
+    "weighted site contributions, w=1/count of distinct endpoint owners, "
+    "each conjugated by full U_site; scalar h0 and S untouched"
+)
 cert = {
+    "vertex_version": VERTEX_VERSION,
     "vertex_convention": "oroszlany_total_h_spin_split",
     "vertex_convention_value": "spin-dependent part of saved total H; no XC reconstruction on "
     "this path: B = W - h0*sigma0, hx=h3, hy=h4, hz=(h1-h2)/2",
-    "partition_declaration": "sublattices A=[...]; every (mu,nu,R) entry "
-    "with mu in A or nu in A carries A's rotation "
-    "(two-sided U_A W U_A^dag); others untouched",
+    "partition_declaration": PARTITION_DECLARATION,
     "packing_convention": "H12 = h3 - i*h4",
     "sector_phase_convention": "d11 = exp(-i(k+q/2)x), d22 = exp(-i(k-q/2)x)",
     "projector_convention": "coeff form A~ = S^-1 A; Tr A = Tr(S A~)",
@@ -610,6 +756,13 @@ check(
     True,
     f"{len(REQUIRED_CERT_FIELDS)} fields",
 )
+assert cert["vertex_version"] == "2.0"
+check("vertex_version pins 2.0 (v1.0 vertices reject)", True)
+assert cert["partition_declaration"] == (
+    "weighted site contributions, w=1/count of distinct endpoint owners, "
+    "each conjugated by full U_site; scalar h0 and S untouched"
+)
+check("partition_declaration pins the vertex-2.0 weighted allocation", True)
 assert "no XC reconstruction" in cert["vertex_convention_value"]
 check("certificate states no-XC-reconstruction path", True)
 

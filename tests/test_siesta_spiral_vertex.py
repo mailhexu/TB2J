@@ -103,7 +103,10 @@ def test_partition_declaration_and_locality(fe3):
     per = bundle.norb // 3
     sites = {f"Fe{i+1}": list(range(i * per, (i + 1) * per)) for i in range(3)}
     vertex = extract_magnetic_vertex(bundle, orbitals_by_site=sites)
-    assert vertex.certificate["partition_declaration"].startswith("two-sided")
+    assert vertex.certificate["partition_declaration"] == (
+        "weighted site contributions, w=1/count of distinct endpoint owners, "
+        "each conjugated by full U_site; scalar h0 and S untouched"
+    )
     for site, members in vertex.partition.items():
         orbs = set(sites[site])
         for mu, nu, _R in members:
@@ -121,6 +124,21 @@ def test_partition_declaration_and_locality(fe3):
     bad["partition"]["Fe1"].append(json.dumps([mu, nu, list(R)]))
     with pytest.raises(SpiralImportError, match="digest mismatch"):
         MagneticVertex.from_dict(bad)
+    # a stale pre-2.0 vertex carries the old unweighted declaration and the
+    # old version tag; both serialization gates must refuse it
+    old_declaration = (
+        "two-sided same-U conjugation on entries with mu or nu in the " "declared site"
+    )
+    stale_v1 = vertex.to_dict()
+    stale_v1["vertex_version"] = "1.0"
+    stale_v1["certificate"]["vertex_version"] = "1.0"
+    stale_v1["certificate"]["partition_declaration"] = old_declaration
+    with pytest.raises(SpiralImportError, match="unsupported magnetic-vertex version"):
+        MagneticVertex.from_dict(stale_v1)
+    stale_declaration = vertex.to_dict()
+    stale_declaration["certificate"]["partition_declaration"] = old_declaration
+    with pytest.raises(SpiralImportError, match="partition_declaration mismatch"):
+        MagneticVertex.from_dict(stale_declaration)
 
 
 def test_fail_closed_on_bad_ownership(fe3):
