@@ -709,8 +709,13 @@ def write_qe_atomic_dump(
     bg = np.linalg.inv(at).T
     tau = np.array([[0.0, 0.5, 0.25], [0.5, 0.25, 0.75], [0.1, 0.0, 0.3]])[:, :nat]
     isk = np.array([1, 2] * (nks // 2) + [1, 2][: nks % 2], dtype="<i4")
-    xk = np.zeros((3, nks))
-    xk[0, 2:] = 0.5  # k-points 3 and 4 at (0.5, 0, 0) 2pi/alat
+    # Regular 3-division mesh along axis 0 in fractional coordinates
+    # (f = xk @ at): an irregular k list cannot define the alias-free
+    # R window of _R_grid_for_cutoff, and even 2 divisions would leave
+    # only R=0. Odd 3 divisions keep the symmetric window {-1,0,1}.
+    kfrac = np.zeros((nks, 3))
+    kfrac[:, 0] = np.mod((np.arange(nks) // 2) / 3.0, 1.0)
+    xk = np.asfortranarray((kfrac @ np.linalg.inv(at)).T)
     wk = np.array([1.0, 1.0, 2.0, 2.0][:nks])
     et = rng.normal(size=(nbnd, nks))
     wg = np.abs(rng.normal(size=(nbnd, nks))) * wk
