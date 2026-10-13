@@ -23,6 +23,7 @@ counter-model breaks the identification.
 """
 
 import hashlib
+from pathlib import Path
 
 import numpy as np
 import scipy.linalg as la
@@ -933,13 +934,16 @@ def main():
         "[H] Generalized eigensolves, all finite-rotation Hessian entries and nonstationary chart probe"
     )
 
-    for path in (
-        "docs/sympy/siesta_spiral_frozen_response.py",
-        "docs/sympy/siesta_spiral_frozen_response.md",
-    ):
-        digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
-        print(f"[H] sha256 {path}: {digest}")
+    for path in (Path(__file__), Path(__file__).with_suffix(".md")):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        print(f"[H] sha256 {path.name}: {digest}")
     print("ALL ASSERTIONS GREEN")
+    return {
+        "gradient": gradient,
+        "onsite_curvature": onsite,
+        "response_curvature": response,
+        "total_curvature": curvature,
+    }
 
 
 if __name__ == "__main__":
