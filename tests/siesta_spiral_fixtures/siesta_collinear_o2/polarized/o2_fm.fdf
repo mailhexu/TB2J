@@ -1,0 +1,47 @@
+SystemName O2 molecular chain, collinear polarized fm anchor (established path)
+SystemLabel o2
+NumberOfAtoms 2
+NumberOfSpecies 1
+%block ChemicalSpeciesLabel
+ 1 8 O
+%endblock ChemicalSpeciesLabel
+LatticeConstant 1.0 Ang
+%block LatticeVectors
+ 7.0 0.0 0.0
+ 0.0 7.0 0.0
+ 0.0 0.0 4.0
+%endblock LatticeVectors
+AtomicCoordinatesFormat Ang
+%block AtomicCoordinatesAndAtomicSpecies
+ 2.895 3.5 2.0 1
+ 4.105 3.5 2.0 1
+%endblock AtomicCoordinatesAndAtomicSpecies
+PAO.BasisSize SZP
+MeshCutoff 150 Ry
+XC.functional GGA
+XC.authors PBE
+Spin polarized
+%block kgrid_Monkhorst_Pack
+ 1 0 0 0.0
+ 0 1 0 0.0
+ 0 0 4 0.0
+%endblock kgrid_Monkhorst_Pack
+ElectronicTemperature 100 K
+SCF.MustConverge T
+SCF.DM.Converge F
+SCF.H.Converge F
+SCF.FreeE.Converge T
+SCF.FreeE.Tolerance 1.d-8 eV
+DM.Tolerance 1.d-6
+SCF.H.Tolerance 1.d-5 eV
+MaxSCFIterations 300
+SCF.Mix Hamiltonian
+DM.MixingWeight 0.05
+DM.NumberPulay 6
+DM.UseSaveDM F
+SaveHS T
+WriteMullikenPop 1
+# Record all eigenvectors, including exactly zero-weight unoccupied states.
+# diag2kspiral's neigneeded pruning uses abs(qo) > occtol; negative threshold
+# disables only that optimization. Zero-weight contributions remain zero.
+DM.OccupancyTolerance -1.d-12
