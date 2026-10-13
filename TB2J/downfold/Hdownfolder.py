@@ -1,9 +1,9 @@
 import numpy as np
 
-from .io_exchange import ExchangeIO
-from .io_exchange.structure import get_attribute_array
-from .kpoints import monkhorst_pack
-from .mathutils import get_rotation_arrays
+from TB2J.magnon import ExchangeIO
+from TB2J.magnon.structure import get_attribute_array
+from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.magnon_math import get_rotation_arrays
 
 
 def combine_arrays(u, v):
@@ -173,7 +173,6 @@ class ExchangeDownfolder(ExchangeIO):
     def lowdin_partition(matrix, indices):
         N = matrix.shape[-1] // 2
         null_indices = np.array([i for i in range(N) if i not in indices])
-        diag_indices = np.diag_indices(2 * null_indices.size)
 
         idx = np.concatenate([indices, indices + N])[None, :]
         jdx = np.concatenate([null_indices, null_indices + N])[None, :]
@@ -183,8 +182,6 @@ class ExchangeDownfolder(ExchangeIO):
         Hji = matrix[..., jdx.T, idx]
         Hjj = matrix[..., jdx.T, jdx]
 
-        eigvals = np.linalg.eigvalsh(matrix)
-        Hjj[..., *diag_indices] -= eigvals.min()
         correction = np.einsum("...ij,...jk,...kl->...il", Hij, np.linalg.inv(Hjj), Hji)
 
         return Hii - correction
