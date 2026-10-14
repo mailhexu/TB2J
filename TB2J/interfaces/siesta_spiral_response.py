@@ -13,13 +13,18 @@ story-005 production vertex.  Conventions are pinned by
   differentiated matrix is re-packed into real-space four-component data.
   Each incident magnetic block transforms as ``B -> U B U^dag`` with its
   spin-scalar trace part and the complete assembled S(k) frozen;
-* the joint perturbation allocates every magnetic block additively to its
-  distinct endpoint owners (weighted site contributions,
-  ``w = 1/count`` per block, each contribution conjugated by the full
-  ``U_site``): ``B(theta) = sum_p w_p U_p B U_p^dag`` against the original
-  block. Onsite blocks carry ``w = 1``, a shared bond ``w = 1/2`` per
-  endpoint, so a common rotation is exactly one global conjugation and
-  finite rotations are independent of the site order;
+* the vertex certificate labels the rotating operator explicitly
+  (``operator_mode``, ADR-004 revision 2026-10-14). The default
+  ``onsite_delta`` rotates only the R=0 same-site blocks, each at full
+  weight ``w = 1``; intersite magnetic blocks stay frozen like the scalar
+  part. The recorded diagnostic variant ``weighted_total_h`` allocates
+  every magnetic block additively to its distinct endpoint owners
+  (weighted site contributions, ``w = 1/count`` per block, each
+  contribution conjugated by the full ``U_site``): ``B(theta) = sum_p
+  w_p U_p B U_p^dag`` against the original block. Onsite blocks carry
+  ``w = 1``, a shared bond ``w = 1/2`` per endpoint, so in this variant a
+  common rotation is exactly one global conjugation and finite rotations
+  are independent of the site order;
 * two transverse axes on ONE site use the declared exponential chart, so
   the same-site second vertex is the symmetric seagull evaluated on the
   once-weighted blocks; the mixed second vertex of two different sites is
@@ -57,17 +62,22 @@ from scipy.linalg import eigh, lu_factor, lu_solve
 from .siesta_spiral import SpiralBundle, SpiralImporter
 from .siesta_spiral_io import EIGENVALUE_TOL_EV, HERMITICITY_TOL
 from .siesta_spiral_vertex import (
+    OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODES,
     VERTEX_CONVENTION,
     MagneticVertex,
     _source_bundle_digest,
 )
 
-RESPONSE_VERSION = "2.0"
+RESPONSE_VERSION = "2.1"
 RESPONSE_CONVENTION = (
-    "frozen_total_h_weighted_site_owned: additive magnetic allocation "
-    "B(theta)=sum_p w_p U_p B U_p^dag with w_p=1/count of distinct endpoint "
-    "owners, each contribution conjugated by full U_site, S and scalar part "
-    "frozen, exponential chart per site, mixed cross-site second vertex zero"
+    "rotating_frame_frozen_response_operator_labeled: the vertex "
+    "certificate labels operator_mode; onsite_delta rotates only R=0 "
+    "same-site blocks at w=1 with intersite magnetic blocks, S and the "
+    "scalar part frozen, weighted_total_h allocates every incident block "
+    "additively B(theta)=sum_p w_p U_p B U_p^dag with w_p=1/count of "
+    "distinct endpoint owners conjugated by full U_site, exponential "
+    "chart per site, mixed cross-site second vertex zero in both modes"
 )
 ENSEMBLE_GAPPED_T0 = "gapped_fixed_occupations"
 TORQUE_BUDGET_EV_PER_RAD = 1e-3
@@ -456,10 +466,18 @@ class FrozenResponseProblem:
                 "(source_bundle_sha256 mismatch); refusing to rotate blocks "
                 "with a foreign vertex"
             )
+        if vertex.certificate.get("operator_mode") not in OPERATOR_MODES:
+            raise SpiralResponseError(
+                "magnetic-vertex certificate carries no known operator_mode "
+                f"(got {vertex.certificate.get('operator_mode')!r}); the "
+                "rotating operator must be declared, never guessed "
+                f"(known modes: {sorted(OPERATOR_MODES)})"
+            )
         MagneticVertex.from_dict(vertex.to_dict())
         self._bundle = deepcopy(bundle)
         self._vertex = deepcopy(vertex)
         self._source_digest = digest
+        self._operator_mode = vertex.certificate["operator_mode"]
         self._importer = SpiralImporter()
         self._pencils = {}
         self._partition = {
@@ -476,6 +494,28 @@ class FrozenResponseProblem:
                 owners.setdefault(key, []).append(site)
         self._owners = {key: tuple(sites) for key, sites in owners.items()}
         self._weights = {key: 1.0 / len(sites) for key, sites in self._owners.items()}
+        if self._operator_mode == OPERATOR_MODE_ONSITE_DELTA:
+            # ADR-004 (2026-10-14 revision): an onsite-delta vertex rotates
+            # only R=0 blocks with both orbitals on the owning site, each at
+            # the full weight w = 1 that single ownership implies.  A shared
+            # or non-R=0 key would mean an intersite or image magnetic block
+            # is being rotated, which this operator mode refuses.
+            for keys in vertex.partition.values():
+                for key in keys:
+                    r_components = key[2] if isinstance(key[2], tuple) else (key[2],)
+                    if any(int(r) != 0 for r in r_components):
+                        raise SpiralResponseError(
+                            f"onsite_delta vertex rotates non-R=0 block "
+                            f"{key!r}; only R=0 same-site blocks may rotate "
+                            "in the onsite_delta operator mode"
+                        )
+            for key, sites in self._owners.items():
+                if len(sites) != 1:
+                    raise SpiralResponseError(
+                        f"onsite_delta vertex rotates shared block {key!r} "
+                        f"owned by {sites!r}; intersite magnetic blocks must "
+                        "stay frozen in the onsite_delta operator mode"
+                    )
         self._axes = {}
         for site in self.site_order:
             if not vertex.partition[site]:
@@ -503,6 +543,11 @@ class FrozenResponseProblem:
     @property
     def site_order(self):
         return tuple(self._vertex.partition)
+
+    @property
+    def operator_mode(self):
+        """The rotating operator this problem's vertex declares."""
+        return self._operator_mode
 
     @property
     def sites(self):
@@ -539,12 +584,16 @@ class FrozenResponseProblem:
             n = self._bundle.norb
             scalar = np.zeros_like(h)
             blocks = {}
-            for mu, nu in set().union(*self._partition.values()):
-                indices = np.ix_([mu, mu + n], [nu, nu + n])
-                block = h[indices]
-                spin_scalar = np.trace(block) / 2.0 * np.eye(2)
-                scalar[indices] = spin_scalar
-                blocks[mu, nu] = block - spin_scalar
+            # Every index pair is decomposed, not only the incident ones:
+            # the frozen complement (intersite magnetic blocks under the
+            # onsite_delta operator) must survive into every rotated pencil.
+            for mu in range(n):
+                for nu in range(n):
+                    indices = np.ix_([mu, mu + n], [nu, nu + n])
+                    block = h[indices]
+                    spin_scalar = np.trace(block) / 2.0 * np.eye(2)
+                    scalar[indices] = spin_scalar
+                    blocks[mu, nu] = block - spin_scalar
             for matrix in (h, s, scalar):
                 matrix.setflags(write=False)
             self._pencils[cache_key] = h, s, scalar, blocks
@@ -564,8 +613,9 @@ class FrozenResponseProblem:
     def vertex_pencil(self, k, coord):
         """Assembled first-order vertex V_coord(k).
 
-        Each incident block enters at its site weight exactly once, so a
-        shared bond contributes w = 1/2 to each endpoint's vertex.
+        Each incident block enters at its site weight exactly once:
+        onsite_delta rotates its R=0 same-site blocks at the full weight
+        w = 1; weighted_total_h gives a shared bond w = 1/2 per endpoint.
         """
         axis = self.axis_of(coord)
         keys = self._partition[coord[0]]
@@ -578,9 +628,10 @@ class FrozenResponseProblem:
         """Assembled second-order vertex W_ab(k), Clairaut-symmetric.
 
         Same site: the symmetric seagull of the exponential chart on the
-        once-weighted incident blocks (shared bonds at w = 1/2).  Different
-        sites: identically zero -- additive site contributions never
-        compose under the weighted site-owned declaration.
+        once-weighted incident blocks (shared bonds at w = 1/2 in the
+        weighted_total_h variant).  Different sites: identically zero --
+        additive site contributions never compose under either operator
+        declaration.
         """
         a, b = self._ordered_pair(coord_a, coord_b)
         axis_a = self.axis_of(a)
@@ -603,13 +654,15 @@ class FrozenResponseProblem:
         return coord_b, coord_a
 
     def rotated_pencil(self, k, thetas):
-        """Pencil under finite rotations: weighted site contributions.
+        """Pencil under finite rotations: per-site weighted contributions.
 
         Every incident magnetic block receives
         ``sum_p w_p U_p B U_p^dag`` computed against the ORIGINAL block,
         so the result is independent of the site order, Hermitian for
         arbitrary per-site angles, and a rotation common to all sites is
-        exactly one global conjugation of the magnetic operator.
+        exactly one global conjugation of the rotated operator.  In the
+        onsite_delta mode only the R=0 same-site blocks rotate (w = 1) and
+        intersite magnetic blocks stay frozen.
         """
         site_thetas = {}
         for site, entries in dict(thetas).items():
@@ -636,19 +689,27 @@ class FrozenResponseProblem:
         unitaries = {
             site: _pass_unitary(generator) for site, generator in site_thetas.items()
         }
-        rotated = {}
+        n = self._bundle.norb
+        # Start from the full frozen pencil: blocks not incident to any
+        # rotating site (intersite magnetic blocks under onsite_delta) stay
+        # bit-identical, exactly like the scalar part.
+        h_out = np.array(_h, dtype=complex)
         for key, block in blocks.items():
+            owners = self._owners.get(key)
+            if owners is None:
+                continue
             weight = self._weights[key]
             total = np.zeros(block.shape, dtype=complex)
-            for site in self._owners[key]:
+            for site in owners:
                 u = unitaries.get(site)
                 if u is None:
                     total += weight * block
                 else:
                     total += weight * (u @ block @ u.conj().T)
-            rotated[key] = total
-        h = scalar + self._place(rotated)
-        return _require_hermitian(h, "rotated H(k)"), s
+            mu, nu = key
+            indices = np.ix_([mu, mu + n], [nu, nu + n])
+            h_out[indices] = scalar[indices] + total
+        return _require_hermitian(h_out, "rotated H(k)"), s
 
     def occupied_energy(self, kpoints, k_weights, thetas, ensemble):
         pts, weights = _normalized_weights(kpoints, k_weights)
@@ -808,11 +869,15 @@ class ResponseSet:
     ``axes[site][label]`` are the declared frame directions. Torque and
     gradient components use ``(site, label)`` keys; curvature uses coordinate
     pairs. All nested metadata are JSON-safe. No stationarity or spin-model
-    identification is applied.
+    identification is applied. ``operator_mode`` records the rotating
+    operator declared by the producing vertex certificate; ``from_dict``
+    refuses records lacking a known mode and, when
+    ``expect_operator_mode`` is given, any record of a different mode.
     """
 
     version: str
     convention: str
+    operator_mode: str
     site_order: tuple
     axes: dict
     coords: tuple
@@ -833,6 +898,7 @@ class ResponseSet:
         payload = {
             "version": self.version,
             "convention": self.convention,
+            "operator_mode": self.operator_mode,
             "site_order": list(self.site_order),
             "axes": {
                 site: {label: list(axis) for label, axis in axes.items()}
@@ -864,11 +930,23 @@ class ResponseSet:
         return payload
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data, *, expect_operator_mode=None):
         if data.get("version") != RESPONSE_VERSION:
             raise SpiralResponseError("unsupported response version")
         if data.get("convention") != RESPONSE_CONVENTION:
             raise SpiralResponseError("unsupported response convention")
+        mode = data.get("operator_mode")
+        if mode not in OPERATOR_MODES:
+            raise SpiralResponseError(
+                "response operator_mode missing or unknown "
+                f"(got {mode!r}; known modes: {sorted(OPERATOR_MODES)})"
+            )
+        if expect_operator_mode is not None and mode != expect_operator_mode:
+            raise SpiralResponseError(
+                f"response operator_mode {mode!r} does not match the "
+                f"expected {expect_operator_mode!r}; refusing to consume a "
+                "record produced by a different rotating operator"
+            )
         payload = {k: v for k, v in data.items() if k != "content_sha256"}
         if data.get("content_sha256") != _payload_digest(payload):
             raise SpiralResponseError("response payload digest mismatch")
@@ -882,6 +960,7 @@ class ResponseSet:
         return cls(
             version=data["version"],
             convention=data["convention"],
+            operator_mode=mode,
             site_order=tuple(data["site_order"]),
             axes={
                 site: {label: tuple(axis) for label, axis in axes.items()}
@@ -1164,6 +1243,7 @@ def evaluate_response_set(
     return ResponseSet(
         version=RESPONSE_VERSION,
         convention=RESPONSE_CONVENTION,
+        operator_mode=problem.operator_mode,
         site_order=problem.site_order,
         axes=axes,
         coords=coords,
@@ -1206,6 +1286,7 @@ def evaluate_response_set(
             "vertex_sha256": cert["vertex_sha256"],
             "bundle_version": problem._bundle.version,
             "vertex_convention": VERTEX_CONVENTION,
+            "operator_mode": problem.operator_mode,
             "q": list(problem._bundle.q),
             "derivation_authority": "docs/sympy/siesta_spiral_frozen_response.py",
             "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

@@ -27,7 +27,11 @@ from TB2J.interfaces.siesta_spiral_response import (
     evaluate_response_set,
 )
 from TB2J.interfaces.siesta_spiral_validation import validate_finite_rotations
-from TB2J.interfaces.siesta_spiral_vertex import extract_magnetic_vertex
+from TB2J.interfaces.siesta_spiral_vertex import (
+    OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODE_WEIGHTED_TOTAL_H,
+    extract_magnetic_vertex,
+)
 
 ANGLES = (8e-3, 4e-3, 2e-3, 1e-3)
 FIXTURE = Path(__file__).parent / "siesta_spiral_fixtures" / "siesta_spiral_o2.npz"
@@ -192,9 +196,11 @@ def test_uniform_q0_o2_rotation_is_one_global_spin_rotation():
     bundle, reference = load_fixture(path)
     assert np.allclose(bundle.q, 0.0)
     n = bundle.norb
+    orbitals_by_site = {"O1": range(n // 2), "O2": range(n // 2, n)}
     vertex = extract_magnetic_vertex(
         bundle,
-        orbitals_by_site={"O1": range(n // 2), "O2": range(n // 2, n)},
+        orbitals_by_site=orbitals_by_site,
+        operator=OPERATOR_MODE_WEIGHTED_TOTAL_H,
     )
     problem = FrozenResponseProblem(
         bundle,
@@ -236,6 +242,31 @@ def test_uniform_q0_o2_rotation_is_one_global_spin_rotation():
     )
     assert abs(uniform - energy) < 1e-8
     assert abs(local - energy) > 1e-4
+
+    # ADR-004 default (onsite_delta): the intersite magnetic blocks stay
+    # frozen, so the same common rotation is no longer a global
+    # conjugation -- and it is a genuine finite response.
+    onsite = FrozenResponseProblem(
+        bundle,
+        extract_magnetic_vertex(bundle, orbitals_by_site=orbitals_by_site),
+        axes_by_site={"O1": (("y", (0, 1, 0)),), "O2": (("y", (0, 1, 0)),)},
+    )
+    assert onsite.operator_mode == OPERATOR_MODE_ONSITE_DELTA
+    for k in reference["kp"]:
+        h, s = onsite.pencil(k)
+        rotated, unchanged_s = onsite.rotated_pencil(k, both)
+        assert not np.allclose(rotated, u @ h @ u.conj().T, atol=1e-8)
+        for a in range(n):
+            for b in range(n):
+                if a == b:
+                    continue
+                idx = np.ix_([a, a + n], [b, b + n])
+                np.testing.assert_array_equal(rotated[idx], h[idx])
+        np.testing.assert_array_equal(unchanged_s, s)
+    uniform_onsite = onsite.occupied_energy(
+        reference["kp"], reference["kp_weight"], both, ensemble
+    )
+    assert abs(uniform_onsite - energy) > 1e-4
 
 
 def test_full_four_point_o2_producer_mesh():
@@ -282,6 +313,7 @@ def test_full_four_point_o2_producer_mesh():
         0.8,
     )
     assert raw.contour_vs_band_max_abs <= RESPONSE_IDENTITY_TOL_EV
+    assert raw.operator_mode == OPERATOR_MODE_ONSITE_DELTA
     result = validate_finite_rotations(
         problem,
         raw,

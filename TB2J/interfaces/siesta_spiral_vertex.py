@@ -12,14 +12,19 @@ Conventions pinned symbolically by ``docs/sympy/siesta_spiral_vertex.py``:
   ``W = h0*sigma0 + h.sigma`` with ``h0 = (H1+H2)/2``,
   ``hx = H3``, ``hy = +H4`` (``H12 = H3 - 1j*H4 = hx - 1j*hy``),
   ``hz = (H1-H2)/2``; the vertex block is the traceless part ``h.sigma``.
-* Local rotation of declared site A contributes a weighted share of each
-  incident entry: ``B + sum_p w_p (U_p B U_p^dag - B)`` with symmetric
-  weight ``w_p = 1/count`` of the entry's distinct endpoint owners (onsite
-  w=1, cross-site w=1/2); under a common U the contributions sum to the
-  full two-sided conjugation ``U B U^dag`` (one-sided variants are
-  non-production, story 007).
-* Certificate fields: vertex convention, packing, sector phases,
-  projector/metric conventions, allocation, and a content digest.
+* Local rotation of declared site A rotates the entries of A's declared
+  partition. Operator modes (ADR-004, user decision 2026-10-14): the
+  production default ``operator="onsite_delta"`` rotates only the R=0
+  same-site blocks (each at full weight ``w=1``), matching the TB2J LKAG
+  onsite vertex; intersite magnetic blocks are not rotated. The recorded
+  variant ``operator="weighted_total_h"`` rotates every incident entry by
+  its symmetric share ``B + sum_p w_p (U_p B U_p^dag - B)`` with weight
+  ``w_p = 1/count`` of the entry's distinct endpoint owners (onsite w=1,
+  cross-site w=1/2); under a common U the contributions sum to the full
+  two-sided conjugation ``U B U^dag``.
+* Certificate fields: vertex convention, operator mode, packing, sector
+  phases, projector/metric conventions, allocation, and a content digest
+  that pins the operator mode.
 """
 
 from __future__ import annotations
@@ -33,14 +38,33 @@ import numpy as np
 
 from .siesta_spiral import SpiralBundle, SpiralImportError
 
-VERTEX_VERSION = "2.0"
+VERTEX_VERSION = "2.1"
 VERTEX_CONVENTION = "oroszlany_total_h_spin_split"
 PACKING_CONVENTION = "H12=H3-1j*H4;hy=+H4"
+OPERATOR_MODE_ONSITE_DELTA = "onsite_delta"
+OPERATOR_MODE_WEIGHTED_TOTAL_H = "weighted_total_h"
+OPERATOR_MODES = (
+    OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODE_WEIGHTED_TOTAL_H,
+)
+DEFAULT_OPERATOR_MODE = OPERATOR_MODE_ONSITE_DELTA
+PARTITION_DECLARATION_ONSITE = (
+    "onsite delta: only R=0 same-site blocks rotate, each at full weight "
+    "w=1; intersite magnetic blocks, scalar h0 and S untouched"
+)
 PARTITION_DECLARATION = (
     "weighted site contributions, w=1/count of distinct endpoint owners, "
     "each conjugated by full U_site; scalar h0 and S untouched"
 )
 PARTITION_DECLARATION_UNDECLARED = "undeclared; rotation gates must refuse"
+
+
+def _partition_declaration(operator_mode: str, declared: bool) -> str:
+    if not declared:
+        return PARTITION_DECLARATION_UNDECLARED
+    if operator_mode == OPERATOR_MODE_ONSITE_DELTA:
+        return PARTITION_DECLARATION_ONSITE
+    return PARTITION_DECLARATION
 
 
 @dataclass(frozen=True)
@@ -56,13 +80,15 @@ class MagneticVertex:
         ``H12 = v3 - 1j*v4`` is carried verbatim from the saved H).
     partition : Mapping[site, frozenset[key]]
         Declared spatial partition: for each site label, the entry keys
-        whose ``mu`` or ``nu`` orbital belongs to that site (ADR-004);
-        local rotations contribute the site's weighted share of each
-        incident entry (``w = 1/count`` of the entry's distinct endpoint
-        owners), not a per-site full conjugation.
+        that site's rotation acts on. Under ``onsite_delta`` these are the
+        R=0 blocks with both orbitals on the site; under
+        ``weighted_total_h`` every entry whose ``mu`` or ``nu`` orbital
+        belongs to the site (ADR-004). Onsite-mode entries rotate at full
+        weight ``w=1``; weighted-mode entries at ``w = 1/count`` of the
+        entry's distinct endpoint owners.
     certificate : dict
-        Provenance: conventions, bundle identity, partition declaration,
-        and ``vertex_sha256`` content digest.
+        Provenance: conventions, operator mode, bundle identity, partition
+        declaration, and ``vertex_sha256`` content digest.
     """
 
     blocks: dict
@@ -120,6 +146,15 @@ class MagneticVertex:
             blocks=blocks, partition=partition, certificate=dict(data["certificate"])
         )
         cert = vertex.certificate
+        # the operator mode is a closed enumeration: a certificate missing
+        # the field or carrying an unknown mode is refused before the
+        # digest gate, and the recorded mode selects the expected
+        # partition declaration
+        mode = cert.get("operator_mode")
+        if mode not in OPERATOR_MODES:
+            raise SpiralImportError(
+                "magnetic-vertex certificate operator_mode mismatch"
+            )
         expected_fields = {
             "vertex_version": VERTEX_VERSION,
             "vertex_convention": VERTEX_CONVENTION,
@@ -135,9 +170,7 @@ class MagneticVertex:
                 "spin-dependent overlap"
             ),
             "allocation": "DZP channels retained",
-            "partition_declaration": (
-                PARTITION_DECLARATION if partition else PARTITION_DECLARATION_UNDECLARED
-            ),
+            "partition_declaration": _partition_declaration(mode, bool(partition)),
         }
         for field_name, expected_value in expected_fields.items():
             if cert.get(field_name) != expected_value:
@@ -203,14 +236,25 @@ def extract_magnetic_vertex(
     bundle: SpiralBundle,
     *,
     orbitals_by_site: Mapping[str, Sequence[int]] | None = None,
+    operator: str = DEFAULT_OPERATOR_MODE,
 ) -> MagneticVertex:
     """Extract the production vertex from a validated spiral bundle.
 
     ``orbitals_by_site`` declares orbital ownership (site label -> orbital
-    indices). Every stored entry incident to a site's orbital belongs to
-    that site's rotation partition. Without ownership, the partition is
+    indices). ``operator`` selects the rotating magnetic operator
+    (ADR-004): ``"onsite_delta"`` (default) partitions only the R=0
+    same-site blocks, each rotating at full weight ``w=1`` so a local
+    rotation matches the TB2J LKAG onsite vertex; ``"weighted_total_h"``
+    keeps the version-2 variant where every entry incident to a site's
+    orbital belongs to that site's partition and rotates by its symmetric
+    share. Unknown modes are refused. Without ownership, the partition is
     explicitly undeclared; story-006 rotation gates must refuse to guess.
     """
+    if operator not in OPERATOR_MODES:
+        raise SpiralImportError(
+            f"unknown magnetic operator {operator!r}; expected one of "
+            f"{sorted(OPERATOR_MODES)}"
+        )
     bundle.validate()
     blocks = {}
     for (mu, nu, R), (h1, h2, h3, h4) in bundle.sparse.items():
@@ -235,8 +279,15 @@ def extract_magnetic_vertex(
         members_by_site = {site: set() for site in orbitals_by_site}
         for key in blocks:
             mu, nu, _R = key
-            for site in {owner[mu], owner[nu]}:
-                members_by_site[site].add(key)
+            if operator == OPERATOR_MODE_ONSITE_DELTA:
+                # only the R=0 block with both orbitals on the same site
+                # enters that site's rotation; intersite magnetic blocks
+                # stay frozen alongside the scalar part
+                if _is_onsite_key(key) and owner[mu] == owner[nu]:
+                    members_by_site[owner[mu]].add(key)
+            else:
+                for site in {owner[mu], owner[nu]}:
+                    members_by_site[site].add(key)
         partition = {
             site: frozenset(members) for site, members in members_by_site.items()
         }
@@ -246,6 +297,7 @@ def extract_magnetic_vertex(
     certificate = {
         "vertex_version": VERTEX_VERSION,
         "vertex_convention": VERTEX_CONVENTION,
+        "operator_mode": operator,
         "vertex_convention_value": (
             "spin-dependent part of the saved total Hamiltonian; no XC "
             "reconstruction on the production path (ADR-004 revised)"
@@ -265,11 +317,7 @@ def extract_magnetic_vertex(
             "spin-dependent overlap"
         ),
         "allocation": "DZP channels retained",
-        "partition_declaration": (
-            PARTITION_DECLARATION
-            if partition_declared
-            else PARTITION_DECLARATION_UNDECLARED
-        ),
+        "partition_declaration": _partition_declaration(operator, partition_declared),
     }
     certificate["vertex_sha256"] = _content_digest(blocks, partition, certificate)
     return MagneticVertex(blocks=blocks, partition=partition, certificate=certificate)
@@ -292,15 +340,19 @@ def _rodrigues(axis, angle):
 
 
 def rotate_site_blocks(vertex, site, *, axis=(0.0, 0.0, 1.0), angle=0.0):
-    """Weighted magnetic contribution of one declared site's rotation.
+    """Magnetic contribution of one declared site's rotation.
 
-    Each entry incident to ``site`` moves from ``B`` toward the rotated
-    ``U B U^dag`` by the site's symmetric share: ``B + w (U B U^dag - B)``
-    with ``w = 1/count`` of the entry's distinct endpoint owners (onsite
-    entries w=1, entries shared with another declared site w=1/2). The
-    scalar part h0 and every other site's sole entries are untouched, and
-    under a common U at every owner the contributions sum to the full
-    conjugation ``U B U^dag``. Returns a new blocks mapping.
+    Each entry in ``site``'s declared partition moves from ``B`` toward
+    the rotated ``U B U^dag`` by the site's share: ``B + w (U B U^dag - B)``
+    with ``w = 1/count`` of the entry's distinct endpoint owners in the
+    vertex's partition. The weighting follows the recorded operator mode:
+    an ``onsite_delta`` partition holds only R=0 same-site blocks, each
+    owned by exactly one site, so every entry rotates at ``w=1``; a
+    ``weighted_total_h`` partition shares incident entries between
+    endpoint owners (onsite w=1, cross-site w=1/2), and under a common U
+    at every owner the contributions sum to the full conjugation
+    ``U B U^dag``. The scalar part h0 and every other site's sole entries
+    are untouched. Returns a new blocks mapping.
     """
     if not vertex.partition:
         raise SpiralImportError(
@@ -405,22 +457,36 @@ def rotation_legitimacy_report(
         "max_trace_deviation": float(max_trace),
         "rotated_entries": len(vertex.partition[site]),
         "convention": (
-            "weighted site contributions, w=1/count of distinct endpoint "
-            "owners, each conjugated by full U_site"
+            PARTITION_DECLARATION_ONSITE
+            if vertex.certificate.get("operator_mode") == OPERATOR_MODE_ONSITE_DELTA
+            else PARTITION_DECLARATION
         ),
     }
 
 
 def partition_variant_spread(
-    bundle, variants, *, probe_orbitals, axis=(0.0, 0.0, 1.0), angle=0.35
+    bundle,
+    variants,
+    *,
+    probe_orbitals,
+    axis=(0.0, 0.0, 1.0),
+    angle=0.35,
+    operator: str = DEFAULT_OPERATOR_MODE,
 ):
     """FR-015 sensitivity: the same probe rotation under declared partitions.
 
     ``variants`` maps a variant name to an ``orbitals_by_site`` declaration.
-    The probe rotation is applied, per variant, to the site that owns
-    ``probe_orbitals``; the report carries each variant's operator change
-    and the maximum pairwise spread of the rotated magnetic operators.
+    ``operator`` selects the rotating operator mode passed to every variant
+    extraction (default ``"onsite_delta"``, ADR-004). The probe rotation is
+    applied, per variant, to the site that owns ``probe_orbitals``; the
+    report carries each variant's operator change and the maximum pairwise
+    spread of the rotated magnetic operators.
     """
+    if operator not in OPERATOR_MODES:
+        raise SpiralImportError(
+            f"unknown magnetic operator {operator!r}; expected one of "
+            f"{sorted(OPERATOR_MODES)}"
+        )
     if not isinstance(variants, dict) or len(variants) < 1:
         raise SpiralImportError("partition variants must be a non-empty mapping")
     probe = [int(o) for o in probe_orbitals]
@@ -429,7 +495,9 @@ def partition_variant_spread(
     per_variant = {}
     blocks_reference = None
     for name, sites in variants.items():
-        vertex = extract_magnetic_vertex(bundle, orbitals_by_site=sites)
+        vertex = extract_magnetic_vertex(
+            bundle, orbitals_by_site=sites, operator=operator
+        )
         if blocks_reference is None:
             blocks_reference = vertex.blocks
         elif _operator_change(blocks_reference, vertex.blocks) != 0.0:

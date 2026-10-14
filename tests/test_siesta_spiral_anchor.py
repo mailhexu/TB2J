@@ -1,14 +1,15 @@
 """Story-011 same-SCF q=0 anchor tests: numeric-only ExchangeCL2 comparison.
 
 The driver splits x-collinear spin channels from the *same* noncollinear O2
-fixture bundle that feeds the repaired frozen-response core, runs the
-established LKAG engine on those channels, and reports the image-summed
-site-pair J values and their signed difference as numbers. Per the user
-decision of 2026-10-13 there is **no agreement threshold**: the tests assert
-that numbers are computed, that raw responses are preserved, that the
-non-identical operator/integration settings are reported unmatched, and that
-the same-SCF spectrum equivalence actually holds numerically -- never that
-the two engines agree.
+fixture bundle that feeds the frozen-response core, runs the established
+LKAG engine on those channels, and reports the image-summed site-pair J
+values and their signed difference as numbers. Per the user decision of
+2026-10-13 there is **no agreement threshold**: the tests assert that
+numbers are computed, that raw responses are preserved, that the operator
+mode is labeled and matched per ADR-004 (onsite_delta default,
+weighted_total_h selectable), that the intrinsically distinct integration
+settings are reported unmatched, and that the same-SCF spectrum equivalence
+actually holds numerically -- never that the two engines agree.
 """
 
 from __future__ import annotations
@@ -38,7 +39,11 @@ from TB2J.interfaces.siesta_spiral_anchor import (
     spectral_equivalence_check,
 )
 from TB2J.interfaces.siesta_spiral_io import load_fixture
-from TB2J.interfaces.siesta_spiral_vertex import extract_magnetic_vertex
+from TB2J.interfaces.siesta_spiral_vertex import (
+    OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODE_WEIGHTED_TOTAL_H,
+    extract_magnetic_vertex,
+)
 
 FIXTURE_DIR = Path(__file__).parent / "siesta_spiral_fixtures" / "siesta_collinear_o2"
 FIXTURE_NPZ = FIXTURE_DIR / "o2_fm_q0.npz"
@@ -61,6 +66,16 @@ def comparison():
     pytest.importorskip("sisl")
     pytest.importorskip("HamiltonIO")
     return run_anchor_comparison(FIXTURE_NPZ, FIXTURE_FDF)
+
+
+@pytest.fixture(scope="module")
+def comparison_weighted():
+    """Diagnostic variant: the weighted incident total-H operator."""
+    pytest.importorskip("sisl")
+    pytest.importorskip("HamiltonIO")
+    return run_anchor_comparison(
+        FIXTURE_NPZ, FIXTURE_FDF, operator=OPERATOR_MODE_WEIGHTED_TOTAL_H
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +178,13 @@ def test_spectral_equivalence_is_actually_numeric(bundle_and_reference):
 def test_certificate_is_json_safe_and_same_scf(comparison, bundle_and_reference):
     payload = json.loads(json.dumps(comparison.to_dict(), allow_nan=False))
     assert payload["anchor_version"] == comparison.certificate["anchor_version"]
+    # ADR-004 default: the onsite-delta operator produced every number
+    assert payload["operator_mode"] == OPERATOR_MODE_ONSITE_DELTA
+    assert comparison.problem.operator_mode == OPERATOR_MODE_ONSITE_DELTA
+    assert (
+        comparison.problem.vertex.certificate["operator_mode"]
+        == OPERATOR_MODE_ONSITE_DELTA
+    )
 
     bundle, _reference = bundle_and_reference
     n = bundle.norb
@@ -297,13 +319,16 @@ def test_ensemble_is_gapped_fixed_occupations(comparison):
     assert record["occupation_smearing_width_ev"] == 0.0
 
 
-def test_settings_report_operator_and_integration_unmatched(comparison):
+def test_settings_report_operator_mode_and_unmatched_settings(comparison):
     settings = comparison.settings
-    assert settings["operator"]["matched"] is False
+    # ADR-004 default: the magnetic operators are matched by construction
+    assert settings["operator"]["operator_mode"] == OPERATOR_MODE_ONSITE_DELTA
+    assert settings["operator"]["matched"] is True
+    assert "operator" not in comparison.certificate["unmatched_settings"]
+    # the intrinsically distinct settings stay honestly unmatched
     assert settings["integration"]["matched"] is False
     assert settings["k_phase_gauge"]["matched"] is False
     assert settings["ensemble"]["matched"] is False
-    assert "operator" in comparison.certificate["unmatched_settings"]
     assert "integration" in comparison.certificate["unmatched_settings"]
     # requested mesh vs oddized actual is reported, not silently absorbed
     mesh = settings["k_mesh"]
@@ -325,8 +350,8 @@ def test_declared_mismatch_is_reported_then_refused(comparison):
     assert unmatched == ["k_mesh"]
     assert settings["k_mesh"]["declared"] == [2, 2, 2]
     assert settings["k_mesh"]["matched"] is False
-    # the mismatch is reported in place; numbers are not re-absorbed
-    assert settings["operator"]["matched"] is False
+    # undeclared settings keep their actual matched/unmatched record
+    assert settings["operator"]["matched"] is True
 
     with pytest.raises(AnchorSettingMismatchError, match="k_mesh"):
         apply_declaration(
@@ -343,6 +368,20 @@ def test_declared_mismatch_is_reported_then_refused(comparison):
     settings = copy.deepcopy(comparison.settings)
     apply_declaration(settings, AnchorDeclaration(j_convention="pair_once"))
     assert settings["j_convention"]["matched"] is False
+    # the projector declaration is matched exactly when it names the
+    # actually recorded operator mode
+    reported = apply_declaration(
+        copy.deepcopy(comparison.settings),
+        AnchorDeclaration(projector=OPERATOR_MODE_ONSITE_DELTA),
+    )
+    assert reported == []
+    settings = copy.deepcopy(comparison.settings)
+    unmatched = apply_declaration(
+        settings, AnchorDeclaration(projector=OPERATOR_MODE_WEIGHTED_TOTAL_H)
+    )
+    assert unmatched == ["operator"]
+    assert settings["operator"]["declared"] == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    assert settings["operator"]["matched"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -384,3 +423,47 @@ def test_spectral_gate_covers_comparison_mesh(comparison):
     assert gate["comparison_mesh"]["n_kpoints"] == 5
     assert gate["comparison_mesh"]["pass"] is True
     assert gate["comparison_mesh"]["max_dev_ev"] <= SPECTRAL_EQUIVALENCE_BUDGET_EV
+
+
+# ---------------------------------------------------------------------------
+# ADR-004 revision (2026-10-14): onsite-delta default, weighted variant
+# ---------------------------------------------------------------------------
+def test_weighted_variant_is_selectable_and_labeled(comparison, comparison_weighted):
+    """The diagnostic weighted operator runs, is labeled, and stays unmatched.
+
+    Both fixtures share the identical legacy engine, so the legacy pair sum
+    is the same number; the projected new-side J values are recorded for
+    both operator modes without any agreement verdict.
+    """
+    cert = comparison_weighted.certificate
+    assert cert["operator_mode"] == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    assert comparison_weighted.problem.operator_mode == (OPERATOR_MODE_WEIGHTED_TOTAL_H)
+    assert (
+        comparison_weighted.problem.vertex.certificate["operator_mode"]
+        == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    )
+    settings = comparison_weighted.settings
+    assert settings["operator"]["operator_mode"] == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    assert settings["operator"]["matched"] is False
+    assert "operator" in cert["unmatched_settings"]
+    assert comparison_weighted.legacy_pair_sum_ev == comparison.legacy_pair_sum_ev
+    pair_key = f"{SITES[0]}|{SITES[1]}"
+    for axis in AXES:
+        j_onsite = comparison.j_stored_by_axis[axis][pair_key]["j_stored_eV"]
+        j_weighted = comparison_weighted.j_stored_by_axis[axis][pair_key]["j_stored_eV"]
+        # ferromagnetic fixture: positive stored J under either operator
+        assert j_weighted > 0.0
+        # the two projectors are different operators; their stored J numbers
+        # differ and both are reported verbatim in their own certificates
+        assert j_weighted != j_onsite
+
+
+def test_unknown_operator_mode_refused_before_any_engine():
+    # an unknown operator mode must stop the driver before any engine run,
+    # so a nonexistent fdf proves the refusal ordering
+    with pytest.raises(AnchorError, match="unknown magnetic operator"):
+        run_anchor_comparison(
+            FIXTURE_NPZ,
+            Path("/nonexistent/dir/o2_fm.fdf"),
+            operator="total_h_ordered",
+        )

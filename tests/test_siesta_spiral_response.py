@@ -5,7 +5,9 @@ story-008 [C2] model (exact fractions, re-derived for the additive
 allocation: per block ``B(theta) = sum_p w_p U_p B U_p^dag`` with
 ``w_p = 1/count`` of the distinct endpoint owners; cross-site second
 vertices exactly zero). Production-path tests run a spinor-form synthetic
-bundle end to end and an O2 fixture smoke on a reduced k subset.
+bundle end to end in BOTH vertex operator modes (ADR-004 default
+``onsite_delta`` and the recorded ``weighted_total_h`` diagnostic variant)
+and an O2 fixture smoke on a reduced k subset.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from TB2J.interfaces.siesta_spiral_response import (
     FrozenResponseProblem,
     ResponseSet,
     SpiralResponseError,
+    _payload_digest,
     contour_curvature,
     contour_gradient,
     evaluate_response_set,
@@ -39,7 +42,14 @@ from TB2J.interfaces.siesta_spiral_response import (
     pencil_gradient,
     second_vertex_blocks,
 )
-from TB2J.interfaces.siesta_spiral_vertex import extract_magnetic_vertex
+from TB2J.interfaces.siesta_spiral_vertex import (
+    OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODE_WEIGHTED_TOTAL_H,
+    PARTITION_DECLARATION_ONSITE,
+    MagneticVertex,
+    _content_digest,
+    extract_magnetic_vertex,
+)
 
 FIXTURE = Path(__file__).parent / "siesta_spiral_fixtures" / "siesta_spiral_o2.npz"
 
@@ -395,9 +405,11 @@ def _spinor_bundle():
     )
 
 
-def _bundle_problem():
+def _bundle_problem(operator=OPERATOR_MODE_ONSITE_DELTA):
     bundle = _spinor_bundle()
-    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0], "B": [1]})
+    vertex = extract_magnetic_vertex(
+        bundle, orbitals_by_site={"A": [0], "B": [1]}, operator=operator
+    )
     problem = FrozenResponseProblem(
         bundle,
         vertex,
@@ -440,6 +452,15 @@ def test_spinor_bundle_response_set_end_to_end():
     )
 
     assert response.version == RESPONSE_VERSION
+    # the record labels the rotating operator that produced every number
+    assert response.operator_mode == OPERATOR_MODE_ONSITE_DELTA
+    assert response.provenance["operator_mode"] == OPERATOR_MODE_ONSITE_DELTA
+    assert (
+        response.frozen_declarations["magnetic_amplitudes"]["certificate"][
+            "operator_mode"
+        ]
+        == OPERATOR_MODE_ONSITE_DELTA
+    )
     # torque state carried verbatim: tau == -gradient, nonzero entries kept
     for coord in coords:
         assert response.torque[coord] == pytest.approx(
@@ -498,6 +519,68 @@ def test_spinor_bundle_response_set_end_to_end():
     stale_convention["convention"] = "frozen_total_h_ordered_two_sided"
     with pytest.raises(SpiralResponseError, match="convention"):
         ResponseSet.from_dict(stale_convention)
+    # a record of a DIFFERENT rotating operator is refused when the consumer
+    # declares which mode it expects; a relabeled payload is refused by the
+    # digest, and a digest-consistent foreign mode by the mode gate
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        ResponseSet.from_dict(
+            response.to_dict(), expect_operator_mode=OPERATOR_MODE_WEIGHTED_TOTAL_H
+        )
+
+
+def test_response_set_records_and_gates_operator_mode():
+    """The weighted variant is selectable and every serialization is labeled."""
+    bundle, vertex, problem, eig = _bundle_problem(
+        operator=OPERATOR_MODE_WEIGHTED_TOTAL_H
+    )
+    assert vertex.certificate["operator_mode"] == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    assert problem.operator_mode == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    gap = float(eig[2] - eig[1])
+    ensemble = Ensemble(
+        ENSEMBLE_GAPPED_T0, 2, 2.0, float((eig[1] + eig[2]) / 2), 0.0, gap
+    )
+    contour = EnergyContour.declared(
+        z0=ensemble.fermi_energy_ev,
+        occupied_min=float(eig[0]),
+        gap_ev=gap,
+        margin_ev=0.4,
+        n_nodes=256,
+    )
+    response = evaluate_response_set(
+        problem,
+        ensemble=ensemble,
+        coords=(("A", "y"), ("B", "y")),
+        kpoints=[0.0],
+        k_weights=[1.0],
+        contour=contour,
+        finite_steps=(4e-3, 2e-3),
+    )
+    assert response.operator_mode == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    payload = json.loads(json.dumps(response.to_dict()))
+    clone = ResponseSet.from_dict(payload)
+    assert clone == response
+    # the weighted record is accepted only under its own mode expectation
+    assert (
+        ResponseSet.from_dict(
+            payload, expect_operator_mode=OPERATOR_MODE_WEIGHTED_TOTAL_H
+        ).operator_mode
+        == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    )
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        ResponseSet.from_dict(payload, expect_operator_mode=OPERATOR_MODE_ONSITE_DELTA)
+    # digest-consistent but unknown mode: refused, never reinterpreted
+    unknown = dict(payload)
+    unknown["operator_mode"] = "total_h_ordered"
+    unknown["content_sha256"] = _payload_digest(
+        {k: v for k, v in unknown.items() if k != "content_sha256"}
+    )
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        ResponseSet.from_dict(unknown)
+    # a missing operator_mode fails closed even with a consistent digest
+    missing = {k: v for k, v in payload.items() if k != "operator_mode"}
+    missing["content_sha256"] = _payload_digest(missing)
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        ResponseSet.from_dict(missing)
 
 
 def test_spinor_bundle_band_matches_finite_rotation():
@@ -526,17 +609,18 @@ def test_spinor_bundle_band_matches_finite_rotation():
 
 
 # ---------------------------------------------------------------------------
-# production path: weighted site-owned finite rotations
+# production path: operator-mode finite rotations
 # ---------------------------------------------------------------------------
 def test_uniform_common_rotation_is_one_global_conjugation():
-    """q=0 synthetic bundle: both sites at the same angle act once.
+    """q=0 synthetic bundle: weighted variant conjugates globally.
 
     The weighted site contributions of every shared and onsite block sum to
     the full ``U B U^dag``, so the pencil transforms by exactly one global
     spinor conjugation (S is spin-scalar here), while a single-site
     rotation remains a genuine physical change.
     """
-    _, _, problem, _eig = _bundle_problem()
+    _, _, problem, _eig = _bundle_problem(operator=OPERATOR_MODE_WEIGHTED_TOTAL_H)
+    assert problem.operator_mode == OPERATOR_MODE_WEIGHTED_TOTAL_H
     angle = 0.13
     c, sn = np.cos(angle / 2.0), np.sin(angle / 2.0)
     u = np.kron(np.array([[c, -sn], [sn, c]]), np.eye(problem.bundle.norb))
@@ -552,6 +636,44 @@ def test_uniform_common_rotation_is_one_global_conjugation():
     np.testing.assert_array_equal(s_again, s_rot)
     # a single-site rotation is NOT a global conjugation: it must move the
     # pencil (local response stays nontrivial)
+    local, _s_local = problem.rotated_pencil(0.0, {"A": {"y": angle}})
+    assert not np.allclose(local, h, atol=1e-8)
+
+
+def test_onsite_delta_common_rotation_freezes_intersite_blocks():
+    """ADR-004 default: only R=0 same-site blocks rotate; intersite frozen.
+
+    A rotation common to both sites conjugates the two onsite blocks but
+    leaves the intersite magnetic blocks bit-identical, so the common
+    rotation is no longer a global conjugation -- while the zero-angle
+    rotation still returns exactly the reference pencil.
+    """
+    bundle, vertex, problem, _eig = _bundle_problem()
+    assert vertex.certificate["operator_mode"] == OPERATOR_MODE_ONSITE_DELTA
+    assert vertex.partition["A"] == frozenset({(0, 0, 0)})
+    assert vertex.partition["B"] == frozenset({(1, 1, 0)})
+    assert problem.operator_mode == OPERATOR_MODE_ONSITE_DELTA
+    angle = 0.13
+    c, sn = np.cos(angle / 2.0), np.sin(angle / 2.0)
+    u = np.kron(np.array([[c, -sn], [sn, c]]), np.eye(bundle.norb))
+    h, s = problem.pencil(0.0)
+    rotated, s_rot = problem.rotated_pencil(0.0, {"A": {"y": angle}, "B": {"y": angle}})
+    # the intersite magnetic blocks never move, bitwise
+    intersite = np.ix_([0, bundle.norb], [1, 1 + bundle.norb])
+    np.testing.assert_array_equal(rotated[intersite], h[intersite])
+    reverse = np.ix_([1, 1 + bundle.norb], [0, bundle.norb])
+    np.testing.assert_array_equal(rotated[reverse], h[reverse])
+    # ... hence a common rotation is NOT one global conjugation anymore
+    assert not np.allclose(rotated, u @ h @ u.conj().T, atol=1e-8)
+    # the onsite blocks themselves did rotate (local response nontrivial)
+    onsite_a = np.ix_([0, bundle.norb], [0, bundle.norb])
+    assert not np.allclose(rotated[onsite_a], h[onsite_a], atol=1e-8)
+    np.testing.assert_array_equal(s_rot, s)
+    # zero-angle rotation returns exactly the reference pencil
+    frozen, s_frozen = problem.rotated_pencil(0.0, {})
+    np.testing.assert_array_equal(frozen, h)
+    np.testing.assert_array_equal(s_frozen, s)
+    # single-site rotation still moves the pencil
     local, _s_local = problem.rotated_pencil(0.0, {"A": {"y": angle}})
     assert not np.allclose(local, h, atol=1e-8)
 
@@ -665,6 +787,49 @@ def test_fail_closed_on_vertex_bundle_mismatch():
         )
 
 
+def test_fail_closed_on_unknown_or_mislabeled_operator_mode():
+    """Operator labeling fails closed at the response layer, too.
+
+    An unknown ``operator_mode`` is refused outright; a weighted partition
+    relabeled ``onsite_delta`` (digest re-signed, declaration text fixed to
+    pass the vertex gates) is refused because it would rotate shared
+    intersite blocks under a label that promises not to.
+    """
+    bundle = _spinor_bundle()
+    axes = {"A": (("y", AXES["y"]),), "B": (("y", AXES["y"]),)}
+    onsite = extract_magnetic_vertex(
+        bundle,
+        orbitals_by_site={"A": [0], "B": [1]},
+        operator=OPERATOR_MODE_ONSITE_DELTA,
+    )
+    unknown = MagneticVertex(
+        onsite.blocks,
+        onsite.partition,
+        dict(onsite.certificate, operator_mode="total_h_ordered"),
+    )
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        FrozenResponseProblem(bundle, unknown, axes_by_site=axes)
+
+    weighted = extract_magnetic_vertex(
+        bundle,
+        orbitals_by_site={"A": [0], "B": [1]},
+        operator=OPERATOR_MODE_WEIGHTED_TOTAL_H,
+    )
+    forged_cert = dict(
+        weighted.certificate,
+        operator_mode=OPERATOR_MODE_ONSITE_DELTA,
+        partition_declaration=PARTITION_DECLARATION_ONSITE,
+    )
+    forged_cert["vertex_sha256"] = _content_digest(
+        weighted.blocks,
+        weighted.partition,
+        {k: v for k, v in forged_cert.items() if k != "vertex_sha256"},
+    )
+    forged = MagneticVertex(weighted.blocks, weighted.partition, forged_cert)
+    with pytest.raises(SpiralResponseError, match="onsite_delta.*shared|shared block"):
+        FrozenResponseProblem(bundle, forged, axes_by_site=axes)
+
+
 def test_gap_gate_refuses_closed_gap():
     h = np.zeros((4, 4), dtype=complex)
     s = np.eye(4)
@@ -742,24 +907,17 @@ def test_o2_smoke_reduced_k_ladder_rung():
             )
             for height in (0.7, 0.8)
         ),
-        k_mesh_rungs=(
-            {
-                "label": "one-k",
-                "kpoints": [tuple(subset[1])],
-                "k_weights": [1.0],
-                "ensemble": ensemble,
-            },
-            {
-                "label": "two-k",
-                "kpoints": [tuple(k) for k in subset],
-                "k_weights": weights,
-                "ensemble": ensemble,
-            },
-        ),
+        # The k-mesh ladder is exercised on the synthetic bundle (its meshes
+        # agree by construction).  On this reduced two-point O2 subset the
+        # one-vs-two-point toy meshes are NOT k-converged under the
+        # onsite_delta operator (recorded torque delta 1.1e-3 eV/rad between
+        # the toy meshes), so the smoke keeps the node and contour-height
+        # ladders whose production budgets gate the integration.
     )
 
     values = list(response.gradient.values()) + list(response.curvature.values())
     assert all(np.isfinite(values))
+    assert response.operator_mode == OPERATOR_MODE_ONSITE_DELTA
     assert response.contour_vs_band_max_abs <= RESPONSE_IDENTITY_TOL_EV
     assert len(response.curvature) == 16
     for a in coords:
@@ -791,7 +949,10 @@ def test_o2_smoke_reduced_k_ladder_rung():
     assert clone == response
 
 
-def test_known_helix_full_transverse_response_and_frozen_metric():
+@pytest.mark.parametrize(
+    "operator", (OPERATOR_MODE_ONSITE_DELTA, OPERATOR_MODE_WEIGHTED_TOTAL_H)
+)
+def test_known_helix_full_transverse_response_and_frozen_metric(operator):
     """Two-site q=0.7 helix with spin-textured phased overlap."""
     bundle = _spinor_bundle()
     bundle.q = (0.7,)
@@ -800,7 +961,9 @@ def test_known_helix_full_transverse_response_and_frozen_metric():
         for r in (-1, 1):
             bundle.sparse[orb, orb, r] = (0.04, -0.02, 0.0, 0.0)
             bundle.overlap[orb, orb, r] = 0.03
-    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0], "B": [1]})
+    vertex = extract_magnetic_vertex(
+        bundle, orbitals_by_site={"A": [0], "B": [1]}, operator=operator
+    )
     problem = FrozenResponseProblem(
         bundle,
         vertex,
@@ -831,6 +994,7 @@ def test_known_helix_full_transverse_response_and_frozen_metric():
     )
     assert len(result.curvature) == 16
     assert result.contour_vs_band_max_abs < 1e-8
+    assert result.operator_mode == operator
     h_zero, s_zero = problem.rotated_pencil(k, {})
     np.testing.assert_allclose(h_zero, h, atol=1e-14)
     np.testing.assert_array_equal(s_zero, s)

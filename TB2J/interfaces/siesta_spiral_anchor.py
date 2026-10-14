@@ -7,11 +7,16 @@ their image-summed site-pair J values and signed differences as numbers.
 
 This is a numbers-only result: ``agreement_status`` is always
 ``"not_evaluated"``; no agreement threshold exists and no AC-006/NFR-005
-compatibility is claimed. The certificate identifies the non-identical
-magnetic operators (weighted incident total-H vs onsite R=0 Delta), the
-distinct integration methods (exact occupied-band Hessian vs LKAG contour),
-and any declaration that does not match the actual settings, instead of
-labeling those settings matched.
+compatibility is claimed. Per the ADR-004 revision (2026-10-14) the
+default rotating operator is the **onsite delta** (only R=0 same-site
+blocks of the total-H spin splitting rotate, each at w=1), so the new
+side matches the legacy LKAG projector by construction; the recorded
+diagnostic variant ``weighted_total_h`` (every incident block at
+w=1/count of its endpoint owners) remains selectable via ``operator``.
+The certificate labels the ``operator_mode`` that produced every number,
+identifies the distinct integration methods (exact occupied-band Hessian
+vs LKAG contour), and any declaration that does not match the actual
+settings, instead of labeling those settings matched.
 
 The HamiltonIO ``SislParser`` NC reader cannot ingest the fixture's
 4-component packing (``get_model`` expects SOC's eight components), so the
@@ -50,11 +55,16 @@ from TB2J.interfaces.siesta_spiral_response import (
     Ensemble,
     FrozenResponseProblem,
 )
-from TB2J.interfaces.siesta_spiral_vertex import extract_magnetic_vertex
+from TB2J.interfaces.siesta_spiral_vertex import (
+    DEFAULT_OPERATOR_MODE,
+    OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODES,
+    extract_magnetic_vertex,
+)
 from TB2J.kpoints import monkhorst_pack
 from TB2J.utils import symbol_number
 
-ANCHOR_VERSION = "1.0"
+ANCHOR_VERSION = "1.1"
 COMPARISON_KIND = "numeric_only_q0_same_scf"
 AGREEMENT_STATUS = "not_evaluated"
 
@@ -107,6 +117,12 @@ _CONVENTIONS = {
     "moment_normalization": (
         "no division by moment^2 on either side; the legacy Delta carries "
         "the full onsite H_up - H_dn split"
+    ),
+    "operator_modes": (
+        "the vertex certificate labels operator_mode (ADR-004 2026-10-14): "
+        "onsite_delta (default) rotates only R=0 same-site blocks at w=1; "
+        "weighted_total_h is the recorded diagnostic variant with "
+        "w=1/count endpoint-owner weights on every incident block"
     ),
     "mathdoc": "tb2j/collinear-anchor-projection",
 }
@@ -639,10 +655,18 @@ def run_frozen_response(
     sites,
     moment_signs: dict,
     magnetic_axis=MAGNETIC_AXIS,
+    operator: str = DEFAULT_OPERATOR_MODE,
 ):
-    """Run ``band_observables`` per transverse axis and project stored J."""
+    """Run ``band_observables`` per transverse axis and project stored J.
+
+    ``operator`` selects the rotating operator passed to the vertex
+    extraction (``onsite_delta`` default per ADR-004 2026-10-14,
+    ``weighted_total_h`` diagnostic variant).
+    """
     n_occupied = int(round(float(reference["electron_count"])))
-    vertex = extract_magnetic_vertex(bundle, orbitals_by_site=orbitals_by_site)
+    vertex = extract_magnetic_vertex(
+        bundle, orbitals_by_site=orbitals_by_site, operator=operator
+    )
     problem = FrozenResponseProblem(bundle, vertex, axes_by_site=axes_by_site)
     kpoints = [np.asarray(k, dtype=float) for k in kpoints_cart]
     weights = [float(w) for w in kweights]
@@ -740,6 +764,7 @@ def _heisenberg_closure(response_by_axis: dict, sites) -> dict:
 
 def _settings_record(
     *,
+    operator_mode,
     requested_kmesh,
     actual_kmesh,
     ensemble_record,
@@ -749,22 +774,45 @@ def _settings_record(
     legacy_adjusted_emin_ev,
     legacy_engine_emin_ev,
 ) -> dict:
-    operator = {
-        "new": (
-            "weighted incident total-H magnetic operator: every stored block "
-            "incident to a site partition, each contribution conjugated by "
-            "the full site unitary with w = 1/count of distinct endpoint owners"
-        ),
-        "legacy": (
-            "onsite R=0 orbital blocks of Delta = H_up - H_dn only; "
-            "intersite spin-dependent blocks are not rotated"
-        ),
-        "matched": False,
-        "note": (
-            "non-identical magnetic operators (projector definitions differ); "
-            "recorded as unmatched, never absorbed into the numbers"
-        ),
-    }
+    if operator_mode == OPERATOR_MODE_ONSITE_DELTA:
+        operator = {
+            "operator_mode": operator_mode,
+            "new": (
+                "onsite delta (ADR-004 2026-10-14): only the R=0 same-site "
+                "blocks of the total-H spin splitting rotate, each at full "
+                "weight w = 1; intersite spin-dependent blocks are not "
+                "rotated"
+            ),
+            "legacy": (
+                "onsite R=0 orbital blocks of Delta = H_up - H_dn only; "
+                "intersite spin-dependent blocks are not rotated"
+            ),
+            "matched": True,
+            "note": (
+                "matched magnetic operators (ADR-004 default): both engines "
+                "rotate only onsite R=0 same-site blocks"
+            ),
+        }
+    else:
+        operator = {
+            "operator_mode": operator_mode,
+            "new": (
+                "weighted incident total-H magnetic operator: every stored "
+                "block incident to a site partition, each contribution "
+                "conjugated by the full site unitary with w = 1/count of "
+                "distinct endpoint owners"
+            ),
+            "legacy": (
+                "onsite R=0 orbital blocks of Delta = H_up - H_dn only; "
+                "intersite spin-dependent blocks are not rotated"
+            ),
+            "matched": False,
+            "note": (
+                "non-identical magnetic operators (projector definitions "
+                "differ); recorded as unmatched, never absorbed into the "
+                "numbers"
+            ),
+        }
     integration = {
         "new": (
             "exact occupied-band Hessian on the k mesh (gapped T=0 step " "occupations)"
@@ -861,9 +909,13 @@ def _declaration_matches(name: str, declared, settings: dict) -> bool:
             declared == settings["ensemble"]["new"]["kind"]
         )
         return False
-    if name in ("operator", "integration"):
+    if name in ("integration",):
         # Intrinsically different definitions; no declaration can match them.
         return False
+    if name == "operator":
+        # ADR-004: the declaration matches only when it names the actually
+        # recorded operator_mode of the run.
+        return str(declared) == settings["operator"].get("operator_mode")
     raise AnchorError(f"unknown declaration field {name!r}")
 
 
@@ -969,18 +1021,30 @@ def run_anchor_comparison(
     nz=DEFAULT_NZ,
     rcut_ang=DEFAULT_RCUT_ANG,
     magnetic_elements=("O",),
+    operator: str = DEFAULT_OPERATOR_MODE,
     declaration: AnchorDeclaration | None = None,
     refuse_on_mismatch: bool = False,
     collinear_tol_ev: float = COLLINEAR_TOL_EV,
 ) -> AnchorComparison:
     """Run both engines on the same NC SCF and assemble the certificate.
 
+    ``operator`` selects the rotating operator of the new side
+    (``onsite_delta`` default per ADR-004 2026-10-14, ``weighted_total_h``
+    diagnostic variant); it is recorded as ``operator_mode`` in the
+    certificate and the settings record.
+
     Returns an :class:`AnchorComparison`; the certificate is numbers-only
     (``agreement_status = "not_evaluated"``) with unmatched settings
-    reported, never absorbed. Refusals before any engine run: non-transverse
-    axes, non-x-collinear components, and failed same-SCF spectral
-    equivalence on the recorded kpoints and the gated comparison mesh.
+    reported, never absorbed. Refusals before any engine run: an unknown
+    operator mode, non-transverse axes, non-x-collinear components, and
+    failed same-SCF spectral equivalence on the recorded kpoints and the
+    gated comparison mesh.
     """
+    if operator not in OPERATOR_MODES:
+        raise AnchorError(
+            f"unknown magnetic operator {operator!r}; expected one of "
+            f"{sorted(OPERATOR_MODES)}"
+        )
     if len(sites) != 2 or len(set(sites)) != 2:
         raise AnchorError("the anchor compares exactly two distinct sites")
     axes = tuple(axes)
@@ -1081,7 +1145,15 @@ def run_anchor_comparison(
         sites,
         moment_signs,
         magnetic_axis=magnetic_axis,
+        operator=operator,
     )
+    if problem.operator_mode != operator:
+        raise AnchorError(
+            "the frozen-response problem recorded operator_mode "
+            f"{problem.operator_mode!r} instead of the requested "
+            f"{operator!r}; refusing a certificate whose rotating operator "
+            "was not the declared one"
+        )
 
     legacy_pair = image_summed_pair_J(exchange, *sites)
     _require_pair_record(legacy_pair, sites)
@@ -1109,6 +1181,7 @@ def run_anchor_comparison(
     )
 
     settings = _settings_record(
+        operator_mode=operator,
         requested_kmesh=kmesh,
         actual_kmesh=actual_kmesh,
         ensemble_record=ensemble.to_record(),
@@ -1133,6 +1206,7 @@ def run_anchor_comparison(
         "anchor_version": ANCHOR_VERSION,
         "comparison_kind": COMPARISON_KIND,
         "agreement_status": AGREEMENT_STATUS,
+        "operator_mode": operator,
         "agreement_statement": (
             "numbers only (user decision 2026-10-13): no agreement threshold "
             "exists and no AC-006/NFR-005 compatibility is claimed or denied"
