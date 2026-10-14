@@ -480,6 +480,13 @@ class FrozenResponseProblem:
         self._operator_mode = vertex.certificate["operator_mode"]
         self._importer = SpiralImporter()
         self._pencils = {}
+        # The declared partition is kept BOTH ways: collapsed to (mu, nu)
+        # for the assembled-block weighted paths, and as the FULL real-space
+        # keys for the onsite_delta mode, whose rotating amplitudes are
+        # per-key R=0 blocks, never the R-summed assembled pencil block.
+        self._key_partition = {
+            site: frozenset(keys) for site, keys in vertex.partition.items()
+        }
         self._partition = {
             site: frozenset((mu, nu) for mu, nu, _r in keys)
             for site, keys in vertex.partition.items()
@@ -494,12 +501,18 @@ class FrozenResponseProblem:
                 owners.setdefault(key, []).append(site)
         self._owners = {key: tuple(sites) for key, sites in owners.items()}
         self._weights = {key: 1.0 / len(sites) for key, sites in self._owners.items()}
+        key_owners = {}
+        for site, keys in self._key_partition.items():
+            for key in keys:
+                key_owners.setdefault(key, []).append(site)
         if self._operator_mode == OPERATOR_MODE_ONSITE_DELTA:
             # ADR-004 (2026-10-14 revision): an onsite-delta vertex rotates
-            # only R=0 blocks with both orbitals on the owning site, each at
-            # the full weight w = 1 that single ownership implies.  A shared
-            # or non-R=0 key would mean an intersite or image magnetic block
-            # is being rotated, which this operator mode refuses.
+            # only R=0 blocks with both orbitals on the owning site -- the
+            # full R=0 site block, mu != nu included, matching
+            # ExchangeCL2.get_Delta -- each at the full weight w = 1 that
+            # single ownership implies.  A non-R=0 or shared key would mean
+            # an image or intersite magnetic block is being rotated, which
+            # this operator mode refuses.
             for keys in vertex.partition.values():
                 for key in keys:
                     r_components = key[2] if isinstance(key[2], tuple) else (key[2],)
@@ -509,13 +522,20 @@ class FrozenResponseProblem:
                             f"{key!r}; only R=0 same-site blocks may rotate "
                             "in the onsite_delta operator mode"
                         )
-            for key, sites in self._owners.items():
+            for key, sites in key_owners.items():
                 if len(sites) != 1:
                     raise SpiralResponseError(
                         f"onsite_delta vertex rotates shared block {key!r} "
                         f"owned by {sites!r}; intersite magnetic blocks must "
                         "stay frozen in the onsite_delta operator mode"
                     )
+        self._key_owner = {
+            key: sites[0] for key, sites in key_owners.items() if len(sites) == 1
+        }
+        self._rotating_keys = frozenset(
+            key for keys in self._key_partition.values() for key in keys
+        )
+        self._onsite_parts = {}
         self._axes = {}
         for site in self.site_order:
             if not vertex.partition[site]:
@@ -606,6 +626,72 @@ class FrozenResponseProblem:
             out[np.ix_([mu, mu + n], [nu, nu + n])] = block
         return out
 
+    def _key_phase_factors(self, key, k):
+        """Importer-identical Bloch factors (d11, d22) of one stored key."""
+        bundle = self._bundle
+        _mu, _nu, r = key
+        if bundle.cell is not None:
+            cell = np.asarray(bundle.cell, dtype=float)
+            pos = np.asarray(bundle.orbital_positions, dtype=float)
+            qvec = np.asarray(bundle.q, dtype=float)
+            kvec = np.atleast_1d(np.asarray(k, dtype=float))
+            xij = np.asarray(r, dtype=float) @ cell + pos[key[1]] - pos[key[0]]
+            kx = float(kvec @ xij)
+            qx = float(qvec @ xij)
+        else:
+            kx = k * r
+            qx = bundle.q[0] * r
+        kphs = np.exp(-1j * kx)
+        qphs = np.exp(-1j * qx / 2)
+        return kphs * qphs, kphs * np.conj(qphs)
+
+    def _onsite_decomposition(self, k):
+        """(frozen H(k), rotating real-space data) for the onsite_delta mode.
+
+        ``frozen`` accumulates every magnetic key the declared operator does
+        not rotate -- intersite blocks and same-orbital R!=0 images -- with
+        its exact importer Bloch phase, in the importer's own iteration
+        order, so frozen entries are bit-stable under any rotation.
+        ``rotating`` maps each selected R=0 same-site key to its phases and
+        raw stored components; the rotating amplitude of a key is its
+        real-space block, never the R-summed assembled (mu, nu) block.
+        """
+        cache_key = tuple(np.asarray(k, dtype=float).ravel())
+        cached = self._onsite_parts.get(cache_key)
+        if cached is None:
+            n = self._bundle.norb
+            frozen = np.zeros((2 * n, 2 * n), complex)
+            rotating = {}
+            for key, (h1, h2, h3, h4) in self._bundle.sparse.items():
+                d11, d22 = self._key_phase_factors(key, k)
+                h12 = complex(h3, -h4)
+                if key in self._rotating_keys:
+                    rotating[key] = (d11, d22, h1, h2, h12)
+                    continue
+                mu, nu = key[0], key[1]
+                frozen[mu, nu] += h1 * d11
+                frozen[mu, nu + n] += h12 * d11
+                frozen[mu + n, nu] += np.conj(h12) * d22
+                frozen[mu + n, nu + n] += h2 * d22
+            frozen.setflags(write=False)
+            cached = frozen, rotating
+            self._onsite_parts[cache_key] = cached
+        return cached
+
+    def _place_key(self, out, key, d11, d22, b00, b01, b10, b11):
+        """Place one phased 2x2 spinor block exactly like the importer."""
+        n = self._bundle.norb
+        mu, nu = key[0], key[1]
+        out[mu, nu] += b00 * d11
+        out[mu, nu + n] += b01 * d11
+        out[mu + n, nu] += b10 * d22
+        out[mu + n, nu + n] += b11 * d22
+
+    @staticmethod
+    def _stored_block(components):
+        _d11, _d22, h1, h2, h12 = components
+        return np.array([[h1, h12], [np.conj(h12), h2]], dtype=complex)
+
     def pencil(self, k):
         h, s, _scalar, _blocks = self._phased_blocks(k)
         return h, s
@@ -614,11 +700,23 @@ class FrozenResponseProblem:
         """Assembled first-order vertex V_coord(k).
 
         Each incident block enters at its site weight exactly once:
-        onsite_delta rotates its R=0 same-site blocks at the full weight
-        w = 1; weighted_total_h gives a shared bond w = 1/2 per endpoint.
+        onsite_delta rotates the full R=0 same-site block set (mu != nu
+        included) of the coordinate's site at w = 1, built from the
+        real-space keys with their importer Bloch phases; weighted_total_h
+        gives a shared bond w = 1/2 per endpoint on the assembled blocks.
         """
         axis = self.axis_of(coord)
-        keys = self._partition[coord[0]]
+        site = coord[0]
+        if self._operator_mode == OPERATOR_MODE_ONSITE_DELTA:
+            _frozen, rotating = self._onsite_decomposition(k)
+            out = np.zeros((2 * self._bundle.norb, 2 * self._bundle.norb), complex)
+            t = _half_generator(axis)
+            for key in sorted(self._key_partition[site]):
+                v = -1j * _comm(t, self._stored_block(rotating[key]))
+                d11, d22 = rotating[key][:2]
+                self._place_key(out, key, d11, d22, v[0, 0], v[0, 1], v[1, 0], v[1, 1])
+            return _require_hermitian(out, "V(k)")
+        keys = self._partition[site]
         _h, _s, _scalar, blocks = self._phased_blocks(k)
         weighted = {key: self._weights[key] * blocks[key] for key in keys}
         pieces = first_vertex_blocks(weighted, keys, axis)
@@ -627,18 +725,32 @@ class FrozenResponseProblem:
     def second_vertex_pencil(self, k, coord_a, coord_b):
         """Assembled second-order vertex W_ab(k), Clairaut-symmetric.
 
-        Same site: the symmetric seagull of the exponential chart on the
-        once-weighted incident blocks (shared bonds at w = 1/2 in the
-        weighted_total_h variant).  Different sites: identically zero --
-        additive site contributions never compose under either operator
+        Same site: the symmetric seagull of the exponential chart, on the
+        full once-weighted incident block set (onsite_delta: the real-space
+        R=0 same-site keys at w = 1; weighted_total_h: assembled blocks
+        with shared bonds at w = 1/2).  Different sites: identically zero
+        -- additive site contributions never compose under either operator
         declaration.
         """
         a, b = self._ordered_pair(coord_a, coord_b)
         axis_a = self.axis_of(a)
         axis_b = self.axis_of(b)
-        _h, _s, _scalar, blocks = self._phased_blocks(k)
         if a[0] != b[0]:
             return _require_hermitian(self._place({}), "W(k)")
+        if self._operator_mode == OPERATOR_MODE_ONSITE_DELTA:
+            _frozen, rotating = self._onsite_decomposition(k)
+            out = np.zeros((2 * self._bundle.norb, 2 * self._bundle.norb), complex)
+            for key in sorted(self._key_partition[a[0]]):
+                w = second_vertex_blocks(
+                    {key: self._stored_block(rotating[key])},
+                    (key,),
+                    axis_a,
+                    axis_b,
+                )[key]
+                d11, d22 = rotating[key][:2]
+                self._place_key(out, key, d11, d22, w[0, 0], w[0, 1], w[1, 0], w[1, 1])
+            return _require_hermitian(out, "W(k)")
+        _h, _s, _scalar, blocks = self._phased_blocks(k)
         keys = self._partition[a[0]]
         weighted = {key: self._weights[key] * blocks[key] for key in keys}
         pieces = second_vertex_blocks(weighted, keys, axis_a, axis_b)
@@ -661,8 +773,9 @@ class FrozenResponseProblem:
         so the result is independent of the site order, Hermitian for
         arbitrary per-site angles, and a rotation common to all sites is
         exactly one global conjugation of the rotated operator.  In the
-        onsite_delta mode only the R=0 same-site blocks rotate (w = 1) and
-        intersite magnetic blocks stay frozen.
+        onsite_delta mode only the real-space R=0 same-site blocks rotate
+        (w = 1), while intersite blocks and same-orbital R!=0 images stay
+        bit-frozen exactly as stored.
         """
         site_thetas = {}
         for site, entries in dict(thetas).items():
@@ -690,6 +803,34 @@ class FrozenResponseProblem:
             site: _pass_unitary(generator) for site, generator in site_thetas.items()
         }
         n = self._bundle.norb
+        if self._operator_mode == OPERATOR_MODE_ONSITE_DELTA:
+            # Start from the frozen complement: every magnetic key outside
+            # the declared R=0 same-site partition, phased exactly as the
+            # importer phases it, is copied once and never touched again,
+            # so intersite blocks and same-orbital R!=0 images are
+            # bit-identical for any angles.
+            frozen, rotating = self._onsite_decomposition(k)
+            h_out = np.array(frozen, dtype=complex)
+            for key in sorted(rotating):
+                d11, d22, h1, h2, h12 = rotating[key]
+                u = unitaries.get(self._key_owner[key])
+                if u is None:
+                    # zero angle: place the stored components verbatim, so
+                    # the unrotated rotated pencil reproduces H(k) bitwise
+                    self._place_key(h_out, key, d11, d22, h1, h12, np.conj(h12), h2)
+                else:
+                    rotated_block = u @ self._stored_block(rotating[key]) @ u.conj().T
+                    self._place_key(
+                        h_out,
+                        key,
+                        d11,
+                        d22,
+                        rotated_block[0, 0],
+                        rotated_block[0, 1],
+                        rotated_block[1, 0],
+                        rotated_block[1, 1],
+                    )
+            return _require_hermitian(h_out, "rotated H(k)"), s
         # Start from the full frozen pencil: blocks not incident to any
         # rotating site (intersite magnetic blocks under onsite_delta) stay
         # bit-identical, exactly like the scalar part.
@@ -871,8 +1012,10 @@ class ResponseSet:
     pairs. All nested metadata are JSON-safe. No stationarity or spin-model
     identification is applied. ``operator_mode`` records the rotating
     operator declared by the producing vertex certificate; ``from_dict``
-    refuses records lacking a known mode and, when
-    ``expect_operator_mode`` is given, any record of a different mode.
+    refuses records lacking a known mode, records whose provenance block or
+    embedded frozen-declaration certificate contradicts the top-level mode,
+    and, when ``expect_operator_mode`` is given, any record of a different
+    mode.
     """
 
     version: str
@@ -940,6 +1083,34 @@ class ResponseSet:
             raise SpiralResponseError(
                 "response operator_mode missing or unknown "
                 f"(got {mode!r}; known modes: {sorted(OPERATOR_MODES)})"
+            )
+        # STD-002: the top-level mode, the provenance block and the embedded
+        # frozen-declaration vertex certificate must agree; a record whose
+        # labels contradict each other is refused before any content check.
+        provenance = data.get("provenance")
+        recorded = (
+            provenance.get("operator_mode") if isinstance(provenance, dict) else None
+        )
+        if recorded != mode:
+            raise SpiralResponseError(
+                f"response provenance operator_mode {recorded!r} contradicts "
+                f"the recorded top-level {mode!r}; refusing an internally "
+                "inconsistent record"
+            )
+        declarations = data.get("frozen_declarations")
+        certificate = (
+            declarations.get("magnetic_amplitudes", {}).get("certificate")
+            if isinstance(declarations, dict)
+            else None
+        )
+        declared = (
+            certificate.get("operator_mode") if isinstance(certificate, dict) else None
+        )
+        if declared != mode:
+            raise SpiralResponseError(
+                "frozen-declaration certificate operator_mode "
+                f"{declared!r} contradicts the recorded top-level {mode!r}; "
+                "refusing an internally inconsistent record"
             )
         if expect_operator_mode is not None and mode != expect_operator_mode:
             raise SpiralResponseError(
@@ -1267,7 +1438,13 @@ def evaluate_response_set(
                 "certificate": cert,
                 "block_count": len(problem._vertex.blocks),
                 "phased_blocks_sha256": phased_amplitude_digest.hexdigest(),
-                "phase_placement": "bundle -> importer -> per-k Pauli split; no real-space repacking",
+                "phase_placement": (
+                    "onsite_delta: rotating amplitudes are the real-space "
+                    "R=0 same-site keys, placed with the importer's Bloch "
+                    "phases; every other magnetic key is frozen verbatim. "
+                    "weighted_total_h: per-k Pauli split of the assembled "
+                    "phased blocks"
+                ),
             },
             "overlap": "assembled spin-dependent S(k) frozen",
         },

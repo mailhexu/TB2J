@@ -381,7 +381,37 @@ def test_declared_mismatch_is_reported_then_refused(comparison):
     )
     assert unmatched == ["operator"]
     assert settings["operator"]["declared"] == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    # SPEC-003: the declaration check is separate from the cross-engine
+    # match. Declaring a mode the run did not use is a declaration mismatch,
+    # but the engines themselves stay matched (onsite vs LKAG onsite).
+    assert settings["operator"]["matched"] is True
+    assert settings["operator"]["declaration_matched"] is False
+
+
+def test_weighted_declaration_does_not_clear_operator_mismatch(comparison_weighted):
+    """SPEC-003: naming the selected weighted mode never clears the mismatch.
+
+    The weighted_total_h engines are genuinely unmatched against the LKAG
+    onsite delta; a correct projector declaration records
+    ``declaration_matched`` without touching the engine-level ``matched``
+    flag, and ``refuse_on_mismatch`` still refuses the comparison.
+    """
+    settings = copy.deepcopy(comparison_weighted.settings)
     assert settings["operator"]["matched"] is False
+    unmatched = apply_declaration(
+        settings, AnchorDeclaration(projector=OPERATOR_MODE_WEIGHTED_TOTAL_H)
+    )
+    assert unmatched == ["operator"]
+    assert settings["operator"]["declared"] == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    assert settings["operator"]["declaration_matched"] is True
+    # the engine mismatch survives the correctly-named declaration
+    assert settings["operator"]["matched"] is False
+    with pytest.raises(AnchorSettingMismatchError, match="operator"):
+        apply_declaration(
+            copy.deepcopy(comparison_weighted.settings),
+            AnchorDeclaration(projector=OPERATOR_MODE_WEIGHTED_TOTAL_H),
+            refuse_on_mismatch=True,
+        )
 
 
 # ---------------------------------------------------------------------------

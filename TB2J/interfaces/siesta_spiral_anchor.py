@@ -931,6 +931,16 @@ def apply_declaration(
     not match the actual one (or whose actual values are intrinsically
     unmatched). With ``refuse_on_mismatch`` the mismatch is refused instead
     of only reported.
+
+    The operator entry is special: its ``matched`` flag records the
+    cross-engine comparison (onsite_delta vs the LKAG onsite delta is
+    matched; weighted_total_h vs the LKAG onsite delta is genuinely
+    unmatched) and is never overwritten by a declaration. A projector
+    declaration only records ``declaration_matched`` -- whether it names
+    the operator_mode actually selected -- and the entry is reported
+    unmatched when either the engines are genuinely unmatched or the
+    declaration names another mode, so ``refuse_on_mismatch`` still
+    refuses a genuinely unmatched engine pair.
     """
     unmatched = []
     for attr, name in _DECLARATION_FIELDS.items():
@@ -939,6 +949,13 @@ def apply_declaration(
             continue
         entry = settings[name]
         entry["declared"] = [int(v) for v in value] if name == "k_mesh" else str(value)
+        if name == "operator":
+            entry["declaration_matched"] = bool(
+                _declaration_matches(name, value, settings)
+            )
+            if not entry["matched"] or not entry["declaration_matched"]:
+                unmatched.append(name)
+            continue
         entry["matched"] = bool(_declaration_matches(name, value, settings))
         if not entry["matched"]:
             unmatched.append(name)

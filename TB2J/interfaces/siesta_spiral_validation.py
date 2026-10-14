@@ -174,7 +174,11 @@ def validate_finite_rotations(
     """
     ensemble.validate()
     # Snapshot consumer data, preserving all raw fields and preventing aliasing.
-    raw = ResponseSet.from_dict(response.to_dict())
+    # STD-002: a ResponseSet produced by a different rotating operator is
+    # refused before any number is consumed.
+    raw = ResponseSet.from_dict(
+        response.to_dict(), expect_operator_mode=problem.operator_mode
+    )
     coords, frames = _frames(problem, raw, axes_by_site, reference_directions_by_site)
     angles = np.asarray(tuple(angle_ladder), dtype=float)
     if (

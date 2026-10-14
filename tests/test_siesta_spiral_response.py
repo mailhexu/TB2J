@@ -581,6 +581,24 @@ def test_response_set_records_and_gates_operator_mode():
     missing["content_sha256"] = _payload_digest(missing)
     with pytest.raises(SpiralResponseError, match="operator_mode"):
         ResponseSet.from_dict(missing)
+    # SPEC-004/STD-002: internally contradictory mode labels are refused
+    # even when the payload digest is re-signed consistently
+    contradicting = json.loads(json.dumps(payload))
+    contradicting["provenance"]["operator_mode"] = OPERATOR_MODE_ONSITE_DELTA
+    contradicting["content_sha256"] = _payload_digest(
+        {k: v for k, v in contradicting.items() if k != "content_sha256"}
+    )
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        ResponseSet.from_dict(contradicting)
+    embedded = json.loads(json.dumps(payload))
+    embedded["frozen_declarations"]["magnetic_amplitudes"]["certificate"][
+        "operator_mode"
+    ] = OPERATOR_MODE_ONSITE_DELTA
+    embedded["content_sha256"] = _payload_digest(
+        {k: v for k, v in embedded.items() if k != "content_sha256"}
+    )
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        ResponseSet.from_dict(embedded)
 
 
 def test_spinor_bundle_band_matches_finite_rotation():
@@ -676,6 +694,128 @@ def test_onsite_delta_common_rotation_freezes_intersite_blocks():
     # single-site rotation still moves the pencil
     local, _s_local = problem.rotated_pencil(0.0, {"A": {"y": angle}})
     assert not np.allclose(local, h, atol=1e-8)
+
+
+def test_onsite_delta_rotation_leaves_nonzero_r_images_bit_frozen():
+    """SPEC-002: rotating amplitudes are only the R=0 keys; images frozen.
+
+    All same-orbital magnetism lives in the R=+-1 images and the R=0 blocks
+    are spin-scalar, so the onsite_delta rotating amplitudes carry no
+    magnetism at all: the first-order vertices vanish identically and every
+    image-bearing position is unchanged (bitwise on the image-only
+    intersite positions). Under the former R-summed assembled-block
+    decomposition the images rode along with the (mu, mu) block and rotated
+    with the site.
+    """
+    bundle = _spinor_bundle()
+    bundle.sparse[(0, 0, 0)] = (2.0, 2.0, 0.0, 0.0)
+    bundle.sparse[(1, 1, 0)] = (1.5, 1.5, 0.0, 0.0)
+    bundle.ncell = 3
+    for orb in range(bundle.norb):
+        for r in (-1, 1):
+            bundle.sparse[orb, orb, r] = (2.3, 1.7, 0.12, -0.07)
+            bundle.overlap[orb, orb, r] = 0.03
+    for r, partner_r in ((1, -1), (-1, 1)):
+        bundle.sparse[(0, 1, r)] = (0.05, -0.02, 0.1, -0.04)
+        bundle.sparse[(1, 0, partner_r)] = (0.05, -0.02, 0.1, -0.04)
+        bundle.overlap[(0, 1, r)] = 0.02
+        bundle.overlap[(1, 0, partner_r)] = 0.02
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0], "B": [1]})
+    assert vertex.partition["A"] == frozenset({(0, 0, 0)})
+    assert vertex.partition["B"] == frozenset({(1, 1, 0)})
+    problem = FrozenResponseProblem(
+        bundle,
+        vertex,
+        axes_by_site={"A": (("y", AXES["y"]),), "B": (("y", AXES["y"]),)},
+    )
+    h, s = problem.pencil(0.0)
+    rotated, s_rot = problem.rotated_pencil(0.0, {"A": {"y": 0.4}, "B": {"y": -0.25}})
+    n = bundle.norb
+    # the intersite positions carry only frozen keys (R=0 blocks and their
+    # R=+-1 images): they never move, bitwise
+    np.testing.assert_array_equal(
+        rotated[np.ix_([0, n], [1, 1 + n])], h[np.ix_([0, n], [1, 1 + n])]
+    )
+    np.testing.assert_array_equal(
+        rotated[np.ix_([1, 1 + n], [0, n])], h[np.ix_([1, 1 + n], [0, n])]
+    )
+    # the same-orbital R=+-1 images ride in the frozen complement: the
+    # rotating amplitudes (the spin-scalar R=0 keys) have an identically
+    # zero first vertex, and the pencil is unchanged to roundoff
+    for coord in (("A", "y"), ("B", "y")):
+        v = problem.vertex_pencil(0.0, coord)
+        np.testing.assert_array_equal(v, np.zeros_like(v))
+    np.testing.assert_allclose(rotated, h, atol=1e-13, rtol=0)
+    np.testing.assert_array_equal(s_rot, s)
+
+
+def test_onsite_delta_rotates_full_r0_same_site_orbital_block():
+    """SPEC-001/002: mu != nu same-site R=0 blocks rotate onsite.
+
+    Site A owns orbitals 0 and 1, so its rotating amplitude is the FULL
+    R=0 site block -- (0,0,0), (1,1,0) and the off-diagonal
+    (0,1,0)/(1,0,0) -- matching ExchangeCL2.get_Delta, while the intersite
+    blocks to site B stay bit-frozen.
+    """
+    bundle = SpiralBundle(
+        version=BUNDLE_VERSION,
+        norb=3,
+        ncell=1,
+        q=(0.0,),
+        spin_packing="H4=-ImH12",
+        phase_convention="q_half_per_spin_sector",
+        hermitization="none_hamiltonian_path",
+        fermi_shift="none",
+        pitch_sign="qphs_up_exp_minus",
+        sparse={
+            (0, 0, 0): (2.0, 0.5, 0.3, 0.1),
+            (1, 1, 0): (1.8, -0.4, 0.12, 0.05),
+            (2, 2, 0): (-3.0, 0.2, 0.2, -0.06),
+            (0, 1, 0): (0.2, -0.1, 0.15, -0.08),
+            (1, 0, 0): (0.2, -0.1, 0.15, -0.08),
+            (0, 2, 0): (0.05, -0.02, 0.1, -0.03),
+            (2, 0, 0): (0.05, -0.02, 0.1, -0.03),
+            (1, 2, 0): (0.05, -0.02, -0.06, 0.04),
+            (2, 1, 0): (0.05, -0.02, -0.06, 0.04),
+        },
+        overlap={
+            (0, 0, 0): 1.0,
+            (1, 1, 0): 1.0,
+            (2, 2, 0): 1.0,
+            (0, 1, 0): 0.05,
+            (1, 0, 0): 0.05,
+            (0, 2, 0): 0.02,
+            (2, 0, 0): 0.02,
+            (1, 2, 0): 0.02,
+            (2, 1, 0): 0.02,
+        },
+    )
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0, 1], "B": [2]})
+    assert vertex.partition["A"] == frozenset(
+        {(0, 0, 0), (1, 1, 0), (0, 1, 0), (1, 0, 0)}
+    )
+    assert vertex.partition["B"] == frozenset({(2, 2, 0)})
+    problem = FrozenResponseProblem(
+        bundle,
+        vertex,
+        axes_by_site={"A": (("y", AXES["y"]),), "B": (("y", AXES["y"]),)},
+    )
+    h, s = problem.pencil(0.0)
+    rotated, s_rot = problem.rotated_pencil(0.0, {"A": {"y": 0.35}})
+    n = bundle.norb
+    off = np.ix_([0, n], [1, 1 + n])
+    # the off-diagonal same-site R=0 block rotated with site A
+    assert not np.allclose(rotated[off], h[off], atol=1e-8)
+    onsite_a = np.ix_([0, n, 1, 1 + n], [0, n, 1, 1 + n])
+    assert not np.allclose(rotated[onsite_a], h[onsite_a], atol=1e-8)
+    # the intersite magnetic blocks to site B are bit-frozen
+    for a, b in ((0, 2), (1, 2), (2, 0), (2, 1)):
+        idx = np.ix_([a, a + n], [b, b + n])
+        np.testing.assert_array_equal(rotated[idx], h[idx])
+    np.testing.assert_array_equal(s_rot, s)
+    # the analytic first vertex of site A carries the off-diagonal block
+    v = problem.vertex_pencil(0.0, ("A", "y"))
+    assert not np.allclose(v[off], np.zeros((2, 2)), atol=1e-8)
 
 
 # ---------------------------------------------------------------------------
@@ -935,8 +1075,8 @@ def test_o2_smoke_reduced_k_ladder_rung():
     assert response.ensemble["gap_ev"] == pytest.approx(gap, abs=1e-9)
     assert response.ensemble["occupations_per_k"] == [[1] * 12 + [0] * 24] * 2
     assert response.ensemble["occupation_smearing_width_ev"] == 0.0
-    # The approved phased-block seam preserves Hermiticity without
-    # real-space repacking of derivative or rotated blocks.
+    # The per-key phased seam keeps the onsite rotating amplitudes in the
+    # importer's Bloch phases: derivative and rotated pencils stay Hermitian.
     for k in subset:
         for coord in coords:
             v = problem.vertex_pencil(k, coord)

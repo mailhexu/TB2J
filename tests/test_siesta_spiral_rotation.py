@@ -121,10 +121,9 @@ def test_rotation_matches_explicit_su2_conjugation(vertex):
         assert rotated[shared] == pytest.approx(expected(vertex.blocks[shared], 0.5))
     else:
         # onsite_delta default: members are exactly the R=0 same-site
-        # blocks, each owned by one site and rotating at full weight
-        assert all(
-            k[0] == k[1] and all(r == 0 for r in k[2]) for k in vertex.partition["Fe1"]
-        )
+        # blocks (mu != nu included), each owned by one site and rotating
+        # at full weight
+        assert all(all(r == 0 for r in k[2]) for k in vertex.partition["Fe1"])
         assert all(
             sum(1 for m in vertex.partition.values() if k in m) == 1
             for k in vertex.partition["Fe1"]

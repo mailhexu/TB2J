@@ -45,7 +45,7 @@ def _frame(normal):
     return {"x": tuple(x), "y": tuple(np.cross(normal, x))}
 
 
-def _synthetic(collapsed=False, closing_gap=False):
+def _synthetic(collapsed=False, closing_gap=False, operator=OPERATOR_MODE_ONSITE_DELTA):
     sparse = {
         (0, 0, 0): (2.0, 0.5, 0.3, 0.1),
         (1, 1, 0): (1.5, -0.5, -0.2, 0.05),
@@ -84,7 +84,9 @@ def _synthetic(collapsed=False, closing_gap=False):
     frames = {"A": _frame((0.3, 0.1, 0.75)), "B": _frame((-0.2, 0.05, 1.0))}
     if closing_gap:
         frames = {"A": _frame((0.0, 0.0, 1.0)), "B": _frame((0.0, 0.0, -1.0))}
-    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0], "B": [1]})
+    vertex = extract_magnetic_vertex(
+        bundle, orbitals_by_site={"A": [0], "B": [1]}, operator=operator
+    )
     problem = FrozenResponseProblem(
         bundle, vertex, axes_by_site={s: tuple(f.items()) for s, f in frames.items()}
     )
@@ -186,6 +188,22 @@ def test_inequivalent_frames_all_gradients_and_intra_inter_site_curvature():
     assert max(abs(v) for v in cross) > 1e-5
 
 
+def test_validation_refuses_response_of_a_different_operator_mode():
+    """STD-002: the finite-rotation seam gates the producing operator mode.
+
+    A weighted_total_h ResponseSet handed to an onsite_delta problem is
+    refused at the serialization boundary, before any vertex binding or
+    frame check runs.
+    """
+    problem, _raw, kwargs = _synthetic()
+    weighted_problem, weighted_raw, _ = _synthetic(
+        operator=OPERATOR_MODE_WEIGHTED_TOTAL_H
+    )
+    assert weighted_problem.operator_mode == OPERATOR_MODE_WEIGHTED_TOTAL_H
+    with pytest.raises(SpiralResponseError, match="operator_mode"):
+        validate_finite_rotations(problem, weighted_raw, **kwargs)
+
+
 def test_uniform_q0_o2_rotation_is_one_global_spin_rotation():
     path = (
         Path(__file__).parent
@@ -256,9 +274,13 @@ def test_uniform_q0_o2_rotation_is_one_global_spin_rotation():
         h, s = onsite.pencil(k)
         rotated, unchanged_s = onsite.rotated_pencil(k, both)
         assert not np.allclose(rotated, u @ h @ u.conj().T, atol=1e-8)
+        # ADR-004 revised partition: the intersite magnetic blocks stay
+        # bit-frozen; the same-site off-diagonal R=0 blocks belong to the
+        # rotating onsite delta and are allowed to move.
+        half = n // 2
         for a in range(n):
             for b in range(n):
-                if a == b:
+                if a == b or (a < half) == (b < half):
                     continue
                 idx = np.ix_([a, a + n], [b, b + n])
                 np.testing.assert_array_equal(rotated[idx], h[idx])

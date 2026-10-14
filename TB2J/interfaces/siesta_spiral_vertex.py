@@ -49,8 +49,9 @@ OPERATOR_MODES = (
 )
 DEFAULT_OPERATOR_MODE = OPERATOR_MODE_ONSITE_DELTA
 PARTITION_DECLARATION_ONSITE = (
-    "onsite delta: only R=0 same-site blocks rotate, each at full weight "
-    "w=1; intersite magnetic blocks, scalar h0 and S untouched"
+    "onsite delta: all R=0 same-site orbital pairs (mu, nu on one site, "
+    "mu != nu included) rotate at full weight w=1; intersite magnetic "
+    "blocks, scalar h0 and S untouched"
 )
 PARTITION_DECLARATION = (
     "weighted site contributions, w=1/count of distinct endpoint owners, "
@@ -280,10 +281,12 @@ def extract_magnetic_vertex(
         for key in blocks:
             mu, nu, _R = key
             if operator == OPERATOR_MODE_ONSITE_DELTA:
-                # only the R=0 block with both orbitals on the same site
-                # enters that site's rotation; intersite magnetic blocks
-                # stay frozen alongside the scalar part
-                if _is_onsite_key(key) and owner[mu] == owner[nu]:
+                # every R=0 block whose two orbitals belong to the same
+                # site enters that site's rotation (mu != nu included,
+                # matching the full R=0 site block of ExchangeCL2.get_Delta);
+                # intersite magnetic blocks stay frozen alongside the
+                # scalar part
+                if _is_r0_key(key) and owner[mu] == owner[nu]:
                     members_by_site[owner[mu]].add(key)
             else:
                 for site in {owner[mu], owner[nu]}:
@@ -551,12 +554,17 @@ def partition_variant_spread(
     }
 
 
-def _is_onsite_key(key):
-    """True for a stored onsite entry; R may be a tuple or a scalar (1D)."""
+def _is_r0_key(key):
+    """True for a stored R=0 entry; R may be a tuple or a scalar (1D)."""
     R = key[2]
     if isinstance(R, (tuple, list)):
-        return key[0] == key[1] and all(r == 0 for r in R)
-    return key[0] == key[1] and R == 0
+        return all(r == 0 for r in R)
+    return R == 0
+
+
+def _is_onsite_key(key):
+    """True for a stored onsite entry; R may be a tuple or a scalar (1D)."""
+    return key[0] == key[1] and _is_r0_key(key)
 
 
 def torque_state_report(bundle, vertex, *, transverse_tol=1e-6):

@@ -153,13 +153,21 @@ def test_partition_declaration_and_locality(fe3):
     for site, members in vertex.partition.items():
         orbs = set(sites[site])
         for mu, nu, R in members:
-            assert mu == nu and mu in orbs
+            assert mu in orbs and nu in orbs
             assert all(r == 0 for r in (R if isinstance(R, tuple) else (R,)))
-    onsite_keys = {
-        k for k in vertex.blocks if k[0] == k[1] and all(r == 0 for r in k[2])
-    }
-    assert set().union(*vertex.partition.values()) == onsite_keys
-    assert onsite_keys < set(vertex.blocks)  # intersite blocks exist, excluded
+    site_of = {}
+    for label, orbs in sites.items():
+        for orb in orbs:
+            site_of[orb] = label
+
+    def same_site_r0(key):
+        mu, nu, R = key
+        rs = R if isinstance(R, tuple) else (R,)
+        return site_of[mu] == site_of[nu] and all(r == 0 for r in rs)
+
+    expected_members = {k for k in vertex.blocks if same_site_r0(k)}
+    assert set().union(*vertex.partition.values()) == expected_members
+    assert expected_members < set(vertex.blocks)  # intersite blocks exist, excluded
     clone = MagneticVertex.from_dict(vertex.to_dict())
     assert clone.partition == vertex.partition
     # explicit weighted variant keeps the version-2 incidence declaration
@@ -232,8 +240,10 @@ def test_default_onsite_delta_leaves_intersite_blocks_frozen(fe3):
         changed = False
         for key in vertex.blocks:
             if key in vertex.partition[site]:
-                # members are exactly the R=0 same-site blocks
-                assert key[0] == key[1] and all(r == 0 for r in key[2])
+                # members are exactly the R=0 same-site blocks (mu != nu
+                # included)
+                assert key[0] in sites[site] and key[1] in sites[site]
+                assert all(r == 0 for r in key[2])
                 changed = changed or rotated[key] != vertex.blocks[key]
             else:
                 # intersite magnetic blocks stay frozen under any site
@@ -260,3 +270,54 @@ def test_scalar_cell_vertex_certificate_roundtrip():
     assert vertex.certificate["operator_mode"] == DEFAULT_OPERATOR_MODE
     assert vertex.certificate["partition_declaration"] == PARTITION_DECLARATION_ONSITE
     assert MagneticVertex.from_dict(vertex.to_dict()) == vertex
+
+
+def test_onsite_delta_partition_covers_offdiagonal_same_site_r0_blocks():
+    # SPEC-001 regression: the onsite_delta partition holds EVERY R=0
+    # block whose two orbitals belong to the same site, mu != nu included
+    # (the full R=0 site block of ExchangeCL2.get_Delta); a same-orbital
+    # R != 0 image is intersite content and stays out of the partition.
+    sparse = {
+        (0, 0, 0): (1.0, -1.0, 0.3, 0.2),
+        (1, 1, 0): (0.5, -0.5, -0.2, 0.1),
+        (0, 1, 0): (0.25, -0.25, 0.15, -0.05),
+        (1, 0, 0): (0.25, -0.25, 0.15, -0.05),
+        # same-orbital magnetic images: NOT R=0, must stay frozen
+        (0, 0, 1): (0.1, -0.1, 0.05, 0.02),
+        (0, 0, -1): (0.1, -0.1, 0.05, 0.02),
+    }
+    bundle = SpiralBundle(
+        version=BUNDLE_VERSION,
+        norb=2,
+        ncell=3,
+        q=(0.0,),
+        spin_packing="H4=-ImH12",
+        phase_convention="q_half_per_spin_sector",
+        hermitization="none_hamiltonian_path",
+        fermi_shift="none",
+        pitch_sign="qphs_up_exp_minus",
+        sparse=sparse,
+        overlap={key: 1.0 for key in sparse},
+    )
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0, 1]})
+    assert vertex.certificate["operator_mode"] == "onsite_delta"
+    assert vertex.partition["A"] == frozenset(
+        {(0, 0, 0), (1, 1, 0), (0, 1, 0), (1, 0, 0)}
+    )
+    rotated = rotate_site_blocks(vertex, "A", axis=(0.0, 0.0, 1.0), angle=np.pi / 3)
+    # every R=0 same-site member rotates at full weight, including the
+    # off-diagonal (0, 1, 0) block
+    theta = np.pi / 3
+    for key in vertex.partition["A"]:
+        v_up, _v_dn, v3, v4 = vertex.blocks[key]
+        assert rotated[key] == pytest.approx(
+            (
+                v_up,
+                -v_up,
+                np.cos(theta) * v3 - np.sin(theta) * v4,
+                np.sin(theta) * v3 + np.cos(theta) * v4,
+            )
+        )
+    # the R != 0 same-orbital images keep their stored values exactly
+    assert rotated[(0, 0, 1)] == vertex.blocks[(0, 0, 1)]
+    assert rotated[(0, 0, -1)] == vertex.blocks[(0, 0, -1)]
