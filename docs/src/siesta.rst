@@ -77,10 +77,22 @@ The measured Fe4 producer-gate response at q=(0,0,1/4), 300 K and
 pair J values are **undetermined** by the joint four-site fit, never
 published as converged exchange constants.
 
+To compare two orientations of the **same** onsite-Delta frozen operator,
+call ``recenter_metallic_reference(problem, angles_by_site=...,
+reference_directions_by_site=...)`` and evaluate its returned problem with
+the original producer ensemble and its returned rotated normals. This
+rotates site-local magnetic blocks without changing the root HSX/vertex
+certificate; the fixed-N chemical potential and occupations are solved
+anew. It does not re-run SCF and does not support weighted-total-H rotation.
+Both references must pass a stable two-step free-energy finite-rotation
+ladder before a numeric fitted-J difference is reported.
+
 ``compare_mapping_outputs(left, right)`` reports fitted-J reference
 dependence only when source bundle, pitch, vertex/operator partition,
-site identity, ensemble and integration all match. Different SCF runs
-or pitches are explicitly ``unmatched_cross_scf``: both records and
+site identity, **declared** ensemble settings and integration all match.
+A matched but unvalidated ladder yields ``uncertified_reference`` with
+no numeric pair differences. Different SCF runs or pitches are explicitly
+``unmatched_cross_scf``: both records and
 provenance are kept, but no numeric exchange difference is emitted.
 Chart-local D and Gamma are not compared across orientations. The
 story-004 independent Fe4 primitive/supercell SCFs differ by +0.115644

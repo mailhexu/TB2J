@@ -7,7 +7,14 @@ from scipy.optimize import brentq
 from scipy.special import expit
 
 from TB2J.interfaces.siesta_spiral import BUNDLE_VERSION, SpiralBundle
-from TB2J.interfaces.siesta_spiral_metallic import evaluate_metallic_response_set
+from TB2J.interfaces.siesta_spiral_mapping import (
+    compare_mapping_outputs,
+    map_response_set,
+)
+from TB2J.interfaces.siesta_spiral_metallic import (
+    evaluate_metallic_response_set,
+    recenter_metallic_reference,
+)
 from TB2J.interfaces.siesta_spiral_response import (
     Ensemble,
     FrozenResponseProblem,
@@ -137,4 +144,126 @@ def test_metallic_ensemble_refuses_unmatched_producer_fermi_level():
             coords=(("A", "y"), ("B", "y")),
             kpoints=(0.0,),
             k_weights=(1.0,),
+        )
+
+
+def test_real_recentered_frozen_operator_comparison_changes_mu_not_identity():
+    scalar = _problem().bundle
+    origin = (0, 0, 0)
+    bundle = SpiralBundle(
+        version=scalar.version,
+        norb=scalar.norb,
+        ncell=scalar.ncell,
+        q=(0.0, 0.0, 0.25),
+        spin_packing=scalar.spin_packing,
+        phase_convention=scalar.phase_convention,
+        hermitization=scalar.hermitization,
+        fermi_shift=scalar.fermi_shift,
+        pitch_sign=scalar.pitch_sign,
+        sparse={(mu, nu, origin): v for (mu, nu, _r), v in scalar.sparse.items()},
+        overlap={(mu, nu, origin): v for (mu, nu, _r), v in scalar.overlap.items()},
+        cell=((4.0, 0.0, 0.0), (0.0, 4.0, 0.0), (0.0, 0.0, 4.0)),
+        orbital_positions=((0.0, 0.0, 0.0), (2.0, 0.0, 0.0)),
+    )
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0], "B": [1]})
+    axes = {
+        site: (("x", (1.0, 0.0, 0.0)), ("y", (0.0, 1.0, 0.0))) for site in ("A", "B")
+    }
+    problem = FrozenResponseProblem(bundle, vertex, axes_by_site=axes)
+    k = (0.0, 0.0, 0.0)
+    eig = eigh(*problem.pencil(k), eigvals_only=True)
+    width = 0.4
+    ensemble = Ensemble(
+        kind="metallic_fermi_dirac_fixed_n",
+        n_occupied=2,
+        electron_count=2.0,
+        fermi_energy_ev=_mu(eig, width, 2.0),
+        smearing_width_ev=width,
+        gap_ev=float(eig[2] - eig[1]),
+    )
+    coords = (("A", "x"), ("A", "y"), ("B", "x"), ("B", "y"))
+    root = evaluate_metallic_response_set(
+        problem,
+        ensemble=ensemble,
+        coords=coords,
+        kpoints=(k,),
+        k_weights=(1.0,),
+        finite_steps=(4e-3, 2e-3),
+    )
+    view, normals = recenter_metallic_reference(
+        problem,
+        angles_by_site={"B": {"y": 0.5}},
+        reference_directions_by_site={"A": (0.0, 0.0, 1.0), "B": (0.0, 0.0, 1.0)},
+    )
+    h_center, s_center = view.pencil(k)
+    h_independent, s_independent = problem.rotated_pencil(k, {"B": {"y": 0.5}})
+    np.testing.assert_allclose(h_center, h_independent, atol=1e-12)
+    with pytest.raises(SpiralResponseError, match="unknown sites"):
+        view.rotated_pencil(k, {"typo": {"y": 0.1}})
+    np.testing.assert_allclose(s_center, s_independent, atol=1e-12)
+    step = 1e-5
+    h_plus, _ = view.rotated_pencil(k, {"B": {"y": step}})
+    h_minus, _ = view.rotated_pencil(k, {"B": {"y": -step}})
+    np.testing.assert_allclose(
+        view.vertex_pencil(k, ("B", "y")), (h_plus - h_minus) / (2 * step), atol=1e-7
+    )
+    shifted = evaluate_metallic_response_set(
+        view,
+        ensemble=ensemble,
+        coords=coords,
+        kpoints=(k,),
+        k_weights=(1.0,),
+        finite_steps=(4e-3, 2e-3),
+    )
+    assert shifted.ensemble["electron_count_at_mu"] == pytest.approx(2.0, abs=1e-10)
+    assert (
+        abs(
+            shifted.ensemble["chemical_potential_ev"]
+            - root.ensemble["chemical_potential_ev"]
+        )
+        > 1e-4
+    )
+    assert (
+        shifted.provenance["source_bundle_sha256"]
+        == root.provenance["source_bundle_sha256"]
+    )
+    assert shifted.provenance["reference_center_rotation_by_site"]["B"]["y"] == 0.5
+    assert all(root.ladder["converged"].values())
+    assert all(shifted.ladder["converged"].values())
+    mapped_root = map_response_set(
+        root, reference_directions_by_site={"A": (0, 0, 1), "B": (0, 0, 1)}
+    )
+    mapped_shifted = map_response_set(shifted, reference_directions_by_site=normals)
+    comparison = compare_mapping_outputs(mapped_root, mapped_shifted)
+    assert comparison["status"] == "matched_frozen_reference_diagnostic"
+    assert abs(comparison["per_pair"]["A|B"]["delta_j_pair_once_eV"]) > 1e-8
+    assert comparison["mapping"]["left"]["response"] == root.to_dict()
+    assert comparison["mapping"]["right"]["response"] == shifted.to_dict()
+    unchecked = evaluate_metallic_response_set(
+        problem,
+        ensemble=ensemble,
+        coords=coords,
+        kpoints=(k,),
+        k_weights=(1.0,),
+        finite_steps=(),
+    )
+    unchecked_mapping = map_response_set(
+        unchecked,
+        reference_directions_by_site={"A": (0, 0, 1), "B": (0, 0, 1)},
+    )
+    refused = compare_mapping_outputs(unchecked_mapping, mapped_shifted)
+    assert refused["status"] == "uncertified_reference"
+    assert refused["per_pair"] == {}
+
+
+def test_metallic_ensemble_refuses_occupied_index_at_band_count():
+    problem = _problem()
+    with pytest.raises(SpiralResponseError, match="n_occupied|band count"):
+        evaluate_metallic_response_set(
+            problem,
+            ensemble=Ensemble("metallic_fermi_dirac_fixed_n", 4, 2.0, 0.0, 0.4, 0.0),
+            coords=(("A", "y"),),
+            kpoints=(0.0,),
+            k_weights=(1.0,),
+            finite_steps=(),
         )

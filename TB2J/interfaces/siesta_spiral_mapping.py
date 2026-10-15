@@ -1222,6 +1222,9 @@ def map_response_set(
         ),
         "ensemble_kind": ensemble.get("kind"),
         "ensemble_gap_ev": ensemble.get("gap_ev"),
+        "reference_center_rotation_by_site": provenance.get(
+            "reference_center_rotation_by_site", {}
+        ),
         "response_sha256": response_digest,
         "mapping_version": MAPPING_VERSION,
     }
@@ -1255,13 +1258,38 @@ def compare_mapping_outputs(left: MappingOutput, right: MappingOutput):
             "comparison requires certified reference directions on both mappings"
         )
     frozen_keys = ("source_bundle_sha256", "vertex_sha256", "operator_mode", "q")
+    declared_ensemble_keys = (
+        "kind",
+        "n_occupied",
+        "electron_count",
+        "fermi_energy_ev",
+        "smearing_width_ev",
+        "occupation_smearing_width_ev",
+        "gap_ev",
+    )
+    same_declaration = all(
+        left.raw_response.ensemble.get(key) == right.raw_response.ensemble.get(key)
+        for key in declared_ensemble_keys
+    )
+    synthetic = all(
+        response.ensemble.get("synthetic") is True
+        for response in (left.raw_response, right.raw_response)
+    )
+    certified = synthetic or all(
+        len(response.ladder.get("finite_rotation", ())) >= 2
+        and all(
+            response.ladder.get("converged", {}).get(axis) is True
+            for axis in ("torque", "curvature")
+        )
+        for response in (left.raw_response, right.raw_response)
+    )
     same_frozen = (
         all(
             left.provenance.get(k) and left.provenance.get(k) == right.provenance.get(k)
             for k in frozen_keys
         )
         and left.raw_response.site_order == right.raw_response.site_order
-        and left.raw_response.ensemble == right.raw_response.ensemble
+        and same_declaration
         and left.raw_response.integration == right.raw_response.integration
         and left.raw_response.frozen_declarations["magnetic_amplitudes"]["certificate"]
         == right.raw_response.frozen_declarations["magnetic_amplitudes"]["certificate"]
@@ -1276,7 +1304,7 @@ def compare_mapping_outputs(left: MappingOutput, right: MappingOutput):
         for side, mapping in (("left", left), ("right", right))
     }
     per_pair = {}
-    if same_frozen:
+    if same_frozen and certified:
         for key in left.parameters:
             if key not in right.parameters:
                 continue
@@ -1299,11 +1327,15 @@ def compare_mapping_outputs(left: MappingOutput, right: MappingOutput):
         "version": "1.0",
         "status": (
             "matched_frozen_reference_diagnostic"
+            if same_frozen and certified
+            else "uncertified_reference"
             if same_frozen
             else "unmatched_cross_scf"
         ),
         "reason": (
             "same certified frozen operator, pitch, ensemble and integration"
+            if same_frozen and certified
+            else "same frozen operator but one or both responses lack a stable finite-rotation ladder"
             if same_frozen
             else "unmatched bundle/SCF, pitch, operator, ensemble or integration; "
             "story-004 cross-SCF free-energy spread +0.115644 eV/cell forbids "

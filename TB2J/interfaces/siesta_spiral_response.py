@@ -873,6 +873,11 @@ class FrozenResponseProblem:
         return _require_hermitian(h_out, "rotated H(k)"), s
 
     def occupied_energy(self, kpoints, k_weights, thetas, ensemble):
+        ensemble.validate()
+        if ensemble.kind != ENSEMBLE_GAPPED_T0:
+            raise SpiralResponseError(
+                "occupied band energy requires a gapped step ensemble; use metallic fixed-N free energy"
+            )
         pts, weights = _normalized_weights(kpoints, k_weights)
         total = 0.0
         for k, w in zip(pts, weights):
@@ -883,6 +888,11 @@ class FrozenResponseProblem:
 
     def band_observables(self, kpoints, k_weights, ensemble, coords):
         """Band-path gradient/curvature with the onsite/response split."""
+        ensemble.validate()
+        if ensemble.kind != ENSEMBLE_GAPPED_T0:
+            raise SpiralResponseError(
+                "band observables require a gapped step ensemble; use evaluate_metallic_response_set"
+            )
         coords = self._validate_coords(coords)
         pts, weights = _normalized_weights(kpoints, k_weights)
         dim = 2 * self._bundle.norb
@@ -1238,6 +1248,11 @@ def _ladder_converged(rungs, field, budget):
 def _reference_gate(problem, ensemble, pts, contour):
     """Certify occupations, Fermi level, indirect gap and pole enclosure."""
     ensemble.validate()
+    if ensemble.kind != ENSEMBLE_GAPPED_T0:
+        raise SpiralResponseError(
+            "occupied-pole contour requires the gapped fixed-occupation ensemble; "
+            "metallic fixed-N response uses evaluate_metallic_response_set"
+        )
     homos, lumos = [], []
     for k in pts:
         h, s = problem.pencil(k)

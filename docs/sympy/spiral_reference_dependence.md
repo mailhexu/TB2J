@@ -143,8 +143,10 @@ lands compatible; the section-3 biquadratic data lands incompatible.
 ## 6. Nonplanar three-site identifiability [F]
 
 Motivation: the Fe4 producer fixture's Mulliken moment normals are not
-exactly coplanar, and `map_response_set` currently refuses nonplanar
-finite-q references. Exact test with generic rational site normals
+exactly coplanar; the mapping accepts these finite-q references but its
+four-site joint fit does not determine individual pair J values. This
+pair-local authority does not assert global four-site identifiability.
+Exact test with generic rational site normals
 $(2,1,2)/3,\ (1,2,2)/3,\ (2,2,1)/3$, triple product $-5/27 \neq 0$
 (noncoplanarity asserted), and distinct generic tangent seeds per site:
 
@@ -159,9 +161,9 @@ $(2,1,2)/3,\ (1,2,2)/3,\ (2,2,1)/3$, triple product $-5/27 \neq 0$
   (iv) the torque rows $g_{a,\alpha} = -J (u_a\!\cdot n_b)$ — and
   identical across all three pairs: **reference-class independent**.
 
-No planarity of the moment normals is required for pair
-identifiability; the planar-only gate is not justified by the mapping
-layer and can be removed for the real producer fixture.
+No planarity of the moment normals is required for pair-local
+identifiability. The real Fe4 four-site joint map still leaves all six
+pair J values undetermined, so pair-local rank cannot certify them.
 
 ## 7. Provenance
 
