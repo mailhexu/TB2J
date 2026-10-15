@@ -53,6 +53,7 @@ from TB2J.interfaces.siesta_spiral_anchor import (
 )
 from TB2J.interfaces.siesta_spiral_io import KB_EV, load_fixture
 from TB2J.interfaces.siesta_spiral_mapping import (
+    CHART_PARAMETER_NAMES,
     CHI2_COMPAT_MAX,
     CHI2_FLAG_MIN,
     DEFAULT_CHI2_FLOOR_EV_PER_RAD2,
@@ -61,7 +62,11 @@ from TB2J.interfaces.siesta_spiral_mapping import (
     ONSITE_RESIDUAL_COMPONENTS,
     THRESHOLD_STATUS_PROVISIONAL,
     MappingOutput,
+    _Chart,
     _compatibility_label,
+    _determined_parameters,
+    _joint_least_squares,
+    _nullspace,
     build_synthetic_response_set,
     map_response_set,
 )
@@ -483,6 +488,29 @@ def test_exact_chain_zero_residual_and_flagged_three_site_distinct():
         assert ident_chain["alignment"]["by_pair"][pair_key] == 1
         assert mapped_chain.parameters[pair_key]["j_pair_once_eV"] is None
         assert "J" in pair_ident["undetermined"]
+
+    # Per-pair identifiability must come from THIS pair's 9-column slice
+    # of the global null basis (round-2 STD-R2-001): a shared first-pair
+    # projection must never be copied onto later pairs.
+    charts_chain = {
+        site: _Chart(site, chain.axes[site], CHAIN_REFERENCES[site])
+        for site in chain.site_order
+    }
+    pairs_chain = list(combinations(chain.site_order, 2))
+    fit_chain = _joint_least_squares(chain, charts_chain, pairs_chain)
+    global_null = _nullspace(fit_chain["design"])
+    for pair in pairs_chain:
+        pair_key = f"{pair[0]}|{pair[1]}"
+        column = fit_chain["pair_col"][pair]
+        expected_determined, expected_undetermined = _determined_parameters(
+            global_null[:, column : column + 9]
+        )
+        pair_ident = ident_chain["per_pair"][pair_key]
+        assert pair_ident["determined"] == expected_determined
+        assert pair_ident["undetermined"] == expected_undetermined
+        assert set(pair_ident["determined"]) | set(pair_ident["undetermined"]) == set(
+            CHART_PARAMETER_NAMES
+        )
 
     # (b) The derivation's flagged three-site term is a genuine
     # non-Heisenberg two-site response (third direction frozen): flagged

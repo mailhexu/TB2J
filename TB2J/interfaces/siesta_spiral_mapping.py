@@ -918,7 +918,7 @@ def map_response_set(
     pairs = list(combinations(response.site_order, 2))
     fit = _joint_least_squares(response, charts, pairs)
     theta_fit = fit["theta_fit"]
-    determined, undetermined = _determined_parameters(_nullspace(fit["design"]))
+    global_null_basis = _nullspace(fit["design"])
 
     mixed_residual = fit["mixed_data"] - fit["mixed_rows"] @ theta_fit
     onsite_residual = fit["onsite_data"] - fit["onsite_rows"] @ theta_fit
@@ -937,8 +937,18 @@ def map_response_set(
     parameters, residuals_per_pair, identifiability_per_pair = {}, {}, {}
     diagnostics_per_pair = {}
     residuals_per_site = {}
-    determined_set = set(determined)
     for index, pair in enumerate(pairs):
+        # Identifiability of THIS pair: slice the global null basis at the
+        # pair's own 9-column block (a later pair can have a different
+        # null-space projection than the first).
+        pair_column = fit["pair_col"][pair]
+        pair_null_basis = (
+            global_null_basis[:, pair_column : pair_column + 9]
+            if global_null_basis.size
+            else global_null_basis
+        )
+        determined, undetermined = _determined_parameters(pair_null_basis)
+        determined_set = set(determined)
         a, b = pair
         pair_key = f"{a}|{b}"
         chart_a, chart_b = charts[a], charts[b]
