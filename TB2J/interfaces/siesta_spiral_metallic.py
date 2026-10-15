@@ -229,6 +229,7 @@ def evaluate_metallic_response_set(
             response[pair] += weight * float(
                 np.sum((kernel * vertex[a] * vertex[b].T).real)
             )
+    # MathDoc: tb2j/siesta-spiral-metallic-response#schur_sign
     correction = {
         pair: -a_terms[pair[0]] * a_terms[pair[1]] / d for pair in unique_pairs
     }
