@@ -95,18 +95,18 @@ MAPPING_VERSION = "2.0"
 # (biquadratic chi2_iso = 2752/3115, three-site chi2_sector = 59/93) sit
 # far above it, while the exact-Heisenberg synthetic sits at exactly 0.
 #
-# PROVISIONAL thresholds: CHI2_COMPAT_MAX and CHI2_FLAG_MIN await the
-# user's numeric approval for story-012; they are engineering defaults,
-# not approved bounds, and MappingOutput.compatibility carries
-# 'threshold_status': 'provisional_pending_story_approval' until then.
+# Thresholds APPROVED by the user for story-012 (2026-10-15):
+# CHI2_COMPAT_MAX = 1e-4, CHI2_FLAG_MIN = 2.5e-3 (1/400), marginal
+# strictly between.  MappingOutput.compatibility carries
+# 'threshold_status': 'approved_story_012_2026-10-15'.
 CHI2_FLAG_MIN = 2.5e-3
 CHI2_COMPAT_MAX = 1.0e-4
-THRESHOLD_STATUS_PROVISIONAL = "provisional_pending_story_approval"
+THRESHOLD_STATUS = "approved_story_012_2026-10-15"
 
 #: Derivation K_FLOOR = 1e-6 (eV/rad^2) denominator floor of the Hessian
 #: chi2; the torque aggregate uses the same floor magnitude in its own
-#: gradient units (eV/rad).  Both floors are provisional like the
-#: thresholds above.
+#: gradient units (eV/rad).  Both floors were approved together with
+#: the thresholds above.
 DEFAULT_CHI2_FLOOR_EV_PER_RAD2 = 1.0e-6
 DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD = 1.0e-6
 
@@ -1154,7 +1154,7 @@ def map_response_set(
             "chi2_compat_max": CHI2_COMPAT_MAX,
             "chi2_flag_min": CHI2_FLAG_MIN,
         },
-        "threshold_status": THRESHOLD_STATUS_PROVISIONAL,
+        "threshold_status": THRESHOLD_STATUS,
     }
 
     ensemble = response.ensemble or {}

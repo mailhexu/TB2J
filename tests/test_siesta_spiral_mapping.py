@@ -60,7 +60,7 @@ from TB2J.interfaces.siesta_spiral_mapping import (
     DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD,
     MIXED_RESIDUAL_COMPONENTS,
     ONSITE_RESIDUAL_COMPONENTS,
-    THRESHOLD_STATUS_PROVISIONAL,
+    THRESHOLD_STATUS,
     MappingOutput,
     _Chart,
     _compatibility_label,
@@ -220,7 +220,7 @@ def _assert_zero(mapping):
     """Exact-Heisenberg verdict: both chi2 scopes vanish, J recovered."""
     assert mapping.compatibility["label"] == "heisenberg_compatible"
     assert mapping.compatibility["gate"] == "hessian_and_measured_torque"
-    assert mapping.compatibility["threshold_status"] == THRESHOLD_STATUS_PROVISIONAL
+    assert mapping.compatibility["threshold_status"] == THRESHOLD_STATUS
     assert mapping.residuals["chi2_hessian"] < 1e-18
     assert mapping.residuals["chi2_torque"] < 1e-18
 
@@ -549,7 +549,7 @@ def test_threshold_constants_and_label_boundaries():
     assert CHI2_FLAG_MIN == 2.5e-3 == 1.0 / 400.0
     assert DEFAULT_CHI2_FLOOR_EV_PER_RAD2 == 1.0e-6
     assert DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD == 1.0e-6
-    assert THRESHOLD_STATUS_PROVISIONAL == "provisional_pending_story_approval"
+    assert THRESHOLD_STATUS == "approved_story_012_2026-10-15"
     assert _compatibility_label(0.0, 0.0) == "heisenberg_compatible"
     assert (
         _compatibility_label(CHI2_COMPAT_MAX, CHI2_COMPAT_MAX)
@@ -919,7 +919,7 @@ def test_o2_zero_pitch_reduction_matches_story011_anchor(o2_response):
     )
     assert "onsite delta" in mapped.provenance["partition_declaration"]
     assert mapped.identifiability["reference_class"] == "collinear_single_reference"
-    assert mapped.compatibility["threshold_status"] == THRESHOLD_STATUS_PROVISIONAL
+    assert mapped.compatibility["threshold_status"] == THRESHOLD_STATUS
 
 
 def test_o2_round_trip_preserves_raw_response(o2_response):
