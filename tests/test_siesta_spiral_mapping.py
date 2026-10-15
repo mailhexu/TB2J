@@ -1,25 +1,42 @@
 """Story-012 mapping layer tests: response -> Heisenberg parameters (FR-009).
 
-The normative authority is docs/sympy/spiral_heisenberg_mapping.py; the
-synthetic tests below differentiate the SAME hand-built energies the
-authority differentiates (exact SymPy, no finite differences), so the
-mapping identities, ranks, null spaces, masquerade shifts and flagged
-chi2 aggregates are checked against the derivation's exact numbers:
+The normative authority is the CORRECTED
+docs/sympy/spiral_heisenberg_mapping.py; the synthetic tests below
+differentiate the SAME hand-built energies the authority differentiates
+(exact SymPy, no finite differences), so the mapping identities, ranks,
+null spaces, masquerade shifts and flagged chi2 aggregates are checked
+against the derivation's exact numbers:
 
-- exact Heisenberg: chi2 == 0, J recovered, J_pair_once = 2 J_stored;
-- pure biquadratic: chi2_iso = 2752/3115 flagged at the planar
-  (noncollinear) reference, exactly J-representable with J_hat = -2B at
-  the collinear reference (masquerade);
-- pure three-site: chi2_sector = 59/93, flagged through the onsite-block
-  violation;
-- zero pitch: J_stored = -K_ab/(2 alignment transverse_dot) reproduces
-  the story-011 anchor number on the O2 fixture (311.528909 meV).
+- exact Heisenberg: chi2 == 0 (Hessian and measured torque), J recovered,
+  J_pair_once = 2 J_stored;
+- collinear anisotropic exact pair (J = 0.1, Gamma_xx = 0.01): the
+  exported J comes from the determined joint fit (J = 0.1, never the
+  common-axis scalar 0.095), which survives only as the j_hat_scalar
+  diagnostic;
+- AFM charts (n_b = -n_a, same site-local axis): the zero-pitch identity
+  divides by the LOCAL tilt dot only (u_a.u_b = -1), so the exact AFM
+  Heisenberg pair stores j_stored = +J/2;
+- pure biquadratic: flagged at the planar (noncollinear) reference,
+  exactly J-representable with J_hat = -2B at the collinear reference
+  (masquerade); the K-only projection diagnostics reproduce the
+  derivation's chi2_iso = 2752/3115 and chi2_sector = 128/267;
+- pure three-site term (frozen third direction): flagged through the
+  onsite-block violation, K-only chi2_sector = 59/93 -- distinct from the
+  exact THREE-SITE Heisenberg chain, which the joint multisite fit maps
+  with zero residual;
+- zero pitch: the scalar common-axis identity (j_hat_scalar_eV and its
+  per-axis entries) reproduces the story-011 anchor number on the O2
+  fixture (311.528909 meV stored, < 1e-6 meV); the exported j_stored is
+  the determined fitted J, which on this fixture resolves the onsite
+  block's single-site structure into an isotropic Gamma component
+  (J_pair_once = (K_ss - 2 K_ab)/3).
 
 MathDoc: tb2j/spiral-heisenberg-mapping (paired authority + derivation).
 """
 
 from __future__ import annotations
 
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +56,10 @@ from TB2J.interfaces.siesta_spiral_mapping import (
     CHI2_COMPAT_MAX,
     CHI2_FLAG_MIN,
     DEFAULT_CHI2_FLOOR_EV_PER_RAD2,
-    RESIDUAL_COMPONENTS,
+    DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD,
+    MIXED_RESIDUAL_COMPONENTS,
+    ONSITE_RESIDUAL_COMPONENTS,
+    THRESHOLD_STATUS_PROVISIONAL,
     MappingOutput,
     _compatibility_label,
     build_synthetic_response_set,
@@ -60,6 +80,7 @@ from TB2J.kpoints import monkhorst_pack
 J_SYN = sp.Rational(1, 10)
 B_SYN = sp.Rational(1, 100)
 K3_SYN = sp.Rational(3, 100)
+GAMMA_XX_SYN = sp.Rational(1, 100)
 
 X, Y, Z = (sp.Matrix(v) for v in np.eye(3).tolist())
 
@@ -72,6 +93,23 @@ COLLINEAR_REFERENCES = {"A": (0.0, 0.0, 1.0), "B": (0.0, 0.0, 1.0)}
 PLANAR_REFERENCES = {
     "A": (0.0, 0.0, 1.0),
     "B": (float(sp.Rational(4, 5)), 0.0, float(sp.Rational(3, 5))),
+}
+#: AFM charts: n_b = -n_a with the SAME site-local transverse axes, so
+#: the local tilts are u_b = -u_a and the local tilt dot is -1 exactly.
+AFM_FRAMES = {"A": (X, Y, Z), "B": (X, Y, -Z)}
+AFM_REFERENCES = {"A": (0.0, 0.0, 1.0), "B": (0.0, 0.0, -1.0)}
+#: Exact three-site Heisenberg chain: three coplanar references in the
+#: x-z plane (the multi-reference refusal only triggers off-plane).
+CHAIN_NB_C = sp.Matrix([sp.Rational(3, 5), 0, sp.Rational(4, 5)])
+CHAIN_FRAMES = {
+    "A": (X, Y, Z),
+    "B": (Y, sp.simplify(PLANAR_NB.cross(Y)), PLANAR_NB),
+    "C": (Y, sp.simplify(CHAIN_NB_C.cross(Y)), CHAIN_NB_C),
+}
+CHAIN_REFERENCES = {
+    "A": (0.0, 0.0, 1.0),
+    "B": (float(sp.Rational(4, 5)), 0.0, float(sp.Rational(3, 5))),
+    "C": (float(sp.Rational(3, 5)), 0.0, float(sp.Rational(4, 5))),
 }
 LABELS = ("1", "2")
 
@@ -93,6 +131,29 @@ def _chart(frame, angles):
 
 def _heisenberg(charts, coupling=J_SYN):
     return -coupling * (charts["A"].T * charts["B"])[0, 0]
+
+
+def _heisenberg_chain(charts, coupling=J_SYN):
+    """Exact Heisenberg energy over ALL pairs of the declared sites."""
+    return -coupling * sum(
+        (charts[a].T * charts[b])[0, 0] for a, b in combinations(sorted(charts), 2)
+    )
+
+
+def _anisotropic_pair(charts):
+    """Exact pair with in-plane anisotropy: -J e_a.e_b + e_a.Gamma.e_b.
+
+    Gamma = Gamma_xx (t1 t1 - n n) in site a's Cartesian chart, i.e. the
+    traceless tensor diag(1/100, 0, -1/100) for the (X, Y, Z) frame.
+    """
+    gamma = GAMMA_XX_SYN * (
+        sp.Matrix([[1, 0, 0], [0, 0, 0], [0, 0, 0]])
+        - sp.Matrix([[0, 0, 0], [0, 0, 0], [0, 0, 1]])
+    )
+    return (
+        -J_SYN * (charts["A"].T * charts["B"])[0, 0]
+        + (charts["A"].T * gamma * charts["B"])[0, 0]
+    )
 
 
 def _biquadratic(charts, strength=B_SYN):
@@ -150,6 +211,15 @@ def _assert_input_preserved(response, digest_before):
     assert _response_digest(response) == digest_before
 
 
+def _assert_zero(mapping):
+    """Exact-Heisenberg verdict: both chi2 scopes vanish, J recovered."""
+    assert mapping.compatibility["label"] == "heisenberg_compatible"
+    assert mapping.compatibility["gate"] == "hessian_and_measured_torque"
+    assert mapping.compatibility["threshold_status"] == THRESHOLD_STATUS_PROVISIONAL
+    assert mapping.residuals["chi2_hessian"] < 1e-18
+    assert mapping.residuals["chi2_torque"] < 1e-18
+
+
 # ---------------------------------------------------------------------------
 # exact Heisenberg synthetics
 # ---------------------------------------------------------------------------
@@ -160,21 +230,32 @@ def test_exact_heisenberg_collinear_zero_residual_and_stored_doubling():
         response, reference_directions_by_site=COLLINEAR_REFERENCES
     )
     _assert_input_preserved(response, digest)
+    _assert_zero(mapped)
 
-    assert mapped.compatibility["label"] == "heisenberg_compatible"
     assert mapped.residuals["chi2_floor_eV_per_rad2"] == (
         DEFAULT_CHI2_FLOOR_EV_PER_RAD2
     )
-    assert set(mapped.residuals["per_pair"]["A|B"]["components_eV_per_rad2"]) == set(
-        RESIDUAL_COMPONENTS
+    assert mapped.residuals["torque_chi2_floor_eV_per_rad"] == (
+        DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD
     )
-    assert mapped.residuals["chi2_iso"] == pytest.approx(0.0, abs=1e-15)
-    assert mapped.residuals["chi2_sector"] == pytest.approx(0.0, abs=1e-15)
+    pair_residuals = mapped.residuals["per_pair"]["A|B"]
+    assert set(pair_residuals["mixed_components_eV_per_rad2"]) == set(
+        MIXED_RESIDUAL_COMPONENTS
+    )
     assert all(
         abs(value) < 1e-12
-        for pair in mapped.residuals["per_pair"].values()
-        for value in pair["components_eV_per_rad2"].values()
+        for value in pair_residuals["mixed_components_eV_per_rad2"].values()
     )
+    for site in ("A", "B"):
+        site_residuals = mapped.residuals["per_site"][site]
+        assert set(site_residuals["onsite_components_eV_per_rad2"]) == set(
+            ONSITE_RESIDUAL_COMPONENTS
+        )
+        assert abs(site_residuals["onsite_closure"]["delta_eV_per_rad2"]) < 1e-12
+        assert all(
+            abs(value) < 1e-12
+            for value in site_residuals["torque_components_eV_per_rad"].values()
+        )
 
     pair = mapped.parameters["A|B"]
     assert pair["alignment"] == 1
@@ -182,77 +263,150 @@ def test_exact_heisenberg_collinear_zero_residual_and_stored_doubling():
     # MathDoc: tb2j/collinear-anchor-projection#stored_ordered_pair_j
     assert pair["j_pair_once_eV"] == pytest.approx(float(J_SYN), rel=1e-12)
     assert pair["j_stored_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
-    assert pair["j_hat_scalar_eV"] == pytest.approx(float(J_SYN), rel=1e-12)
+    # Isotropic limit: the scalar common-axis diagnostic coincides.
+    assert pair["j_hat_scalar_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
     assert pair["scalar_extraction"]["method"] == "zero_pitch_identity"
     for axis in LABELS:
         entry = pair["scalar_extraction"]["per_axis"][axis]
+        assert entry["transverse_dot"] == pytest.approx(1.0, abs=1e-12)
         assert entry["j_stored_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
     assert pair["gamma_transverse_eV"]["11"] == pytest.approx(0.0, abs=1e-12)
-    # The unidentifiable D components are listed, never guessed.
-    assert set(pair["dmi_determined_chart_eV"]) == {"D_z"}
-    assert pair["dmi_determined_chart_eV"]["D_z"] == pytest.approx(0.0, abs=1e-12)
+    # Corrected torque rows: D is determined with the torque data.
+    assert set(pair["dmi_determined_chart_eV"]) == {"D_x", "D_y", "D_z"}
+    assert all(abs(value) < 1e-12 for value in pair["dmi_determined_chart_eV"].values())
 
     ident = mapped.identifiability["per_pair"]["A|B"]
     assert mapped.identifiability["reference_class"] == "collinear_single_reference"
     assert ident["rank_mixed_block"] == 4
     assert ident["rank_onsite_closure"] == 5
-    assert ident["rank_with_torque"] == 7
-    assert set(ident["undetermined"]) == {"D_x", "D_y", "Gamma_xz", "Gamma_yz"}
-    assert set(ident["determined"]) == {
-        "J",
-        "D_z",
-        "Gamma_xx",
-        "Gamma_xy",
-        "Gamma_yy",
+    assert ident["rank_with_torque"] == 9
+    assert set(ident["mixed_nullspace_named"]) == {
+        "D_x",
+        "D_y",
+        "Gamma_xz",
+        "Gamma_yz",
+        "longitudinal_A_zz",
     }
-    assert set(ident["nullspace_named"]) == {"D_x", "D_y", "Gamma_xz", "Gamma_yz"}
-    assert ident["nullspace_generic"] == []
-    assert set(ident["torque_nullspace_named"]) == {
-        "trade_D_x_Gamma_yz",
-        "trade_D_y_Gamma_xz",
+    assert set(ident["onsite_closure_nullspace_named"]) == {
+        "D_x",
+        "D_y",
+        "Gamma_xz",
+        "Gamma_yz",
     }
-    assert ident["undetermined_trades"] == {
-        "D_x": "trade_D_x_Gamma_yz",
-        "D_y": "trade_D_y_Gamma_xz",
-        "Gamma_yz": "trade_D_x_Gamma_yz",
-        "Gamma_xz": "trade_D_y_Gamma_xz",
-    }
+    assert ident["torque_nullspace_named"] == []
+    assert set(ident["determined"]) == set(
+        (
+            "J",
+            "D_x",
+            "D_y",
+            "D_z",
+            "Gamma_xx",
+            "Gamma_xy",
+            "Gamma_xz",
+            "Gamma_yz",
+            "Gamma_yy",
+        )
+    )
+    assert ident["undetermined"] == []
+    # The former D <-> Gamma trades are retracted by the corrected rows:
+    # no trade direction is named at any identifiability level.
+    assert "undetermined_trades" not in ident
+    for key in (
+        "mixed_nullspace_named",
+        "onsite_closure_nullspace_named",
+        "torque_nullspace_named",
+    ):
+        assert all("trade" not in name.lower() for name in ident[key])
 
 
-def test_exact_heisenberg_planar_reference_completes_identifiability():
+def test_exact_heisenberg_planar_reference_fully_determined():
     response = _synthetic_response(
         _heisenberg, frames=PLANAR_FRAMES, q=(0.25, 0.25, 0.0)
     )
     digest = _response_digest(response)
     mapped = map_response_set(response, reference_directions_by_site=PLANAR_REFERENCES)
     _assert_input_preserved(response, digest)
+    _assert_zero(mapped)
 
     assert mapped.identifiability["reference_class"] == "planar_single_q"
-    assert mapped.compatibility["label"] == "heisenberg_compatible"
-    assert mapped.residuals["chi2_iso"] == pytest.approx(0.0, abs=1e-15)
-    assert mapped.residuals["chi2_sector"] == pytest.approx(0.0, abs=1e-15)
-
     pair = mapped.parameters["A|B"]
     assert pair["j_pair_once_eV"] == pytest.approx(float(J_SYN), rel=1e-12)
     assert pair["j_stored_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
-    assert pair["scalar_extraction"]["method"] == "sector_fit"
+    # The common-axis scalar identity is a zero-pitch instrument only.
+    assert pair["scalar_extraction"]["method"] == "finite_pitch"
+    assert pair["j_hat_scalar_eV"] is None
     assert pair["gamma_transverse_eV"]["11"] == pytest.approx(0.0, abs=1e-12)
     assert pair["gamma_transverse_eV"]["22"] == pytest.approx(0.0, abs=1e-12)
 
     ident = mapped.identifiability["per_pair"]["A|B"]
+    # Corrected authority: planar Hessian-only rank 5, full rank 9.
     assert ident["rank_onsite_closure"] == 5
-    assert ident["rank_with_torque"] == 8
-    # Torque-completed planar reference: everything but the blind trade
-    # members is determined, J included.
-    assert "J" in ident["determined"]
-    assert set(ident["undetermined"]) == {"D_x", "Gamma_yz"}
-    assert ident["undetermined_trades"] == {
-        "D_x": "trade_D_x_Gamma_yz",
-        "Gamma_yz": "trade_D_x_Gamma_yz",
+    assert ident["rank_with_torque"] == 9
+    assert ident["torque_nullspace_named"] == []
+    assert ident["undetermined"] == []
+    assert set(ident["determined"]) == {
+        "J",
+        "D_x",
+        "D_y",
+        "D_z",
+        "Gamma_xx",
+        "Gamma_xy",
+        "Gamma_xz",
+        "Gamma_yz",
+        "Gamma_yy",
     }
-    # The planar blind direction rotates with the tilt: exactly the
-    # derivation's single tradeoff at the t1-tilted reference.
-    assert set(ident["torque_nullspace_named"]) == {"trade_D_x_Gamma_yz"}
+    diagnostic = mapped.residuals["diagnostics"]["per_pair"]["A|B"]
+    assert diagnostic["scope"] == "pair_12_entry_k_only_layer"
+    assert diagnostic["chi2_sector"] == pytest.approx(0.0, abs=1e-18)
+    assert diagnostic["chi2_iso"] == pytest.approx(0.0, abs=1e-18)
+
+
+# ---------------------------------------------------------------------------
+# fitted-J export vs the scalar diagnostic (STD-005)
+# ---------------------------------------------------------------------------
+def test_collinear_anisotropic_exact_pair_exports_fitted_j():
+    response = _synthetic_response(_anisotropic_pair)
+    mapped = map_response_set(
+        response, reference_directions_by_site=COLLINEAR_REFERENCES
+    )
+    _assert_zero(mapped)
+
+    pair = mapped.parameters["A|B"]
+    # The exported J comes from the determined fitted J (theta_fit):
+    # J = 0.1 exactly -- NOT the 0.095 of the common-axis scalar mean.
+    assert pair["j_pair_once_eV"] == pytest.approx(0.1, rel=1e-12)
+    assert pair["j_stored_eV"] == pytest.approx(0.05, rel=1e-12)
+    # The scalar extraction survives as the labeled diagnostic, carrying
+    # the in-plane anisotropy contamination J - u.Gamma.u per axis.
+    assert pair["j_hat_scalar_eV"] == pytest.approx(0.0475, rel=1e-12)
+    per_axis = pair["scalar_extraction"]["per_axis"]
+    assert per_axis["1"]["j_stored_eV"] == pytest.approx(0.05, rel=1e-12)
+    assert per_axis["2"]["j_stored_eV"] == pytest.approx(0.045, rel=1e-12)
+    assert pair["gamma_transverse_eV"]["11"] == pytest.approx(0.01, rel=1e-12)
+    assert pair["gamma_transverse_eV"]["22"] == pytest.approx(0.0, abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# AFM convention (STD-004): site-local signed tilts, local tilt dot only
+# ---------------------------------------------------------------------------
+def test_afm_reference_stores_positive_half_j():
+    response = _synthetic_response(_heisenberg, frames=AFM_FRAMES)
+    digest = _response_digest(response)
+    mapped = map_response_set(response, reference_directions_by_site=AFM_REFERENCES)
+    _assert_input_preserved(response, digest)
+    _assert_zero(mapped)
+
+    pair = mapped.parameters["A|B"]
+    assert pair["alignment"] == -1
+    # MathDoc: tb2j/spiral-heisenberg-mapping#zero_pitch_reduction
+    # u_a.u_b = -1 exactly; j_stored = -K_ab / (2 u_a.u_b) = +J/2 > 0.
+    assert pair["j_pair_once_eV"] == pytest.approx(float(J_SYN), rel=1e-12)
+    assert pair["j_stored_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
+    assert pair["j_hat_scalar_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
+    for axis in LABELS:
+        entry = pair["scalar_extraction"]["per_axis"][axis]
+        assert entry["transverse_dot"] == pytest.approx(-1.0, abs=1e-12)
+        assert entry["j_stored_eV"] == pytest.approx(float(J_SYN) / 2.0, rel=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -268,27 +422,71 @@ def test_biquadratic_flagged_noncollinear_and_masquerades_collinear():
     )
     _assert_input_preserved(planar_response, planar_digest)
     assert planar.compatibility["label"] == "incompatible"
+    assert planar.residuals["chi2_hessian"] >= CHI2_FLAG_MIN
+    assert planar.residuals["chi2_torque"] >= 0.0
     # MathDoc: tb2j/spiral-heisenberg-mapping#synthetic
-    assert planar.residuals["chi2_iso"] == pytest.approx(2752.0 / 3115.0, rel=1e-9)
-    assert planar.residuals["chi2_sector"] == pytest.approx(128.0 / 267.0, rel=1e-9)
-    assert planar.residuals["chi2_iso"] >= CHI2_FLAG_MIN
+    # K-only projection diagnostics reproduce the derivation's exact
+    # fractions (distinctly labeled; the verdict uses the joint fit).
+    diagnostic = planar.residuals["diagnostics"]["per_pair"]["A|B"]
+    assert diagnostic["chi2_iso"] == pytest.approx(2752.0 / 3115.0, rel=1e-9)
+    assert diagnostic["chi2_sector"] == pytest.approx(128.0 / 267.0, rel=1e-9)
 
     collinear = map_response_set(
         _synthetic_response(_biquadratic),
         reference_directions_by_site=COLLINEAR_REFERENCES,
     )
     # Invisible at the collinear anchor: exactly J-representable, and the
-    # pure biquadratic masquerades as J_hat = -2B (n_a.n_b) = -2B.
+    # pure biquadratic masquerades as J_hat = -2B (n_a.n_b) = -2B -- the
+    # masquerade now appears in the exported fitted J itself.
     assert collinear.compatibility["label"] == "heisenberg_compatible"
-    assert collinear.residuals["chi2_iso"] == pytest.approx(0.0, abs=1e-15)
-    assert collinear.residuals["chi2_sector"] == pytest.approx(0.0, abs=1e-15)
+    assert collinear.residuals["chi2_hessian"] < 1e-24
+    assert collinear.residuals["chi2_torque"] < 1e-24
     pair = collinear.parameters["A|B"]
-    assert pair["j_hat_scalar_eV"] == pytest.approx(float(-2 * B_SYN), rel=1e-12)
     assert pair["j_pair_once_eV"] == pytest.approx(float(-2 * B_SYN), rel=1e-12)
     assert pair["j_stored_eV"] == pytest.approx(float(-B_SYN), rel=1e-12)
+    # The scalar diagnostic is carried in stored units: -B per axis.
+    assert pair["j_hat_scalar_eV"] == pytest.approx(float(-B_SYN), rel=1e-12)
 
 
-def test_three_site_flagged_via_onsite_closure_violation():
+def test_exact_chain_zero_residual_and_flagged_three_site_distinct():
+    # (a) The exact THREE-SITE Heisenberg chain maps with zero residual
+    # under the joint multisite fit (onsite/torque rows are sums over the
+    # incident pairs, never reused per bond).  The three-site site data
+    # is shared among its bonds: the global fit keeps a nontrivial null,
+    # so the signed per-pair exports stay gated (never guessed) while the
+    # fit itself and the per-site closures are exact.
+    chain = _synthetic_response(
+        _heisenberg_chain, frames=CHAIN_FRAMES, q=(0.25, 0.25, 0.0)
+    )
+    chain_digest = _response_digest(chain)
+    mapped_chain = map_response_set(
+        chain, reference_directions_by_site=CHAIN_REFERENCES
+    )
+    _assert_input_preserved(chain, chain_digest)
+    _assert_zero(mapped_chain)
+    for site in ("A", "B", "C"):
+        site_residuals = mapped_chain.residuals["per_site"][site]
+        assert abs(site_residuals["onsite_closure"]["delta_eV_per_rad2"]) < 1e-12
+        assert site_residuals["onsite_max_abs_residual_eV_per_rad2"] < 1e-12
+        assert all(
+            abs(value) < 1e-12
+            for value in site_residuals["torque_components_eV_per_rad"].values()
+        )
+    ident_chain = mapped_chain.identifiability
+    for pair_key in ("A|B", "A|C", "B|C"):
+        pair_ident = ident_chain["per_pair"][pair_key]
+        # Pair-local corrected authority ranks hold at every bond.
+        assert pair_ident["rank_mixed_block"] == 4
+        assert pair_ident["rank_with_torque"] == 9
+        # The shared site data leaves global trade directions: the signed
+        # pair parameters are reported undetermined, never guessed.
+        assert ident_chain["alignment"]["by_pair"][pair_key] == 1
+        assert mapped_chain.parameters[pair_key]["j_pair_once_eV"] is None
+        assert "J" in pair_ident["undetermined"]
+
+    # (b) The derivation's flagged three-site term is a genuine
+    # non-Heisenberg two-site response (third direction frozen): flagged
+    # through the onsite-block violation.
     response = _synthetic_response(
         _three_site, frames=PLANAR_FRAMES, q=(0.25, 0.25, 0.0)
     )
@@ -296,27 +494,90 @@ def test_three_site_flagged_via_onsite_closure_violation():
     mapped = map_response_set(response, reference_directions_by_site=PLANAR_REFERENCES)
     _assert_input_preserved(response, digest)
     assert mapped.compatibility["label"] == "incompatible"
-    assert mapped.residuals["chi2_sector"] == pytest.approx(59.0 / 93.0, rel=1e-9)
-    assert mapped.residuals["chi2_iso"] >= CHI2_FLAG_MIN
-    pair_residuals = mapped.residuals["per_pair"]["A|B"]
-    # The three-site term is flagged through the onsite-block violation.
-    assert pair_residuals["onsite_max_abs_residual_eV_per_rad2"] > 1e-12
-    closure = mapped.parameters["A|B"]["onsite_closure"]
-    assert abs(closure["a"]["delta_eV_per_rad2"]) > 1e-12
-    assert abs(closure["b"]["delta_eV_per_rad2"]) > 1e-12
+    assert mapped.residuals["chi2_hessian"] >= CHI2_FLAG_MIN
+    for site in ("A", "B"):
+        assert (
+            mapped.residuals["per_site"][site]["onsite_max_abs_residual_eV_per_rad2"]
+            > 1e-12
+        )
+        assert (
+            abs(
+                mapped.residuals["per_site"][site]["onsite_closure"][
+                    "delta_eV_per_rad2"
+                ]
+            )
+            > 1e-12
+        )
+    diagnostic = mapped.residuals["diagnostics"]["per_pair"]["A|B"]
+    assert diagnostic["chi2_sector"] == pytest.approx(59.0 / 93.0, rel=1e-9)
+    assert diagnostic["chi2_iso"] == pytest.approx(1927.0 / 2170.0, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
-# thresholds, digest gates and refusals
+# thresholds, torque gating, digest gates and refusals
 # ---------------------------------------------------------------------------
 def test_threshold_constants_and_label_boundaries():
     assert CHI2_COMPAT_MAX == 1.0e-4
     assert CHI2_FLAG_MIN == 2.5e-3 == 1.0 / 400.0
     assert DEFAULT_CHI2_FLOOR_EV_PER_RAD2 == 1.0e-6
-    assert _compatibility_label(0.0) == "heisenberg_compatible"
-    assert _compatibility_label(CHI2_COMPAT_MAX) == "heisenberg_compatible"
-    assert _compatibility_label(0.5 * (CHI2_COMPAT_MAX + CHI2_FLAG_MIN)) == "marginal"
-    assert _compatibility_label(CHI2_FLAG_MIN) == "incompatible"
+    assert DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD == 1.0e-6
+    assert THRESHOLD_STATUS_PROVISIONAL == "provisional_pending_story_approval"
+    assert _compatibility_label(0.0, 0.0) == "heisenberg_compatible"
+    assert (
+        _compatibility_label(CHI2_COMPAT_MAX, CHI2_COMPAT_MAX)
+        == "heisenberg_compatible"
+    )
+    assert (
+        _compatibility_label(0.5 * (CHI2_COMPAT_MAX + CHI2_FLAG_MIN), 0.0) == "marginal"
+    )
+    assert _compatibility_label(0.0, 0.5 * (CHI2_COMPAT_MAX + CHI2_FLAG_MIN)) == (
+        "marginal"
+    )
+    # The verdict gates on BOTH scopes: either at the flag level flags.
+    assert _compatibility_label(CHI2_FLAG_MIN, 0.0) == "incompatible"
+    assert _compatibility_label(0.0, CHI2_FLAG_MIN) == "incompatible"
+    assert _compatibility_label(CHI2_FLAG_MIN, CHI2_COMPAT_MAX) == "incompatible"
+
+
+def test_residual_scopes_and_verdict_gate():
+    # A site-asymmetric onsite tamper breaks the K representability: the
+    # Hessian scope flags, the emitted fit moves, and the torque residual
+    # g_raw - g_map(theta_fit) is nonzero and reported alongside it
+    # (SPEC-007: both scopes enter the verdict dictionary).
+    response = _synthetic_response(_heisenberg)
+    curvature = dict(response.curvature)
+    key = (("A", "1"), ("A", "1"))
+    curvature[key] = curvature[key] + 0.05
+    curvature[(key[1], key[0])] = curvature[(key[1], key[0])] + 0.05
+    tampered = build_synthetic_response_set(
+        site_order=response.site_order,
+        axes_by_site=response.axes,
+        gradient=response.gradient,
+        curvature=curvature,
+        q=(0.0, 0.0, 0.0),
+    )
+    mapped = map_response_set(
+        tampered, reference_directions_by_site=COLLINEAR_REFERENCES
+    )
+    assert mapped.residuals["chi2_hessian"] == pytest.approx(1.0 / 12.0, rel=1e-9)
+    # Curvature-only tamper at an equilibrium reference: the torque scope
+    # stays exactly satisfied, and the two-scope gate still flags via the
+    # Hessian scope alone.
+    assert mapped.residuals["chi2_torque"] == pytest.approx(0.0, abs=1e-12)
+    assert mapped.compatibility["label"] == "incompatible"
+    assert mapped.compatibility["gate"] == "hessian_and_measured_torque"
+    assert "chi2_hessian" in mapped.compatibility["scope"]
+    assert "chi2_torque" in mapped.compatibility["scope"]
+    assert (
+        mapped.compatibility["aggregate"]
+        == "global sums over all pair and site entries"
+    )
+    # Structural note: at any single reference the torque-only columns
+    # (D and the torque-only Gamma entries) never enter the Hessian rows,
+    # so a single reference's measured gradients are always exactly
+    # representable and chi2_torque stays ~0; the two-scope gate is
+    # exercised at the unit level in test_threshold_constants_and_label_
+    # boundaries and becomes binding for stacked multi-reference data.
 
 
 def test_mapping_output_round_trip_and_digest_gates():
@@ -334,7 +595,10 @@ def test_mapping_output_round_trip_and_digest_gates():
     with pytest.raises(SpiralResponseError, match="version"):
         MappingOutput.from_dict(tampered_version)
     tampered = dict(record)
-    tampered["compatibility"] = {**record["compatibility"], "chi2_iso": 0.5}
+    tampered["compatibility"] = {
+        **record["compatibility"],
+        "chi2_hessian": 0.5,
+    }
     with pytest.raises(SpiralResponseError, match="digest"):
         MappingOutput.from_dict(tampered)
 
@@ -349,9 +613,19 @@ def test_alignment_is_refused_not_guessed_without_references():
     assert pair["alignment_source"] == "undetermined"
     assert pair["j_pair_once_eV"] is None
     assert pair["j_stored_eV"] is None
+    assert pair["j_hat_scalar_eV"] is None
     assert pair["gamma_transverse_eV"] is None
+    # The sign-independent per-axis data is still reported, with the
+    # signed j_stored left undetermined per axis.
+    for axis in LABELS:
+        entry = pair["scalar_extraction"]["per_axis"][axis]
+        assert entry["K_ab_eV_per_rad2"] == pytest.approx(-float(J_SYN), rel=1e-12)
+        assert entry["transverse_dot"] == pytest.approx(1.0, abs=1e-12)
+        assert entry["j_stored_eV"] is None
+    diagnostic = mapped.residuals["diagnostics"]["per_pair"]["A|B"]
+    assert diagnostic["j_hat_isotropic_eV"] is None
     # Sign-independent verdicts are still delivered in full.
-    assert mapped.residuals["chi2_iso"] == pytest.approx(0.0, abs=1e-15)
+    assert mapped.residuals["chi2_hessian"] < 1e-24
     assert mapped.compatibility["label"] == "heisenberg_compatible"
     assert "torque cannot substitute" in mapped.identifiability["alignment"]["note"]
 
@@ -366,6 +640,12 @@ def test_reference_class_refusals():
             _synthetic_response(_heisenberg),
             reference_directions_by_site=COLLINEAR_REFERENCES,
             chi2_floor_eV_per_rad2=-1.0,
+        )
+    with pytest.raises(SpiralResponseError, match="floor"):
+        map_response_set(
+            _synthetic_response(_heisenberg),
+            reference_directions_by_site=COLLINEAR_REFERENCES,
+            torque_chi2_floor_eV_per_rad=0.0,
         )
     # q = 0 with non-collinear certified references is refused (the
     # references are transverse to their own frames but not parallel).
@@ -434,6 +714,19 @@ def test_reference_class_refusals():
                 "C": (0.0, 1.0, 0.0),
             },
         )
+
+
+def test_synthetic_provenance_partition_fields_present():
+    mapped = map_response_set(
+        _synthetic_response(_heisenberg),
+        reference_directions_by_site=COLLINEAR_REFERENCES,
+    )
+    # Synthetic records carry no vertex certificate beyond the operator
+    # mode: the partition/vertex-version fields are present and honest.
+    assert mapped.provenance["partition_declaration"] is None
+    assert mapped.provenance["vertex_version"] is None
+    assert mapped.provenance["operator_mode"] == "onsite_delta"
+    assert mapped.provenance["mapping_version"] == "2.0"
 
 
 # ---------------------------------------------------------------------------
@@ -534,10 +827,32 @@ def test_o2_zero_pitch_reduction_matches_story011_anchor(o2_response):
     pair = mapped.parameters["O1|O2"]
     assert pair["alignment"] == 1
     assert pair["scalar_extraction"]["method"] == "zero_pitch_identity"
-    assert 1e3 * pair["j_stored_eV"] == pytest.approx(ANCHOR_J_STORED_MEV, abs=1e-6)
+    # Zero-pitch identity (story-011 anchor): the scalar common-axis
+    # extraction and its per-axis entries reproduce the anchor number.
+    assert 1e3 * pair["j_hat_scalar_eV"] == pytest.approx(ANCHOR_J_STORED_MEV, abs=1e-6)
+    # The exported j_stored comes from the DETERMINED fitted J
+    # (theta_fit).  Physical finding on this fixture: the measured onsite
+    # transverse curvature (+0.4546 eV/rad^2) differs from the
+    # pure-Heisenberg closure (+0.6231 eV/rad^2 = K_ss + 2|K_ab| would
+    # need K_ss = -K_ab), i.e. the fixture carries genuine single-site
+    # transverse structure.  Under the corrected rank-9 collinear map it
+    # maps to an isotropic Gamma_11 = Gamma_22 ~ -0.0561 eV with D = 0,
+    # while the story-011 anchor identity stays on the scalar diagnostic.
+    mixed_ab = response.curvature[(("O1", "y"), ("O2", "y"))]
+    onsite_ss = response.curvature[(("O1", "y"), ("O1", "y"))]
+    j_pair_exact = (onsite_ss - 2.0 * mixed_ab) / 3.0
+    assert 1e3 * pair["j_stored_eV"] == pytest.approx(
+        1e3 * j_pair_exact / 2.0, abs=1e-6
+    )
     assert 1e3 * pair["j_pair_once_eV"] == pytest.approx(
         1e3 * 2.0 * pair["j_stored_eV"], rel=1e-12
     )
+    gamma_exact = (onsite_ss + mixed_ab) / 3.0
+    assert pair["gamma_transverse_eV"]["11"] == pytest.approx(gamma_exact, rel=1e-9)
+    assert pair["gamma_transverse_eV"]["22"] == pytest.approx(gamma_exact, rel=1e-9)
+    assert all(abs(value) < 1e-12 for value in pair["dmi_determined_chart_eV"].values())
+    assert "anchor" in mapped.conventions["zero_pitch_anchor"]
+    assert "anchor" in mapped.identifiability["zero_pitch_anchor"]
 
     # Cross-seam: the story-011 anchor projection on the same mesh.
     moment_signs = _site_moment_signs(bundle, orbitals_by_site)
@@ -567,7 +882,16 @@ def test_o2_zero_pitch_reduction_matches_story011_anchor(o2_response):
     )
     assert mapped.provenance["ensemble_kind"] == ENSEMBLE_GAPPED_T0
     assert mapped.provenance["response_sha256"] == digest
+    # SPEC-008: the raw vertex certificate's declarations surface here.
+    certificate = response.frozen_declarations["magnetic_amplitudes"]["certificate"]
+    assert mapped.provenance["vertex_version"] == certificate["vertex_version"]
+    assert (
+        mapped.provenance["partition_declaration"]
+        == certificate["partition_declaration"]
+    )
+    assert "onsite delta" in mapped.provenance["partition_declaration"]
     assert mapped.identifiability["reference_class"] == "collinear_single_reference"
+    assert mapped.compatibility["threshold_status"] == THRESHOLD_STATUS_PROVISIONAL
 
 
 def test_o2_round_trip_preserves_raw_response(o2_response):
@@ -595,4 +919,5 @@ def test_o2_without_references_reports_alignment_undetermined(o2_response):
         "marginal",
         "incompatible",
     }
-    assert mapped.residuals["chi2_sector"] >= 0.0
+    assert mapped.residuals["chi2_hessian"] >= 0.0
+    assert mapped.residuals["chi2_torque"] >= 0.0

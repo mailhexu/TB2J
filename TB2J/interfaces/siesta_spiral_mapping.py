@@ -11,32 +11,51 @@ identity used here is pinned there with exact assertions:
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#pair_mapping
     K_ab[a,b]  = -J (u_a.u_b) + D.(u_a x u_b) + u_a.Gamma.u_b
-    K_aa[a,b]  = +delta[a,b] (n_a.n_b) J - delta[a,b] (n_a.Gamma.n_b)
+    K_aa[a,b]  = +delta[a,b] (n_a.n_b) J - delta[a,b] D.(n_a x n_b)
+                 - delta[a,b] (n_a.Gamma.n_b)
     g_a.alpha  = -J (u.n_b) + D.(u x n_b) + u.Gamma.n_b   (torque = -g)
+    g_b.beta   = -J (n_a.u) + D.(n_a x u_b) + u_b.Gamma.n_a
 with tilt directions u_alpha = t_alpha x n of the declared transverse
 chart, Gamma symmetric traceless, J > 0 ferromagnetic, unit moment
-directions and no |m|^2 division.
+directions and no |m|^2 division.  D enters the mixed cross products and
+the onsite DIAGONAL blocks through -D.(n_a x n_b) (zero at collinear
+references); the b-site gradient row is D.(n_a x u_b) -- the derivative
+of E_DMI = +D.(e_a x e_b) -- NOT D.(u_b x n_a).
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#zero_pitch_reduction
-    J_stored = -K_ab / (2 alignment transverse_dot),  J_pair_once = 2 J_stored
+    J_stored = -K_ab / (2 transverse_dot),  J_pair_once = 2 J_stored
+with transverse_dot the SITE-LOCAL tilt dot (u_a.u_b): the AFM alignment
+sign is already encoded in the charts (n_b = -n_a with the same
+site-local axis t gives u_b = -u_a), so j_stored = +J/2 for the exact
+AFM Heisenberg pair -- no separate alignment factor divides the identity.
 
 # MathDoc: tb2j/collinear-anchor-projection#stored_ordered_pair_j
 (the story-011 anchor identity: TB2J stores both ordered directions at
 J_stored = J_pair_once / 2; exchange_Jdict keeps (R,i,j) and (-R,j,i)).
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#identifiability
-Reference classes and exact ranks: a q = 0 collinear single reference
-determines rank 4 from the mixed block, rank 5 with the onsite closure
-(null space {D_x, D_y, Gamma_xz, Gamma_yz}) and rank 7 with torque rows
-(remaining null space the D_x <-> Gamma_yz and D_y <-> Gamma_xz trades);
-a planar single-q reference reaches rank 5 / rank 8 with a single blind
-direction; only a multi-reference set completes the rank to 9 (refused
-here, never approximated).
+Reference classes and exact ranks (corrected rows): a q = 0 collinear
+single reference determines rank 4 from the mixed block (null space
+{D_x, D_y, Gamma_xz, Gamma_yz, longitudinal A_zz <-> J trade}), rank 5
+with the onsite closure (null space {D_x, D_y, Gamma_xz, Gamma_yz}) and
+rank 9 with the torque rows: the corrected b-site gradient row makes the
+sums AND differences of the two sites' DMI torque columns measurable, so
+D is determined together with Gamma and no D <-> Gamma trade survives.
+A planar single-q reference has Hessian rank 5 and full rank 9 with the
+torque rows; stacked references stay at rank 9.
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#residual_definitions
-Residuals r_i = K_raw - K_map on the gauge-free 12-entry layout of one
-pair (mixed 2x2, then both onsite 2x2 blocks), the dimensionless
-statistic chi = sqrt(r2 / max(d2, K_floor^2)), and the synthetic flags.
+Component residuals r = raw - mapped(theta_fit) against the EMITTED
+joint least-squares fit, aggregated over the gauge-free K entries
+(mixed + onsite) into chi2_hessian and over the measured-gradient
+entries into chi2_torque, each with its own explicit denominator floor:
+chi2 = r2 / max(d2, floor^2).  The K-only projection residuals are kept
+as a distinctly labeled diagnostic.
+
+The fit itself is ONE global least squares over ALL pair parameters
+(mixed K rows per pair; onsite and torque rows of a site are sums over
+its incident pairs): the measured onsite block and gradient of a site
+are single numbers shared by its bonds and are never reused per bond.
 
 The layer never mutates its input, never guesses an unidentifiable
 parameter, and never derives a sign it cannot certify: without declared
@@ -68,21 +87,28 @@ from .siesta_spiral_response import (
 )
 from .siesta_spiral_vertex import DEFAULT_OPERATOR_MODE, OPERATOR_MODES
 
-MAPPING_VERSION = "1.0"
+MAPPING_VERSION = "2.0"
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#synthetic
 # Flag level chi > 1/20 = CHI_MAX of the derivation's compatibility
 # statistic, squared: chi2 >= 1/400.  Both flagged derivation synthetics
 # (biquadratic chi2_iso = 2752/3115, three-site chi2_sector = 59/93) sit
 # far above it, while the exact-Heisenberg synthetic sits at exactly 0.
+#
+# PROVISIONAL thresholds: CHI2_COMPAT_MAX and CHI2_FLAG_MIN await the
+# user's numeric approval for story-012; they are engineering defaults,
+# not approved bounds, and MappingOutput.compatibility carries
+# 'threshold_status': 'provisional_pending_story_approval' until then.
 CHI2_FLAG_MIN = 2.5e-3
-# User approval of these two story-012 thresholds is recorded in story-012:
-# chi2 <= 1e-4 (chi <= 1e-2) counts as Heisenberg-compatible, chi2 >=
-# CHI2_FLAG_MIN as incompatible, and strictly between as marginal.
 CHI2_COMPAT_MAX = 1.0e-4
+THRESHOLD_STATUS_PROVISIONAL = "provisional_pending_story_approval"
 
-#: Derivation K_FLOOR = 1e-6 (eV/rad^2) denominator floor of chi.
+#: Derivation K_FLOOR = 1e-6 (eV/rad^2) denominator floor of the Hessian
+#: chi2; the torque aggregate uses the same floor magnitude in its own
+#: gradient units (eV/rad).  Both floors are provisional like the
+#: thresholds above.
 DEFAULT_CHI2_FLOOR_EV_PER_RAD2 = 1.0e-6
+DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD = 1.0e-6
 
 HEISENBERG_COMPATIBLE = "heisenberg_compatible"
 INCOMPATIBLE = "incompatible"
@@ -107,12 +133,11 @@ CHART_PARAMETER_NAMES = (
     "Gamma_yy",
 )
 
-#: Chart-named null directions of the derivation.
+#: Chart-named null directions of the derivation (corrected authority).
+#: The former D_x <-> Gamma_yz and D_y <-> Gamma_xz trades are RETRACTED:
+#: the corrected b-site torque row D.(n_a x u_b) determines D together
+#: with Gamma once the torque data is used.
 LONGITUDINAL_DIRECTION = {"J": 1.0, "Gamma_xx": 1.0, "Gamma_yy": 1.0}
-NAMED_TRADES = {
-    "trade_D_x_Gamma_yz": {"D_x": -1.0, "Gamma_yz": 1.0},
-    "trade_D_y_Gamma_xz": {"D_y": 1.0, "Gamma_xz": 1.0},
-}
 
 #: Gauge-free 12-entry data layout of one pair
 #: (MathDoc: tb2j/spiral-heisenberg-mapping#residual_definitions).
@@ -130,9 +155,13 @@ RESIDUAL_COMPONENTS = (
     "onsite_b_21",
     "onsite_b_22",
 )
-
-_MIXED_ROWS = 4
-_ONSITE_BLOCK_ROWS = 4
+MIXED_RESIDUAL_COMPONENTS = (
+    "mixed_11",
+    "mixed_12",
+    "mixed_21",
+    "mixed_22",
+)
+ONSITE_RESIDUAL_COMPONENTS = ("onsite_11", "onsite_12", "onsite_21", "onsite_22")
 
 _FRAME_UNIT_TOL = 1e-6
 AXIS_TRANSVERSE_TOL = 1e-6
@@ -151,11 +180,16 @@ def _payload_digest(payload):
     ).hexdigest()
 
 
-def _compatibility_label(chi2):
-    """Threshold rule of the story-012 compatibility verdict."""
-    if chi2 <= CHI2_COMPAT_MAX:
+def _compatibility_label(chi2_hessian, chi2_torque):
+    """Threshold rule over BOTH scopes of the story-012 verdict.
+
+    Compatible requires the Hessian AND the measured-torque aggregate
+    inside the compatibility bound; either scope at or beyond the flag
+    level marks the response incompatible; anything between is marginal.
+    """
+    if chi2_hessian <= CHI2_COMPAT_MAX and chi2_torque <= CHI2_COMPAT_MAX:
         return HEISENBERG_COMPATIBLE
-    if chi2 >= CHI2_FLAG_MIN:
+    if chi2_hessian >= CHI2_FLAG_MIN or chi2_torque >= CHI2_FLAG_MIN:
         return INCOMPATIBLE
     return MARGINAL
 
@@ -257,18 +291,21 @@ def _parameter_row(dot_j, d_chart, gamma_chart):
 
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#pair_mapping
-def _pair_model(chart_a, chart_b):
-    """(12x9 sector rows, 12x1 isotropic rows, 4x9 gradient rows) of a pair.
+def _pair_rows(chart_a, chart_b):
+    """Row blocks of one pair's model, in the pair chart (site a's chart).
 
-    Parameters are carried in site a's chart; for the derivation anchors
-    (site a framed on the Cartesian axes) the chart projections are the
-    Cartesian components.  D and J never enter the onsite blocks; the
-    onsite rows are diagonal in the chart (the composed chart's seagull).
+    Returns (mixed 4x9, onsite block 4x9, site-a gradient 2x9, site-b
+    gradient 2x9).  The onsite rows are diagonal in the chart (the
+    composed chart's vanishing mixed second vertex): +J (n_a.n_b) on the
+    diagonal entries, -D.(n_a x n_b) and -(n_a.Gamma.n_b) alongside, and
+    zeros off the diagonal.  The site-b gradient DMI row is
+    D.(n_a x u_b) -- the direct derivative of E_DMI = +D.(e_a x e_b).
     """
     gamma_basis = _chart_gamma_basis(chart_a)
     directions = _chart_directions(chart_a)
+    n_a, n_b = chart_a.n, chart_b.n
 
-    def channel_rows(dot_j, cross, gamma_proj):
+    def channel_row(dot_j, cross, gamma_proj):
         d_proj = {name: float(cross @ vec) for name, vec in directions.items()}
         g_proj = {
             name: float(np.sum(gamma_proj * tensor))
@@ -276,44 +313,40 @@ def _pair_model(chart_a, chart_b):
         }
         return _parameter_row(dot_j, d_proj, g_proj)
 
-    rows = []
-    for u_a in chart_a.tilts:
-        for u_b in chart_b.tilts:
-            rows.append(
-                channel_rows(
-                    -(u_a @ u_b), np.cross(u_a, u_b), u_a[:, None] * u_b[None, :]
-                )
-            )
-    n_a, n_b = chart_a.n, chart_b.n
-    n_dot = float(n_a @ n_b)
-    # Onsite anisotropy carries -delta (n_a.Gamma.n_b); D never enters.
-    onsite_row = channel_rows(n_dot, np.zeros(3), -(n_a[:, None] * n_b[None, :]))
-    zero_row = [0.0] * len(CHART_PARAMETER_NAMES)
-    for _chart in (chart_a, chart_b):
-        rows += [onsite_row, zero_row, zero_row, onsite_row]
-
-    gradient_rows = []
-    for tilts, other in ((chart_a.tilts, n_b), (chart_b.tilts, n_a)):
-        for u in tilts:
-            gradient_rows.append(
-                channel_rows(
-                    -(u @ other), np.cross(u, other), u[:, None] * other[None, :]
-                )
-            )
-
-    # Heisenberg-only isotropic layer: mixed -u_a.u_b and onsite n_a.n_b
-    # on the diagonal chart entries only.
-    isotropic = []
-    for index, row in enumerate(rows):
-        off_diagonal = index >= _MIXED_ROWS and (
-            index - _MIXED_ROWS
-        ) % _ONSITE_BLOCK_ROWS not in (0, 3)
-        isotropic.append(0.0 if off_diagonal else row[0])
-    return (
-        np.asarray(rows, dtype=float),
-        np.asarray(isotropic, dtype=float),
-        np.asarray(gradient_rows, dtype=float),
+    mixed = [
+        channel_row(-(u_a @ u_b), np.cross(u_a, u_b), np.outer(u_a, u_b))
+        for u_a in chart_a.tilts
+        for u_b in chart_b.tilts
+    ]
+    onsite_entry = channel_row(
+        float(n_a @ n_b), -np.cross(n_a, n_b), -np.outer(n_a, n_b)
     )
+    zero_row = [0.0] * len(CHART_PARAMETER_NAMES)
+    onsite_block = [onsite_entry, zero_row, zero_row, onsite_entry]
+    gradient_a = [
+        channel_row(-(u @ n_b), np.cross(u, n_b), np.outer(u, n_b))
+        for u in chart_a.tilts
+    ]
+    gradient_b = [
+        channel_row(-(u @ n_a), np.cross(n_a, u), np.outer(u, n_a))
+        for u in chart_b.tilts
+    ]
+    return (
+        np.asarray(mixed, dtype=float),
+        np.asarray(onsite_block, dtype=float),
+        np.asarray(gradient_a, dtype=float),
+        np.asarray(gradient_b, dtype=float),
+    )
+
+
+def _pair_isotropic_layer(chart_a, chart_b):
+    """12-entry isotropic Heisenberg-only layer of one pair (diagnostic)."""
+    mixed = [-(u_a @ u_b) for u_a in chart_a.tilts for u_b in chart_b.tilts]
+    nab = float(chart_a.n @ chart_b.n)
+    onsite = []
+    for _chart in (chart_a, chart_b):
+        onsite += [nab, 0.0, 0.0, nab]
+    return np.asarray(mixed + onsite, dtype=float)
 
 
 def _nullspace(matrix):
@@ -335,10 +368,6 @@ def _named_chart_directions():
     candidates["longitudinal_A_zz"] = np.array(
         [LONGITUDINAL_DIRECTION.get(name, 0.0) for name in CHART_PARAMETER_NAMES]
     )
-    for name, trade in NAMED_TRADES.items():
-        candidates[name] = np.array(
-            [trade.get(parameter, 0.0) for parameter in CHART_PARAMETER_NAMES]
-        )
     return candidates
 
 
@@ -346,9 +375,9 @@ def _match_nullspace(null_basis):
     """Name the chart directions carried by a null space.
 
     Returns (named, generic): ``named`` lists derivation names whose
-    direction lies in the null space and adds independent content (a
-    matched trade suppresses its redundant re-expression through its
-    members); ``generic`` lists the remaining, unnamed null directions.
+    direction lies in the null space (each matched direction suppresses
+    redundant re-expressions of the same ray); ``generic`` lists the
+    remaining, unnamed null directions with their chart components.
     """
     null_basis = np.asarray(null_basis, dtype=float)
     if null_basis.size == 0:
@@ -395,19 +424,6 @@ def _determined_parameters(null_basis):
     return determined, undetermined
 
 
-def _undetermined_trades(torque_null_basis):
-    """Map each traded chart parameter to its matched torque-level trade."""
-    named, _generic = _match_nullspace(torque_null_basis)
-    trades = {}
-    for name in named:
-        if name not in NAMED_TRADES:
-            continue
-        for parameter, coef in NAMED_TRADES[name].items():
-            if abs(coef) > _NULL_PARTICIPATION_TOL:
-                trades[parameter] = name
-    return trades
-
-
 def _curvature_entry(response, coord_a, coord_b):
     key = (coord_a, coord_b)
     if key not in response.curvature:
@@ -426,22 +442,38 @@ def _gradient_entry(response, coord):
     return float(response.gradient[coord])
 
 
-def _pair_data(response, chart_a, chart_b):
-    """Gauge-free 12-entry data vector of one pair (derivation layout)."""
+def _mixed_data(response, chart_a, chart_b):
+    """Measured mixed K block of one pair, in the derivation layout."""
     a, b = chart_a.site, chart_b.site
-    mixed = [
-        _curvature_entry(response, (a, la), (b, lb))
-        for la in chart_a.labels
-        for lb in chart_b.labels
-    ]
-    data = list(mixed)
-    for chart in (chart_a, chart_b):
-        data += [
-            _curvature_entry(response, (chart.site, l1), (chart.site, l2))
+    return np.asarray(
+        [
+            _curvature_entry(response, (a, la), (b, lb))
+            for la in chart_a.labels
+            for lb in chart_b.labels
+        ],
+        dtype=float,
+    )
+
+
+def _onsite_data(response, chart):
+    """Measured onsite K block of one site, in the (11,12,21,22) layout."""
+    site = chart.site
+    return np.asarray(
+        [
+            _curvature_entry(response, (site, l1), (site, l2))
             for l1 in chart.labels
             for l2 in chart.labels
-        ]
-    return np.asarray(data, dtype=float)
+        ],
+        dtype=float,
+    )
+
+
+def _gradient_data(response, chart):
+    """Measured gradient of one site, one entry per declared axis label."""
+    return np.asarray(
+        [_gradient_entry(response, (chart.site, label)) for label in chart.labels],
+        dtype=float,
+    )
 
 
 def _reference_class(q):
@@ -484,18 +516,25 @@ def _alignment_by_pair(site_order, charts, references_given):
 
 
 def _scalar_extraction(response, chart_a, chart_b, alignment):
-    """Zero-pitch stored-J identity per common chart axis.
+    """Zero-pitch stored-J identity per common chart axis (diagnostic).
 
     # MathDoc: tb2j/spiral-heisenberg-mapping#zero_pitch_reduction
     # MathDoc: tb2j/collinear-anchor-projection#stored_ordered_pair_j
-    J_stored = -K_ab / (2 alignment transverse_dot), J_pair_once = 2 J_stored.
+    J_stored = -K_ab / (2 transverse_dot) with transverse_dot the
+    SITE-LOCAL tilt dot (u_a.u_b) of the same axis LABEL: the AFM
+    alignment is already encoded in the charts (u_b = -u_a), so no
+    separate alignment factor divides the identity and the exact AFM
+    Heisenberg pair yields j_stored = +J/2.  The second-site tilt is
+    looked up by axis LABEL, never by position.
     """
     a, b = chart_a.site, chart_b.site
     per_axis = {}
-    for index, label in enumerate(chart_a.labels):
+    for label in chart_a.labels:
         if label not in chart_b.labels:
             continue
-        transverse_dot = float(chart_a.tilts[index] @ chart_b.tilts[index])
+        u_a = chart_a.tilts[chart_a.labels.index(label)]
+        u_b = chart_b.tilts[chart_b.labels.index(label)]
+        transverse_dot = float(u_a @ u_b)
         if abs(transverse_dot) < _TRANSVERSE_DOT_MIN:
             per_axis[label] = {
                 "j_stored_eV": None,
@@ -507,9 +546,7 @@ def _scalar_extraction(response, chart_a, chart_b, alignment):
             "K_ab_eV_per_rad2": k_ab,
             "transverse_dot": transverse_dot,
             "j_stored_eV": (
-                None
-                if alignment is None
-                else -k_ab / (2.0 * alignment * transverse_dot)
+                None if alignment is None else -k_ab / (2.0 * transverse_dot)
             ),
         }
     stored = [
@@ -522,23 +559,76 @@ def _scalar_extraction(response, chart_a, chart_b, alignment):
     return float(np.mean(stored)), per_axis
 
 
-def _onsite_closure(rows, data, theta, labels_a, labels_b):
-    """Per-site onsite closure: measured K_aa[11] vs the mapped row."""
-    closure = {}
-    for site, labels, block in (
-        ("a", labels_a, "onsite_a_11"),
-        ("b", labels_b, "onsite_b_11"),
-    ):
-        row_index = RESIDUAL_COMPONENTS.index(block)
-        measured = float(data[row_index])
-        mapped = float(rows[row_index] @ theta)
-        closure[site] = {
-            "chart_axis_labels": list(labels),
-            "measured_K_aa_11_eV_per_rad2": measured,
-            "mapped_K_aa_11_eV_per_rad2": mapped,
-            "delta_eV_per_rad2": measured - mapped,
-        }
-    return closure
+def _positive_floor(value, default, name):
+    """Shared floor validation for the two chi2 scopes."""
+    if value is None:
+        return float(default)
+    floor = float(value)
+    if not np.isfinite(floor) or floor <= 0.0:
+        raise SpiralResponseError(f"{name} must be finite and positive")
+    return floor
+
+
+def _joint_least_squares(response, charts, pairs):
+    """ONE global least squares over ALL pair parameters.
+
+    The mixed K rows enter per pair (each pair's 12-entry gauge-free K
+    layout reduces to its 4 mixed rows here); the onsite rows and the
+    torque rows of a SITE are SUMS over its incident pairs.  The measured
+    onsite block and gradient of a site are single numbers shared by its
+    bonds and are never reused per bond.  Returns the emitted ``theta_fit``
+    together with the row blocks needed for the residual report.
+    """
+    pair_col = {pair: 9 * index for index, pair in enumerate(pairs)}
+    n_col = 9 * len(pairs)
+    pair_rows = {pair: _pair_rows(charts[pair[0]], charts[pair[1]]) for pair in pairs}
+    incident = {site: [] for site in response.site_order}
+    for pair in pairs:
+        incident[pair[0]].append(pair)
+        incident[pair[1]].append(pair)
+
+    mixed_rows = np.zeros((4 * len(pairs), n_col))
+    mixed_data = []
+    for index, pair in enumerate(pairs):
+        a, b = pair
+        column = pair_col[pair]
+        mixed_rows[4 * index : 4 * index + 4, column : column + 9] = pair_rows[pair][0]
+        mixed_data.extend(_mixed_data(response, charts[a], charts[b]))
+
+    onsite_rows = np.zeros((4 * len(response.site_order), n_col))
+    onsite_data = []
+    for index, site in enumerate(response.site_order):
+        for pair in incident[site]:
+            column = pair_col[pair]
+            onsite_rows[4 * index : 4 * index + 4, column : column + 9] += pair_rows[
+                pair
+            ][1]
+        onsite_data.extend(_onsite_data(response, charts[site]))
+
+    torque_rows = np.zeros((2 * len(response.site_order), n_col))
+    torque_data = []
+    for index, site in enumerate(response.site_order):
+        for pair in incident[site]:
+            column = pair_col[pair]
+            block = pair_rows[pair][2] if site == pair[0] else pair_rows[pair][3]
+            torque_rows[2 * index : 2 * index + 2, column : column + 9] += block
+        torque_data.extend(_gradient_data(response, charts[site]))
+
+    design = np.vstack([mixed_rows, onsite_rows, torque_rows])
+    target = np.concatenate([mixed_data, onsite_data, torque_data])
+    theta_fit, *_ = np.linalg.lstsq(design, target, rcond=None)
+    return {
+        "pair_rows": pair_rows,
+        "pair_col": pair_col,
+        "mixed_rows": mixed_rows,
+        "mixed_data": np.asarray(mixed_data, dtype=float),
+        "onsite_rows": onsite_rows,
+        "onsite_data": np.asarray(onsite_data, dtype=float),
+        "torque_rows": torque_rows,
+        "torque_data": np.asarray(torque_data, dtype=float),
+        "design": design,
+        "theta_fit": theta_fit,
+    }
 
 
 @dataclass(frozen=True)
@@ -598,8 +688,9 @@ class MappingOutput:
 
 
 def _conventions_record():
-    # MathDoc: tb2j/spiral-heisenberg-mapping (normative SymPy authority).
-    # MathDoc: tb2j/collinear-anchor-projection#stored_ordered_pair_j
+    # MathDoc: tb2j/spiral-heisenberg-mapping (normative SymPy authority,
+    # corrected results). MathDoc:
+    # tb2j/collinear-anchor-projection#stored_ordered_pair_j
     return {
         "mathdoc": (
             "tb2j/spiral-heisenberg-mapping (pair mapping, identifiability, "
@@ -619,9 +710,30 @@ def _conventions_record():
         ),
         "dmi_sign": "E_dmi = +D.(e_a x e_b)",
         "torque": "tau = -gradient (FR-008), nonzero reference torques retained",
+        "zero_pitch_identity": (
+            "J_stored = -K_ab / (2 transverse_dot) with transverse_dot the "
+            "SITE-LOCAL tilt dot (u_a.u_b) of the same axis label; the AFM "
+            "alignment is encoded in the charts (u_b = -u_a), so the exact "
+            "AFM Heisenberg pair stores j_stored = +J/2"
+        ),
+        "zero_pitch_anchor": (
+            "at zero pitch the story-011 anchor identity corresponds to "
+            "j_hat_scalar_eV, the common-axis scalar extraction -- "
+            "Gamma-contaminated as J_hat = J - u.Gamma.u per the authority "
+            "[C]; j_pair_once_eV and j_stored_eV are the distinct "
+            "Szilva-hierarchy parameters from the determined joint fit, "
+            "which uses the full hierarchy (Heisenberg + DMI + Gamma)"
+        ),
+        "fit": (
+            "one global least squares over ALL pair parameters: mixed K rows "
+            "per pair, onsite and torque rows of a site summed over its "
+            "incident pairs; residuals are taken against this emitted fit"
+        ),
         "chi_statistic": (
-            "chi = sqrt(r2 / max(d2, K_floor^2)); scale-invariant while the "
-            "floor is inactive"
+            "chi2 = r2 / max(d2, floor^2) per scope; chi2_hessian over the "
+            "gauge-free K entries (mixed + onsite), chi2_torque over the "
+            "measured-gradient entries; scale-invariant while the floor "
+            "is inactive"
         ),
     }
 
@@ -717,6 +829,7 @@ def map_response_set(
     *,
     reference_directions_by_site=None,
     chi2_floor_eV_per_rad2=None,
+    torque_chi2_floor_eV_per_rad=None,
 ):
     """Map one ResponseSet onto per-pair Heisenberg parameters.
 
@@ -729,21 +842,22 @@ def map_response_set(
     reported as ``None`` instead of guessed.
 
     ``chi2_floor_eV_per_rad2`` overrides the derivation's K_FLOOR = 1e-6
-    denominator floor of the compatibility statistic.
+    denominator floor of the Hessian statistic;
+    ``torque_chi2_floor_eV_per_rad`` the matching gradient-unit floor.
     """
     if not isinstance(response, ResponseSet):
         raise SpiralResponseError(
             "map_response_set consumes a versioned ResponseSet "
             f"(got {type(response).__name__})"
         )
-    if chi2_floor_eV_per_rad2 is None:
-        floor = DEFAULT_CHI2_FLOOR_EV_PER_RAD2
-    else:
-        floor = float(chi2_floor_eV_per_rad2)
-        if not np.isfinite(floor) or floor <= 0.0:
-            raise SpiralResponseError(
-                "chi2_floor_eV_per_rad2 must be finite and positive"
-            )
+    floor = _positive_floor(
+        chi2_floor_eV_per_rad2, DEFAULT_CHI2_FLOOR_EV_PER_RAD2, "chi2_floor_eV_per_rad2"
+    )
+    torque_floor = _positive_floor(
+        torque_chi2_floor_eV_per_rad,
+        DEFAULT_TORQUE_CHI2_FLOOR_EV_PER_RAD,
+        "torque_chi2_floor_eV_per_rad",
+    )
     response_digest = response.to_dict()["content_sha256"]
     raw_response = copy.deepcopy(response)
 
@@ -801,101 +915,150 @@ def map_response_set(
         response.site_order, charts, references is not None
     )
 
+    pairs = list(combinations(response.site_order, 2))
+    fit = _joint_least_squares(response, charts, pairs)
+    theta_fit = fit["theta_fit"]
+    determined, undetermined = _determined_parameters(_nullspace(fit["design"]))
+
+    mixed_residual = fit["mixed_data"] - fit["mixed_rows"] @ theta_fit
+    onsite_residual = fit["onsite_data"] - fit["onsite_rows"] @ theta_fit
+    torque_residual = fit["torque_data"] - fit["torque_rows"] @ theta_fit
+    hessian_data2 = float(fit["mixed_data"] @ fit["mixed_data"]) + float(
+        fit["onsite_data"] @ fit["onsite_data"]
+    )
+    hessian_residual2 = float(mixed_residual @ mixed_residual) + float(
+        onsite_residual @ onsite_residual
+    )
+    chi2_hessian = hessian_residual2 / max(hessian_data2, floor**2)
+    torque_data2 = float(fit["torque_data"] @ fit["torque_data"])
+    torque_residual2 = float(torque_residual @ torque_residual)
+    chi2_torque = torque_residual2 / max(torque_data2, torque_floor**2)
+
     parameters, residuals_per_pair, identifiability_per_pair = {}, {}, {}
-    chi2_iso_pairs, chi2_sector_pairs = [], []
-    for a, b in combinations(response.site_order, 2):
+    diagnostics_per_pair = {}
+    residuals_per_site = {}
+    determined_set = set(determined)
+    for index, pair in enumerate(pairs):
+        a, b = pair
         pair_key = f"{a}|{b}"
         chart_a, chart_b = charts[a], charts[b]
-        alignment = alignment_by_pair[(a, b)]
-        sector_rows, isotropic_rows, gradient_rows = _pair_model(chart_a, chart_b)
-        data = _pair_data(response, chart_a, chart_b)
+        alignment = alignment_by_pair[pair]
+        pair_mixed, pair_onsite, pair_grad_a, pair_grad_b = fit["pair_rows"][pair]
+        # The pair-local K layout: mixed 2x2 + BOTH onsite 2x2 blocks (the
+        # same onsite row serves either site of the pair).
+        sector = np.vstack([pair_mixed, pair_onsite, pair_onsite])
+        stacked = np.vstack([sector, pair_grad_a, pair_grad_b])
 
         # Identifiability is a property of the anchor geometry (the
-        # derivation's matrix ranks), independent of the measured data.
-        mixed_rank = int(np.linalg.matrix_rank(sector_rows[:_MIXED_ROWS]))
-        closure_rank = int(np.linalg.matrix_rank(sector_rows))
-        stacked = np.vstack([sector_rows, gradient_rows])
+        # derivation's corrected matrix ranks), independent of the data.
+        mixed_rank = int(np.linalg.matrix_rank(pair_mixed))
+        closure_rank = int(np.linalg.matrix_rank(sector))
         torque_rank = int(np.linalg.matrix_rank(stacked))
-        null_basis = _nullspace(sector_rows)
-        torque_null_basis = _nullspace(stacked)
-        null_named, null_generic = _match_nullspace(null_basis)
-        torque_named, _torque_generic = _match_nullspace(torque_null_basis)
+        mixed_null = _nullspace(pair_mixed)
+        closure_null = _nullspace(sector)
+        torque_null = _nullspace(stacked)
+        mixed_named, mixed_generic = _match_nullspace(mixed_null)
+        closure_named, closure_generic = _match_nullspace(closure_null)
+        torque_named, _torque_generic = _match_nullspace(torque_null)
 
-        # Chi statistics are pinned to the K-only least-squares layer of
-        # the derivation ([E]); at a planar reference the pair parameters
-        # are NOT all determined by K alone (hessian rank 5 of 9), so the
-        # parameter fit adds the certified gradient rows (rank 8), exactly
-        # like the derivation's identifiability completion.
-        theta, *_ = np.linalg.lstsq(sector_rows, data, rcond=None)
-        gradient_data = np.asarray(
-            [
-                _gradient_entry(response, (chart_a.site, label))
-                for label in chart_a.labels
-            ]
-            + [
-                _gradient_entry(response, (chart_b.site, label))
-                for label in chart_b.labels
-            ],
-            dtype=float,
+        # Per-pair mixed residual slice of the emitted joint fit.
+        mixed_slice = slice(4 * index, 4 * index + 4)
+        pair_mixed_residual = mixed_residual[mixed_slice]
+        pair_mixed_data = fit["mixed_data"][mixed_slice]
+        pair_denominator = max(float(pair_mixed_data @ pair_mixed_data), floor**2)
+        chi2_mixed_pair = float(pair_mixed_residual @ pair_mixed_residual) / (
+            pair_denominator
         )
-        if reference_class == REFERENCE_CLASS_PLANAR:
-            augmented = np.vstack([sector_rows, gradient_rows])
-            theta_fit, *_ = np.linalg.lstsq(
-                augmented, np.concatenate([data, gradient_data]), rcond=None
-            )
-            fit_basis, fit_kind = augmented, "hessian_plus_torque"
-        else:
-            theta_fit, fit_basis, fit_kind = theta, sector_rows, "hessian_only"
-        # The determined/undetermined report describes the parameter fit
-        # actually used: K-only at a collinear reference (the derivation's
-        # D2 null space), torque-completed at a planar reference (D4).
-        determined, undetermined = _determined_parameters(_nullspace(fit_basis))
-        residual = data - sector_rows @ theta
-        residual2 = float(residual @ residual)
-        data2 = float(data @ data)
-        denominator = max(data2, floor**2)
-        chi2_sector_pair = residual2 / denominator
-        j_hat = float(isotropic_rows @ data) / float(isotropic_rows @ isotropic_rows)
-        isotropic_residual = data - isotropic_rows * j_hat
-        chi2_iso_pair = float(isotropic_residual @ isotropic_residual) / denominator
-        onsite_max = max(abs(float(v)) for v in residual[_MIXED_ROWS:])
 
-        # Signed parameters: only with a certified alignment sign.
+        # K-only projection diagnostic (distinctly labeled; derivation [E]
+        # 12-entry layer for a two-site response, mixed-only otherwise).
+        if len(response.site_order) == 2:
+            data12 = np.concatenate([pair_mixed_data, fit["onsite_data"]])
+            theta_k, *_ = np.linalg.lstsq(sector, data12, rcond=None)
+            k_residual = data12 - sector @ theta_k
+            iso = _pair_isotropic_layer(chart_a, chart_b)
+            iso_norm2 = float(iso @ iso)
+            j_hat_iso = (
+                float(iso @ data12) / iso_norm2
+                if iso_norm2 > _TRANSVERSE_DOT_MIN
+                else None
+            )
+            k_components = {
+                name: float(value)
+                for name, value in zip(RESIDUAL_COMPONENTS, k_residual)
+            }
+            denominator12 = max(float(data12 @ data12), floor**2)
+            k_diagnostic = {
+                "scope": "pair_12_entry_k_only_layer",
+                "chi2_sector": float(k_residual @ k_residual) / denominator12,
+                "chi2_iso": (
+                    None
+                    if j_hat_iso is None
+                    else float((data12 - iso * j_hat_iso) @ (data12 - iso * j_hat_iso))
+                    / denominator12
+                ),
+                "j_hat_isotropic_eV": None if alignment is None else j_hat_iso,
+                "components_eV_per_rad2": k_components,
+            }
+        else:
+            k_diagnostic = {
+                "scope": "mixed_block_k_only_layer",
+                "chi2_sector": chi2_mixed_pair,
+                "chi2_iso": None,
+                "j_hat_isotropic_eV": None,
+                "components_eV_per_rad2": {
+                    name: float(value)
+                    for name, value in zip(
+                        MIXED_RESIDUAL_COMPONENTS, pair_mixed_residual
+                    )
+                },
+            }
+        diagnostics_per_pair[pair_key] = k_diagnostic
+
+        # Signed parameters: only with a certified alignment sign, and
+        # only the parameters the joint fit determines (never guessed).
+        # The sign-independent per-axis zero-pitch data is reported at a
+        # collinear reference regardless, with the signed j_stored left
+        # undetermined when the alignment is uncertified.
+        if reference_class == REFERENCE_CLASS_COLLINEAR:
+            j_hat_scalar, per_axis = _scalar_extraction(
+                response, chart_a, chart_b, alignment
+            )
+            scalar_method = (
+                "zero_pitch_identity"
+                if alignment is not None
+                else "undetermined_alignment"
+            )
+        else:
+            j_hat_scalar, per_axis = None, {}
+            scalar_method = (
+                "finite_pitch" if alignment is not None else ("undetermined_alignment")
+            )
         if alignment is None:
             j_pair_once = j_stored = None
-            j_hat_reported = None
             gamma_transverse = None
             dmi_determined = None
-            per_axis, scalar_method = {}, "undetermined_alignment"
-        elif reference_class == REFERENCE_CLASS_COLLINEAR:
-            stored, per_axis = _scalar_extraction(response, chart_a, chart_b, alignment)
-            j_stored = stored
-            j_pair_once = None if stored is None else 2.0 * stored
-            j_hat_reported = j_hat
-            gamma_transverse = {
-                "11": float(theta_fit[CHART_PARAMETER_NAMES.index("Gamma_xx")]),
-                "12": float(theta_fit[CHART_PARAMETER_NAMES.index("Gamma_xy")]),
-                "22": float(theta_fit[CHART_PARAMETER_NAMES.index("Gamma_yy")]),
-            }
-            scalar_method = "zero_pitch_identity"
         else:
-            j_pair_once = float(theta_fit[0])
-            j_stored = j_pair_once / 2.0
-            j_hat_reported = j_hat
+            column = fit["pair_col"][pair]
+            pair_theta = theta_fit[column : column + 9]
+            j_pair_once = float(pair_theta[0]) if "J" in determined_set else None
+            j_stored = None if j_pair_once is None else j_pair_once / 2.0
             gamma_transverse = {
-                "11": float(theta_fit[CHART_PARAMETER_NAMES.index("Gamma_xx")]),
-                "12": float(theta_fit[CHART_PARAMETER_NAMES.index("Gamma_xy")]),
-                "22": float(theta_fit[CHART_PARAMETER_NAMES.index("Gamma_yy")]),
+                key: (
+                    float(pair_theta[CHART_PARAMETER_NAMES.index(name)])
+                    if name in determined_set
+                    else None
+                )
+                for key, name in (
+                    ("11", "Gamma_xx"),
+                    ("12", "Gamma_xy"),
+                    ("22", "Gamma_yy"),
+                )
             }
-            per_axis = {}
-            scalar_method = "sector_fit"
-        if alignment is None:
-            dmi_determined = None
-        else:
             dmi_determined = {
-                name: float(theta_fit[index])
-                for index, name in enumerate(CHART_PARAMETER_NAMES)
-                if name in {"D_x", "D_y", "D_z"} and name in determined
+                name: float(pair_theta[CHART_PARAMETER_NAMES.index(name)])
+                for name in ("D_x", "D_y", "D_z")
+                if name in determined_set
             }
 
         parameters[pair_key] = {
@@ -906,64 +1069,97 @@ def map_response_set(
             "alignment_source": alignment_source,
             "j_pair_once_eV": j_pair_once,
             "j_stored_eV": j_stored,
-            "j_hat_scalar_eV": j_hat_reported,
+            "j_hat_scalar_eV": j_hat_scalar,
             "gamma_transverse_eV": gamma_transverse,
             "dmi_determined_chart_eV": dmi_determined,
             "scalar_extraction": {
                 "method": scalar_method,
-                "parameter_fit": fit_kind,
                 "per_axis": per_axis,
             },
-            "onsite_closure": _onsite_closure(
-                sector_rows, data, theta_fit, chart_a.labels, chart_b.labels
-            ),
         }
         residuals_per_pair[pair_key] = {
-            "components_eV_per_rad2": {
-                name: float(value) for name, value in zip(RESIDUAL_COMPONENTS, residual)
+            "mixed_components_eV_per_rad2": {
+                name: float(value)
+                for name, value in zip(MIXED_RESIDUAL_COMPONENTS, pair_mixed_residual)
             },
-            "chi_pair": float(np.sqrt(chi2_sector_pair)),
-            "chi2_sector_pair": chi2_sector_pair,
-            "chi2_iso_pair": chi2_iso_pair,
-            "onsite_max_abs_residual_eV_per_rad2": float(onsite_max),
+            "chi2_mixed_pair": chi2_mixed_pair,
         }
-        chi2_iso_pairs.append(chi2_iso_pair)
-        chi2_sector_pairs.append(chi2_sector_pair)
         identifiability_per_pair[pair_key] = {
             "rank_mixed_block": mixed_rank,
             "rank_onsite_closure": closure_rank,
             "rank_with_torque": torque_rank,
-            "nullspace_named": null_named,
-            "nullspace_generic": null_generic,
+            "mixed_nullspace_named": mixed_named,
+            "mixed_nullspace_generic": mixed_generic,
+            "onsite_closure_nullspace_named": closure_named,
+            "onsite_closure_nullspace_generic": closure_generic,
             "torque_nullspace_named": torque_named,
             "determined": determined,
             "undetermined": undetermined,
-            "undetermined_trades": _undetermined_trades(torque_null_basis),
+            "note": (
+                "corrected authority: the b-site torque row D.(n_a x u_b) "
+                "determines D together with Gamma; the former "
+                "D <-> Gamma trade directions are retracted"
+            ),
         }
 
-    chi2_iso = max(chi2_iso_pairs)
-    chi2_sector = max(chi2_sector_pairs)
+    for index, site in enumerate(response.site_order):
+        onsite_residual_slice = slice(4 * index, 4 * index + 4)
+        torque_residual_slice = slice(2 * index, 2 * index + 2)
+        site_onsite_residual = onsite_residual[onsite_residual_slice]
+        site_torque_residual = torque_residual[torque_residual_slice]
+        site_onsite_data = fit["onsite_data"][4 * index : 4 * index + 4]
+        site_onsite_model = fit["onsite_rows"][4 * index : 4 * index + 4] @ theta_fit
+        residuals_per_site[site] = {
+            "chart_axis_labels": list(charts[site].labels),
+            "onsite_components_eV_per_rad2": {
+                name: float(value)
+                for name, value in zip(ONSITE_RESIDUAL_COMPONENTS, site_onsite_residual)
+            },
+            "onsite_max_abs_residual_eV_per_rad2": float(
+                np.max(np.abs(site_onsite_residual))
+            ),
+            "onsite_closure": {
+                "measured_K_ss_11_eV_per_rad2": float(site_onsite_data[0]),
+                "mapped_K_ss_11_eV_per_rad2": float(site_onsite_model[0]),
+                "delta_eV_per_rad2": float(site_onsite_residual[0]),
+            },
+            "torque_components_eV_per_rad": {
+                label: float(value)
+                for label, value in zip(charts[site].labels, site_torque_residual)
+            },
+        }
+
     compatibility = {
-        "label": _compatibility_label(chi2_iso),
-        "chi2_iso": chi2_iso,
-        "chi2_sector": chi2_sector,
-        "aggregate": "max over site pairs",
+        "label": _compatibility_label(chi2_hessian, chi2_torque),
+        "gate": "hessian_and_measured_torque",
+        "chi2_hessian": chi2_hessian,
+        "chi2_torque": chi2_torque,
+        "scope": (
+            "chi2_hessian: mixed + onsite K residuals against the emitted "
+            "joint fit; chi2_torque: measured-gradient residuals against "
+            "the same fit; the verdict gates on BOTH scopes"
+        ),
+        "aggregate": "global sums over all pair and site entries",
         "thresholds": {
             "chi2_compat_max": CHI2_COMPAT_MAX,
             "chi2_flag_min": CHI2_FLAG_MIN,
         },
+        "threshold_status": THRESHOLD_STATUS_PROVISIONAL,
     }
 
     ensemble = response.ensemble or {}
     identifiability = {
         "reference_class": reference_class,
         "q": q,
+        "zero_pitch_anchor": (
+            "at zero pitch the story-011 anchor identity corresponds to "
+            "j_hat_scalar_eV (common-axis scalar, Gamma-contaminated per "
+            "the authority [C]); j_pair_once_eV/j_stored_eV are the "
+            "Szilva-hierarchy parameters of the determined joint fit"
+        ),
         "alignment": {
             "source": alignment_source,
-            "by_pair": {
-                f"{a}|{b}": alignment_by_pair[(a, b)]
-                for a, b in combinations(response.site_order, 2)
-            },
+            "by_pair": {f"{a}|{b}": alignment_by_pair[(a, b)] for a, b in pairs},
             "note": (
                 "alignment = sign(n_a.n_b) from the certified reference "
                 "directions; torque cannot substitute for them (it vanishes "
@@ -975,15 +1171,34 @@ def map_response_set(
         "per_pair": identifiability_per_pair,
     }
     residuals = {
+        "fit": "joint_multisite_least_squares",
         "chi2_floor_eV_per_rad2": floor,
+        "torque_chi2_floor_eV_per_rad": torque_floor,
+        "chi2_hessian": chi2_hessian,
+        "chi2_torque": chi2_torque,
         "per_pair": residuals_per_pair,
-        "chi2_iso": chi2_iso,
-        "chi2_sector": chi2_sector,
+        "per_site": residuals_per_site,
+        "diagnostics": {
+            "note": (
+                "K-only projection residuals of the derivation [E] layer; "
+                "distinctly labeled diagnostic -- the compatibility verdict "
+                "uses the emitted joint fit above"
+            ),
+            "per_pair": diagnostics_per_pair,
+        },
     }
+
+    certificate = (
+        response.frozen_declarations.get("magnetic_amplitudes", {}).get("certificate")
+        if isinstance(response.frozen_declarations, dict)
+        else None
+    ) or {}
     provenance_out = {
         "operator_mode": response.operator_mode,
+        "vertex_version": certificate.get("vertex_version"),
         "vertex_sha256": provenance.get("vertex_sha256"),
         "source_bundle_sha256": provenance.get("source_bundle_sha256"),
+        "partition_declaration": certificate.get("partition_declaration"),
         "q": q,
         "ensemble_kind": ensemble.get("kind"),
         "ensemble_gap_ev": ensemble.get("gap_ev"),

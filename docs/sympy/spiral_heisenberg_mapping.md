@@ -69,18 +69,36 @@ $$
 
 $$
 K_{aa}[\alpha,\beta] = +\delta_{\alpha\beta}\,J\,(\mathbf n_a\!\cdot\!\mathbf n_b)
-- \delta_{\alpha\beta}\,(\mathbf n_a\,\Gamma\,\mathbf n_b),
-\qquad
-\mathbf g_{a,\alpha} = -J\,(\mathbf u_{a,\alpha}\!\cdot\!\mathbf n_b)
-+ \mathbf D\!\cdot\!(\mathbf u_{a,\alpha}\times\mathbf n_b)
-+ \mathbf u_{a,\alpha}\,\Gamma\,\mathbf n_b .
+- \delta_{\alpha\beta}\,(\mathbf n_a\,\Gamma\,\mathbf n_b)
+- \delta_{\alpha\beta}\,\mathbf D\!\cdot\!(\mathbf n_a\times\mathbf n_b),
 $$
 
-Structure asserted channel by channel with fully symbolic frames: $J$ and
-$\mathbf D$ never enter onsite blocks; $\mathbf D$ enters only through the mixed
-cross products $\mathbf u_{a,\alpha}\times\mathbf u_{b,\beta}$ (and the mixed
-cross products with $\mathbf n_b$ in the gradient); the anisotropy reaches the
-onsite blocks only through the longitudinal combinations
+$$
+\mathbf g_{a,\alpha} = -J\,(\mathbf u_{a,\alpha}\!\cdot\!\mathbf n_b)
++ \mathbf D\!\cdot\!(\mathbf u_{a,\alpha}\times\mathbf n_b)
++ \mathbf u_{a,\alpha}\,\Gamma\,\mathbf n_b ,
+\qquad
+\mathbf g_{b,\beta} = -J\,(\mathbf n_a\!\cdot\!\mathbf u_{b,\beta})
++ \mathbf D\!\cdot\!(\mathbf n_a\times\mathbf u_{b,\beta})
++ \mathbf u_{b,\beta}\,\Gamma\,\mathbf n_a .
+$$
+
+Structure asserted channel by channel with fully symbolic frames, and
+re-asserted by direct differentiation of the pair energies on a genuinely
+noncollinear two-site reference ($\mathbf n_a\neq\mathbf n_b$): the b-site
+DMI gradient is $\mathbf D\cdot(\mathbf n_a\times\mathbf u_b)$ — the
+$\partial_{\theta_b}$ derivative of $+\mathbf D\cdot(\hat e_a\times\hat e_b)$
+keeps the $(\hat e_a\times)$ ordering, i.e. it is **not**
+$\mathbf D\cdot(\mathbf u_b\times\mathbf n_a)$ — and both onsite diagonal
+second derivatives of the DMI channel equal
+$-\mathbf D\cdot(\mathbf n_a\times\mathbf n_b)$ (from
+$\mathrm d^2\hat e/\mathrm d\theta^2|_0=-\mathbf n$), so **$\mathbf D$ enters
+the onsite DIAGONAL blocks at any noncollinear reference** (it vanishes there
+only when $\mathbf n_a\times\mathbf n_b=0$, e.g. collinear anchors); the
+same-site off-diagonal DMI onsite stays zero (vanishing mixed vertex, section
+A); $J$ enters onsite blocks only through the $+\delta_{\alpha\beta}
+J(\mathbf n_a\cdot\mathbf n_b)$ trace; the anisotropy reaches the onsite
+blocks only through the longitudinal combinations
 $\mathbf n_a\Gamma\mathbf n_b$.
 
 ## Zero-pitch reduction to the story-011 identity (asserted, section C)
@@ -89,16 +107,29 @@ At $q=0$ (collinear, common transverse tilt direction $\mathbf t$, $\mathbf u=\m
 $K_{ab}=-J$ exactly and the DMI channel is silent ($\mathbf u\times\mathbf u=0$).
 With distinct transverse axes ($\mathbf u_a\cdot\mathbf u_b\neq0$),
 $J^{\rm pair}_{ab}=-K_{ab}/(\mathbf u_a\!\cdot\!\mathbf u_b)$, and the story-011
-stored ordered-pair identity holds verbatim:
+stored ordered-pair identity holds verbatim **with the transverse dot taken
+between the SITE-LOCAL tilt charts**:
 
 $$
-J^{\rm stored}_{ab} = -\frac{K_{ab}}{2\,{\rm sign}(\hat e_a\!\cdot\!\hat e_b)\,
-(\mathbf u_a\!\cdot\!\mathbf u_b)},
+J^{\rm stored}_{ab} = -\frac{K_{ab}}{2\,(\mathbf u_a\!\cdot\!\mathbf u_b)_{\rm local}},
 \qquad J^{\rm pair}_{ab} = 2\,J^{\rm stored}_{ab},
 $$
 
-with the AFM reference flip checked explicitly ($\hat e_b=-\hat n$,
-$K_{ab}=+J(\mathbf u_a\cdot\mathbf u_b)$). **In-plane-anisotropy contamination**:
+**AFM convention (pinned, asserted on the actual charts).** For an AFM
+reference the site-local charts carry the alignment: $\mathbf n_b=-\mathbf n_a$
+with the same declared transverse axis $\mathbf t$ gives
+$\mathbf u_b=\mathbf t\times\mathbf n_b=-\mathbf u_a$, so
+$\mathrm{transverse\_dot}(\mathbf u_a,\mathbf u_b)=-1$ exactly — the alignment
+sign is **already encoded** in the tilt dot, and the extraction divides by the
+LOCAL tilt dot only. Differentiating the actual two-site AFM charts gives
+$K_{ab}=-J(\mathbf u_a\!\cdot\!\mathbf u_b)=+J$, hence $J^{\rm stored}=+J/2$. Equivalently, in a common-axis
+projection one must insert the explicit alignment
+${\rm sign}(\mathbf n_a\!\cdot\!\mathbf n_b)=-1$ with
+$\mathbf u\cdot\mathbf u=+1$; both routes give $+J/2$ (asserted). A
+post-hoc flip $\hat e_b\to-\hat e_b$ of a collinear chart pair is **not** a
+valid AFM chart and is not used anywhere.
+
+**In-plane-anisotropy contamination**:
 the common-direction extraction absorbs the transverse anisotropy projection,
 
 $$
@@ -127,9 +158,9 @@ $c^2+s^2=1$):
 |---|---|---|
 | scalar common-direction $K$ (story-011 extraction) | 1 (null 8) | all of $\mathbf D$ — **incl. the reference-axis component** — $\Gamma_{xz},\Gamma_{yz}$, and the $J\leftrightarrow$ in-plane-trace/$A_{zz}$ trade |
 | full $2\times2$ mixed block, collinear | 4 (null 5) | $D_x,D_y,\Gamma_{xz},\Gamma_{yz}$, and $(\delta J,\delta\Gamma_{xx},\delta\Gamma_{yy})=(1,1,1)$ — the **longitudinal $A_{zz}$ shift** ($\delta\Gamma_{zz}=-2$) trading against $J$ |
-| + onsite closure, collinear | 5 (null 4) | $D_x,D_y,\Gamma_{xz},\Gamma_{yz}$ only; $J$ and $\Gamma_{\rm in\,plane}$ determined |
-| + torque, collinear | 7 (null 2) | the two tradeoffs $D_x\leftrightarrow\Gamma_{yz}$ and $D_y\leftrightarrow\Gamma_{xz}$ (the collinear torque sees only the sums $\mathbf D\cdot\mathbf t_\alpha+\mathbf t_\alpha\Gamma\mathbf n$) |
-| planar single-$q$ reference (symbolic $c,s$), torque + full Hessian | Hessian-only 5; full 8 (null 1) | exactly $\delta D_{t1_a}=-\lambda,\ \delta\Gamma_{t2_a n}=+\lambda$; with the tilt along $t2_a$ the blind pair rotates to $D_{t2_a}\leftrightarrow\Gamma_{t1_a n}$ (both asserted symbolically) |
+| + onsite closure, collinear | 5 (null 4) | $D_x,D_y,\Gamma_{xz},\Gamma_{yz}$ only; $J$ and $\Gamma_{\rm in\,plane}$ determined (at a collinear anchor the new onsite DMI entry vanishes, $\mathbf n_a\times\mathbf n_b=0$) |
+| + torque, collinear | **9 (null 0)** | nothing — under the corrected b-site gradient $\mathbf D\cdot(\mathbf n_a\times\mathbf u_b)$ the site-b torque rows carry the **opposite** DMI sign of the site-a rows while the $\Gamma$ rows are symmetric, so sums *and* differences are measured and the former trades $D_x\leftrightarrow\Gamma_{yz}$, $D_y\leftrightarrow\Gamma_{xz}$ are broken (asserted non-null) |
+| planar single-$q$ reference (symbolic $c,s$), torque + full Hessian | Hessian-only 5; full **9 (null 0)** | nothing — the corrected onsite DMI row $-\mathbf D\cdot(\mathbf n_a\times\mathbf n_b)=-c\,D_y$ makes $D_y$ visible through the Hessian, and the corrected torque closes the remaining in-plane combinations for arbitrary $(c,s)$; the former blind pairs $D_{t1_a}\leftrightarrow\Gamma_{t2_a n}$ and $D_{t2_a}\leftrightarrow\Gamma_{t1_a n}$ are asserted **non-null** |
 
 **Reference-axis DMI note.** The contract's example "DMI along the reference
 axis undetermined" is exact for the *scalar* common-direction extraction
@@ -138,12 +169,18 @@ reference-axis $D$ through its antisymmetric off-diagonal part
 ($\mathbf u_{a,1}\times\mathbf u_{b,2}\parallel\hat n\neq0$); the in-plane $D$
 components stay blind at any collinear anchor.
 
-**Multi-reference completion** (exact rational anchors): collinear + planar
-noncollinear still leaves the shared planar blind direction (rank 8); two
-mutually generic noncollinear references give rank 9, as does collinear +
-two noncollinear. Full separation of $(J,\mathbf D,\Gamma)$ from transverse
-data alone is therefore a *multi-reference* statement; a single reference
-always leaves at least one $D$–$\Gamma$ tradeoff.
+**Multi-reference statement (corrected model).** With the corrected rows, a
+single reference already reaches exact rank 9 whenever torque is consumed:
+collinear + torque, the symbolic planar reference (either tilt axis), and the
+exact $3\!-\!4\!-\!5$ anchor all give null dimension 0; stacked references
+(collinear + planar, two generic noncollinear, collinear + two noncollinear)
+stay at rank 9 (asserted). Hessian-only data remains incomplete at every
+single anchor (rank 4 mixed / 5 with onsite closure). The earlier claim that
+"a single reference always leaves one $D$–$\Gamma$ tradeoff" was an artifact
+of the defective b-site gradient sign (which made site-b torque rows repeat
+the site-a DMI sign, leaving the two trades null at rank 7, and of the missing
+onsite DMI entry at planar references, rank 8 there); it no longer holds and
+is retracted.
 
 ## Residual and compatibility statistic (asserted, section E)
 
@@ -183,7 +220,11 @@ The biquadratic row is the sharp statement: **a collinear anchor cannot flag
 biquadratic exchange at all** (it is exactly $J$-representable there), while a
 noncollinear single reference flags it at both the isotropic and the full-sector
 layer. This is a derivation-level justification for noncollinear anchors in the
-flagging protocol.
+flagging protocol. All flag numbers ($\tfrac{2752}{3115},\tfrac{128}{267},
+\tfrac{1927}{2170},\tfrac{59}{93}$) and the collinear masquerade
+$\hat J=-\tfrac1{50}$ are unchanged by the corrected DMI rows: the biquadratic
+and three-site synthetics carry no DMI weight, and the flag behavior of the
+synthetics survives the correction exactly.
 
 ## Assumptions and limits (honest)
 
@@ -192,12 +233,13 @@ flagging protocol.
    constrained only through what violates the pair-shaped data (demonstrated
    for three-site terms via the onsite blocks); nothing is claimed about
    terms that stay inside the pair rowspace at the anchor.
-2. **Single-reference determinacy.** A single reference never determines the
-   full pair tensor from transverse data: one $D$–$\Gamma$ tradeoff always
-   survives (rank 8 of 9 with torque and onsite closure; more without torque).
-   The planar blind direction is exact and chart-relative
-   ($D_{\rm tilt}\leftrightarrow\Gamma_{\rm other\,transverse,\,n}$); a
-   second, suitably different reference closes it (rank 9 asserted).
+2. **Reference completeness.** Under the corrected rows, single-reference
+   determinacy of the full pair tensor requires the torque rows: Hessian-only
+   data never exceeds rank 5 at any anchor (mixed 4, + onsite closure 5),
+   while Hessian + torque reaches exact rank 9 at the collinear and at planar
+   references alike (asserted symbolically for arbitrary tilt). Hessian-only
+   blindness is chart-relative ($D_{\rm tilt}\leftrightarrow\Gamma_{\rm other
+   \,transverse,\,n}$-type combinations stay unconstrained without torque).
 3. **Reference-state dependence (Szilva).** $K$ and $\mathbf g$ are properties
    of the *state*, not of the pair alone; the mapping returns parameters
    defined *at* the reference. Comparing $J$ across different references mixes
