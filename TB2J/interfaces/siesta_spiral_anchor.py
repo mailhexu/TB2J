@@ -5,14 +5,16 @@ response and the established nonorthogonal LKAG engine ``ExchangeCL2`` from
 the **same saved noncollinear SCF** (the q=0 O2 fixture bundle) and report
 their image-summed site-pair J values and signed differences as numbers.
 
-This is a numbers-only result: ``agreement_status`` is always
-``"not_evaluated"``; no agreement threshold exists and no AC-006/NFR-005
-compatibility is claimed. Per the ADR-004 revision (2026-10-14) the
-default rotating operator is the **onsite delta** (only R=0 same-site
-blocks of the total-H spin splitting rotate, each at w=1), so the new
-side matches the legacy LKAG projector by construction; the recorded
-diagnostic variant ``weighted_total_h`` (every incident block at
-w=1/count of its endpoint owners) remains selectable via ``operator``.
+The matched onsite-delta comparison carries the user-approved 2026-10-15
+AC-006 budget of 1.0 meV per image-summed site pair:
+``agreement_status`` is ``"passed_within_budget"`` or ``"failed_budget"``
+for that mode, while the recorded diagnostic variant ``weighted_total_h``
+(unmatched projector) always stays ``"not_evaluated"`` and is never passed.
+Per the ADR-004 revision (2026-10-14) the default rotating operator is the
+**onsite delta** (only R=0 same-site blocks of the total-H spin splitting
+rotate, each at w=1), so the new side matches the legacy LKAG projector by
+construction; ``weighted_total_h`` (every incident block at w=1/count of
+its endpoint owners) remains selectable via ``operator``.
 The certificate labels the ``operator_mode`` that produced every number,
 identifies the distinct integration methods (exact occupied-band Hessian
 vs LKAG contour), and any declaration that does not match the actual
@@ -58,15 +60,37 @@ from TB2J.interfaces.siesta_spiral_response import (
 from TB2J.interfaces.siesta_spiral_vertex import (
     DEFAULT_OPERATOR_MODE,
     OPERATOR_MODE_ONSITE_DELTA,
+    OPERATOR_MODE_WEIGHTED_TOTAL_H,
     OPERATOR_MODES,
     extract_magnetic_vertex,
 )
 from TB2J.kpoints import monkhorst_pack
 from TB2J.utils import symbol_number
 
-ANCHOR_VERSION = "1.1"
+ANCHOR_VERSION = "1.2"
 COMPARISON_KIND = "numeric_only_q0_same_scf"
 AGREEMENT_STATUS = "not_evaluated"
+
+#: User-approved AC-006 budget (2026-10-15): absolute 1.0 meV per
+#: image-summed site pair on the matched onsite-Delta operator comparison;
+#: the ensemble-attributed residual was measured at 0.108160 meV.
+AC006_BUDGET_MEV = 1.0
+
+# Operator modes are imported from the vertex module (single source);
+# the AC-006 budget gate applies only to the matched onsite-Delta mode.
+
+AGREEMENT_STATEMENT_ONSITE = (
+    "agreement_status applies the user-approved 2026-10-15 AC-006 budget of "
+    f"{AC006_BUDGET_MEV} meV per image-summed site pair to the matched "
+    "onsite-Delta operator comparison; a pass is fixture-class numerical "
+    "agreement under the declared conventions, and the ensemble convention "
+    "is still recorded unmatched"
+)
+AGREEMENT_STATEMENT_WEIGHTED = (
+    "numbers only (user decision 2026-10-13): the weighted total-H variant "
+    "has an unmatched projector, is never passed, and no threshold is "
+    "applied to it; no AC-006/NFR-005 compatibility is claimed or denied"
+)
 
 #: x-collinearity of the stored components must hold at this level; the
 #: recorded fixture shows max|h1-h2| = 9.4e-14 eV and max|h4| = 1.5e-15 eV.
@@ -975,6 +999,30 @@ def _payload_digest(payload: dict) -> str:
     ).hexdigest()
 
 
+def _agreement_status(
+    operator_mode: str,
+    differences_mev: dict,
+    budget_mev: float,
+) -> tuple:
+    """Apply the AC-006 budget gate for one operator mode.
+
+    Returns ``(status, within_by_axis, overall)``. The weighted total-H
+    variant has an unmatched projector: it is never passed and no threshold
+    is applied to it (all-``None`` verdicts).
+    """
+    if operator_mode == OPERATOR_MODE_WEIGHTED_TOTAL_H:
+        return AGREEMENT_STATUS, {axis: None for axis in differences_mev}, None
+    if operator_mode != OPERATOR_MODE_ONSITE_DELTA:
+        raise AnchorError(f"unknown operator mode {operator_mode!r}")
+    within = {
+        axis: bool(abs(float(diff)) <= float(budget_mev))
+        for axis, diff in differences_mev.items()
+    }
+    overall = all(within.values()) if within else False
+    status = "passed_within_budget" if overall else "failed_budget"
+    return status, within, overall
+
+
 def _oddize_kmesh(kmesh) -> list:
     """Mirror ExchangeCL._prepare_kmesh: n//2*2 + 1 per dimension."""
     return [int(n) // 2 * 2 + 1 for n in kmesh]
@@ -1050,12 +1098,15 @@ def run_anchor_comparison(
     diagnostic variant); it is recorded as ``operator_mode`` in the
     certificate and the settings record.
 
-    Returns an :class:`AnchorComparison`; the certificate is numbers-only
-    (``agreement_status = "not_evaluated"``) with unmatched settings
-    reported, never absorbed. Refusals before any engine run: an unknown
-    operator mode, non-transverse axes, non-x-collinear components, and
-    failed same-SCF spectral equivalence on the recorded kpoints and the
-    gated comparison mesh.
+    Returns an :class:`AnchorComparison`; the matched ``onsite_delta`` mode
+    applies the user-approved 2026-10-15 AC-006 budget of 1.0 meV per
+    image-summed site pair (``passed_within_budget`` / ``failed_budget``),
+    while the ``weighted_total_h`` diagnostic variant always stays
+    ``not_evaluated`` and is never passed. Unmatched settings are reported,
+    never absorbed. Refusals before any engine run: an unknown operator
+    mode, non-transverse axes, non-x-collinear components, and failed
+    same-SCF spectral equivalence on the recorded kpoints and the gated
+    comparison mesh.
     """
     if operator not in OPERATOR_MODES:
         raise AnchorError(
@@ -1219,15 +1270,23 @@ def run_anchor_comparison(
     )
 
     vertex = problem.vertex
+    differences_mev = {
+        axis: per_axis_numbers[axis]["difference_legacy_minus_new_meV"] for axis in axes
+    }
+    agreement_status, within_by_axis, within_overall = _agreement_status(
+        operator, differences_mev, AC006_BUDGET_MEV
+    )
+    agreement_statement = (
+        AGREEMENT_STATEMENT_ONSITE
+        if operator == OPERATOR_MODE_ONSITE_DELTA
+        else AGREEMENT_STATEMENT_WEIGHTED
+    )
     payload = {
         "anchor_version": ANCHOR_VERSION,
         "comparison_kind": COMPARISON_KIND,
-        "agreement_status": AGREEMENT_STATUS,
+        "agreement_status": agreement_status,
         "operator_mode": operator,
-        "agreement_statement": (
-            "numbers only (user decision 2026-10-13): no agreement threshold "
-            "exists and no AC-006/NFR-005 compatibility is claimed or denied"
-        ),
+        "agreement_statement": agreement_statement,
         "conventions": dict(_CONVENTIONS),
         "same_scf": {
             "source_bundle_sha256": vertex.certificate["source_bundle_sha256"],
@@ -1290,10 +1349,15 @@ def run_anchor_comparison(
             "site_pair": list(sites),
             "per_axis": per_axis_numbers,
             "axis_symmetry_spread_new_eV": spread,
+            "budget_meV": float(AC006_BUDGET_MEV),
+            "within_budget_by_axis": within_by_axis,
+            "within_budget": within_overall,
             "statement": (
                 "raw gradient/curvature and the onsite/response split are "
                 "preserved verbatim alongside the mapped exchange; the "
-                "difference is a computed number, not an agreement verdict"
+                "difference is a computed number. In the matched onsite_delta "
+                "mode it carries the user-approved 2026-10-15 AC-006 budget "
+                "verdict; the weighted variant carries no verdict at all"
             ),
         },
     }

@@ -1,15 +1,16 @@
-"""Story-011 same-SCF q=0 anchor tests: numeric-only ExchangeCL2 comparison.
+"""Story-011 same-SCF q=0 anchor tests: ExchangeCL2 comparison with the
+user-approved 2026-10-15 AC-006 budget.
 
 The driver splits x-collinear spin channels from the *same* noncollinear O2
 fixture bundle that feeds the frozen-response core, runs the established
 LKAG engine on those channels, and reports the image-summed site-pair J
-values and their signed difference as numbers. Per the user decision of
-2026-10-13 there is **no agreement threshold**: the tests assert that
-numbers are computed, that raw responses are preserved, that the operator
-mode is labeled and matched per ADR-004 (onsite_delta default,
-weighted_total_h selectable), that the intrinsically distinct integration
-settings are reported unmatched, and that the same-SCF spectrum equivalence
-actually holds numerically -- never that the two engines agree.
+values and their signed difference. In the matched onsite_delta default
+mode the difference carries the 1.0 meV budget verdict
+(passed_within_budget / failed_budget); the weighted_total_h diagnostic
+variant has an unmatched projector, stays not_evaluated, and is never
+passed. The tests further assert that raw responses are preserved, that
+the intrinsically distinct integration settings are reported unmatched,
+and that the same-SCF spectrum equivalence actually holds numerically.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from scipy.linalg import eigh
 
 from TB2J.interfaces.siesta_spiral import SpiralImporter
 from TB2J.interfaces.siesta_spiral_anchor import (
+    AC006_BUDGET_MEV,
     AXIS_SYMMETRY_BUDGET_EV,
     COLLINEAR_TOL_EV,
     GRADIENT_STATIONARITY_BUDGET_EV_PER_RAD,
@@ -31,6 +33,7 @@ from TB2J.interfaces.siesta_spiral_anchor import (
     AnchorDeclaration,
     AnchorError,
     AnchorSettingMismatchError,
+    _agreement_status,
     apply_declaration,
     build_collinear_spin_channels,
     channel_pencil,
@@ -253,10 +256,67 @@ def test_legacy_pair_sum_is_one_directed_with_reciprocity(comparison):
     assert cert["reciprocity_complete"] is True
 
 
-def test_numeric_comparison_numbers_only_and_consistent(comparison):
+def test_ac006_budget_verdict_default_mode(comparison):
+    """Matched onsite_delta mode: the 2026-10-15 budget gate is applied."""
     cert = comparison.certificate
-    assert cert["agreement_status"] == "not_evaluated"
     numeric = cert["numeric_comparison"]
+    assert cert["operator_mode"] == "onsite_delta"
+    assert cert["agreement_status"] == "passed_within_budget"
+    assert numeric["budget_meV"] == AC006_BUDGET_MEV == 1.0
+    assert numeric["within_budget"] is True
+    pair_key = f"{SITES[0]}|{SITES[1]}"
+    for axis in AXES:
+        record = numeric["per_axis"][axis]
+        difference_mev = record["difference_legacy_minus_new_meV"]
+        assert numeric["within_budget_by_axis"][axis] is True
+        assert abs(difference_mev) <= AC006_BUDGET_MEV
+        # measured ensemble-attributed residual is 0.108160 meV; stay far
+        # under the budget without pinning the exact post-repair number
+        assert abs(difference_mev) <= 0.5
+    new_j = float(comparison.j_stored_by_axis[AXES[0]][pair_key]["j_stored_eV"])
+    assert (
+        numeric["per_axis"][AXES[0]]["difference_legacy_minus_new_eV"]
+        == comparison.legacy_pair_sum_ev - new_j
+    )
+    assert "2026-10-15" in cert["agreement_statement"]
+    assert "1.0 meV" in cert["agreement_statement"]
+    assert "ensemble" in cert["agreement_statement"]
+
+
+def test_budget_gate_synthetic_cases():
+    """Synthetic over/under-budget and weighted-mode verdicts (no engine)."""
+    within = {"y": 0.108160, "z": -0.108160}
+    over = {"y": 0.108160, "z": -2.5}
+    status, per_axis, overall = _agreement_status(
+        OPERATOR_MODE_ONSITE_DELTA, within, AC006_BUDGET_MEV
+    )
+    assert status == "passed_within_budget"
+    assert per_axis == {"y": True, "z": True}
+    assert overall is True
+    status, per_axis, overall = _agreement_status(
+        OPERATOR_MODE_ONSITE_DELTA, over, AC006_BUDGET_MEV
+    )
+    assert status == "failed_budget"
+    assert per_axis == {"y": True, "z": False}
+    assert overall is False
+    status, per_axis, overall = _agreement_status(
+        OPERATOR_MODE_WEIGHTED_TOTAL_H, over, AC006_BUDGET_MEV
+    )
+    assert status == "not_evaluated"
+    assert per_axis == {"y": None, "z": None}
+    assert overall is None
+    with pytest.raises(AnchorError, match="operator mode"):
+        _agreement_status("bogus", within, AC006_BUDGET_MEV)
+
+
+def test_weighted_variant_never_carries_a_pass_verdict(comparison_weighted):
+    """The unmatched weighted variant stays not_evaluated, no threshold."""
+    cert = comparison_weighted.certificate
+    numeric = cert["numeric_comparison"]
+    assert cert["operator_mode"] == "weighted_total_h"
+    assert cert["agreement_status"] == "not_evaluated"
+    assert numeric["within_budget"] is None
+    assert set(numeric["within_budget_by_axis"].values()) == {None}
     forbidden = ("pass", "agreement", "matched", "threshold", "compatible")
 
     def _no_verdicts(node):
@@ -269,18 +329,18 @@ def test_numeric_comparison_numbers_only_and_consistent(comparison):
                 _no_verdicts(item)
 
     _no_verdicts(numeric)
+    # consistency of the numbers underneath the (absent) verdict
     pair_key = f"{SITES[0]}|{SITES[1]}"
     for axis in AXES:
         record = numeric["per_axis"][axis]
-        new_j = float(comparison.j_stored_by_axis[axis][pair_key]["j_stored_eV"])
-        assert record["j_stored_new_eV"] == new_j
-        assert record["j_stored_legacy_image_sum_eV"] == comparison.legacy_pair_sum_ev
+        new_j = float(
+            comparison_weighted.j_stored_by_axis[axis][pair_key]["j_stored_eV"]
+        )
         assert record["difference_legacy_minus_new_eV"] == (
-            comparison.legacy_pair_sum_ev - new_j
+            comparison_weighted.legacy_pair_sum_ev - new_j
         )
         # ferromagnetic fixture: both engines report a positive stored J
         assert new_j > 0.0
-        assert record["j_stored_legacy_image_sum_eV"] > 0.0
     # the difference is a computed number, not pinned to the pre-repair value
     for axis in AXES:
         assert numeric["per_axis"][axis]["j_stored_new_eV"] != STALE_PRE_REPAIR_J_EV
