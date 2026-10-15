@@ -9,7 +9,7 @@ The normative authority is the SymPy derivation
 ``docs/sympy/spiral_heisenberg_mapping.py`` (FR-009 / ADR-006); every
 identity used here is pinned there with exact assertions:
 
-# MathDoc: tb2j/spiral-heisenberg-mapping#pair_mapping
+# MathDoc: tb2j/spiral-heisenberg-mapping#mixed_block_mapping
     K_ab[a,b]  = -J (u_a.u_b) + D.(u_a x u_b) + u_a.Gamma.u_b
     K_aa[a,b]  = +delta[a,b] (n_a.n_b) J - delta[a,b] D.(n_a x n_b)
                  - delta[a,b] (n_a.Gamma.n_b)
@@ -22,7 +22,7 @@ the onsite DIAGONAL blocks through -D.(n_a x n_b) (zero at collinear
 references); the b-site gradient row is D.(n_a x u_b) -- the derivative
 of E_DMI = +D.(e_a x e_b) -- NOT D.(u_b x n_a).
 
-# MathDoc: tb2j/spiral-heisenberg-mapping#zero_pitch_reduction
+# MathDoc: tb2j/spiral-heisenberg-mapping#stored_ordered_pair_j
     J_stored = -K_ab / (2 transverse_dot),  J_pair_once = 2 J_stored
 with transverse_dot the SITE-LOCAL tilt dot (u_a.u_b): the AFM alignment
 sign is already encoded in the charts (n_b = -n_a with the same
@@ -44,7 +44,7 @@ D is determined together with Gamma and no D <-> Gamma trade survives.
 A planar single-q reference has Hessian rank 5 and full rank 9 with the
 torque rows; stacked references stay at rank 9.
 
-# MathDoc: tb2j/spiral-heisenberg-mapping#residual_definitions
+# MathDoc: tb2j/spiral-heisenberg-mapping#compatibility_statistic
 Component residuals r = raw - mapped(theta_fit) against the EMITTED
 joint least-squares fit, aggregated over the gauge-free K entries
 (mixed + onsite) into chi2_hessian and over the measured-gradient
@@ -89,7 +89,7 @@ from .siesta_spiral_vertex import DEFAULT_OPERATOR_MODE, OPERATOR_MODES
 
 MAPPING_VERSION = "2.1"
 
-# MathDoc: tb2j/spiral-heisenberg-mapping#synthetic
+# MathDoc: tb2j/spiral-heisenberg-mapping#synthetic_flags
 # Flag level chi > 1/20 = CHI_MAX of the derivation's compatibility
 # statistic, squared: chi2 >= 1/400.  Both flagged derivation synthetics
 # (biquadratic chi2_iso = 2752/3115, three-site chi2_sector = 59/93) sit
@@ -141,7 +141,7 @@ CHART_PARAMETER_NAMES = (
 LONGITUDINAL_DIRECTION = {"J": 1.0, "Gamma_xx": 1.0, "Gamma_yy": 1.0}
 
 #: Gauge-free 12-entry data layout of one pair
-#: (MathDoc: tb2j/spiral-heisenberg-mapping#residual_definitions).
+#: (MathDoc: tb2j/spiral-heisenberg-mapping#compatibility_statistic).
 RESIDUAL_COMPONENTS = (
     "mixed_11",
     "mixed_12",
@@ -291,7 +291,7 @@ def _parameter_row(dot_j, d_chart, gamma_chart):
     return row
 
 
-# MathDoc: tb2j/spiral-heisenberg-mapping#pair_mapping
+# MathDoc: tb2j/spiral-heisenberg-mapping#mixed_block_mapping
 def _pair_rows(chart_a, chart_b):
     """Row blocks of one pair's model, in the pair chart (site a's chart).
 
@@ -519,7 +519,7 @@ def _alignment_by_pair(site_order, charts, references_given):
 def _scalar_extraction(response, chart_a, chart_b, alignment):
     """Zero-pitch stored-J identity per common chart axis (diagnostic).
 
-    # MathDoc: tb2j/spiral-heisenberg-mapping#zero_pitch_reduction
+    # MathDoc: tb2j/spiral-heisenberg-mapping#stored_ordered_pair_j
     # MathDoc: tb2j/collinear-anchor-projection#stored_ordered_pair_j
     J_stored = -K_ab / (2 transverse_dot) with transverse_dot the
     SITE-LOCAL tilt dot (u_a.u_b) of the same axis LABEL: the AFM
@@ -1246,7 +1246,7 @@ def compare_mapping_outputs(left: MappingOutput, right: MappingOutput):
     permit a numeric per-pair J departure. An unmatched pair is reported
     with both complete raw responses but NEVER a converged exchange delta.
     Chart-local D and Gamma cannot be subtracted across reference frames.
-    # MathDoc: tb2j/spiral-reference-dependence#full_fit
+    # MathDoc: tb2j/spiral-reference-dependence#biquadratic_departure
     """
     if not isinstance(left, MappingOutput) or not isinstance(right, MappingOutput):
         raise SpiralResponseError("comparison requires two MappingOutput records")
