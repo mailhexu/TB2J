@@ -42,10 +42,11 @@ story-005 production vertex.  Conventions are pinned by
 * finite rotations of the same frozen problem provide the independent
   cross-check and the convergence ladder (budgets approved in story 009).
 
-The module fails closed on undeclared partitions, unknown sites or axes,
-unsupported ensembles, unenclosable contours, broken bundle/vertex
-binding, non-Hermitian pencils and any closed gap (ADR-005, FR-016
-defers metallic ensembles).
+The gapped T=0 contour evaluator fails closed on undeclared partitions,
+unknown sites or axes, an unenclosable contour, broken bundle/vertex
+binding, a non-Hermitian pencil or a closed gap. The distinct fixed-N
+Fermi-Dirac metallic evaluator is in ``siesta_spiral_metallic.py``; it
+shares the frozen operator and ResponseSet contract, not the contour.
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ RESPONSE_CONVENTION = (
     "chart per site, mixed cross-site second vertex zero in both modes"
 )
 ENSEMBLE_GAPPED_T0 = "gapped_fixed_occupations"
+ENSEMBLE_METALLIC_FD = "metallic_fermi_dirac_fixed_n"
 TORQUE_BUDGET_EV_PER_RAD = 1e-3
 CURVATURE_BUDGET_EV_PER_RAD2 = 1e-3
 RESPONSE_IDENTITY_TOL_EV = 1e-8
@@ -274,7 +276,7 @@ def contour_curvature(h, s, w, v_a, v_b, contour):
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Ensemble:
-    """Declared electronic ensemble (ADR-005); gapped T=0 only (FR-016)."""
+    """Declared electronic ensemble (ADR-005): gapped step or metallic fixed-N."""
 
     kind: str
     n_occupied: int
@@ -291,11 +293,10 @@ class Ensemble:
         self.validate()
 
     def validate(self):
-        if self.kind != ENSEMBLE_GAPPED_T0:
+        if self.kind not in (ENSEMBLE_GAPPED_T0, ENSEMBLE_METALLIC_FD):
             raise SpiralResponseError(
-                f"unsupported ensemble kind {self.kind!r}; metallic ensembles "
-                "require explicitly matched conventions (FR-016) and are not "
-                "implemented"
+                f"unsupported ensemble kind {self.kind!r}; expected gapped "
+                "fixed occupations or metallic fixed-N Fermi-Dirac"
             )
         if (
             not isinstance(self.n_occupied, (int, np.integer))
@@ -314,18 +315,37 @@ class Ensemble:
             value = float(getattr(self, name))
             if not np.isfinite(value):
                 raise SpiralResponseError(f"ensemble {name} must be finite")
-        if not self.gap_ev > 0.0:
+        if self.kind == ENSEMBLE_GAPPED_T0 and not self.gap_ev > 0.0:
             raise SpiralResponseError(
                 "ensemble gap_ev must be positive for the gapped reference"
             )
+        if self.kind == ENSEMBLE_METALLIC_FD and self.smearing_width_ev <= 0.0:
+            raise SpiralResponseError("metallic Fermi-Dirac width must be positive")
         if self.smearing_width_ev < 0.0:
             raise SpiralResponseError("smearing_width_ev must be nonnegative")
-        if self.electron_count != self.n_occupied:
+        if self.electron_count <= 0.0:
+            raise SpiralResponseError("electron_count must be positive")
+        if self.kind == ENSEMBLE_GAPPED_T0 and self.electron_count != self.n_occupied:
             raise SpiralResponseError(
                 "electron_count must equal n_occupied: spinor bands have unit multiplicity"
             )
 
     def to_record(self):
+        if self.kind == ENSEMBLE_METALLIC_FD:
+            return {
+                "kind": self.kind,
+                "n_occupied": int(self.n_occupied),
+                "electron_count": float(self.electron_count),
+                "fermi_energy_ev": float(self.fermi_energy_ev),
+                "smearing_width_ev": float(self.smearing_width_ev),
+                "occupation_smearing_width_ev": float(self.smearing_width_ev),
+                "producer_width_declaration": (
+                    "declared producer Fermi-Dirac width is used in the "
+                    "fixed-N free-energy derivatives"
+                ),
+                "gap_ev": float(self.gap_ev),
+                "declaration": "fixed-N Fermi-Dirac free energy, one global chemical potential",
+            }
         return {
             "kind": self.kind,
             "n_occupied": int(self.n_occupied),
@@ -1028,7 +1048,7 @@ class ResponseSet:
     torque: dict
     curvature: dict
     curvature_split: dict
-    contour_vs_band_max_abs: float
+    contour_vs_band_max_abs: float | None
     finite_rotation_cross_check: dict
     frozen_declarations: dict
     ensemble: dict

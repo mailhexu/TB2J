@@ -179,6 +179,12 @@ def validate_finite_rotations(
     raw = ResponseSet.from_dict(
         response.to_dict(), expect_operator_mode=problem.operator_mode
     )
+    if raw.contour_vs_band_max_abs is None:
+        raise SpiralResponseError(
+            "this finite-rotation validator requires a gapped contour identity; "
+            "metallic fixed-N free-energy rotations are certified by "
+            "evaluate_metallic_response_set"
+        )
     coords, frames = _frames(problem, raw, axes_by_site, reference_directions_by_site)
     angles = np.asarray(tuple(angle_ladder), dtype=float)
     if (

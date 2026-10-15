@@ -87,7 +87,7 @@ from .siesta_spiral_response import (
 )
 from .siesta_spiral_vertex import DEFAULT_OPERATOR_MODE, OPERATOR_MODES
 
-MAPPING_VERSION = "2.0"
+MAPPING_VERSION = "2.1"
 
 # MathDoc: tb2j/spiral-heisenberg-mapping#synthetic
 # Flag level chi > 1/20 = CHI_MAX of the derivation's compatibility
@@ -116,6 +116,7 @@ MARGINAL = "marginal"
 
 REFERENCE_CLASS_COLLINEAR = "collinear_single_reference"
 REFERENCE_CLASS_PLANAR = "planar_single_q"
+REFERENCE_CLASS_NONPLANAR = "nonplanar_single_q"
 
 #: Chart parameter vector of one pair, in the first site's chart: J, the
 #: D vector projected on (t1, t2, n_a), and the traceless symmetric Gamma
@@ -488,17 +489,12 @@ def _reference_class(q):
 
 
 def _reference_planes(references):
-    """Planarity of the declared reference directions (rank <= 2)."""
+    """Whether certified reference normals lie in one plane (rank <= 2)."""
     stack = np.column_stack([np.asarray(v, dtype=float) for v in references.values()])
     singular_values = np.linalg.svd(stack, compute_uv=False)
-    if len(singular_values) < 3:
-        return  # at most two directions are always coplanar
-    if float(singular_values[2]) > PLANARITY_TOL * max(float(singular_values[0]), 1.0):
-        raise SpiralResponseError(
-            "declared reference directions are not coplanar; a nonplanar "
-            "single-q texture needs the multi-reference identification "
-            "(rank 9 completion), which this mapping refuses to approximate"
-        )
+    return len(singular_values) < 3 or (
+        float(singular_values[2]) <= PLANARITY_TOL * max(float(singular_values[0]), 1.0)
+    )
 
 
 def _alignment_by_pair(site_order, charts, references_given):
@@ -507,7 +503,12 @@ def _alignment_by_pair(site_order, charts, references_given):
     if references_given:
         source = "reference_directions_by_site"
         for a, b in combinations(site_order, 2):
-            alignment[(a, b)] = 1.0 if float(charts[a].n @ charts[b].n) >= 0.0 else -1.0
+            dot = float(charts[a].n @ charts[b].n)
+            alignment[(a, b)] = (
+                0.0
+                if abs(dot) <= _DIRECTION_MATCH_TOL
+                else (1.0 if dot > 0.0 else -1.0)
+            )
     else:
         source = "undetermined"
         for pair in combinations(site_order, 2):
@@ -883,11 +884,15 @@ def map_response_set(
     if reference_class == REFERENCE_CLASS_PLANAR:
         if references is None:
             raise SpiralResponseError(
-                "finite-q planar treatment needs the certified reference "
-                "directions of every site; without them the spiral plane "
-                "and the pair alignments are unknowable and are not guessed"
+                "finite-q treatment needs certified reference directions of "
+                "every site; the texture and pair signs are not guessed"
             )
-        _reference_planes(references)
+        if not _reference_planes(references):
+            # The pair K/torque rows are valid for arbitrary unit normals;
+            # the story-013 SymPy authority certifies rank 9 for a generic
+            # noncoplanar three-site geometry. The actual joint nullspace
+            # is still computed from the declared charts, not assumed.
+            reference_class = REFERENCE_CLASS_NONPLANAR
 
     charts = {}
     for site in response.site_order:
@@ -1210,6 +1215,11 @@ def map_response_set(
         "source_bundle_sha256": provenance.get("source_bundle_sha256"),
         "partition_declaration": certificate.get("partition_declaration"),
         "q": q,
+        "reference_directions_by_site": (
+            None
+            if references is None
+            else {site: charts[site].n.tolist() for site in response.site_order}
+        ),
         "ensemble_kind": ensemble.get("kind"),
         "ensemble_gap_ev": ensemble.get("gap_ev"),
         "response_sha256": response_digest,
@@ -1224,3 +1234,95 @@ def map_response_set(
         provenance=provenance_out,
         raw_response=raw_response,
     )
+
+
+def compare_mapping_outputs(left: MappingOutput, right: MappingOutput):
+    """Compare two certified references without a new fit or an E(q) fit.
+
+    Only one immutable frozen bundle/SCF, pitch, ensemble and integration
+    permit a numeric per-pair J departure. An unmatched pair is reported
+    with both complete raw responses but NEVER a converged exchange delta.
+    Chart-local D and Gamma cannot be subtracted across reference frames.
+    # MathDoc: tb2j/spiral-reference-dependence#full_fit
+    """
+    if not isinstance(left, MappingOutput) or not isinstance(right, MappingOutput):
+        raise SpiralResponseError("comparison requires two MappingOutput records")
+    left_record, right_record = left.to_dict(), right.to_dict()
+    left_ref = left.provenance.get("reference_directions_by_site")
+    right_ref = right.provenance.get("reference_directions_by_site")
+    if left_ref is None or right_ref is None:
+        raise SpiralResponseError(
+            "comparison requires certified reference directions on both mappings"
+        )
+    frozen_keys = ("source_bundle_sha256", "vertex_sha256", "operator_mode", "q")
+    same_frozen = (
+        all(
+            left.provenance.get(k) and left.provenance.get(k) == right.provenance.get(k)
+            for k in frozen_keys
+        )
+        and left.raw_response.site_order == right.raw_response.site_order
+        and left.raw_response.ensemble == right.raw_response.ensemble
+        and left.raw_response.integration == right.raw_response.integration
+        and left.raw_response.frozen_declarations["magnetic_amplitudes"]["certificate"]
+        == right.raw_response.frozen_declarations["magnetic_amplitudes"]["certificate"]
+    )
+    provenance = {
+        side: {
+            **mapping.provenance,
+            "ensemble": copy.deepcopy(mapping.raw_response.ensemble),
+            "integration": copy.deepcopy(mapping.raw_response.integration),
+            "site_order": list(mapping.raw_response.site_order),
+        }
+        for side, mapping in (("left", left), ("right", right))
+    }
+    per_pair = {}
+    if same_frozen:
+        for key in left.parameters:
+            if key not in right.parameters:
+                continue
+            j_left = left.parameters[key]["j_pair_once_eV"]
+            j_right = right.parameters[key]["j_pair_once_eV"]
+            if j_left is None or j_right is None:
+                per_pair[key] = {
+                    "delta_j_pair_once_eV": None,
+                    "delta_j_stored_eV": None,
+                    "reason": "pair J undetermined at one or both references",
+                }
+                continue
+            delta = float(j_left - j_right)
+            per_pair[key] = {
+                "delta_j_pair_once_eV": delta,
+                "delta_j_stored_eV": delta / 2.0,
+                "interpretation": "reference-direction dependence of the fitted J; not an exact-Heisenberg claim",
+            }
+    payload = {
+        "version": "1.0",
+        "status": (
+            "matched_frozen_reference_diagnostic"
+            if same_frozen
+            else "unmatched_cross_scf"
+        ),
+        "reason": (
+            "same certified frozen operator, pitch, ensemble and integration"
+            if same_frozen
+            else "unmatched bundle/SCF, pitch, operator, ensemble or integration; "
+            "story-004 cross-SCF free-energy spread +0.115644 eV/cell forbids "
+            "a converged exchange difference"
+        ),
+        "converged_exchange_difference": False,
+        "comparison_scope": (
+            "fitted pair-once scalar J in common site/pair identity only; "
+            "chart-local D/Gamma are not compared; neither reference is "
+            "relabeled exact Heisenberg"
+        ),
+        "per_pair": per_pair,
+        "compatibility": {
+            "left": copy.deepcopy(left.compatibility),
+            "right": copy.deepcopy(right.compatibility),
+        },
+        "provenance": provenance,
+        "mapping": {"left": left_record, "right": right_record},
+    }
+    payload = json.loads(json.dumps(payload, allow_nan=False))
+    payload["content_sha256"] = _payload_digest(payload)
+    return payload

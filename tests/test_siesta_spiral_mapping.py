@@ -68,6 +68,7 @@ from TB2J.interfaces.siesta_spiral_mapping import (
     _joint_least_squares,
     _nullspace,
     build_synthetic_response_set,
+    compare_mapping_outputs,
     map_response_set,
 )
 from TB2J.interfaces.siesta_spiral_response import (
@@ -682,7 +683,8 @@ def test_reference_class_refusals():
             _synthetic_response(_heisenberg, frames=PLANAR_FRAMES),
             reference_directions_by_site=PLANAR_REFERENCES,
         )
-    # Nonplanar finite-q references need the multi-reference treatment.
+    # Certified nonplanar finite-q normals still have pair-local rank 9:
+    # the physical producer texture need not be exactly planar.
     three_site_frames = {
         "A": (X, Y, Z),
         "B": (Y, sp.simplify(PLANAR_NB.cross(Y)), PLANAR_NB),
@@ -733,15 +735,17 @@ def test_reference_class_refusals():
         curvature=curvature,
         q=(0.25, 0.0, 0.0),
     )
-    with pytest.raises(SpiralResponseError, match="multi-reference"):
-        map_response_set(
-            response,
-            reference_directions_by_site={
-                "A": (0.0, 0.0, 1.0),
-                "B": (float(sp.Rational(4, 5)), 0.0, float(sp.Rational(3, 5))),
-                "C": (0.0, 1.0, 0.0),
-            },
-        )
+    mapped = map_response_set(
+        response,
+        reference_directions_by_site={
+            "A": (0.0, 0.0, 1.0),
+            "B": (float(sp.Rational(4, 5)), 0.0, float(sp.Rational(3, 5))),
+            "C": (0.0, 1.0, 0.0),
+        },
+    )
+    assert mapped.identifiability["reference_class"] == "nonplanar_single_q"
+    assert mapped.compatibility["label"] == "heisenberg_compatible"
+    assert mapped.raw_response.to_dict() == response.to_dict()
 
 
 def test_synthetic_provenance_partition_fields_present():
@@ -754,7 +758,7 @@ def test_synthetic_provenance_partition_fields_present():
     assert mapped.provenance["partition_declaration"] is None
     assert mapped.provenance["vertex_version"] is None
     assert mapped.provenance["operator_mode"] == "onsite_delta"
-    assert mapped.provenance["mapping_version"] == "2.0"
+    assert mapped.provenance["mapping_version"] == "2.1"
 
 
 # ---------------------------------------------------------------------------
@@ -949,3 +953,59 @@ def test_o2_without_references_reports_alignment_undetermined(o2_response):
     }
     assert mapped.residuals["chi2_hessian"] >= 0.0
     assert mapped.residuals["chi2_torque"] >= 0.0
+
+
+def test_two_reference_fitted_j_departure_and_cross_scf_guard():
+    # Exact same frozen synthetic operator, same q/ensemble/site identity:
+    # the SymPy authority predicts the FULL joint-fit J shift 148 B / 125
+    # for E = -J x - B x² (not the K-only isotropic diagnostic shift).
+    def energy(charts):
+        return _heisenberg(charts) - _biquadratic(charts)
+
+    q = (0.25, 0.25, 0.0)
+    collinear = map_response_set(
+        _synthetic_response(energy, frames=COLLINEAR_FRAMES, q=q),
+        reference_directions_by_site=COLLINEAR_REFERENCES,
+    )
+    planar = map_response_set(
+        _synthetic_response(energy, frames=PLANAR_FRAMES, q=q),
+        reference_directions_by_site=PLANAR_REFERENCES,
+    )
+    before = (collinear.to_dict(), planar.to_dict())
+    comparison = compare_mapping_outputs(collinear, planar)
+    assert comparison["status"] == "matched_frozen_reference_diagnostic"
+    assert comparison["per_pair"]["A|B"]["delta_j_pair_once_eV"] == pytest.approx(
+        float(sp.Rational(148, 125) * B_SYN), abs=1e-11
+    )
+    assert comparison["per_pair"]["A|B"]["delta_j_stored_eV"] == pytest.approx(
+        float(sp.Rational(74, 125) * B_SYN), abs=1e-11
+    )
+    assert comparison["compatibility"]["left"]["label"] == "heisenberg_compatible"
+    assert comparison["compatibility"]["right"]["label"] == "incompatible"
+    assert comparison["provenance"]["right"]["reference_directions_by_site"] == {
+        site: list(direction) for site, direction in PLANAR_REFERENCES.items()
+    }
+    assert comparison["converged_exchange_difference"] is False
+    assert (collinear.to_dict(), planar.to_dict()) == before
+    assert comparison["mapping"]["left"]["response"] == collinear.raw_response.to_dict()
+    assert comparison["mapping"]["right"]["response"] == planar.raw_response.to_dict()
+
+    # Same q but a distinct SCF/bundle identity: the comparison may show
+    # both records, never emit a numeric exchange difference.
+    other_raw = build_synthetic_response_set(
+        site_order=planar.raw_response.site_order,
+        axes_by_site=planar.raw_response.axes,
+        gradient=planar.raw_response.gradient,
+        curvature=planar.raw_response.curvature,
+        q=q,
+        source_bundle_sha256="independent-scf",
+    )
+    other = map_response_set(other_raw, reference_directions_by_site=PLANAR_REFERENCES)
+    unmatched = compare_mapping_outputs(collinear, other)
+    assert unmatched["status"] == "unmatched_cross_scf"
+    assert unmatched["per_pair"] == {}
+    assert unmatched["converged_exchange_difference"] is False
+    assert (
+        unmatched["provenance"]["left"]["source_bundle_sha256"]
+        != unmatched["provenance"]["right"]["source_bundle_sha256"]
+    )
