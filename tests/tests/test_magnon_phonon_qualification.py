@@ -374,6 +374,47 @@ def test_structure_identity_detects_symbol_mismatch():
     assert not report["checks"]["symbols"]
 
 
+def test_structure_identity_rejects_wrong_spin_to_atom_mapping():
+    magnon = _structured_magnon()
+    # Spin 1 is remapped from Cr (atom 1) to nonmagnetic I (atom 2).
+    magnon.magnetic_atom_indices = [0, 2]
+    report = verify_structure_identity(magnon, _structured_phonon())
+    assert not report["ok"]
+    assert report["status"] == "failed"
+    assert not report["bond_map"]["bijection"]
+
+
+def test_structure_without_positions_key_is_unverified():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    modes.structure = {"symbols": ["Cr", "Cr", "I"]}
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert report["status"] == "unverified"
+    assert report["checks"]["positions"] is None
+
+
+def test_structure_position_tolerance_is_absolute():
+    magnon = _structured_magnon()
+    positions = np.array(magnon.atom_positions, copy=True)
+    positions[1, 0] += 5e-6
+    report = verify_structure_identity(
+        magnon, _structured_phonon(positions=positions), position_tol=1e-8
+    )
+    assert not report["ok"]
+    assert not report["checks"]["positions"]
+
+
+def test_negative_phonon_eigenvalues_are_not_counted_as_acoustic():
+    modes = _duck_phonon_gamma()
+    modes.eigenvalues_eV_per_Ang2_per_amu = np.array([-0.5, -0.2])
+    modes.frequencies_thz = np.array([-15.0, -10.0])
+    report = qualify_phonon_modes(modes)
+    point = report["per_point"][0]
+    assert point["acoustic_count"] == 0
+    assert point["acoustic_residual_thz"] == pytest.approx(10.0)
+
+
 # ------------------------------------------------------------------ full report
 
 

@@ -102,7 +102,7 @@ def qualify_phonon_modes(modes, *, acoustic_tol: float | None = None) -> dict:
         acoustic_tol = np.finfo(float).eps * eigenvalues.size * scale
     at_gamma = eigenvalues.size and np.max(np.abs(q - np.rint(q))) <= 1e-8
     if at_gamma:
-        acoustic_mask = eigenvalues <= acoustic_tol
+        acoustic_mask = np.abs(eigenvalues) <= acoustic_tol
         acoustic_count = int(np.count_nonzero(acoustic_mask))
         if acoustic_count:
             acoustic_residual = float(np.max(np.abs(frequencies_thz[acoustic_mask])))
@@ -417,7 +417,11 @@ def verify_structure_identity(
                 f"phonon {phonon_symbols}"
             )
 
-    if model_positions is None or phonon_structure is None:
+    if (
+        model_positions is None
+        or phonon_structure is None
+        or "positions" not in phonon_structure
+    ):
         # No coordinates on one side: positions cannot be certified here.
         checks["positions"] = None
         if model_positions is None:
@@ -440,14 +444,47 @@ def verify_structure_identity(
         else:
             # Identity up to a global lattice translation of the whole map.
             shift = model_positions[0] - phonon_positions[0]
-            checks["positions"] = bool(
-                np.allclose(
-                    model_positions, phonon_positions + shift, atol=position_tol
-                )
+            positions_match = np.allclose(
+                model_positions,
+                phonon_positions + shift,
+                atol=position_tol,
+                rtol=0.0,
             )
+            # Independently certify spin-to-atom resolution against the
+            # spin-only symbols/positions carried by Magnon.
+            spin_symbols = getattr(spin_model, "symbols", None)
+            spin_positions = getattr(spin_model, "positions", None)
+            if spin_symbols is None and model_symbols is not None:
+                spin_symbols = [model_symbols[index] for index in magnetic_indices]
+            if spin_positions is None:
+                spin_positions = model_positions[magnetic_indices]
+            else:
+                spin_positions = np.asarray(spin_positions, float)
+            map_indices_valid = all(
+                0 <= index < len(phonon_symbols) and index < len(phonon_positions)
+                for index in magnetic_indices
+            )
+            if map_indices_valid:
+                resolved_symbols = [phonon_symbols[index] for index in magnetic_indices]
+                resolved_positions = phonon_positions[magnetic_indices]
+                spin_map_valid = (
+                    len(resolved_symbols) == nspin
+                    and len(spin_symbols) == nspin
+                    and list(spin_symbols) == resolved_symbols
+                    and spin_positions.shape == resolved_positions.shape
+                    and np.allclose(
+                        spin_positions,
+                        resolved_positions + shift,
+                        atol=position_tol,
+                        rtol=0.0,
+                    )
+                )
+            else:
+                spin_map_valid = False
+            checks["positions"] = bool(positions_match and spin_map_valid)
             if not checks["positions"]:
                 warnings.append(
-                    "positions differ beyond "
+                    "positions or spin-to-atom resolution differ beyond "
                     f"{position_tol:g} Ang (up to a global translation)"
                 )
 
@@ -480,10 +517,20 @@ def verify_structure_identity(
         and JR.shape[1] == JR.shape[2] == nspin
         and np.all(np.isfinite(JR))
     )
+    spin_symbols = getattr(spin_model, "symbols", None)
+    if spin_symbols is None and model_symbols is not None:
+        spin_symbols = [model_symbols[index] for index in magnetic_indices]
+    resolved_symbols = (
+        [phonon_symbols[index] for index in magnetic_indices]
+        if all(0 <= index < len(phonon_symbols) for index in magnetic_indices)
+        else []
+    )
     bijection = bool(
         len(magnetic_indices) == nspin
         and len(set(magnetic_indices)) == nspin
-        and all(0 <= index < len(phonon_symbols) for index in magnetic_indices)
+        and len(resolved_symbols) == nspin
+        and spin_symbols is not None
+        and list(spin_symbols) == resolved_symbols
     )
     bonds_resolve = bijection and indices_valid
     if bonds_resolve and n_bonds:
