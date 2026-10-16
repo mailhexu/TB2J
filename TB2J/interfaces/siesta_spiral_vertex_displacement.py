@@ -432,6 +432,24 @@ def run_ac009_validation(
 
     plus_bundle = _bundle_from_hs_geometry(plus_sile_b, "displaced_plus", "")
     minus_bundle = _bundle_from_hs_geometry(minus_sile_b, "displaced_minus", "")
+    reference_keys = set(bundle.sparse)
+    for label, displaced_bundle in (
+        ("+h", plus_bundle),
+        ("-h", minus_bundle),
+    ):
+        displaced_keys = set(displaced_bundle.sparse)
+        extras = sorted(displaced_keys - reference_keys)
+        missing = sorted(reference_keys - displaced_keys)
+        if extras or missing:
+            raise SparsePatternMismatch(
+                f"route (b): the {label} displaced HSX export does not have "
+                "exactly the reference bundle's sparse pattern: "
+                f"extra keys {extras}, missing keys {missing}. "
+                "assemble_onto_bundle requires exact coverage, so a "
+                "displaced pair must carry the same keys and no others; "
+                "regenerate the displaced export with the sparse pattern "
+                "of the reference bundle."
+            )
     if set(plus_bundle.sparse) != set(minus_bundle.sparse):
         raise SparsePatternMismatch(
             "route (b): the +h and -h displaced HSX exports carry different "

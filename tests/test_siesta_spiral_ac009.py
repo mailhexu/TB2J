@@ -238,6 +238,75 @@ def test_ensemble_bookkeeping_recorded_verbatim(synthetic_bundle):
 # TEST-001 (real campaign, skip-gated): fe4 displaced campaign
 # ---------------------------------------------------------------------------
 
+
+def _patterned_sile(z_atom1_bohr, *, extra_keys=(), missing_keys=()):
+    """A displaced fake sile whose sparse pattern deviates on purpose."""
+    h, s = {}, {}
+    for key, base in _EXT_H.items():
+        if key in missing_keys:
+            continue
+        a = _EXT_ALPHA[key]
+        h[key] = tuple(
+            -(base[i] + a[i] * z_atom1_bohr * BOHR_TO_ANG)
+            if i == 3
+            else (base[i] + a[i] * z_atom1_bohr * BOHR_TO_ANG)
+            for i in range(4)
+        )
+        s[key] = (_EXT_S[key][0], 0.0, 0.0, 0.0)
+    for key in extra_keys:
+        h[key] = (0.0, 0.0, 0.0, 0.0)
+        s[key] = (1.0, 0.0, 0.0, 0.0)
+    return _FakeHsxFourComponent(
+        CELL,
+        ((0.0, 0.0, z_atom1_bohr), (0.0, 0.0, 3.0)),
+        ((0, 0, 0), (1, 0, 0), (-1, 0, 0)),
+        h,
+        s,
+        0.0,
+    )
+
+
+def test_extra_displaced_sparse_key_refused(synthetic_bundle):
+    """A displaced pair carrying an EXTRA sparse key is refused: route (b)
+    must match the reference bundle's pattern exactly, both directions,
+    the same contract assemble_onto_bundle enforces."""
+    from TB2J.interfaces.siesta_spiral_displacement import SparsePatternMismatch
+
+    extra = (1, 0, (1, 0, 0))
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=STEP_BOHR)
+    with pytest.raises(SparsePatternMismatch) as exc:
+        run_ac009_validation(
+            synthetic_bundle,
+            pattern,
+            plus_sile=_patterned_sile(+STEP_BOHR, extra_keys=(extra,)),
+            minus_sile=_patterned_sile(-STEP_BOHR, extra_keys=(extra,)),
+            reference_fermi_ev=-4.5,
+        )
+    msg = str(exc.value)
+    assert "extra keys" in msg and "route (b)" in msg
+    assert str(extra) in msg
+
+
+def test_missing_displaced_sparse_key_refused(synthetic_bundle):
+    """A displaced pair MISSING a reference sparse key is refused with the
+    missing keys named."""
+    from TB2J.interfaces.siesta_spiral_displacement import SparsePatternMismatch
+
+    missing = (0, 0, (1, 0, 0))
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=STEP_BOHR)
+    with pytest.raises(SparsePatternMismatch) as exc:
+        run_ac009_validation(
+            synthetic_bundle,
+            pattern,
+            plus_sile=_patterned_sile(+STEP_BOHR, missing_keys=(missing,)),
+            minus_sile=_patterned_sile(-STEP_BOHR, missing_keys=(missing,)),
+            reference_fermi_ev=-4.5,
+        )
+    msg = str(exc.value)
+    assert "missing keys" in msg and "route (b)" in msg
+    assert str(missing) in msg
+
+
 CAMPAIGN = Path(
     "/home/hexu/projects/TB2J_dev/.tmp/siesta-xc-mft/fe4_displaced_campaign"
 )
