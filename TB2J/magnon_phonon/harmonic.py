@@ -355,7 +355,10 @@ def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint):
             f"phonon_bare dynamical matrix has a negative eigenvalue {evals.min():.6g}; "
             "unstable bare phonons are not clipped or regularized"
         )
-    omega = evecs @ np.diag(np.sqrt(evals)) @ evecs.conj().T
+    # The phonon Nambu rows are NORMAL-MODE bosons (unit commutators), so
+    # their diagonal block is the mode-energy diagonal, and the mixed
+    # Gamma is projected onto those same modes by _bosonic_coupling.
+    omega = np.diag(np.sqrt(evals))
     phonon_energies = np.sqrt(evals)
     Gamma = _bosonic_coupling(mixed, kpoint, phonon_energies, evecs)
 
@@ -379,7 +382,7 @@ def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint):
     # B^+ block
     M[n_mag + n_ph : 2 * n_mag + n_ph, :n_mag] = Hb[n_mag:, :n_mag]
     M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag : n_mag + n_ph] = Gamma.conj()
-    M[2 * n_mag + n_ph :, :n_mag] = Gamma.conj()
+    M[2 * n_mag + n_ph :, :n_mag] = Gamma.conj().T
     # bottom-right block: Nambu conjugate of A with the supplied magnon
     # lower block embedded (nonreciprocal-safe) instead of Hb00*
     M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag + n_ph : n_mag + n_ph + n_mag] = Hb[
@@ -445,8 +448,10 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
         energies[ik], paraunitary[ik] = colpa_diagonalize_factor(K, metric=g_metric)
         pos = paraunitary[ik, :, :N]  # (2N coordinates, N modes)
         weight_sq = np.abs(pos) ** 2
-        mag = weight_sq[:n_mag, :] + weight_sq[N : N + n_mag, :]
-        ph = weight_sq[n_mag:N, :] + weight_sq[N + n_mag :, :]
+        mag = weight_sq[:n_mag, :].sum(axis=0) + weight_sq[N : N + n_mag, :].sum(axis=0)
+        ph = weight_sq[n_mag:N, :].sum(axis=0) + weight_sq[N + n_mag : 2 * N, :].sum(
+            axis=0
+        )
         total = mag + ph
         magnetic_weight[ik] = mag / total
         displacement_weight[ik] = ph / total
@@ -456,10 +461,16 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
         magnetic_strength[ik] = 2.0 * np.sum(
             spin_lengths[:, None] * weight_sq[:n_mag, :], axis=0
         )
-        # <0|w_beta|mode> = sum_nu e_{beta nu} T_{a_nu, mode}/sqrt(2 omega_nu)
-        displacement_amp = (phonon_modes @ pos[n_mag:N, :]) / np.sqrt(
+        # Hermitian displacement field, so BOTH phonon components enter
+        # (derived in docs/sympy/harmonic_magnon_phonon.py):
+        # <0|a_nu + a_nu^+|mode> = T_{a_nu, mode} + T*_{a-bar_nu, mode}
+        # (the conjugated hole term is the -k partner).  The per-mode
+        # zero point 1/sqrt(2 omega_nu) applies to the normal-mode
+        # amplitudes BEFORE the eigenvector projection.
+        a_amplitude = (pos[n_mag:N, :] + pos[N + n_mag : 2 * N, :].conj()) / np.sqrt(
             2.0 * phonon_energies
         )[:, None]
+        displacement_amp = phonon_modes @ a_amplitude
         if mixed.displacement_coordinate == "cartesian_angstrom":
             displacement_amp = (
                 displacement_amp

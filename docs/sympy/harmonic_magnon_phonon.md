@@ -116,6 +116,12 @@ an energy term $G\,s\,w$ is a bosonic coupling
 
 $$\Gamma_{i\nu}=G_{i,\beta}\,e_{\beta\nu}\sqrt{S_i/2}\,/\sqrt{2\omega_\nu},$$
 
+with the per-mode factor $1/\sqrt{2\omega_\nu}$ applied to the
+normal-mode amplitudes BEFORE the eigenvector projection (it is indexed
+by the mode $\nu$, not by the coordinate $\beta$).  The phonon Nambu
+rows are normal-mode bosons: their diagonal block is $\mathrm{diag}(
+\omega_\nu)$ in that same mode basis.
+
 with the spin-length and phonon zero-point factors applied exactly once,
 in the solver and nowhere else.  For a Cartesian displacement basis
 ($w=\sqrt{m}\,u$) the derivative converts first as
@@ -126,17 +132,23 @@ $G=g\sqrt{2\beta}$ returns exactly the bosonic coupling $g$.
 ## Operator-defined observable strengths
 
 The physical transverse-spin operator is $\zeta_i=S_{i1}+iS_{i2}=
-\sqrt{2S_i}\,b_i$ to linear order and the mass-weighted displacement is
-$Q=(a+a^\dagger)/\sqrt{2\beta}$.  For a positive hybrid mode with
-normalized column $t=(t_b,t_a,t_b^*,t_a^*)$ the one-quantum matrix
-elements are $\langle0|\zeta|\nu\rangle=\sqrt{2S}\,t_b$ and
-$\langle0|Q|\nu\rangle=t_a/\sqrt{2\beta}$, giving the physical strengths
+\sqrt{2S_i}\,b_i$ to linear order (pure annihilation, so its residue is
+the particle component alone) and the Hermitian mass-weighted
+displacement is $Q=(a+a^\dagger)/\sqrt{2\beta}$.  With the hybrid
+expansion $a=\sum_\lambda(t_a\gamma_\lambda+t_{\bar a}\gamma_
+\lambda^\dagger)$ the conjugate gives
+$\langle0|a^\dagger|\lambda\rangle=t_{\bar a}^*$, so BOTH phonon
+components enter the displacement element:
 
-$$M_\nu=2S\,|t_b|^2,\qquad D_\nu=|t_a|^2/(2\beta).$$
+$$\langle0|\zeta|\nu\rangle=\sqrt{2S}\,t_b,\qquad
+\langle0|Q|\nu\rangle=(t_a+t_{\bar a}^*)/\sqrt{2\beta},$$
+
+$$M_\nu=2S\,|t_b|^2,\qquad D_\nu=|t_a+t_{\bar a}^*|^2/(2\beta).$$
 
 Bare limits pin both normalizations: the magnon-like mode has
 $M=2S$, $D=0$; the phonon-like mode has $M=0$, $D=1/(2\beta)$ (the
-zero-point amplitude of $Q$).  At resonance $t_b=t_a$ on both branches,
+zero-point amplitude of $Q$; $t_{\bar a}\to0$ there, so the value is unchanged).
+At resonance $t_b=t_a$ on both branches,
 so the strength shares are exactly $1/2$.  The solver returns these as
 `magnetic_strength`/`displacement_strength` alongside the normalized
 amplitude shares `magnetic_weight`/`displacement_weight`.

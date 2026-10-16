@@ -337,8 +337,9 @@ def test_observable_strengths_match_operator_matrix_elements():
             t = res.paraunitary[0][:, mode]
             tb = t[0]
             ta = t[1]
+            tah = t[3]
             mag_expect = 2 * spin_length * abs(tb) ** 2
-            dis_expect = abs(ta) ** 2 / (2 * beta)
+            dis_expect = abs(ta + np.conj(tah)) ** 2 / (2 * beta)
             assert abs(res.magnetic_strength[0, mode] - mag_expect) < 1e-10
             assert abs(res.displacement_strength[0, mode] - dis_expect) < 1e-10
     # bare limits: g -> 0 gives pure magnon M = 2S and pure phonon D = 1/(2 beta)
@@ -349,3 +350,119 @@ def test_observable_strengths_match_operator_matrix_elements():
     assert abs(res.displacement_strength[0][order[0]] - 1.0 / (2 * 1.0)) < 1e-9
     assert abs(res.magnetic_strength[0][order[1]] - 2 * spin_length) < 1e-9
     assert abs(res.displacement_strength[0][order[1]] - 0.0) < 1e-9
+
+
+def test_multimode_mixed_eigenvectors_lehmann():
+    """TEST-008: mixed unequal-frequency phonons match truncated-Fock Lehmann.
+
+    Two displacement coordinates whose mass-weighted dynamical matrix has
+    rotated eigenvectors and distinct energies exercise the per-mode
+    zero-point ordering; the exact one-quantum matrix elements come from
+    independent sparse diagonalization of the same bosonic Hamiltonian.
+    """
+    from TB2J.magnon_phonon.harmonic import MixedSpinDisplacementHessian
+
+    alpha, omega1, omega2 = 2.0, 0.9, 2.3
+    spin_length = 2.0
+    g = 0.15 * np.sqrt(alpha * omega1)  # visible hole admixture, stable
+    theta = 0.7
+    rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    dyn = rot @ np.diag([omega1**2, omega2**2]) @ rot.T
+
+    def magnon_bare(pts):
+        out = np.zeros((len(pts), 2, 2), dtype=complex)
+        out[:, 0, 0] = alpha
+        out[:, 1, 1] = alpha
+        return out
+
+    mixed = MixedSpinDisplacementHessian(
+        n_mag_sites=1,
+        displacement_labels=((0, 0), (0, 1)),
+        magnon_bare=magnon_bare,
+        phonon_bare=lambda pts: np.array([dyn] * len(pts)),
+        mixed_derivative=lambda pts: np.full((len(pts), 1, 2), g * np.sqrt(2 * omega1)),
+        spin_lengths=(spin_length,),
+        producer="multimode_control",
+        provenance={"source": "mixed unequal-omega Lehmann fixture"},
+    )
+    res = hybrid_modes(POINTS, mixed)
+
+    # independent truncated-Fock reference: H and w_beta as sparse matrices
+    nb = 7  # quanta cutoff per boson; truncated-Fock reference converges
+    # to the harmonic BdG values within ~1e-3 at this coupling
+    dim = nb**3
+
+    def state(ib, i1, i2):
+        return (ib * nb + i1) * nb + i2
+
+    def op(kind, which):
+        mat = np.zeros((dim, dim))
+        for ib in range(nb):
+            for i1 in range(nb):
+                for i2 in range(nb):
+                    s = state(ib, i1, i2)
+                    occ = (ib, i1, i2)[which]
+                    if kind == "n":
+                        mat[s, s] = occ
+                    elif kind == "p" and occ + 1 < nb:  # a^+
+                        t = state(
+                            ib + (which == 0),
+                            i1 + (which == 1),
+                            i2 + (which == 2),
+                        )
+                        mat[t, s] = np.sqrt(occ + 1)
+                    elif kind == "m" and occ > 0:  # a
+                        t = state(
+                            ib - (which == 0),
+                            i1 - (which == 1),
+                            i2 - (which == 2),
+                        )
+                        mat[t, s] = np.sqrt(occ)
+        return mat
+
+    b, a1, a2 = op("m", 0), op("m", 1), op("m", 2)
+    b_d, a1_d, a2_d = op("p", 0), op("p", 1), op("p", 2)
+    b_n, a1_n, a2_n = op("n", 0), op("n", 1), op("n", 2)
+    ham = (alpha * b_n + omega1 * a1_n + omega2 * a2_n).astype(complex)
+    # H_int = sum_nu Gamma_nu (b+b^+)(a_nu+a_nu^+); the Gamma_nu are taken
+    # from the same conversion routine the solver uses.
+    from TB2J.magnon_phonon.harmonic import _bosonic_coupling
+
+    gamma_block = _bosonic_coupling(
+        mixed,
+        np.zeros(3),
+        np.array([omega1, omega2]),
+        rot,
+    )[0]
+    a_ops = [a1 + a1_d, a2 + a2_d]
+    for nu, a_pair in enumerate(a_ops):
+        ham += gamma_block[nu] * (b + b_d) @ a_pair
+    evals, evecs = np.linalg.eigh(ham)
+    ground = evecs[:, 0]
+    # identify the three one-quantum-like states by total-quanta expectation
+    # (multi-quanta states interleave the sorted spectrum)
+    n_op = b_n + a1_n + a2_n
+    quanta = np.abs(np.conj(evecs).T @ (n_op @ evecs)).diagonal()
+    one_q = sorted(np.argsort(np.abs(quanta - 1.0))[:3])
+
+    def strength(op_beta):
+        elem = np.array([ground @ (op_beta @ evecs[:, idx]) for idx in one_q])
+        return np.abs(elem) ** 2
+
+    # physical displacement: per-mode zero point before the eigenvector mix
+    w0 = rot[0, 0] * (a1 + a1_d) / np.sqrt(2 * omega1) + rot[0, 1] * (
+        a2 + a2_d
+    ) / np.sqrt(2 * omega2)
+    w1 = rot[1, 0] * (a1 + a1_d) / np.sqrt(2 * omega1) + rot[1, 1] * (
+        a2 + a2_d
+    ) / np.sqrt(2 * omega2)
+    lehmann_dis = strength(w0) + strength(w1)
+    lehmann_mag = strength(np.sqrt(2 * spin_length) * b)
+
+    order = np.argsort(res.energies[0])
+    for rank, mode in enumerate(order):
+        lehmann_idx = one_q[rank]
+        # solver energies are excitations relative to the ground state
+        assert abs(res.energies[0][mode] - (evals[lehmann_idx] - evals[0])) < 5e-3
+        assert abs(res.displacement_strength[0][mode] - lehmann_dis[rank]) < 5e-3
+        assert abs(res.magnetic_strength[0][mode] - lehmann_mag[rank]) < 5e-3
