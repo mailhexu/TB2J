@@ -129,6 +129,33 @@ def _spin_transition_amplitudes(modes, u=None, v=None):
     return amplitudes.reshape(-1, amplitudes.shape[-1])
 
 
+def _fm_chain_8():
+    # Periodic eight-site FM chain in one cell: zero-acoustic plus seven
+    # gapped branches (omega = 4 J S [1 - cos(2 pi m / 8)] >= 1.17 eV).
+    nspin = 8
+    JR = np.zeros((1, nspin, nspin, 3, 3))
+    for i in range(nspin):
+        j = (i + 1) % nspin
+        JR[0, i, j] = np.eye(3)
+        JR[0, j, i] = np.eye(3)
+    magmom = np.zeros((nspin, 3))
+    magmom[:, 2] = 2.0
+    magnon = Magnon(
+        nspin=nspin,
+        magmom=magmom,
+        Rlist=np.array([[0, 0, 0]], dtype=int),
+        JR=JR,
+        cell=np.eye(3),
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0.0, 1.0]]),
+        _n=np.array([0.0, 1.0, 0.0]),
+    )
+    magnon.set_reference(
+        np.zeros(3), np.array([[0.0, 0.0, 1.0]]), np.array([0.0, 1.0, 0.0])
+    )
+    return magnon
+
+
 def _direct_positive_energies(magnon, kpoints):
     """Independent generalized eigenvalues of g H, not Cholesky energies."""
     result = []
@@ -258,6 +285,23 @@ def test_engineered_anomalous_model_against_direct_diagonalization():
         np.sum(np.abs(modes.u) ** 2, axis=-1) - np.sum(np.abs(modes.v) ** 2, axis=-1),
         1.0,
         atol=1e-10,
+    )
+
+
+def test_eight_site_fm_gamma_keeps_single_zero_branch():
+    magnon = _fm_chain_8()
+    modes = magnon.get_site_boson_modes([[0.0, 0, 0]])
+    legacy = magnon._magnon_energies([[0.0, 0, 0]])
+    assert int(modes.is_zero_mode[0].sum()) == 1
+    assert modes.energies[0, 0] == 0.0
+    assert np.all(modes.energies[0, 1:] > 0.1)
+    np.testing.assert_array_equal(modes.energies[0, 1:], legacy[0, 1:])
+    n = magnon.nspin
+    g = np.diag(np.r_[np.ones(n), -np.ones(n)])
+    np.testing.assert_allclose(
+        modes.paraunitary[0].conj().T @ g @ modes.paraunitary[0],
+        g,
+        atol=1e-9,
     )
 
 

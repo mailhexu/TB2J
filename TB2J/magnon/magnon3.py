@@ -286,10 +286,16 @@ class Magnon:
         Holstein--Primakoff image of a uniform rotation. Every candidate must
         be a null vector of the unshifted Hessian within the numeric-zero
         tolerance, and the certified candidates must span the whole null
-        space of the dynamical matrix ``g @ H``. The vanishing-branch count
-        is then half the algebraic multiplicity of the zero eigenvalue of
-        ``g @ H``; bosonic particle-hole symmetry makes that multiplicity
-        even. Returns ``(n_zero_modes, worst_candidate_residual)``.
+        space of the Hessian. The vanishing-branch count is half the
+        algebraic multiplicity of the zero eigenvalue of ``g @ H``; bosonic
+        particle-hole symmetry makes that multiplicity even. The count is
+        computed in the Hessian eigenbasis, where ``K diag(lambda)`` has one
+        zero column per null eigenvalue, so the multiplicity is
+        ``nullity(H)`` plus the zero count of the range block ``K_rr
+        Lambda_r``; that separation scales linearly with the gaps. It is
+        cross-checked against the rank of the nondimensionalized power
+        ``(gH / scale)^dim``: mismatch refuses the zeroing. Returns
+        ``(n_zero_modes, worst_candidate_residual)``.
         """
         eps = np.finfo(float).eps
         q_scale = max(1.0, float(np.max(np.abs(kpoint))))
@@ -322,14 +328,29 @@ class Magnon:
         dynamical = g @ H
         scale = float(np.max(np.abs(np.linalg.eigvalsh(H))))
         rank_tol = eps * dim * scale
-        nullity = dim - np.linalg.matrix_rank(dynamical, tol=rank_tol)
-        # Algebraic multiplicity of the zero eigenvalue: nonzero-eigenvalue
-        # blocks stay full rank under powers, zero Jordan chains vanish. The
-        # power's entries are pure rounding noise, so rank against the
-        # Hessian scale, not the power's own (vanishing) scale.
-        power = np.linalg.matrix_power(dynamical, dim)
-        algebraic_zero = dim - np.linalg.matrix_rank(power, tol=rank_tol)
+        lam, U = np.linalg.eigh(H)
+        K = U.conj().T @ g @ U
+        k_scale = max(1.0, float(np.max(np.abs(K))))
+        null_mask = lam <= rank_tol
+        algebraic_zero = int(np.count_nonzero(null_mask))
+        if algebraic_zero < dim:
+            lam_r = lam[~null_mask]
+            K_rr = K[np.ix_(~null_mask, ~null_mask)]
+            block = K_rr * lam_r[None, :]
+            block_tol = eps * dim * scale * k_scale
+            block_eigenvalues = np.linalg.eigvals(block)
+            algebraic_zero += int(
+                np.count_nonzero(np.abs(block_eigenvalues) <= block_tol)
+            )
+        # Cross-check: rank the nondimensionalized power. Its nonzero
+        # singular values are the gapped branches; zero Jordan chains vanish.
+        if scale > 0.0:
+            power = np.linalg.matrix_power(dynamical / scale, dim)
+            power_rank = np.linalg.matrix_rank(power, tol=eps * dim)
+            if algebraic_zero != dim - power_rank:
+                return 0, residual
         span = np.linalg.matrix_rank(np.column_stack(candidates), tol=rank_tol)
+        nullity = int(np.count_nonzero(null_mask))
         if span != nullity or algebraic_zero < nullity or algebraic_zero % 2:
             return 0, residual
         return algebraic_zero // 2, residual

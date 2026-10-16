@@ -145,14 +145,41 @@ def main():
     assert sp.simplify(weps - eps) == 0
     assert sp.limit(veps**2, eps, 0, dir="+") is sp.oo
 
-    # Vanishing-branch halving: for a real-A BdG pair, tr(gH)=0 makes the
-    # dynamical characteristic polynomial even in lambda, so a zero
-    # eigenvalue carries an even algebraic multiplicity and the number of
-    # vanishing branches is half of it (FM: one branch; two-sublattice AFM
-    # at Gamma: two branches).
-    lam = sp.symbols("lambda", real=True)
-    char_poly = lam**2 + (b0**2 - A0**2)
-    assert sp.simplify(char_poly - char_poly.subs(lam, -lam)) == 0
+    # Vanishing-branch halving: for a real two-site BdG pair the exchange
+    # reality makes P (gH) P = -gH with P the particle-hole swap, so the
+    # characteristic polynomial is even in lambda and a zero eigenvalue
+    # carries an even algebraic multiplicity; the number of vanishing
+    # branches is half of it (FM: one branch; two-sublattice AFM at Gamma:
+    # two branches).
+    particle_hole_swap = sp.Matrix(
+        sp.BlockMatrix([[sp.zeros(2), sp.eye(2)], [sp.eye(2), sp.zeros(2)]])
+    )
+    metric4 = sp.diag(1, 1, -1, -1)
+    A11, A12, A22, B11, B12, B22 = sp.symbols("A11 A12 A22 B11 B12 B22", real=True)
+    A2 = sp.Matrix([[A11, A12], [A12, A22]])
+    B2 = sp.Matrix([[B11, B12], [B12, B22]])
+    H4 = sp.Matrix(sp.BlockMatrix([[A2, B2], [B2, A2]]))
+    lam_sym = sp.Symbol("lambda", real=True)
+    char = sp.expand((metric4 * H4).charpoly(lam_sym).as_expr())
+    assert sp.simplify(
+        particle_hole_swap * (metric4 * H4) * particle_hole_swap + metric4 * H4
+    ) == sp.zeros(4)
+    assert sp.expand(char - char.subs(lam_sym, -lam_sym)) == 0
+
+    # The counting factorization: with m null Hessian eigenvalues the
+    # eigenbasis dynamical matrix K diag(lambda) has m zero columns, so its
+    # characteristic polynomial carries lambda^m and the remaining zeros
+    # come from the range block K_rr Lambda_r.
+    k11, k12, k13, k22, k23, k33, l1, l2 = sp.symbols(
+        "k11 k12 k13 k22 k23 k33 lambda1 lambda2", real=True
+    )
+    K3 = sp.Matrix([[k11, k12, k13], [k12, k22, k23], [k13, k23, k33]])
+    KL = K3 * sp.diag(0, l1, l2)
+    assert KL[:, 0] == sp.zeros(3, 1)
+    K_rr = sp.Matrix([[k22, k23], [k23, k33]])
+    full = (lam_sym * sp.eye(3) - KL).det()
+    minor = (lam_sym * sp.eye(2) - K_rr * sp.diag(l1, l2)).det()
+    assert sp.expand(full - lam_sym * minor) == 0
     print(
         "lower-Cholesky reconstruction, paraunitarity, FM/AFM/anomalous models, "
         "spin factors, reciprocal partners, and zero-mode limits: OK"

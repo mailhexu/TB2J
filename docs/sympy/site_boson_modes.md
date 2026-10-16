@@ -96,11 +96,16 @@ unshifted Hessian, with residual $\|H\beta\|$ (unit-normalized candidate)
 reported in `diagnostics.symmetry_residual`, and the certified candidates
 must span the full null space of the unshifted dynamical matrix $gH$. The
 number of vanishing branches is then half the algebraic multiplicity of the
-zero eigenvalue of $gH$; bosonic particle-hole symmetry makes the
-characteristic polynomial even in $\lambda$, so that multiplicity is
-certified even. The multiplicity is measured as the null space of
-$(gH)^{2N}$ ranked against the Hessian's own scale, never against the
-vanishing scale of the power itself. A branch whose energy is nonzero keeps
+zero eigenvalue of $gH$; bosonic particle-hole symmetry ($P(gH)P = -gH$ for
+real exchange) makes the characteristic polynomial even in $\lambda$, so
+that multiplicity is certified even. The multiplicity is computed in the
+Hessian eigenbasis: $U^\dagger gH\,U = K\operatorname{diag}(\lambda)$ has
+one zero column per null eigenvalue, so it equals
+$\dim\ker H$ plus the zero count of the range block $K_{rr}\Lambda_r$ —
+a separation that scales linearly with the gaps, not with their $2N$-th
+powers. It is cross-checked against the rank of the nondimensionalized
+power $(gH/\|H\|)^{2N}$; a mismatch refuses the zeroing. A branch whose
+energy is nonzero keeps
 its unshifted value. References whose Hessian minimum lies below
 $-n\,\varepsilon_{\mathrm{mach}}\,\|H\|$ (a scale-aware numeric-zero
 tolerance, reported per point as `stability_tol`) are rejected as unstable;
