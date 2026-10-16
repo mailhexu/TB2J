@@ -98,14 +98,20 @@ def main():
     assert sp.simplify((u0**2 - v0**2) - 1) == 0
     assert sp.simplify((u0 * v0) ** 2 - b0**2 / (4 * gap0**2)) == 0
 
-    # Reality of real-space exchange gives H(-k)=H(k)*, so the M
-    # eigensystem partners are conjugate up to the arbitrary eigenvector phase.
-    Ar, Ai, Br, Bi = sp.symbols("Ar Ai Br Bi", real=True)
-    Ak, Bk = Ar + sp.I * Ai, Br + sp.I * Bi
-    Hk = sp.Matrix([[Ak, Bk], [sp.conjugate(Bk), sp.conjugate(Ak)]])
-    Am, Bm = Ar - sp.I * Ai, Br - sp.I * Bi
-    Hminus = sp.Matrix([[Am, Bm], [sp.conjugate(Bm), sp.conjugate(Am)]])
-    assert sp.simplify(Hminus - sp.conjugate(Hk)) == sp.zeros(2)
+    # The BdG particle-hole identity relates opposite k, not the positive
+    # branches at the same k. A nonreciprocal normal term has A(k)!=A(-k).
+    Ak, Am, Bk = sp.symbols("A_k A_minus_k B", real=True)
+    Hk = sp.Matrix([[Ak, Bk], [Bk, Am]])
+    Hminus = sp.Matrix([[Am, Bk], [Bk, Ak]])
+    tau_x = sp.Matrix([[0, 1], [1, 0]])
+    assert sp.simplify(Hminus - tau_x * sp.conjugate(Hk) * tau_x) == sp.zeros(2)
+    gk = sp.diag(1, -1)
+    Dk, Dminus = gk * Hk, gk * Hminus
+    assert sp.simplify(tau_x * sp.conjugate(Dk) * tau_x + Dminus) == sp.zeros(2)
+    root = sp.sqrt((Ak + Am) ** 2 - 4 * Bk**2)
+    negative_k = (Ak - Am - root) / 2
+    positive_minus_k = (Am - Ak + root) / 2
+    assert sp.simplify(positive_minus_k + negative_k) == 0
 
     # TB2J puts sqrt(S_i S_j) into the exchange blocks; the modes then
     # multiply unit-commutator HP bosons, whose transverse spin carries sqrt(2S_i).

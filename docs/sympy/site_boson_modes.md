@@ -23,7 +23,7 @@ Thus the physical generalized eigenvector of $gH$ is
 
 $$\psi_\nu=(K^\dagger)^{-1}x_\nu,$$
 
-not the transformed-coordinate eigvector $x_\nu$ itself. For a positive
+not the transformed-coordinate eigenvector $x_\nu$ itself. For a positive
 branch $\epsilon_\nu=\omega_\nu>0$, unit Euclidean norm of $x_\nu$ gives
 $\psi_\nu^\dagger g\psi_\nu=1/\omega_\nu$ and
 $\psi_\nu^\dagger H\psi_\nu=1$. The normalized physical column is
@@ -39,18 +39,25 @@ $$T^\dagger gT=g,\qquad T^\dagger HT=\operatorname{diag}(\omega_1,\ldots,\omega_
 
 Its row order is $(b(k),b^\dagger(-k))$ and its column order is
 $(\gamma(k),\gamma^\dagger(-k))$. The exposed `u` and `v` are the two row
-blocks of the positive-norm columns, transposed to `(mode, site)`. Mode
-rephasing multiplies a column by a unit phase and leaves both paraunitarity
-and mode-resolved quadratic observables invariant.
+blocks of the positive-norm columns, transposed to `(mode, site)`. Under a
+mode phase, the one-magnon spin matrix element gets that phase, but its
+spectral residue (the matrix element times its adjoint) is invariant. Within
+a degenerate subspace, only the summed projector/residue is invariant under a
+unitary basis rotation. Story 009 vertices must transform covariantly in the
+same mode subspace; this API does not fix a phase or degenerate-subspace gauge.
 
 ## Reciprocal partners and local-frame spin factors
 
 The exchange transform used in `Magnon.Jq` is
-$J(q)=\sum_R J(R)e^{-2\pi i q\cdot R}$. Reality and exchange reciprocity imply
-$H(-k)=H(k)^*$; the positive/negative eigensystem branches at $k$ and $-k$
-are particle/hole partners, up to the arbitrary phase (and rotations within
-degenerate subspaces) of each eigensolver basis. No cross-k phase gauge is
-assumed by the API.
+$J(q)=\sum_R J(R)e^{-2\pi i q\cdot R}$. The bosonic particle-hole identity is
+
+$$H(-k)=\tau_x H(k)^*\tau_x,$$
+
+where $\tau_x$ exchanges particle and hole blocks. For the dynamical matrix
+$D(k)=gH(k)$ this gives $D(-k)=-\tau_xD(k)^*\tau_x$. Thus positive-energy
+branches at $-k$ pair with the negative-norm branch at $k$; positive energies
+at $k$ and $-k$ need not be equal in nonreciprocal systems. Arbitrary
+eigenvector phases (and degenerate-subspace rotations) remain unfixed.
 
 `Hq` folds $\sqrt{S_iS_j}$ into normal and anomalous exchange blocks and
 uses $S_l$ in the on-site longitudinal term. The returned `u,v` therefore
@@ -76,8 +83,20 @@ The executable certificate checks three model classes:
 
 For an anomalous branch, $v^2=(A/\omega-1)/2$ can diverge as a Goldstone
 frequency tends to zero while the bosonic metric norm remains one. Exactly
-zero-frequency Cholesky normalization is singular. The API uses the
-established energy result unchanged, reports the Hamiltonian minimum and
-Cholesky tier/shift, and uses the explicitly reported $10^{-6}$ eV limit
-regularization for a singular mode reconstruction. References requiring the
-legacy large stability shift are rejected rather than exporting modes.
+zero-frequency Cholesky normalization is singular, so the accessor
+regularizes only the mode reconstruction with the explicitly reported
+$10^{-6}$ eV shift.
+
+A one-magnon energy is exported as an exact symmetry zero only when a
+derived criterion holds at a reciprocal-lattice point: the global-rotation
+Holstein--Primakoff displacement
+$\beta_i=\sqrt{S_i/2}\,U_i^*\cdot(n\times V_i)$ (one candidate per Cartesian
+axis, particle and hole blocks conjugated) must be a null vector of the
+unshifted Hessian, with residual $\|H\beta\|/\|\beta\|$ reported in
+`diagnostics.symmetry_residual`, and the certified candidate count must be
+even (global rotations pair particles and holes). The count caps the zeroed
+modes. References whose Hessian minimum lies below
+$-n\,\varepsilon_{\mathrm{mach}}\,\|H\|$ (a scale-aware numeric-zero
+tolerance, reported per point as `stability_tol`) are rejected as unstable;
+the legacy $10^{-6}$ eV Cholesky retry shift is never used to mask a
+genuinely negative mode.

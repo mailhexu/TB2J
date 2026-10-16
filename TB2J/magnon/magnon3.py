@@ -278,6 +278,38 @@ class Magnon:
             return eigvals[:, n:] + min_eig, eigvecs[:, :, n:].swapaxes(1, 2)
         return np.linalg.eigvalsh(eig_matrix)[:, n:] + min_eig, None
 
+    @staticmethod
+    def _global_rotation_null_modes(H, kpoint, spin_lengths, U, V, stability_tol):
+        """Certify Γ-point zero modes from global-rotation Hessian null vectors."""
+        eps = np.finfo(float).eps
+        q_scale = max(1.0, float(np.max(np.abs(kpoint))))
+        if np.max(np.abs(kpoint - np.rint(kpoint))) > eps * q_scale:
+            return 0, np.nan
+
+        candidates = []
+        residuals = []
+        for axis in np.eye(3):
+            tangent = np.cross(axis, V)
+            beta = np.sqrt(spin_lengths / 2.0) * np.einsum(
+                "ix,ix->i", U.conj(), tangent
+            )
+            candidate = np.concatenate((beta, beta.conj()))
+            norm = np.linalg.norm(candidate)
+            if norm == 0.0:
+                continue
+            candidates.append(candidate)
+            residuals.append(np.linalg.norm(H @ candidate) / norm)
+        if not candidates:
+            return 0, np.nan
+        residual = float(max(residuals))
+        if residual > stability_tol:
+            return 0, residual
+
+        rank = np.linalg.matrix_rank(np.column_stack(candidates))
+        if rank == 0 or rank % 2:
+            return 0, residual
+        return min(H.shape[0] // 2, rank // 2), residual
+
     def get_site_boson_modes(self, kpoints):
         """Return canonical physical site-boson modes at fractional k-points.
 
@@ -288,35 +320,47 @@ class Magnon:
         commutator Holstein--Primakoff bosons; transverse spin amplitudes carry
         the additional local factor ``sqrt(2 * spin_lengths[i])``.
 
-        References requiring the legacy large stability shift are rejected.
-        Exact Goldstone points are evaluated as the limit of a 1e-6 eV
-        regularization, while their energies remain exactly those returned by
-        ``_magnon_energies``.
+        A one-magnon energy is set to exact zero only when the global-rotation
+        HP displacement is a null vector of the unshifted Hessian within its
+        floating-point backward-error tolerance. The reported stability and
+        symmetry residuals make both decisions auditable.
         """
         kpoints = np.asarray(kpoints, dtype=float)
         H = self.Hq(kpoints)
         n = H.shape[-1] // 2
-        point_min = np.linalg.eigvalsh(H)[:, 0]
-        K, energy_offset, tier = self._cholesky_with_retries(H)
-        if tier == 2 or np.any(point_min < -1e-6):
+        h_eigenvalues = np.linalg.eigvalsh(H)
+        point_min = h_eigenvalues[:, 0]
+        h_scale = np.max(np.abs(h_eigenvalues), axis=1)
+        stability_tol = np.finfo(float).eps * (2 * n) * h_scale
+        unstable = point_min < -stability_tol
+        if np.any(unstable):
             raise ValueError(
                 "Cannot construct site-boson modes for an unstable reference "
-                f"(minimum Hamiltonian eigenvalue {point_min.min():.6g} eV)."
+                f"(minimum Hamiltonian eigenvalue {point_min.min():.6g} eV; "
+                f"numeric-zero tolerance {stability_tol.min():.3g} eV)."
             )
+        K, energy_offset, tier = self._cholesky_with_retries(H)
 
         g = np.diag(np.r_[np.ones(n), -np.ones(n)])
         energies = (
             np.linalg.eigvalsh(K.swapaxes(-1, -2).conj() @ g @ K)[:, n:] + energy_offset
         )
         paraunitary = np.empty((len(kpoints), 2 * n, 2 * n), dtype=complex)
-        shifts = np.full(len(kpoints), 1e-6 if tier == 1 else 0.0)
+        global_shift = (
+            0.0 if tier == 0 else (1e-6 if tier == 1 else -energy_offset + 1e-6)
+        )
+        shifts = np.full(len(kpoints), global_shift)
         tiers = np.full(len(kpoints), tier, dtype=int)
+        normalized_spins = self.magmom / np.linalg.norm(self.magmom, axis=-1)[:, None]
+        U, V = get_rotation_arrays(normalized_spins, u=self._uz)
+        symmetry_residual = np.full(len(kpoints), np.nan)
+        zero_mode = np.zeros((len(kpoints), n), dtype=bool)
         for ik in range(len(kpoints)):
             Ki = K[ik]
             # A semidefinite Goldstone matrix can pass LAPACK Cholesky with a
             # singular factor. Regularize only the mode reconstruction; keep
             # the energy path identical to the established diagonalizer.
-            if tier == 0 and point_min[ik] <= 1e-12:
+            if tier == 0 and point_min[ik] <= stability_tol[ik]:
                 shifts[ik] = 1e-6
                 tiers[ik] = 1
                 Ki = np.linalg.cholesky(H[ik] + shifts[ik] * np.eye(2 * n))
@@ -334,12 +378,15 @@ class Magnon:
             paraunitary[ik] = np.concatenate(
                 (physical[:, n:], physical[:, :n][:, ::-1]), axis=1
             )
+            n_zero, symmetry_residual[ik] = self._global_rotation_null_modes(
+                H[ik], kpoints[ik], self.Snorm, U, V, stability_tol[ik]
+            )
+            if n_zero:
+                energies[ik, :n_zero] = 0.0
+                zero_mode[ik, :n_zero] = True
 
         positive = paraunitary[:, :n, :n].swapaxes(1, 2)
         hole = paraunitary[:, n:, :n].swapaxes(1, 2)
-        normalized_spins = self.magmom / np.linalg.norm(self.magmom, axis=-1)[:, None]
-        U, V = get_rotation_arrays(normalized_spins, u=self._uz)
-        zero_mode = energies <= 1e-5
         return SiteBosonModes(
             kpoints=kpoints,
             energies=energies,
@@ -351,6 +398,8 @@ class Magnon:
             V=V,
             diagnostics=SiteBosonDiagnostics(
                 min_eig=point_min,
+                stability_tol=stability_tol,
+                symmetry_residual=symmetry_residual,
                 shift=shifts,
                 cholesky_tier=tiers,
             ),

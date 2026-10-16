@@ -33,15 +33,20 @@ class SiteBosonDiagnostics:
     """Read-only per-k-point stability and Cholesky regularization diagnostics."""
 
     min_eig: np.ndarray
+    stability_tol: np.ndarray
+    symmetry_residual: np.ndarray
     shift: np.ndarray
     cholesky_tier: np.ndarray
 
     def __post_init__(self):
-        object.__setattr__(self, "min_eig", _readonly_array(self.min_eig, float))
-        object.__setattr__(self, "shift", _readonly_array(self.shift, float))
-        object.__setattr__(
-            self, "cholesky_tier", _readonly_array(self.cholesky_tier, int)
-        )
+        for name, dtype in (
+            ("min_eig", float),
+            ("stability_tol", float),
+            ("symmetry_residual", float),
+            ("shift", float),
+            ("cholesky_tier", int),
+        ):
+            object.__setattr__(self, name, _readonly_array(getattr(self, name), dtype))
 
 
 @dataclass(frozen=True)
