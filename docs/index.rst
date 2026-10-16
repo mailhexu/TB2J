@@ -32,6 +32,7 @@ Welcome to TB2J's documentation!
    src/projector_green.rst
    src/spiral.rst
    src/spiral_response.md
+   src/siesta_spiral_cli.md
    src/qe_projector.rst
    src/split_soc_gpaw.rst
    src/split_soc_abinit_paw.rst

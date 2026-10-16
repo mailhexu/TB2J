@@ -4,6 +4,11 @@ Use TB2J with Siesta
 In this tutorial we will learn how to use TB2J with Siesta. First we calculate the isotropic exchange in bcc Fe. Then we calculate the isotropic exhange, anisotropic exchange and Dzyanoshinskii-Moriya interaction (DMI) parameters from a calculation with spin-orbit coupling enabled.
 Before running this tutorial, please make sure that the sisl package is installed.
 
+For the separate certified finite-pitch spiral workflow, see
+:doc:`siesta_spiral_cli`. It runs digest-pinned producer inputs through the
+required response/mapping gates and writes a validated SpinIO pickle to a
+new directory; it does not replace the collinear tutorial below.
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 
