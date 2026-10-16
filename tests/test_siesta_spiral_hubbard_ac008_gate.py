@@ -41,16 +41,20 @@ from TB2J.interfaces.siesta_spiral_hubbard import (
     AC008_ANGLE_LADDER_RAD,
     AC008_CONTRACT_ENERGY_BUDGET_EV,
     AC008_CURVATURE_BUDGET_EV_PER_RAD2,
+    AC008_PACKING_FIDELITY_BUDGET_EV,
     AC008_STABLE_WINDOW_RUNGS,
     AC008_TORQUE_BUDGET_EV_PER_RAD,
     RY_TO_EV,
     DftuProvenance,
     HubbardBundle,
+    HubbardBundleError,
     ProvenanceAuditError,
     assemble_hubbard_operator,
     audit_xc_hubbard_provenance,
     build_xc_hubbard_audit_artifact,
     edftu_oracle,
+    hubbard_site_block_components,
+    hubbard_site_block_unpack,
     rotated_hubbard_site_components,
     run_ac008_gate,
 )
@@ -378,13 +382,17 @@ def contract_table(dftu, gate):
 
 
 @pytest.fixture(scope="module")
-def audit_artifact(dftu):
+def audit_artifact(dftu, gate):
+    """Audit envelope with the XC source pinned to the Gamma frozen
+    problem's stored total H (the XC contribution enters through the
+    stored total Hamiltonian, digested at export time)."""
     return build_xc_hubbard_audit_artifact(
         dftu["bundle"],
         vertex_kind="xc+hubbard",
         producer_u_ry=float(dftu["data"]["u_ry"]),
         producer_j_ry=float(dftu["data"]["j_ry"]),
         producer_u_j_source=dftu["refs"]["u_j_stdout"],
+        xc_source={"kind": "stored_total_H", "payload": gate["bundle"].sparse},
     )
 
 
@@ -507,6 +515,47 @@ def test_declared_ensemble_and_identity_gate(gate):
     assert gate["fold_asymmetry"] <= 1e-12
 
 
+def test_packing_fidelity_reproduces_certified_operator(dftu):
+    """Pinned packing-fidelity gate: rebuild the certified +U operator
+    from the 4-component file packing (undoing the documented packing
+    for this texture class: real spin-diagonal channels, du = conj-swap
+    of ud) and assert reproduction within the pinned budget.  The
+    reproduction error is COMPUTED here on the genuine reference
+    (measured worst 2.2978e-13 eV, dominated by the discarded Im
+    spin-diagonal residual), not asserted from the story record."""
+    v_certified = np.asarray(dftu["v_hubbard"], dtype=complex) * RY_TO_EV
+    worst = 0.0
+    for site in range(NSITES):
+        comps = hubbard_site_block_components(dftu["v_hubbard"][site])
+        rebuilt = hubbard_site_block_unpack(comps, energy_scale=1.0)
+        assert rebuilt.shape == v_certified[site].shape
+        worst = max(worst, float(np.max(np.abs(rebuilt - v_certified[site]))))
+    assert worst <= AC008_PACKING_FIDELITY_BUDGET_EV, (
+        f"packing fidelity {worst:.3e} eV exceeds the pinned budget "
+        f"{AC008_PACKING_FIDELITY_BUDGET_EV:.1e} eV"
+    )
+
+
+def test_packing_refuses_out_of_class_texture(dftu):
+    """The packing restriction is enforced: a texture with complex
+    spin-diagonal channels (rotated out of the xz plane) carries O(eV)
+    imaginary diagonal parts that the 4-component packing would discard
+    silently -- the packer must refuse."""
+    v = np.asarray(dftu["v_hubbard"], dtype=complex).copy()
+    v[0, 0] = v[0, 0] + 0.37j * np.max(np.abs(v[0, 0]))  # complex uu channel
+    with pytest.raises(HubbardBundleError) as excinfo:
+        hubbard_site_block_components(v[0])
+    assert "restriction" in str(excinfo.value)
+    assert "xz-plane" in str(excinfo.value)
+
+    # and a texture whose du channel is not the conj-swap of ud
+    w = np.asarray(dftu["v_hubbard"], dtype=complex).copy()
+    w[0, 3, 0, 0] = w[0, 3, 0, 0] + 0.19
+    with pytest.raises(HubbardBundleError) as excinfo:
+        hubbard_site_block_components(w[0])
+    assert "conj(ud)" in str(excinfo.value)
+
+
 # ---------------------------------------------------------------------------
 # TEST-002: provenance audit (genuine passes, stripped/substituted refuse)
 # ---------------------------------------------------------------------------
@@ -521,10 +570,44 @@ def test_audit_passes_on_genuine_outputs(dftu, audit_artifact):
     assert checks["j_ry_matches_producer"] is True
     assert checks["projector_identity"] == dftu["prov"].projector_identity
     assert len(checks["rotation_contract_mathdoc_sha256"]) == 64
+    # XC source identity pinned and digested at export time (FR-014)
+    assert checks["xc_source_kind"] == "stored_total_H"
+    assert len(checks["xc_source_digest"]) == 64
     # story-014 open item: the Edftu oracle is recorded, never gated
     info = verdict["informational"]
     assert info["edftu_reference_ev"] == float(dftu["data"]["edftu_ref_ev"])
     assert np.isfinite(info["edftu_delta_ev"])
+
+
+def test_audit_refuses_stripped_xc_source(audit_artifact):
+    """A +U export without an XC source identity is indistinguishable
+    from an H0+V^U output with the XC contribution stripped (FR-014)."""
+    for stripped in (
+        {k: v for k, v in audit_artifact.items() if k != "xc_source"},
+        {**audit_artifact, "xc_source": None},
+        {**audit_artifact, "xc_source": {"kind": "stored_total_H"}},
+        {**audit_artifact, "xc_source": {"kind": "hub_only", "digest": "0" * 64}},
+    ):
+        with pytest.raises(ProvenanceAuditError) as excinfo:
+            audit_xc_hubbard_provenance(stripped)
+        assert excinfo.value.reason == "stripped_xc_contribution"
+        assert "xc_source" in str(excinfo.value) or "XC" in str(excinfo.value)
+
+
+def test_audit_refuses_substituted_xc_digest(audit_artifact):
+    """Substituting the XC digest after export breaks the export-time
+    binding to the certificate; the audit refuses fail-closed."""
+    tampered = {
+        **audit_artifact,
+        "xc_source": {
+            "kind": "stored_total_H",
+            "digest": "ab" * 32,
+        },
+    }
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance(tampered)
+    assert excinfo.value.reason == "stripped_xc_contribution"
+    assert "substituted" in str(excinfo.value)
 
 
 def test_audit_refuses_stripped_hubbard_declaration(audit_artifact):
@@ -550,6 +633,10 @@ def test_audit_refuses_stripped_hubbard_operator(dftu, audit_artifact):
         producer_u_ry=float(dftu["data"]["u_ry"]),
         producer_j_ry=float(dftu["data"]["j_ry"]),
         producer_u_j_source=dftu["refs"]["u_j_stdout"],
+        xc_source={
+            "kind": "stored_total_H",
+            "payload": audit_artifact["xc_source"]["digest"],
+        },
     )
     with pytest.raises(ProvenanceAuditError) as excinfo:
         audit_xc_hubbard_provenance(stripped)
@@ -729,3 +816,76 @@ def test_gate_driver_refuses_tampered_contract_energies(
     )
     assert verdict["passed"] is False
     assert "contract_energy_budget_exceeded" in verdict["failure_reasons"]
+
+
+def test_gate_driver_refuses_unpinned_cross_check_ladder(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    """The gate must refuse a cross-check computed over a different
+    angle ladder: such a check can pass every budget while the verdict
+    still reports the approved AC-008 ladder.  Refusal names the pinned
+    values."""
+    shrunk = {
+        **cross_check,
+        "angle_ladder_rad": tuple(ANGLE_LADDER[:5]),
+        "rungs": cross_check["rungs"][:5],
+    }
+    with pytest.raises(HubbardBundleError) as excinfo:
+        run_ac008_gate(
+            dftu["bundle"],
+            cross_check=shrunk,
+            contract_table=contract_table,
+            ensemble=gate["ensemble"],
+            texture_provenance=texture_provenance(dftu, moments),
+            audit_artifact=audit_artifact,
+        )
+    message = str(excinfo.value)
+    for angle in AC008_ANGLE_LADDER_RAD:
+        assert f"{round(angle, 6)}" in message
+    assert "stable window" in message
+
+
+def test_gate_driver_accepts_pinned_stable_window_ladder(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    """The pinned stable window (rungs 4-6) is an approved alternative
+    to the full ladder."""
+    window_angles = tuple(ANGLE_LADDER[i] for i in AC008_STABLE_WINDOW_RUNGS)
+    window_rungs = [
+        rung for rung in cross_check["rungs"] if rung["angle_rad"] in window_angles
+    ]
+    window_table = [row for row in contract_table if row["angle_rad"] in window_angles]
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check={
+            **cross_check,
+            "angle_ladder_rad": window_angles,
+            "rungs": window_rungs,
+        },
+        contract_table=window_table,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert verdict["passed"] is True, verdict["failure_reasons"]
+
+
+def test_gate_driver_refuses_missing_dc_freeze_evidence(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    """Absent dc evidence must fail closed: a contract row without
+    'dc_change_max' proves nothing about double counting being frozen."""
+    stripped = [
+        {k: v for k, v in row.items() if k != "dc_change_max"} for row in contract_table
+    ]
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check=cross_check,
+        contract_table=stripped,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert verdict["passed"] is False
+    assert "missing_dc_freeze_evidence" in verdict["failure_reasons"]
+    assert verdict["contract_wire_in"]["double_counting_frozen"] is False

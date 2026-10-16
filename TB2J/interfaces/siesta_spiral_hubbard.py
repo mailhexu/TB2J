@@ -1582,6 +1582,22 @@ AC008_CONTRACT_ENERGY_BUDGET_EV = 1e-11
 #: sit within the budgets above; measured on the genuine reference.
 AC008_STABLE_WINDOW_RUNGS = (4, 5, 6)
 
+#: Packing fidelity budget (eV), FIXED AT STORY-016 APPROVAL.  The 4-component
+#: file packing (uu, dd, ud, -Im ud) discards the residual imaginary part of
+#: the spin-diagonal channels and stores the du channel implicitly (du =
+#: conj(ud) transposed); the certified operator is reproduced from the packed
+#: representation to within this measured bound on the genuine reference
+#: (measured worst 2.2978e-13 eV, dominated by the discarded Im uu/dd).
+AC008_PACKING_FIDELITY_BUDGET_EV = 2.3e-13
+
+#: Packing validity ceiling (eV) for the documented restriction of
+#: :func:`hubbard_site_block_components`: the packing is only defined for
+#: xz-plane / real-channel textures (real spin-diagonal channels, du =
+#: conj-swap of ud).  Textures violating that class lose O(eV) information
+#: and are refused outright; the genuine reference sits ~4 orders of
+#: magnitude below this ceiling (2.3e-13 eV, AC008_PACKING_FIDELITY_BUDGET_EV).
+HUBBARD_PACKING_RESTRICTION_BUDGET_EV = 1e-9
+
 
 class ProvenanceAuditError(DftuProvenanceError):
     """XC+Hubbard provenance audit refusal (AC-008 / FR-014), fail-closed.
@@ -1615,6 +1631,45 @@ def rotation_contract_mathdoc_sha256():
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def xc_source_payload_sha256(payload):
+    """Canonical sha256 over an XC source payload (AC-008 / FR-014).
+
+    Accepts numpy arrays, (nested) mappings, sequences, byte strings and
+    scalars; digests them in a deterministic canonical byte form so the
+    same payload always yields the same digest.  Anything else is
+    refused (fail-closed) rather than digested through ``repr``.
+    """
+    if isinstance(payload, np.ndarray):
+        arr = np.ascontiguousarray(payload)
+        return hashlib.sha256(
+            arr.dtype.str.encode("utf-8")
+            + (str(arr.shape) + "|").encode("utf-8")
+            + arr.tobytes()
+        ).hexdigest()
+    if isinstance(payload, bytes):
+        return hashlib.sha256(payload).hexdigest()
+    if isinstance(payload, str):
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    if isinstance(payload, dict):
+        h = hashlib.sha256()
+        for key in sorted(payload, key=str):
+            h.update(f"{key!r}:".encode("utf-8"))
+            h.update(xc_source_payload_sha256(payload[key]).encode("utf-8"))
+        return h.hexdigest()
+    if isinstance(payload, (list, tuple)):
+        h = hashlib.sha256()
+        for item in payload:
+            h.update(xc_source_payload_sha256(item).encode("utf-8"))
+        return h.hexdigest()
+    if isinstance(payload, (int, float, complex, bool)) or payload is None:
+        return hashlib.sha256(repr(payload).encode("utf-8")).hexdigest()
+    raise HubbardBundleError(
+        f"xc_source payload of type {type(payload).__name__} cannot be "
+        "digested canonically; pass the array/bytes/mapping that carries "
+        "the XC contribution"
+    )
+
+
 def build_xc_hubbard_audit_artifact(
     bundle,
     *,
@@ -1622,6 +1677,7 @@ def build_xc_hubbard_audit_artifact(
     producer_u_ry,
     producer_j_ry,
     producer_u_j_source,
+    xc_source,
     rotation_contract_sha256=None,
 ):
     """Assemble the serializable XC+Hubbard provenance-audit artifact.
@@ -1630,18 +1686,59 @@ def build_xc_hubbard_audit_artifact(
     certificate (arrays + provenance + conventions, sha256-digested) is
     embedded, alongside the declared vertex kind, the producer stdout
     U/J reference (the substitution anchor) and the rotation-contract
-    MathDoc sha256.  The declared ``vertex_kind`` is recorded as given:
-    declaring ``"xc"`` on a +U run is exactly the stripped-Hubbard
-    output the audit must refuse (FR-014).
+    MathDoc sha256.
+
+    ``xc_source`` pins the identity of the XC contribution inside the
+    +U total H (FR-014): a dict with
+
+    * ``kind`` -- ``"stored_total_H"`` (the XC contribution enters
+      through the stored total Hamiltonian) or ``"vertex"`` (it enters
+      through the extracted magnetic vertex), and
+    * ``payload`` -- the actual XC source content (array / bytes /
+      mapping / sequence) that is sha256-digested here at export time.
+
+    The recorded digest is bound to the certificate digest
+    (``xc_digest_binding``), so post-export substitution of the XC
+    digest alone is detected by the audit.  Declaring
+    ``vertex_kind="xc"`` on a +U run -- or exporting without an
+    XC source identity at all -- is exactly the stripped-XC output
+    the audit must refuse (FR-014/FR-005).
     """
     sha = rotation_contract_sha256
     if sha is None:
         sha = rotation_contract_mathdoc_sha256()
+    if not isinstance(xc_source, dict):
+        raise HubbardBundleError(
+            "build_xc_hubbard_audit_artifact requires xc_source with "
+            "{'kind': 'stored_total_H'|'vertex', 'payload': <xc content>}; "
+            "a +U export without an XC source identity cannot be audited "
+            "against stripping (FR-014)"
+        )
+    xc_kind = str(xc_source.get("kind", ""))
+    if xc_kind not in ("stored_total_H", "vertex"):
+        raise HubbardBundleError(
+            f"xc_source kind {xc_kind!r} is not one of 'stored_total_H' "
+            "or 'vertex'; identify where the XC contribution enters the "
+            "+U total H (FR-014)"
+        )
+    xc_payload = xc_source.get("payload")
+    if xc_payload is None:
+        raise HubbardBundleError(
+            "xc_source carries no payload; the XC content must be "
+            "presented at export so it can be digested (FR-014)"
+        )
+    xc_digest = xc_source_payload_sha256(xc_payload)
+    certificate = bundle.to_certificate()
+    binding = hashlib.sha256(
+        (certificate["payload_sha256"] + xc_digest).encode("utf-8")
+    ).hexdigest()
     return {
         "kind": "xc_hubbard_provenance_audit",
-        "version": "1.0",
+        "version": "1.1",
         "vertex_kind": str(vertex_kind),
-        "certificate": bundle.to_certificate(),
+        "xc_source": {"kind": xc_kind, "digest": xc_digest},
+        "xc_digest_binding": binding,
+        "certificate": certificate,
         "producer_u_ry": float(producer_u_ry),
         "producer_j_ry": float(producer_j_ry),
         "producer_u_j_source": str(producer_u_j_source),
@@ -1661,6 +1758,8 @@ def audit_xc_hubbard_provenance(artifact):
 
     * ``malformed_audit_artifact`` -- not an audit envelope/certificate;
     * ``tampered_certificate_payload`` -- certificate digest mismatch;
+    * ``stripped_xc_contribution`` -- missing/malformed XC source
+      identity or digest, or a digest breaking its export-time binding;
     * ``stripped_hubbard_contribution`` -- vertex kind xc(-only) or
       vanishing Hubbard operator where +U is declared;
     * ``substituted_u_j`` -- U/J differing from the producer reference;
@@ -1721,6 +1820,44 @@ def audit_xc_hubbard_provenance(artifact):
             "re-export the +U artifact from the producer run",
         )
     prov = checked.prov
+
+    # (0) stripped XC contribution: the XC source identity + content
+    # digest must be present, well-formed and bound to this certificate.
+    xc_source = artifact.get("xc_source")
+    if (
+        not isinstance(xc_source, dict)
+        or xc_source.get("kind") not in ("stored_total_H", "vertex")
+        or not xc_source.get("digest")
+    ):
+        refuse(
+            "stripped_xc_contribution",
+            "audit artifact carries no XC source identity/content digest "
+            "(xc_source with kind 'stored_total_H'|'vertex' and a sha256 "
+            "digest); a +U export without a digested XC contribution is "
+            "indistinguishable from an H0+V^U output with the XC vertex "
+            "stripped -- re-export with build_xc_hubbard_audit_artifact "
+            "(FR-014)",
+        )
+    xc_digest = str(xc_source["digest"])
+    if len(xc_digest) != 64 or any(c not in "0123456789abcdef" for c in xc_digest):
+        refuse(
+            "stripped_xc_contribution",
+            f"xc_source digest {xc_digest!r} is not a sha256 hex digest; "
+            "re-export the +U artifact so the XC payload is digested at "
+            "export time (FR-014)",
+        )
+    expected_binding = hashlib.sha256(
+        (certificate["payload_sha256"] + xc_digest).encode("utf-8")
+    ).hexdigest()
+    if artifact.get("xc_digest_binding") != expected_binding:
+        refuse(
+            "stripped_xc_contribution",
+            "xc_source digest does not match the binding recorded at "
+            "export against this certificate (payload sha "
+            f"{certificate['payload_sha256'][:12]}...); the XC "
+            "contribution was substituted or re-digested after export -- "
+            "re-export from the producer run",
+        )
 
     # (1) stripped Hubbard contribution: the +U run must keep BOTH the
     # XC channel and the Hubbard operator (vertex kind xc+hubbard).
@@ -1825,6 +1962,8 @@ def audit_xc_hubbard_provenance(artifact):
         "vertex_kind": vertex_kind,
         "checks": {
             "certificate_digest": "verified",
+            "xc_source_kind": xc_source["kind"],
+            "xc_source_digest": xc_digest,
             "vertex_kind_xc_plus_hubbard": True,
             "hubbard_operator_scale_ry": w_scale,
             "u_ry_matches_producer": True,
@@ -1853,11 +1992,31 @@ def hubbard_site_block_components(v_hubbard_site, *, energy_scale=RY_TO_EV):
     of the certified +U operator are real to machine precision on the
     declared reference (xz-plane texture keeps the occupation channels
     real); the residual imaginary part is bounded by the gate's packing
-    fidelity check.
+    fidelity check (``AC008_PACKING_FIDELITY_BUDGET_EV``, measured
+    2.2978e-13 eV on the genuine reference).
+
+    Documented restriction: the packing is only defined for xz-plane /
+    real-channel textures.  Textures whose spin-diagonal channels carry
+    an imaginary part, or whose du channel is not the conj-swap of ud
+    (``du = conj(ud).T``), would lose O(eV) information through this
+    packing and are refused outright (fail-closed) rather than silently
+    truncated.
     """
     w = np.asarray(v_hubbard_site, dtype=complex) * energy_scale
     if w.shape != (4, 5, 5):
         raise HubbardBundleError(f"v_hubbard_site must be (4, 5, 5), got {w.shape}")
+    ceiling = HUBBARD_PACKING_RESTRICTION_BUDGET_EV
+    im_diag = max(float(np.max(np.abs(w[0].imag))), float(np.max(np.abs(w[1].imag))))
+    du_swap_residual = float(np.max(np.abs(w[3] - np.conj(w[2].T))))
+    if im_diag > ceiling or du_swap_residual > ceiling:
+        raise HubbardBundleError(
+            "Hubbard site operator violates the 4-component packing "
+            f"restriction: spin-diagonal |Im| = {im_diag:.3e} eV, "
+            f"|du - conj(ud).T| = {du_swap_residual:.3e} eV exceed the "
+            f"{ceiling:.1e} eV ceiling; the (uu, dd, ud, -Im ud) packing "
+            "is only valid for xz-plane / real-channel textures -- store "
+            "the full complex operator instead of packing it"
+        )
     return {
         (p, q): (
             float(w[0, p, q].real),
@@ -1868,6 +2027,24 @@ def hubbard_site_block_components(v_hubbard_site, *, energy_scale=RY_TO_EV):
         for p in range(5)
         for q in range(5)
     }
+
+
+def hubbard_site_block_unpack(components, *, energy_scale=RY_TO_EV):
+    """Inverse of :func:`hubbard_site_block_components` for the declared
+    texture class: rebuild the (4, 5, 5) complex site operator (in
+    ``energy_scale`` units, default eV) from the packed components,
+    restoring ud = h3 - i*h4 and the implicit du channel du =
+    conj(ud).T.  Valid only where the packing restriction holds; the
+    residual against the certified operator is the packing-fidelity
+    budget (``AC008_PACKING_FIDELITY_BUDGET_EV``).
+    """
+    w = np.zeros((4, 5, 5), dtype=complex)
+    for (p, q), (h1, h2, h3, h4) in components.items():
+        w[0, p, q] = h1
+        w[1, p, q] = h2
+        w[2, p, q] = complex(h3, -h4)
+    w[3] = np.conj(w[2]).T
+    return w / energy_scale
 
 
 def rotated_hubbard_site_components(
@@ -1967,6 +2144,26 @@ def run_ac008_gate(
     )
 
     ladder = tuple(cross_check.get("angle_ladder_rad", ()))
+    # Pinned-ladder cross-check: the gate may only report the approved
+    # AC-008 ladder (or exactly the pinned stable window).  A cross-check
+    # computed over a different angle ladder could pass every budget
+    # while the verdict still claims the approved rungs -- refuse here,
+    # naming the pinned values.
+    pinned_window_ladder = tuple(
+        AC008_ANGLE_LADDER_RAD[i] for i in AC008_STABLE_WINDOW_RUNGS
+    )
+    supplied_ladder = tuple(float(a) for a in ladder)
+    if supplied_ladder not in (AC008_ANGLE_LADDER_RAD, pinned_window_ladder):
+        raise HubbardBundleError(
+            "cross_check angle ladder "
+            f"{[round(a, 6) for a in supplied_ladder]} does not match the "
+            "pinned AC-008 ladder; the gate may only run over the "
+            f"approved ladder {[round(a, 6) for a in AC008_ANGLE_LADDER_RAD]} "
+            "or exactly its pinned stable window "
+            f"{[round(a, 6) for a in pinned_window_ladder]} (rungs "
+            f"{AC008_STABLE_WINDOW_RUNGS}); re-run the story-010 "
+            "cross-check on the pinned ladder"
+        )
     table_angles = sorted({float(row["angle_rad"]) for row in contract_table})
     reasons = []
     if not audit_verdict.get("passed"):
@@ -1992,13 +2189,19 @@ def run_ac008_gate(
         (float(row["hubbard_covariance_relative"]) for row in contract_table),
         default=0.0,
     )
-    dc_moved = any(
-        float(row.get("dc_change_max", 0.0)) != 0.0 for row in contract_table
+    # fail-closed: absent dc evidence is a refusal, not a pass.  A row
+    # without 'dc_change_max' proves nothing about double counting being
+    # frozen; only an explicit zero passes.
+    missing_dc_evidence = any("dc_change_max" not in row for row in contract_table)
+    dc_moved = not missing_dc_evidence and any(
+        float(row["dc_change_max"]) != 0.0 for row in contract_table
     )
     if worst_contract > contract_budget:
         reasons.append("contract_energy_budget_exceeded")
     if worst_covariance > HUBBARD_ROTATION_TOLERANCE:
         reasons.append("hubbard_covariance_budget_exceeded")
+    if missing_dc_evidence:
+        reasons.append("missing_dc_freeze_evidence")
     if dc_moved:
         reasons.append("double_counting_not_frozen")
     if not contract_table:
@@ -2046,7 +2249,7 @@ def run_ac008_gate(
             "rows": list(contract_table),
             "worst_abs_delta_ev": worst_contract,
             "worst_hubbard_covariance_relative": worst_covariance,
-            "double_counting_frozen": not dc_moved,
+            "double_counting_frozen": not dc_moved and not missing_dc_evidence,
         },
         "provenance_verdicts": {
             "audit": audit_verdict,
