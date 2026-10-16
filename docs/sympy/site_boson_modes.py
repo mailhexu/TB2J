@@ -180,6 +180,26 @@ def main():
     full = (lam_sym * sp.eye(3) - KL).det()
     minor = (lam_sym * sp.eye(2) - K_rr * sp.diag(l1, l2)).det()
     assert sp.expand(full - lam_sym * minor) == 0
+
+    # The cross-check recounts the block zeros through the Hermitian
+    # congruence form: eig(K_rr Lambda_r) = eig(Lambda_r^{1/2} K_rr
+    # Lambda_r^{1/2}) (AB/BA similarity), so both counts agree exactly and
+    # no exponentiating power is needed.
+    a11, a12, a22, l1c, l2c = sp.symbols("a11 a12 a22 l1 l2", positive=True)
+    K2 = sp.Matrix([[a11, a12], [a12, a22]])
+    block = K2 * sp.diag(l1c, l2c)
+    herm = sp.Matrix(
+        [
+            [l1c * a11, sp.sqrt(l1c) * a12 * sp.sqrt(l2c)],
+            [sp.sqrt(l2c) * a12 * sp.sqrt(l1c), l2c * a22],
+        ]
+    )
+    assert (
+        sp.expand(
+            (lam_sym * sp.eye(2) - block).det() - (lam_sym * sp.eye(2) - herm).det()
+        )
+        == 0
+    )
     print(
         "lower-Cholesky reconstruction, paraunitarity, FM/AFM/anomalous models, "
         "spin factors, reciprocal partners, and zero-mode limits: OK"

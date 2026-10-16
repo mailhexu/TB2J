@@ -103,9 +103,12 @@ Hessian eigenbasis: $U^\dagger gH\,U = K\operatorname{diag}(\lambda)$ has
 one zero column per null eigenvalue, so it equals
 $\dim\ker H$ plus the zero count of the range block $K_{rr}\Lambda_r$ —
 a separation that scales linearly with the gaps, not with their $2N$-th
-powers. It is cross-checked against the rank of the nondimensionalized
-power $(gH/\|H\|)^{2N}$; a mismatch refuses the zeroing. A branch whose
-energy is nonzero keeps
+powers. The block is similar to the Hermitian congruence form
+$\Lambda_r^{1/2}K_{rr}\Lambda_r^{1/2}$, so its zero count is recomputed
+through that form with the Hermitian solver, and the nullity is rechecked
+through the Hessian SVD rank; any mismatch refuses the zeroing. No
+exponentiating power is taken, so resolved gaps cannot underflow. A branch
+whose energy is nonzero keeps
 its unshifted value. References whose Hessian minimum lies below
 $-n\,\varepsilon_{\mathrm{mach}}\,\|H\|$ (a scale-aware numeric-zero
 tolerance, reported per point as `stability_tol`) are rejected as unstable;

@@ -292,9 +292,12 @@ class Magnon:
         computed in the Hessian eigenbasis, where ``K diag(lambda)`` has one
         zero column per null eigenvalue, so the multiplicity is
         ``nullity(H)`` plus the zero count of the range block ``K_rr
-        Lambda_r``; that separation scales linearly with the gaps. It is
-        cross-checked against the rank of the nondimensionalized power
-        ``(gH / scale)^dim``: mismatch refuses the zeroing. Returns
+        Lambda_r``; that separation scales linearly with the gaps. The block
+        is similar to the Hermitian congruence form ``Lambda_r^{1/2} K_rr
+        Lambda_r^{1/2}``, so the zero count is recomputed through that form
+        with the Hermitian solver, and the nullity is rechecked through the
+        Hessian SVD rank: any mismatch refuses the zeroing. No exponentiating
+        power is taken, so resolved gaps cannot underflow. Returns
         ``(n_zero_modes, worst_candidate_residual)``.
         """
         eps = np.finfo(float).eps
@@ -325,32 +328,37 @@ class Magnon:
         dim = H.shape[0]
         n = dim // 2
         g = np.diag(np.r_[np.ones(n), -np.ones(n)])
-        dynamical = g @ H
         scale = float(np.max(np.abs(np.linalg.eigvalsh(H))))
         rank_tol = eps * dim * scale
         lam, U = np.linalg.eigh(H)
         K = U.conj().T @ g @ U
         k_scale = max(1.0, float(np.max(np.abs(K))))
         null_mask = lam <= rank_tol
-        algebraic_zero = int(np.count_nonzero(null_mask))
-        if algebraic_zero < dim:
+        nullity = int(np.count_nonzero(null_mask))
+        # Nullity cross-check through the Hessian SVD rank (linear scale).
+        if nullity != dim - np.linalg.matrix_rank(H, tol=rank_tol):
+            return 0, residual
+        algebraic_zero = nullity
+        if nullity < dim:
             lam_r = lam[~null_mask]
             K_rr = K[np.ix_(~null_mask, ~null_mask)]
             block = K_rr * lam_r[None, :]
             block_tol = eps * dim * scale * k_scale
-            block_eigenvalues = np.linalg.eigvals(block)
             algebraic_zero += int(
-                np.count_nonzero(np.abs(block_eigenvalues) <= block_tol)
+                np.count_nonzero(np.abs(np.linalg.eigvals(block)) <= block_tol)
             )
-        # Cross-check: rank the nondimensionalized power. Its nonzero
-        # singular values are the gapped branches; zero Jordan chains vanish.
-        if scale > 0.0:
-            power = np.linalg.matrix_power(dynamical / scale, dim)
-            power_rank = np.linalg.matrix_rank(power, tol=eps * dim)
-            if algebraic_zero != dim - power_rank:
+            # Gap-preserving cross-check: eig(K_rr Lambda_r) equals
+            # eig(Lambda_r^{1/2} K_rr Lambda_r^{1/2}) (Hermitian, so its
+            # algebraic zeros are geometric and eigvalsh is backward stable).
+            lam_r_sqrt = np.sqrt(lam_r)
+            herm = lam_r_sqrt[:, None] * K_rr * lam_r_sqrt[None, :]
+            herm_tol = eps * dim * float(lam_r.max()) * k_scale
+            herm_zeros = int(
+                np.count_nonzero(np.abs(np.linalg.eigvalsh(herm)) <= herm_tol)
+            )
+            if algebraic_zero != nullity + herm_zeros:
                 return 0, residual
         span = np.linalg.matrix_rank(np.column_stack(candidates), tol=rank_tol)
-        nullity = int(np.count_nonzero(null_mask))
         if span != nullity or algebraic_zero < nullity or algebraic_zero % 2:
             return 0, residual
         return algebraic_zero // 2, residual
