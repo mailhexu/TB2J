@@ -1,0 +1,731 @@
+"""Story-016 tests: the AC-008 gate on the genuine +U reference.
+
+TEST-001 runs the story-010 matched frozen-rotation machinery
+(``validate_finite_rotations``) on a frozen problem whose rotating
+operator is the certified +U Hubbard vertex of the fe4 producer state,
+and binds the story-015 rotation contract to the SAME frozen problem at
+the energy level (contract-rotated operator vs SU(2) conjugation, no
+new SCF).  TEST-002 audits the XC+Hubbard provenance of the +U artifact
+and refuses stripped/substituted outputs with distinct actionable
+diagnostics (FR-014).  IMPL-001 assembles the verdict report through
+``run_ac008_gate``.
+
+Frozen problem (declared per ADR-005): the Gamma-point pencil of the
+correlated Hubbard subspace -- per-site Hubbard operators W_s (eV) in
+the pinned 4-component spin packing, frozen genuine projector-overlap
+channel S, and no other rotating contribution.  The Hubbard operator is
+strictly onsite (ADR-007 local self-energy), so the frozen channel that
+makes the spectrum respond is the intersite overlap; this declaration
+is recorded in the verdict.  Local frames follow the DM.InitSpin 90
+deg/atom texture (moments +z, +x, -z, -x), so all four sites carry
+inequivalent orientations.
+
+Tolerances are FIXED AT STORY-016 APPROVAL (2026-10-16) and mirrored in
+the story record budgets; see AC008_* constants in
+TB2J/interfaces/siesta_spiral_hubbard.py.
+
+Fixtures mirror test_siesta_spiral_hubbard_rotation.py: the producer
+npz plus the committed ground-truth occupation dump; tests skip cleanly
+when the npz is absent (seeding ``TB2J_test_data`` is a user action).
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+from scipy.linalg import eigh
+
+from TB2J.interfaces.siesta_spiral import BUNDLE_VERSION, SpiralBundle, SpiralImporter
+from TB2J.interfaces.siesta_spiral_hubbard import (
+    AC008_ANGLE_LADDER_RAD,
+    AC008_CONTRACT_ENERGY_BUDGET_EV,
+    AC008_CURVATURE_BUDGET_EV_PER_RAD2,
+    AC008_STABLE_WINDOW_RUNGS,
+    AC008_TORQUE_BUDGET_EV_PER_RAD,
+    RY_TO_EV,
+    DftuProvenance,
+    HubbardBundle,
+    ProvenanceAuditError,
+    assemble_hubbard_operator,
+    audit_xc_hubbard_provenance,
+    build_xc_hubbard_audit_artifact,
+    edftu_oracle,
+    rotated_hubbard_site_components,
+    run_ac008_gate,
+)
+from TB2J.interfaces.siesta_spiral_response import (
+    CURVATURE_BUDGET_EV_PER_RAD2,
+    ENSEMBLE_GAPPED_T0,
+    RESPONSE_IDENTITY_TOL_EV,
+    TORQUE_BUDGET_EV_PER_RAD,
+    EnergyContour,
+    Ensemble,
+    FrozenResponseProblem,
+    evaluate_response_set,
+    occupied_band_energy,
+)
+from TB2J.interfaces.siesta_spiral_validation import validate_finite_rotations
+from TB2J.interfaces.siesta_spiral_vertex import (
+    OPERATOR_MODE_ONSITE_DELTA,
+    extract_magnetic_vertex,
+)
+
+DATA = Path(__file__).parent / "data"
+NPZ = DATA / "fe4_dftu_story014.npz"
+GT_OCC = DATA / "fe4_occ.dftu_occ"
+
+NORBD = 5  # correlated d shell per site
+NSITES = 4
+NORB = NSITES * NORBD
+NOCC = 20  # half of the 40 correlated spinor states; open 0.788 eV gap
+SITE_LABELS = tuple(f"Fe{i + 1}" for i in range(NSITES))
+ORBITALS_BY_SITE = {
+    label: [s * NORBD + p for p in range(NORBD)] for s, label in enumerate(SITE_LABELS)
+}
+
+# Angles and budgets FIXED AT STORY-016 APPROVAL (mirrored in the module
+# constants and the story-016 budgets block; measured worst values are
+# recorded in the story body).
+ANGLE_LADDER = AC008_ANGLE_LADDER_RAD
+STABLE_WINDOW_ANGLES = tuple(ANGLE_LADDER[i] for i in AC008_STABLE_WINDOW_RUNGS)
+
+
+def parse_gt_occ(path):
+    """fe4_occ.dftu_occ: header 'nua nproj nspin', rows
+    'site spin m m' re im' (1-based site/spin)."""
+    lines = path.read_text().split("\n")
+    nua, _nproj, nspin = map(int, lines[0].split())
+    gt = np.zeros((nua, nspin, NORBD, NORBD), dtype=complex)
+    for line in lines[1:]:
+        p = line.split()
+        if len(p) == 6:
+            s, sig, m, mp = (int(v) for v in p[:4])
+            gt[s - 1, sig - 1, m - 1, mp - 1] = complex(float(p[4]), float(p[5]))
+    return gt
+
+
+def _unit(vector):
+    vector = np.asarray(vector, dtype=float)
+    return vector / np.linalg.norm(vector)
+
+
+def _transverse_frame(normal):
+    """Right-handed {x, y} frame transverse to ``normal``."""
+    normal = _unit(normal)
+    seed = (1.0, 0.0, 0.0) if abs(normal[0]) < 0.9 else (0.0, 1.0, 0.0)
+    x = _unit(np.cross(seed, normal))
+    return {"x": tuple(x), "y": tuple(np.cross(normal, x))}
+
+
+@pytest.fixture(scope="module")
+def dftu():
+    """Genuine +U state: GT occupations, certified assembler, provenance."""
+    if not NPZ.exists():
+        pytest.skip("fe4_dftu_story014.npz not seeded (user action)")
+    data = np.load(NPZ)
+    occ = parse_gt_occ(GT_OCC)
+    u_ry, j_ry = float(data["u_ry"]), float(data["j_ry"])
+    refs = json.loads(str(data["refs_json"]))
+    prov = DftuProvenance(
+        u_ev=float(data["u_ev"]),
+        j_ev=float(data["j_ev"]),
+        u_ry=u_ry,
+        j_ry=j_ry,
+        projector_rc_bohr=float(data["proj_rc"]),
+        projector_npts=int(data["proj_npts"]),
+        slater_f0_ry=u_ry,
+        slater_f2_ry=14.0 * j_ry / 1.625,
+        slater_f4_ry=0.625 * 14.0 * j_ry / 1.625,
+        source_refs=refs,
+        correlated_species="Fe",
+        principal_n=3,
+        site_indices=tuple(range(NSITES)),
+        projector_identity=(
+            f"Fe_nc.dftu_proj:rc={float(data['proj_rc']):.6f},"
+            f"npts={int(data['proj_npts'])}"
+        ),
+    )
+    v_hubbard, v_dc, conventions = assemble_hubbard_operator(occ, prov)
+    bundle = HubbardBundle(
+        prov=prov,
+        occupations=occ,
+        v_hubbard=v_hubbard,
+        v_dc=v_dc,
+        edftu_ev=edftu_oracle(occ, v_hubbard, v_dc, prov=prov),
+        edftu_reference_ev=float(data["edftu_ref_ev"]),
+        conventions=conventions,
+    )
+    return {
+        "data": data,
+        "refs": refs,
+        "occ": occ,
+        "prov": prov,
+        "v_hubbard": v_hubbard,
+        "v_dc": v_dc,
+        "bundle": bundle,
+    }
+
+
+@pytest.fixture(scope="module")
+def moments(dftu):
+    """GT moment directions per site (MathDoc moment_vector convention)."""
+    occ = dftu["occ"]
+    out = []
+    for s in range(NSITES):
+        t_ud = np.trace(occ[s, 2])
+        t_du = np.trace(occ[s, 3])
+        vector = np.array(
+            [
+                np.real(t_ud + t_du),
+                np.real(1j * (t_ud - t_du)),
+                np.real(np.trace(occ[s, 0]) - np.trace(occ[s, 1])),
+            ]
+        )
+        out.append(_unit(vector))
+    return tuple(out)
+
+
+def gamma_hubbard_bundle(v_hubbard, S20):
+    """Gamma-point frozen problem of the correlated subspace.
+
+    Sparse H: per-site Hubbard operators (bundle file packing, eV);
+    intersite H blocks are exactly zero (the +U operator is strictly
+    onsite).  Overlap: the genuine Gamma-folded projector overlap.
+    """
+    sparse, overlap = {}, {}
+    for mu in range(NORB):
+        for nu in range(NORB):
+            sval = float(S20[mu, nu])
+            if mu // NORBD == nu // NORBD:
+                site = mu // NORBD
+                p, q = mu % NORBD, nu % NORBD
+                w = v_hubbard[site] * RY_TO_EV
+                comps = (
+                    float(w[0, p, q].real),
+                    float(w[1, p, q].real),
+                    float(w[2, p, q].real),
+                    float(-w[2, p, q].imag),
+                )
+            else:
+                if abs(sval) < 1e-12:
+                    continue
+                comps = (0.0, 0.0, 0.0, 0.0)
+            sparse[(mu, nu, 0)] = comps
+            overlap[(mu, nu, 0)] = sval
+    return SpiralBundle(
+        version=BUNDLE_VERSION,
+        norb=NORB,
+        ncell=1,
+        q=(0.0,),
+        spin_packing="H4=-ImH12",
+        phase_convention="q_half_per_spin_sector",
+        hermitization="none_hamiltonian_path",
+        fermi_shift="none",
+        pitch_sign="qphs_up_exp_minus",
+        sparse=sparse,
+        overlap=overlap,
+        metadata={
+            "origin": "story-016 AC-008 gate",
+            "frozen_problem": (
+                "Gamma-point correlated-subspace pencil: Hubbard operators "
+                "rotate (story-015 contract), genuine projector overlap and "
+                "zero intersite Hubbard blocks stay frozen"
+            ),
+        },
+    )
+
+
+@pytest.fixture(scope="module")
+def gate(dftu, moments):
+    """Bundle, declared ensemble, analytic response (story-009 machinery)."""
+    data = dftu["data"]
+    no_l = 4 * 9  # 9 orbitals per atom in the producer cell
+    S36 = np.zeros((no_l, no_l))
+    np.add.at(S36, (data["s_rows"], data["s_cols"] % no_l), data["s_vals"])
+    didx = [a * 9 + 1 + p for a in range(NSITES) for p in range(NORBD)]
+    block = S36[np.ix_(didx, didx)]
+    fold_asymmetry = float(np.max(np.abs(block - block.T)))
+    S20 = 0.5 * (block + block.T)
+
+    bundle = gamma_hubbard_bundle(dftu["v_hubbard"], S20)
+    bundle.validate()
+    vertex = extract_magnetic_vertex(
+        bundle, orbitals_by_site=ORBITALS_BY_SITE, operator=OPERATOR_MODE_ONSITE_DELTA
+    )
+    axes_by_site = {
+        label: _transverse_frame(m) for label, m in zip(SITE_LABELS, moments)
+    }
+    problem = FrozenResponseProblem(
+        bundle,
+        vertex,
+        axes_by_site={s: tuple(f.items()) for s, f in axes_by_site.items()},
+    )
+    values = eigh(*problem.pencil(0.0), eigvals_only=True)
+    gap = float(values[NOCC] - values[NOCC - 1])
+    fermi = float(0.5 * (values[NOCC] + values[NOCC - 1]))
+    ensemble = Ensemble(ENSEMBLE_GAPPED_T0, NOCC, float(NOCC), fermi, 0.0, gap)
+    contour = EnergyContour.declared(
+        z0=fermi,
+        occupied_min=float(values[0]),
+        gap_ev=gap,
+        margin_ev=0.3,
+        n_nodes=512,
+    )
+    coords = tuple((s, a) for s in problem.site_order for a in ("x", "y"))
+    response = evaluate_response_set(
+        problem,
+        ensemble=ensemble,
+        coords=coords,
+        kpoints=[0.0],
+        k_weights=[1.0],
+        contour=contour,
+        finite_steps=(),
+    )
+    return {
+        "bundle": bundle,
+        "problem": problem,
+        "ensemble": ensemble,
+        "response": response,
+        "axes_by_site": axes_by_site,
+        "reference_directions_by_site": {
+            label: tuple(float(v) for v in m) for label, m in zip(SITE_LABELS, moments)
+        },
+        "gap_ev": gap,
+        "fermi_ev": fermi,
+        "fold_asymmetry": fold_asymmetry,
+        "occupied_energy_ev": occupied_band_energy(*problem.pencil(0.0), NOCC),
+    }
+
+
+@pytest.fixture(scope="module")
+def cross_check(gate):
+    """Story-010 matched frozen-rotation summary on the +U frozen problem."""
+    result = validate_finite_rotations(
+        gate["problem"],
+        gate["response"],
+        axes_by_site=gate["axes_by_site"],
+        reference_directions_by_site=gate["reference_directions_by_site"],
+        ensemble=gate["ensemble"],
+        kpoints=[0.0],
+        k_weights=[1.0],
+        angle_ladder=ANGLE_LADDER,
+    )
+    return result.finite_rotation_cross_check
+
+
+@pytest.fixture(scope="module")
+def contract_table(dftu, gate):
+    """Story-015 contract vs SU(2) conjugation on the SAME frozen problem.
+
+    For every coordinate and every ladder angle the rotated pencil is
+    built twice through the certified importer: once from the
+    contract-rotated operator (rotate_hubbard_site_operator: occupation
+    co-rotation, W reassembly, dc frozen), once by the plain per-site
+    conjugation the story-009/010 machinery differentiates.
+    """
+    problem = gate["problem"]
+    occ, prov = dftu["occ"], dftu["prov"]
+    sparse = gate["bundle"].sparse
+    rows = []
+    for site, label_site in enumerate(SITE_LABELS):
+        for axis_label, axis in gate["axes_by_site"][label_site].items():
+            for angle in ANGLE_LADDER:
+                comps, report = rotated_hubbard_site_components(
+                    occ, prov, site, axis=axis, angle=angle
+                )
+                site_keys = {
+                    (mu, nu, 0): comps[(mu % NORBD, nu % NORBD)]
+                    for mu, nu, _r in sparse
+                    if mu // NORBD == site == nu // NORBD
+                }
+                contract_bundle = SpiralBundle(
+                    version=BUNDLE_VERSION,
+                    norb=NORB,
+                    ncell=1,
+                    q=(0.0,),
+                    spin_packing="H4=-ImH12",
+                    phase_convention="q_half_per_spin_sector",
+                    hermitization="none_hamiltonian_path",
+                    fermi_shift="none",
+                    pitch_sign="qphs_up_exp_minus",
+                    sparse={**sparse, **site_keys},
+                    overlap=gate["bundle"].overlap,
+                )
+                h_contract, s = SpiralImporter().assemble_pencil(contract_bundle, 0.0)
+                h_conj, s_conj = problem.rotated_pencil(
+                    0.0, {label_site: {axis_label: angle}}
+                )
+                assert np.array_equal(s, s_conj)
+                e_contract = occupied_band_energy(h_contract, s, NOCC)
+                e_conj = occupied_band_energy(h_conj, s, NOCC)
+                rows.append(
+                    {
+                        "site": label_site,
+                        "axis": axis_label,
+                        "angle_rad": float(angle),
+                        "energy_conjugation_ev": e_conj,
+                        "energy_contract_ev": e_contract,
+                        "abs_delta_ev": abs(e_contract - e_conj),
+                        "hubbard_covariance_relative": report[
+                            "hubbard_covariance_relative"
+                        ],
+                        "dc_change_max": report["dc_change_max"],
+                        "would_be_dc_drift_ry": report["would_be_dc_drift_ry"],
+                    }
+                )
+    return rows
+
+
+@pytest.fixture(scope="module")
+def audit_artifact(dftu):
+    return build_xc_hubbard_audit_artifact(
+        dftu["bundle"],
+        vertex_kind="xc+hubbard",
+        producer_u_ry=float(dftu["data"]["u_ry"]),
+        producer_j_ry=float(dftu["data"]["j_ry"]),
+        producer_u_j_source=dftu["refs"]["u_j_stdout"],
+    )
+
+
+def texture_provenance(dftu, moments):
+    """Producer texture state recorded verbatim (fixture-recorded)."""
+    data = dftu["data"]
+    return {
+        "producer_run_id": (
+            "fe4_so_dftu (stdout fe4_so_dftu.stdout; fixture "
+            "tests/data/fe4_dftu_story014.npz)"
+        ),
+        "convergence": (
+            "converged +U SO-texture reference; fixture-recorded Edftu "
+            f"reference {float(data['edftu_ref_ev'])} eV"
+        ),
+        "edftu_reference_ev": float(data["edftu_ref_ev"]),
+        "edftu_oracle_ev": float(dftu["bundle"].edftu_ev),
+        "texture_description": (
+            "DM.InitSpin 90 deg/atom texture on the 4-atom Fe chain "
+            "(commensurate q=1/4 pitch, 3.644 bohr spacing); moments "
+            "+z, +x, -z, -x by site order; the texture is set and held "
+            "by DM.InitSpin on the pinned build (story-004), q-control "
+            "of the texture is not validated"
+        ),
+        "declared_vertex_kind": "xc+hubbard",
+        "u_ev": float(data["u_ev"]),
+        "j_ev": float(data["j_ev"]),
+        "pitch": "commensurate q=1/4 (pi/2 per site), InitSpin-defined",
+        "moments_unit": [[float(v) for v in m] for m in moments],
+    }
+
+
+# ---------------------------------------------------------------------------
+# TEST-001: matched frozen-rotation agreement on the +U reference
+# ---------------------------------------------------------------------------
+
+
+def test_matched_frozen_rotation_agreement(gate, cross_check):
+    """Analytic local response vs finite rotations of the SAME frozen
+    problem, over the approved angle ladder (story-010 machinery)."""
+    assert cross_check["passed"] is True, cross_check["failure_reasons"]
+    assert cross_check["stable_error_regime"] == {"gradient": True, "curvature": True}
+    windows = cross_check["common_stable_windows"]
+    assert len(windows) == 1, "unexpected extra stable windows"
+    assert windows[0]["angles_rad"] == list(STABLE_WINDOW_ANGLES)
+
+    # Tolerances FIXED AT STORY-016 APPROVAL: torque/curvature budgets
+    # inherit the story-009/010 approved values; every ladder rung records
+    # the mismatch, the roundoff floor and the minimum rotated gap.
+    assert cross_check["budgets"]["torque_ev_per_rad"] == TORQUE_BUDGET_EV_PER_RAD
+    assert (
+        cross_check["budgets"]["curvature_ev_per_rad2"] == CURVATURE_BUDGET_EV_PER_RAD2
+    )
+    rungs = cross_check["rungs"]
+    assert [rung["angle_rad"] for rung in rungs] == list(ANGLE_LADDER)
+    for rung in rungs:
+        assert rung["gradient_max_abs_mismatch"] <= TORQUE_BUDGET_EV_PER_RAD
+        assert rung["minimum_rotated_gap_ev"] > 0.0
+        assert np.isfinite(rung["curvature_roundoff_floor"])
+    for index in AC008_STABLE_WINDOW_RUNGS:
+        assert (
+            rungs[index]["curvature_max_abs_mismatch"] <= CURVATURE_BUDGET_EV_PER_RAD2
+        )
+        assert rungs[index]["curvature_roundoff_floor"] <= CURVATURE_BUDGET_EV_PER_RAD2
+
+    # Stable error regime consistent with the story-010 pattern: the
+    # truncation-dominated errors decay as theta**2 across the halving
+    # rungs (theta halves -> error ~ quarter) before the roundoff plateau.
+    for field in ("gradient_max_abs_mismatch", "curvature_max_abs_mismatch"):
+        for coarse, fine in zip(rungs, rungs[1:]):
+            if np.isclose(2.0 * fine["angle_rad"], coarse["angle_rad"]):
+                assert 2.5 * fine[field] <= coarse[field] <= 5.5 * fine[field], (
+                    field,
+                    coarse["angle_rad"],
+                    coarse[field],
+                    fine[field],
+                )
+
+    # Nonzero reference torque preserved and reported verbatim (FR-008);
+    # rotation probes changed the operator (story-006 legitimacy).
+    reference_torque = cross_check["reference_torque"]
+    assert len(reference_torque) == 2 * len(SITE_LABELS)
+    assert max(abs(v) for v in reference_torque.values()) > 0.0
+    assert cross_check["torque_state"] == gate["response"].torque_state
+    assert all(v > 1e-12 for v in cross_check["physical_rotation_change_norm"].values())
+
+
+def test_contract_rotation_matches_conjugation_energy(dftu, gate, contract_table):
+    """The story-015 contract reproduces the conjugated frozen problem at
+    the ENERGY level over the whole ladder (no new SCF anywhere)."""
+    assert len(contract_table) == len(SITE_LABELS) * 2 * len(ANGLE_LADDER)
+    worst_delta = max(row["abs_delta_ev"] for row in contract_table)
+    worst_covariance = max(row["hubbard_covariance_relative"] for row in contract_table)
+    # FIXED AT STORY-016 APPROVAL: contract-vs-conjugation energy budget
+    # 1e-11 eV (measured 1.7e-13), covariance at the story-015 tolerance.
+    assert worst_delta <= AC008_CONTRACT_ENERGY_BUDGET_EV
+    assert worst_covariance <= 1e-12
+    assert all(row["dc_change_max"] == 0.0 for row in contract_table)
+    assert all(row["would_be_dc_drift_ry"] > 0.0 for row in contract_table)
+
+    # the rotations are physical: they move the frozen-problem energy
+    energies = [row["energy_conjugation_ev"] for row in contract_table]
+    e0 = gate["occupied_energy_ev"]
+    assert max(abs(e - e0) for e in energies) > 1e-6
+
+
+def test_declared_ensemble_and_identity_gate(gate):
+    """ADR-005 declaration: gapped step ensemble on the Gamma frozen
+    problem; the story-009 contour/eigenbasis identity gate holds."""
+    ensemble = gate["ensemble"]
+    ensemble.validate()
+    assert ensemble.kind == ENSEMBLE_GAPPED_T0
+    assert ensemble.n_occupied == NOCC
+    assert gate["gap_ev"] > 0.1  # open 0.788 eV gap on the declared reference
+    assert gate["response"].contour_vs_band_max_abs <= RESPONSE_IDENTITY_TOL_EV
+    # packing fidelity: the Gamma-folded overlap is symmetric, and the
+    # assembled pencil reproduces the certified operator through the
+    # importer (the complex residue of W's spin-diagonal channels is
+    # bounded by the same gate).
+    assert gate["fold_asymmetry"] <= 1e-12
+
+
+# ---------------------------------------------------------------------------
+# TEST-002: provenance audit (genuine passes, stripped/substituted refuse)
+# ---------------------------------------------------------------------------
+
+
+def test_audit_passes_on_genuine_outputs(dftu, audit_artifact):
+    verdict = audit_xc_hubbard_provenance(audit_artifact)
+    assert verdict["passed"] is True
+    checks = verdict["checks"]
+    assert checks["vertex_kind_xc_plus_hubbard"] is True
+    assert checks["u_ry_matches_producer"] is True
+    assert checks["j_ry_matches_producer"] is True
+    assert checks["projector_identity"] == dftu["prov"].projector_identity
+    assert len(checks["rotation_contract_mathdoc_sha256"]) == 64
+    # story-014 open item: the Edftu oracle is recorded, never gated
+    info = verdict["informational"]
+    assert info["edftu_reference_ev"] == float(dftu["data"]["edftu_ref_ev"])
+    assert np.isfinite(info["edftu_delta_ev"])
+
+
+def test_audit_refuses_stripped_hubbard_declaration(audit_artifact):
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance({**audit_artifact, "vertex_kind": "xc"})
+    assert excinfo.value.reason == "stripped_hubbard_contribution"
+    assert "xc+hubbard" in str(excinfo.value)
+
+
+def test_audit_refuses_stripped_hubbard_operator(dftu, audit_artifact):
+    zeroed = HubbardBundle(
+        prov=dftu["prov"],
+        occupations=dftu["occ"],
+        v_hubbard=np.zeros_like(dftu["v_hubbard"]),
+        v_dc=dftu["v_dc"],
+        edftu_ev=dftu["bundle"].edftu_ev,
+        edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
+        conventions=dftu["bundle"].conventions,
+    )
+    stripped = build_xc_hubbard_audit_artifact(
+        zeroed,
+        vertex_kind="xc+hubbard",
+        producer_u_ry=float(dftu["data"]["u_ry"]),
+        producer_j_ry=float(dftu["data"]["j_ry"]),
+        producer_u_j_source=dftu["refs"]["u_j_stdout"],
+    )
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance(stripped)
+    assert excinfo.value.reason == "stripped_hubbard_contribution"
+    assert "all-zero Hubbard operator" in str(excinfo.value)
+
+
+def test_audit_refuses_substituted_u_j(audit_artifact, dftu):
+    # the certificate (and its digest) stay untouched: substitution is
+    # caught against the independent producer stdout reference
+    tampered = {**audit_artifact, "producer_u_ry": float(dftu["data"]["u_ry"]) * 1.01}
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance(tampered)
+    assert excinfo.value.reason == "substituted_u_j"
+    assert dftu["refs"]["u_j_stdout"] in str(excinfo.value)
+
+    tampered_j = {**audit_artifact, "producer_j_ry": float(dftu["data"]["j_ry"]) - 0.01}
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance(tampered_j)
+    assert excinfo.value.reason == "substituted_u_j"
+
+
+def _repackaged_certificate(dftu, prov_payload_mutator):
+    """Re-digest the certificate after mutating the provenance payload."""
+    certificate = dftu["bundle"].to_certificate()
+    payload = json.loads(json.dumps(certificate["payload"]))
+    prov_payload_mutator(payload["prov"])
+    payload["prov"] = {k: v for k, v in payload["prov"].items()}
+    tampered_certificate = {
+        "kind": certificate["kind"],
+        "version": certificate["version"],
+        "payload": payload,
+        "payload_sha256": HubbardBundle._digest_with(
+            payload,
+            {
+                "occupations": dftu["bundle"].occupations.astype(complex),
+                "v_hubbard": dftu["bundle"].v_hubbard.astype(complex),
+                "v_dc": dftu["bundle"].v_dc.astype(complex),
+            },
+        ),
+    }
+    return tampered_certificate
+
+
+def test_audit_refuses_stripped_projector_identity(dftu):
+    def blank_identity(prov_payload):
+        prov_payload["projector_identity"] = ""
+
+    artifact = {
+        "kind": "xc_hubbard_provenance_audit",
+        "version": "1.0",
+        "vertex_kind": "xc+hubbard",
+        "certificate": _repackaged_certificate(dftu, blank_identity),
+        "producer_u_ry": float(dftu["data"]["u_ry"]),
+        "producer_j_ry": float(dftu["data"]["j_ry"]),
+        "producer_u_j_source": dftu["refs"]["u_j_stdout"],
+        "rotation_contract_mathdoc_sha256": "0" * 64,
+    }
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance(artifact)
+    assert excinfo.value.reason == "stripped_projector_identity"
+    assert "projector" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "sha", [None, "0" * 64], ids=["missing_mathdoc_sha", "stale_mathdoc_sha"]
+)
+def test_audit_refuses_uncertified_rotation_contract(audit_artifact, sha):
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance(
+            {**audit_artifact, "rotation_contract_mathdoc_sha256": sha}
+        )
+    assert excinfo.value.reason == "uncertified_rotation_contract"
+
+
+def test_audit_refuses_tampered_certificate_payload(dftu, audit_artifact):
+    certificate = json.loads(json.dumps(audit_artifact["certificate"]))
+    certificate["payload"]["edftu_ev"] = float(certificate["payload"]["edftu_ev"]) + 1.0
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance({**audit_artifact, "certificate": certificate})
+    assert excinfo.value.reason == "tampered_certificate_payload"
+
+
+# ---------------------------------------------------------------------------
+# IMPL-001: gate driver verdict
+# ---------------------------------------------------------------------------
+
+
+def test_gate_driver_verdict(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments, tmp_path
+):
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check=cross_check,
+        contract_table=contract_table,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert verdict["gate"] == "AC-008"
+    assert verdict["passed"] is True, verdict["failure_reasons"]
+    assert verdict["failure_reasons"] == []
+
+    # declared ensemble (ADR-005 string + record)
+    assert "ADR-005" in verdict["declared_ensemble_string"]
+    assert "no cross-SCF comparison" in verdict["declared_ensemble_string"]
+    assert verdict["declared_ensemble"]["kind"] == ENSEMBLE_GAPPED_T0
+    assert verdict["declared_ensemble"]["n_occupied"] == NOCC
+
+    # agreement table + tolerances
+    assert [row["angle_rad"] for row in verdict["agreement_table"]] == list(
+        ANGLE_LADDER
+    )
+    tolerances = verdict["tolerances"]
+    assert tolerances["torque_ev_per_rad"] == AC008_TORQUE_BUDGET_EV_PER_RAD
+    assert tolerances["curvature_ev_per_rad2"] == AC008_CURVATURE_BUDGET_EV_PER_RAD2
+    assert tolerances["contract_energy_abs_ev"] == AC008_CONTRACT_ENERGY_BUDGET_EV
+    assert tolerances["pinned_at"] == "story-016 approval"
+
+    # provenance verdicts (audit wired into the driver)
+    assert verdict["provenance_verdicts"]["audit"]["passed"] is True
+    assert verdict["provenance_verdicts"]["rotation_contract"]["passed"] is True
+    assert verdict["contract_wire_in"]["double_counting_frozen"] is True
+    assert (
+        verdict["contract_wire_in"]["worst_abs_delta_ev"]
+        <= AC008_CONTRACT_ENERGY_BUDGET_EV
+    )
+
+    # texture provenance verbatim
+    texture = verdict["texture_provenance"]
+    assert "fe4_so_dftu" in texture["producer_run_id"]
+    assert "DM.InitSpin 90 deg/atom" in texture["texture_description"]
+    assert texture["edftu_reference_ev"] == float(dftu["data"]["edftu_ref_ev"])
+
+    # the verdict report is JSON-serializable for the evidence pack
+    # (tests write only inside tmp_path; the evidence pack write happens
+    # at review time)
+    report_path = tmp_path / "ac008_verdict.json"
+    report_path.write_text(json.dumps(verdict, indent=1))
+    reparsed = json.loads(report_path.read_text())
+    assert reparsed["passed"] is True
+
+
+def test_gate_driver_records_provenance_refusal(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    stripped = {**audit_artifact, "vertex_kind": "xc"}
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check=cross_check,
+        contract_table=contract_table,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=stripped,
+    )
+    assert verdict["passed"] is False
+    assert (
+        "provenance_audit_stripped_hubbard_contribution" in verdict["failure_reasons"]
+    )
+    assert verdict["provenance_verdicts"]["audit"]["passed"] is False
+
+
+def test_gate_driver_refuses_tampered_contract_energies(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    tampered = [
+        dict(row, energy_contract_ev=row["energy_contract_ev"] + 1e-6)
+        for row in contract_table
+    ]
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check=cross_check,
+        contract_table=tampered,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert verdict["passed"] is False
+    assert "contract_energy_budget_exceeded" in verdict["failure_reasons"]

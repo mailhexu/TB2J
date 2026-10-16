@@ -1552,3 +1552,511 @@ def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
         ),
     )
     return bundle, hubbard_bundle
+
+
+# ----------------------------------------------------------------------
+# story-016: AC-008 gate — matched frozen-rotation checks on the genuine
+# +U reference, plus the XC+Hubbard provenance audit (FR-014).
+# ----------------------------------------------------------------------
+
+#: AC-008 angle ladder (rad), FIXED AT STORY-016 APPROVAL (2026-10-16).
+#: Coarse rungs demonstrate the theta**2 finite-difference truncation
+#: regime; the three finest rungs form the approved stable-error window.
+AC008_ANGLE_LADDER_RAD = (0.5, 0.25, 0.125, 0.0625, 0.03125, 0.025, 0.02)
+
+#: AC-008 budgets, FIXED AT STORY-016 APPROVAL (2026-10-16).  Torque and
+#: curvature budgets inherit the story-009/010 approved values
+#: (TB2J.interfaces.siesta_spiral_response.TORQUE_BUDGET_EV_PER_RAD /
+#: CURVATURE_BUDGET_EV_PER_RAD2); the contract-energy budget pins the
+#: story-015 rotation contract at the frozen-problem energy level.
+#: Measured worst values on the genuine fe4 +U reference: torque mismatch
+#: 1.2e-7 eV/rad at theta=0.5 decaying as theta**2, curvature mismatch
+#: 6.5e-4 eV/rad2 at the plateau angles, contract-vs-conjugation energy
+#: delta 1.7e-13 eV, hubbard covariance 5.8e-16 relative.
+AC008_TORQUE_BUDGET_EV_PER_RAD = 1e-3
+AC008_CURVATURE_BUDGET_EV_PER_RAD2 = 1e-3
+AC008_CONTRACT_ENERGY_BUDGET_EV = 1e-11
+
+#: Stable-error window (rung indices into AC008_ANGLE_LADDER_RAD) where
+#: all analytic-vs-finite mismatches, adjacent deltas and roundoff floors
+#: sit within the budgets above; measured on the genuine reference.
+AC008_STABLE_WINDOW_RUNGS = (4, 5, 6)
+
+
+class ProvenanceAuditError(DftuProvenanceError):
+    """XC+Hubbard provenance audit refusal (AC-008 / FR-014), fail-closed.
+
+    Carries a stable machine-readable ``reason`` so gate consumers can
+    distinguish the refusal classes; the message is the actionable
+    diagnostic naming the producer source to re-export or re-certify.
+    """
+
+    def __init__(self, reason, message):
+        super().__init__(message)
+        self.reason = str(reason)
+
+
+def rotation_contract_mathdoc_sha256():
+    """sha256 of the +U rotation-contract derivation authority, or None.
+
+    The authority is ``docs/sympy/siesta_spiral_hubbard_rotation.py`` in
+    the same source tree as this module.  An installed distribution
+    without the docs tree yields ``None``; the audit then fails closed
+    (uncertified rotation contract) instead of trusting a stale claim.
+    """
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "sympy"
+        / "siesta_spiral_hubbard_rotation.py"
+    )
+    if not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def build_xc_hubbard_audit_artifact(
+    bundle,
+    *,
+    vertex_kind,
+    producer_u_ry,
+    producer_j_ry,
+    producer_u_j_source,
+    rotation_contract_sha256=None,
+):
+    """Assemble the serializable XC+Hubbard provenance-audit artifact.
+
+    ``bundle`` is the genuine :class:`HubbardBundle`; its full
+    certificate (arrays + provenance + conventions, sha256-digested) is
+    embedded, alongside the declared vertex kind, the producer stdout
+    U/J reference (the substitution anchor) and the rotation-contract
+    MathDoc sha256.  The declared ``vertex_kind`` is recorded as given:
+    declaring ``"xc"`` on a +U run is exactly the stripped-Hubbard
+    output the audit must refuse (FR-014).
+    """
+    sha = rotation_contract_sha256
+    if sha is None:
+        sha = rotation_contract_mathdoc_sha256()
+    return {
+        "kind": "xc_hubbard_provenance_audit",
+        "version": "1.0",
+        "vertex_kind": str(vertex_kind),
+        "certificate": bundle.to_certificate(),
+        "producer_u_ry": float(producer_u_ry),
+        "producer_j_ry": float(producer_j_ry),
+        "producer_u_j_source": str(producer_u_j_source),
+        "rotation_contract_mathdoc_sha256": sha,
+    }
+
+
+def audit_xc_hubbard_provenance(artifact):
+    """Audit the XC+Hubbard provenance of a +U gate artifact (AC-008).
+
+    Passes only on genuine outputs: the declared vertex kind is
+    ``xc+hubbard`` with both operator contributions present, the U/J
+    values match the producer stdout reference, the projector identity
+    is recorded, and the rotation contract is certified against the
+    current derivation-authority MathDoc sha256.  Every refusal raises
+    :class:`ProvenanceAuditError` with a distinct ``reason``:
+
+    * ``malformed_audit_artifact`` -- not an audit envelope/certificate;
+    * ``tampered_certificate_payload`` -- certificate digest mismatch;
+    * ``stripped_hubbard_contribution`` -- vertex kind xc(-only) or
+      vanishing Hubbard operator where +U is declared;
+    * ``substituted_u_j`` -- U/J differing from the producer reference;
+    * ``stripped_projector_identity`` -- unidentified projector table;
+    * ``uncertified_rotation_contract`` -- missing or stale MathDoc sha.
+
+    Returns a verdict dict recording every check plus informational
+    Edftu oracle/reference values (story-014 keeps the oracle outside
+    the gating set; recorded verbatim, never gated).
+    """
+
+    def refuse(reason, message):
+        raise ProvenanceAuditError(reason, message)
+
+    if not isinstance(artifact, dict) or artifact.get("kind") != (
+        "xc_hubbard_provenance_audit"
+    ):
+        refuse(
+            "malformed_audit_artifact",
+            "provenance audit requires an 'xc_hubbard_provenance_audit' "
+            "envelope; build it with build_xc_hubbard_audit_artifact from "
+            "the genuine HubbardBundle",
+        )
+    certificate = artifact.get("certificate")
+    if (
+        not isinstance(certificate, dict)
+        or certificate.get("kind") != "hubbard_bundle_certificate"
+    ):
+        refuse(
+            "malformed_audit_artifact",
+            "audit artifact carries no 'hubbard_bundle_certificate'; the "
+            "+U operator, provenance and conventions must be presented "
+            "through the digested certificate",
+        )
+    try:
+        checked = HubbardBundle.from_certificate(certificate)
+    except HubbardBundleError as exc:
+        refuse(
+            "tampered_certificate_payload",
+            f"certificate payload digest mismatch ({exc}); the +U artifact "
+            "was modified after export -- re-export from the producer run",
+        )
+    except DftuProvenanceError as exc:
+        # A re-digested certificate can carry a structurally invalid
+        # provenance (fail-closed constructor).  Blanking the projector
+        # identity is exactly the stripped-identity producer defect.
+        if "projector_identity" in str(exc):
+            refuse(
+                "stripped_projector_identity",
+                "certificate provenance carries no projector_identity; the "
+                "projector table (file, rc, npts) must be identified for "
+                "the occupation reconstruction to be auditable "
+                f"(constructor: {exc})",
+            )
+        refuse(
+            "tampered_certificate_payload",
+            f"certificate provenance is incomplete or altered ({exc}); "
+            "re-export the +U artifact from the producer run",
+        )
+    prov = checked.prov
+
+    # (1) stripped Hubbard contribution: the +U run must keep BOTH the
+    # XC channel and the Hubbard operator (vertex kind xc+hubbard).
+    vertex_kind = artifact.get("vertex_kind")
+    w_scale = (
+        float(np.max(np.abs(checked.v_hubbard)))
+        if np.asarray(checked.v_hubbard).size
+        else 0.0
+    )
+    if vertex_kind != "xc+hubbard":
+        refuse(
+            "stripped_hubbard_contribution",
+            f"declared vertex kind {vertex_kind!r} on a run with U="
+            f"{prov.u_ev:.6g} eV / J={prov.j_ev:.6g} eV: a +U output must "
+            "declare vertex kind 'xc+hubbard' with the Hubbard operator "
+            "channels retained (FR-005/FR-014); re-export without "
+            "stripping the Hubbard contribution",
+        )
+    if prov.u_ry > 0 and w_scale <= 0.0:
+        refuse(
+            "stripped_hubbard_contribution",
+            "certificate declares U > 0 but carries an all-zero Hubbard "
+            "operator; the V^U channels were stripped after export",
+        )
+    if checked.conventions.get("vertex_kind") != "hubbard_local":
+        refuse(
+            "stripped_hubbard_contribution",
+            f"certificate conventions declare vertex_kind "
+            f"{checked.conventions.get('vertex_kind')!r} instead of "
+            "'hubbard_local'; the certified +U assembly was altered",
+        )
+
+    # (2) substituted U/J: the certificate is internally digest-consistent,
+    # so substitution is caught against the independent producer reference.
+    source = artifact.get("producer_u_j_source")
+    if not source:
+        refuse(
+            "substituted_u_j",
+            "audit artifact carries no producer U/J reference source; the "
+            "substitution anchor (stdout 'DFTUprojs with U/J' lines) is "
+            "required",
+        )
+    for name, producer, actual in (
+        ("U", artifact.get("producer_u_ry"), prov.u_ry),
+        ("J", artifact.get("producer_j_ry"), prov.j_ry),
+    ):
+        if producer is None:
+            refuse(
+                "substituted_u_j",
+                f"audit artifact carries no producer {name} reference; the "
+                f"stdout value from {source} is required to detect "
+                "substitution",
+            )
+        if abs(float(producer) - float(actual)) > 1e-12 * max(1.0, abs(float(actual))):
+            refuse(
+                "substituted_u_j",
+                f"certificate {name}={float(actual):.12g} Ry does not match "
+                f"the producer declaration {float(producer):.12g} Ry "
+                f"({source}); the U/J values were substituted after export",
+            )
+
+    # (3) stripped projector identity.
+    if not prov.projector_identity:
+        refuse(
+            "stripped_projector_identity",
+            "certificate provenance carries no projector_identity; the "
+            "projector table (file, rc, npts) must be identified for the "
+            "occupation reconstruction to be auditable",
+        )
+
+    # (4) uncertified rotation contract: the pinned MathDoc sha must be
+    # present AND match the current derivation authority.
+    sha = artifact.get("rotation_contract_mathdoc_sha256")
+    if not sha:
+        refuse(
+            "uncertified_rotation_contract",
+            "audit artifact carries no rotation_contract_mathdoc_sha256; "
+            "the story-015 contract must be certified against "
+            "docs/sympy/siesta_spiral_hubbard_rotation.py before the +U "
+            "output can pass the gate (FR-014)",
+        )
+    computed = rotation_contract_mathdoc_sha256()
+    if computed is None:
+        refuse(
+            "uncertified_rotation_contract",
+            "rotation-contract derivation authority "
+            "(docs/sympy/siesta_spiral_hubbard_rotation.py) not found in "
+            "this source tree; refusing to certify the contract against "
+            "an unverifiable sha (fail-closed)",
+        )
+    if sha != computed:
+        refuse(
+            "uncertified_rotation_contract",
+            f"rotation-contract MathDoc sha {sha} is stale (current "
+            f"authority sha {computed}); re-run the derivation authority "
+            "and re-export the +U artifact",
+        )
+
+    edftu_delta = float(checked.edftu_ev) - float(checked.edftu_reference_ev)
+    return {
+        "passed": True,
+        "vertex_kind": vertex_kind,
+        "checks": {
+            "certificate_digest": "verified",
+            "vertex_kind_xc_plus_hubbard": True,
+            "hubbard_operator_scale_ry": w_scale,
+            "u_ry_matches_producer": True,
+            "j_ry_matches_producer": True,
+            "projector_identity": prov.projector_identity,
+            "rotation_contract_mathdoc_sha256": computed,
+        },
+        "informational": {
+            "edftu_oracle_ev": float(checked.edftu_ev),
+            "edftu_reference_ev": float(checked.edftu_reference_ev),
+            "edftu_delta_ev": edftu_delta,
+            "edftu_gating": (
+                "recorded verbatim, never gated (story-014 open item on "
+                "the SIESTA-side energy convention)"
+            ),
+        },
+    }
+
+
+def hubbard_site_block_components(v_hubbard_site, *, energy_scale=RY_TO_EV):
+    """(4, 5, 5) channel array -> {(p, q): (h1, h2, h3, h4)} file packing.
+
+    Maps the site's Hubbard operator onto the pinned 4-component spin
+    block packing used by SpiralBundle/HSX files (uu, dd, ud, -Im ud),
+    scaled to ``energy_scale`` (default eV).  The spin-diagonal channels
+    of the certified +U operator are real to machine precision on the
+    declared reference (xz-plane texture keeps the occupation channels
+    real); the residual imaginary part is bounded by the gate's packing
+    fidelity check.
+    """
+    w = np.asarray(v_hubbard_site, dtype=complex) * energy_scale
+    if w.shape != (4, 5, 5):
+        raise HubbardBundleError(f"v_hubbard_site must be (4, 5, 5), got {w.shape}")
+    return {
+        (p, q): (
+            float(w[0, p, q].real),
+            float(w[1, p, q].real),
+            float(w[2, p, q].real),
+            float(-w[2, p, q].imag),
+        )
+        for p in range(5)
+        for q in range(5)
+    }
+
+
+def rotated_hubbard_site_components(
+    occupations, prov, site, *, axis, angle, energy_scale=RY_TO_EV
+):
+    """Story-015 contract rotation of one site, in bundle file packing.
+
+    Runs :func:`rotate_hubbard_site_operator` (occupation co-rotation,
+    W reassembly, dc frozen) and packs the rotated site operator as
+    ``{(p, q): (h1, h2, h3, h4)}`` components.  Returns the components
+    and the rotation report (covariance, dc drift, gates) verbatim.
+    """
+    result = rotate_hubbard_site_operator(
+        occupations, prov, site, axis=axis, angle=angle
+    )
+    comps = hubbard_site_block_components(
+        result["v_hubbard_rotated"][site], energy_scale=energy_scale
+    )
+    return comps, result["report"]
+
+
+def run_ac008_gate(
+    bundle,
+    *,
+    cross_check,
+    contract_table,
+    ensemble,
+    texture_provenance,
+    audit_artifact,
+):
+    """AC-008 gate driver (story-016): assemble the +U verdict report.
+
+    Parameters
+    ----------
+    bundle : HubbardBundle
+        The genuine +U artifact under gate.
+    cross_check : dict
+        The ``finite_rotation_cross_check`` summary produced by
+        ``TB2J.interfaces.siesta_spiral_validation.validate_finite_rotations``
+        on the frozen problem built from this bundle's operator
+        (analytic local response vs finite rotations, story-010 machinery).
+    contract_table : list of dict
+        Per-rotation rows binding the story-015 contract to the same
+        frozen problem at the energy level; each row carries ``site``,
+        ``axis``, ``angle_rad``, ``energy_conjugation_ev``,
+        ``energy_contract_ev``, ``abs_delta_ev``,
+        ``hubbard_covariance_relative``, ``dc_change_max`` and
+        ``would_be_dc_drift_ry``.
+    ensemble : TB2J.interfaces.siesta_spiral_response.Ensemble
+        The declared ADR-005 ensemble of the frozen problem.
+    texture_provenance : dict
+        Producer run id, convergence, Edftu and texture description,
+        recorded verbatim in the verdict.
+    audit_artifact : dict
+        Envelope from :func:`build_xc_hubbard_audit_artifact`; the
+        provenance audit is wired in here and its verdict recorded.
+
+    Returns the verdict dict (agreement table, tolerances, provenance
+    verdicts, declared ensemble string, texture provenance verbatim,
+    pass/fail with failure reasons).  JSON-serializable for the
+    evidence pack; the audit refusal is recorded, never swallowed.
+    """
+    from .siesta_spiral_response import (
+        CURVATURE_BUDGET_EV_PER_RAD2,
+        TORQUE_BUDGET_EV_PER_RAD,
+    )
+
+    # Pinned budgets are cross-checked against the story-009/010 approved
+    # values they inherit; a drift there invalidates the AC-008 pin.
+    if (
+        AC008_TORQUE_BUDGET_EV_PER_RAD != TORQUE_BUDGET_EV_PER_RAD
+        or AC008_CURVATURE_BUDGET_EV_PER_RAD2 != CURVATURE_BUDGET_EV_PER_RAD2
+    ):
+        raise HubbardBundleError(
+            "AC-008 torque/curvature budgets have drifted from the "
+            "story-009/010 approved values they inherit; re-pin the gate "
+            "before running it"
+        )
+    try:
+        audit_verdict = audit_xc_hubbard_provenance(audit_artifact)
+    except ProvenanceAuditError as exc:
+        audit_verdict = {"passed": False, "reason": exc.reason, "diagnostic": str(exc)}
+
+    record = ensemble.to_record()
+    declared_ensemble_string = (
+        "ADR-005 {kind}: n_occupied={n}, electron_count={ne}, "
+        "gap={gap:.12g} eV, Fermi={fermi:.12g} eV; density, scalar "
+        "potential, amplitudes, basis and S frozen; only the declared "
+        "magnetic operator rotates; finite rotations reuse the same "
+        "frozen problem (no cross-SCF comparison enters the gate)"
+    ).format(
+        kind=record["kind"],
+        n=record["n_occupied"],
+        ne=record["electron_count"],
+        gap=record["gap_ev"],
+        fermi=record["fermi_energy_ev"],
+    )
+
+    ladder = tuple(cross_check.get("angle_ladder_rad", ()))
+    table_angles = sorted({float(row["angle_rad"]) for row in contract_table})
+    reasons = []
+    if not audit_verdict.get("passed"):
+        reasons.append("provenance_audit_" + audit_verdict.get("reason", "refused"))
+    if not cross_check.get("passed"):
+        reasons.extend(cross_check.get("failure_reasons", ["cross_check_failed"]))
+    contract_budget = AC008_CONTRACT_ENERGY_BUDGET_EV
+    # fail-closed: recompute the deltas from the reported energies instead
+    # of trusting the rows' own abs_delta_ev bookkeeping
+    contract_table = [
+        dict(
+            row,
+            abs_delta_ev=abs(
+                float(row["energy_contract_ev"]) - float(row["energy_conjugation_ev"])
+            ),
+        )
+        for row in contract_table
+    ]
+    worst_contract = max(
+        (float(row["abs_delta_ev"]) for row in contract_table), default=0.0
+    )
+    worst_covariance = max(
+        (float(row["hubbard_covariance_relative"]) for row in contract_table),
+        default=0.0,
+    )
+    dc_moved = any(
+        float(row.get("dc_change_max", 0.0)) != 0.0 for row in contract_table
+    )
+    if worst_contract > contract_budget:
+        reasons.append("contract_energy_budget_exceeded")
+    if worst_covariance > HUBBARD_ROTATION_TOLERANCE:
+        reasons.append("hubbard_covariance_budget_exceeded")
+    if dc_moved:
+        reasons.append("double_counting_not_frozen")
+    if not contract_table:
+        reasons.append("empty_contract_table")
+    elif table_angles != sorted(set(float(a) for a in ladder)):
+        reasons.append("contract_table_angles_differ_from_ladder")
+
+    agreement_table = [
+        {
+            "angle_rad": rung["angle_rad"],
+            "gradient_max_abs_mismatch": rung["gradient_max_abs_mismatch"],
+            "curvature_max_abs_mismatch": rung["curvature_max_abs_mismatch"],
+            "gradient_roundoff_floor": rung["gradient_roundoff_floor"],
+            "curvature_roundoff_floor": rung["curvature_roundoff_floor"],
+            "minimum_rotated_gap_ev": rung["minimum_rotated_gap_ev"],
+        }
+        for rung in cross_check.get("rungs", ())
+    ]
+    verdict = {
+        "gate": "AC-008",
+        "version": "1.0",
+        "passed": not reasons,
+        "failure_reasons": reasons,
+        "declared_ensemble": record,
+        "declared_ensemble_string": declared_ensemble_string,
+        "tolerances": {
+            "angle_ladder_rad": list(AC008_ANGLE_LADDER_RAD),
+            "torque_ev_per_rad": AC008_TORQUE_BUDGET_EV_PER_RAD,
+            "curvature_ev_per_rad2": AC008_CURVATURE_BUDGET_EV_PER_RAD2,
+            "contract_energy_abs_ev": AC008_CONTRACT_ENERGY_BUDGET_EV,
+            "hubbard_covariance_relative": HUBBARD_ROTATION_TOLERANCE,
+            "stable_window_rungs": list(AC008_STABLE_WINDOW_RUNGS),
+            "pinned_at": "story-016 approval",
+        },
+        "agreement_table": agreement_table,
+        "stable_error_regime": {
+            "gradient": cross_check.get("stable_error_regime", {}).get("gradient"),
+            "curvature": cross_check.get("stable_error_regime", {}).get("curvature"),
+            "common_stable_windows": cross_check.get("common_stable_windows", []),
+            "reference_gradient": cross_check.get("reference_gradient"),
+            "reference_torque": cross_check.get("reference_torque"),
+            "torque_state": cross_check.get("torque_state"),
+        },
+        "contract_wire_in": {
+            "rows": list(contract_table),
+            "worst_abs_delta_ev": worst_contract,
+            "worst_hubbard_covariance_relative": worst_covariance,
+            "double_counting_frozen": not dc_moved,
+        },
+        "provenance_verdicts": {
+            "audit": audit_verdict,
+            "rotation_contract": {
+                "mathdoc": "tb2j/siesta-spiral-hubbard-rotation",
+                "tolerance_relative": HUBBARD_ROTATION_TOLERANCE,
+                "worst_covariance_relative": worst_covariance,
+                "passed": worst_covariance <= HUBBARD_ROTATION_TOLERANCE,
+            },
+        },
+        "texture_provenance": dict(texture_provenance),
+    }
+    return verdict
