@@ -1087,7 +1087,12 @@ class HubbardBundle:
     correlated subspace (H_stored = H_xc + H_U), i.e. the intrinsic XC
     carrier: it is digested into the certificate so the XC provenance
     audit derives its digest from certified arrays, never from
-    caller-supplied bytes (FR-014).
+    caller-supplied bytes (FR-014).  XC PRESENCE IS A PRODUCER FACT:
+    the certified SIESTA +U run's stored total H carries the PBE XC
+    contribution in every SCF step, so a valid ``stored_h`` always
+    comes from the producer HSX through :func:`ingest_dftu_run`
+    (never from a Hubbard-only pencil), and it MUST be accompanied by
+    ``stored_h_provenance`` naming that producer anchor.
     """
 
     prov: DftuProvenance
@@ -1099,6 +1104,7 @@ class HubbardBundle:
     fixture_digest: str = ""
     conventions: dict = field(default_factory=lambda: dict(_HUBBARD_CONVENTIONS))
     stored_h: np.ndarray | None = None
+    stored_h_provenance: dict | None = None
     note: str = (
         "H_stored = H_xc + H_U (final_H_f_stress.F): the stored HSX "
         "Hamiltonian already contains the +U potential; do not add "
@@ -1130,6 +1136,17 @@ class HubbardBundle:
                     "HubbardBundle stored_h must be a square (n, n) "
                     f"stored-total-H array, got {sh.shape}"
                 )
+            if not isinstance(self.stored_h_provenance, dict) or (
+                self.stored_h_provenance.get("kind") != "producer_hsx_stored_total_H"
+            ):
+                raise HubbardBundleError(
+                    "HubbardBundle stored_h requires stored_h_provenance "
+                    "with kind 'producer_hsx_stored_total_H': XC presence "
+                    "is a producer fact, anchored to the certified +U "
+                    "run's stored total H extracted from the producer HSX "
+                    "by ingest_dftu_run; a Hubbard-only pencil is not an "
+                    "XC carrier (FR-014)"
+                )
 
     @staticmethod
     def _complex_payload(arr: np.ndarray) -> dict:
@@ -1145,6 +1162,7 @@ class HubbardBundle:
             "fixture_digest": payload.get("fixture_digest", ""),
             "edftu_ev": float(payload["edftu_ev"]),
             "edftu_reference_ev": float(payload["edftu_reference_ev"]),
+            "stored_h_provenance": payload.get("stored_h_provenance"),
         }
         return _digest(arrays, meta=meta)
 
@@ -1170,6 +1188,7 @@ class HubbardBundle:
         }
         if self.stored_h is not None:
             payload["stored_h"] = self._complex_payload(self.stored_h)
+            payload["stored_h_provenance"] = dict(self.stored_h_provenance)
             arrays["stored_h"] = np.asarray(self.stored_h, dtype=complex)
         digest = self._digest_with(payload, arrays)
         return {
@@ -1228,6 +1247,7 @@ class HubbardBundle:
             fixture_digest=payload.get("fixture_digest", ""),
             conventions=payload.get("conventions", {}),
             stored_h=arrays.get("stored_h"),
+            stored_h_provenance=payload.get("stored_h_provenance"),
             note=payload.get("note", ""),
         )
 
@@ -1454,6 +1474,93 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
     return bundle
 
 
+def extract_producer_stored_h(hsx_sile, site_indices):
+    """Stored total H over the certified correlated subspace (Ry).
+
+    XC presence is a PRODUCER fact (story-014/016): the certified
+    SIESTA +U run stores its TOTAL Hamiltonian H_stored = H_xc + H_U in
+    the HSX, with the PBE XC contribution present in every SCF step, so
+    the correlated-subspace rows/cols of that stored H are the XC
+    carrier digested by the FR-014 provenance audit.  This helper reads
+    the producer HSX the certified ingestion path already consumes --
+    never caller-supplied bytes.
+
+    The pinned file packing is unfolded per sparse entry exactly as in
+    ``_bundle_from_hs_geometry``: ``H1=H11, H2=H22, H3=Re H12,
+    H4=-Im H12`` (the diag3k sign fix restores the raw file order), and
+    sisl's ``read_hamiltonian`` ``-Ef`` shift is undone so the returned
+    matrix is the unshifted producer H.  Rows/cols are the correlated
+    atoms' in-cell orbital windows; the Gamma-point matrix folds every
+    supercell image (unit phase at Gamma).  The two spinor channels are
+    packed in the same blocked convention as
+    :meth:`SpiralImporter.assemble_pencil`: the up block first, then the
+    down block, with ``H12`` in the up-down quadrant.
+
+    Returns a complex ``(2n, 2n)`` array with ``n`` the total number of
+    correlated orbitals.
+    """
+    g = hsx_sile.read_geometry()
+    no_l = int(g.lasto[-1]) + 1
+    hamiltonian = hsx_sile.read_hamiltonian()
+    ef_raw = hsx_sile.read_fermi_level()
+    Ef = float(ef_raw) if ef_raw is not None else 0.0
+    if Ef != 0.0:
+        hamiltonian.shift(Ef)
+    hcsr = hamiltonian._csr
+    sites = tuple(int(s) for s in site_indices)
+    if not sites:
+        raise DftuProvenanceError(
+            "extract_producer_stored_h requires the declared site_indices"
+        )
+    didx = []
+    norb_site = None
+    for ka in sites:
+        if not 1 <= ka <= g.na:
+            raise DftuProvenanceError(
+                f"site_indices entry {ka} is outside the producer cell " f"(1..{g.na})"
+            )
+        first = int(g.firsto[ka - 1])
+        last = int(g.lasto[ka - 1])
+        count = last - first + 1
+        if norb_site is None:
+            norb_site = count
+        elif count != norb_site:
+            raise DftuProvenanceError(
+                "correlated sites carry different orbital counts "
+                f"({norb_site} vs {count}); the correlated subspace must "
+                "be a set of equivalent atoms"
+            )
+        didx.extend(range(first, last + 1))
+    n = len(didx)
+    row_of = {io: mu for mu, io in enumerate(didx)}
+    h = np.zeros((2 * n, 2 * n), dtype=complex)
+    hD = hcsr._D
+    seen = 0
+    for io in range(no_l):
+        mu = row_of.get(io)
+        if mu is None:
+            continue
+        for ptr in range(hcsr.ptr[io], hcsr.ptr[io + 1]):
+            jo = row_of.get(int(hcsr.col[ptr]) % no_l)
+            if jo is None:
+                continue
+            c = hD[ptr]
+            h11, h22, h3, h4 = float(c[0]), float(c[1]), float(c[2]), float(c[3])
+            h12 = complex(h3, h4)  # raw file order H3=Re H12, H4=Im H12
+            h[mu, jo] += h11
+            h[mu + n, jo + n] += h22
+            h[mu, jo + n] += h12
+            h[mu + n, jo] += np.conj(h12)
+            seen += 1
+    if seen == 0:
+        raise HubbardBundleError(
+            "the producer HSX carries no sparse entries over the "
+            "declared correlated subspace; the XC carrier cannot be "
+            "extracted from this export"
+        )
+    return h
+
+
 def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
     """Build (SpiralBundle with hubbard, HubbardBundle) from a genuine
     SIESTA +U export (spec AC-1).
@@ -1486,7 +1593,13 @@ def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
     (bundle, hubbard_bundle) : (SpiralBundle, HubbardBundle)
         The spiral bundle carries ``hubbard=provenance``; the Hubbard
         bundle carries occupations, potentials and the Edftu oracle
-        value with the producer's printed value as reference.
+        value with the producer's printed value as reference.  Its
+        ``stored_h`` is the stored total H extracted from the producer
+        HSX over the certified correlated subspace (H_stored =
+        H_xc + H_U): the XC carrier, anchored via
+        ``stored_h_provenance`` to the producer HSX identity and the
+        run's Edftu reference.  XC presence is a producer fact delivered
+        by this certified ingestion path -- never assembled downstream.
     """
     for req in ("species_label", "principal_n", "site_indices"):
         if ids.get(req) is None:
@@ -1553,6 +1666,31 @@ def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
     bundle = _bundle_from_hs_geometry(hsx_sile, stdout_path.name, proj_name)
     bundle.hubbard = prov
     bundle.validate()
+    # XC presence is a PRODUCER fact: the XC carrier is the stored total
+    # H read from THIS producer HSX (H_stored = H_xc + H_U; PBE XC in
+    # every SCF step), extracted here over the certified correlated
+    # subspace -- never a Hubbard-only pencil assembled downstream.
+    sites = tuple(int(s) for s in ids["site_indices"])
+    stored_h = extract_producer_stored_h(hsx_sile, sites)
+    hsx_name = Path(hsx).name
+    stored_h_provenance = {
+        "kind": "producer_hsx_stored_total_H",
+        "anchor": (
+            "XC presence is a producer fact: the certified +U run's "
+            "stored total H (read from the producer HSX by "
+            "ingest_dftu_run) carries the PBE XC contribution in every "
+            "SCF step; H_stored = H_xc + H_U (story-014)"
+        ),
+        "hsx": hsx_name,
+        "extraction": (
+            "extract_producer_stored_h: certified correlated-subspace "
+            "rows/cols, Gamma-folded over supercell images; spinor "
+            "channels stacked [up; down], H12 = H3 + i*H4 (raw file "
+            "order after the diag3k fix); sisl's -Ef shift undone"
+        ),
+        "site_indices": list(sites),
+        "edftu_reference_ev": float(edftu_ref),
+    }
     hubbard_bundle = HubbardBundle(
         prov=prov,
         occupations=occ,
@@ -1562,6 +1700,8 @@ def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
         edftu_reference_ev=edftu_ref,
         conventions=conv,
         fixture_digest="",
+        stored_h=stored_h,
+        stored_h_provenance=stored_h_provenance,
         note=ids.get(
             "note",
             "Ingested by ingest_dftu_run from a genuine SIESTA +U run; "
@@ -1709,10 +1849,18 @@ def build_xc_hubbard_audit_artifact(
     The XC source digest is INTRINSIC (FR-014): it is derived from the
     certificate's own stored-H payload (``bundle.stored_h``, the stored
     total H over the certified subspace, H_stored = H_xc + H_U), never
-    from caller-supplied bytes.  A certificate whose certified state
-    carries no stored-H payload -- or an all-zero one -- is exactly the
-    stripped-XC output and is refused here with the ``empty_xc_source``
-    reason: an artifact with no XC carrier cannot pass the audit.
+    from caller-supplied bytes.  The CARRIER is the producer-extracted
+    ``stored_h``: XC presence is a producer fact anchored through
+    ``ingest_dftu_run`` (the certified ingestion path reads the +U
+    run's HSX, where the PBE XC contribution is present in every SCF
+    step).  A certificate whose stored-H payload is missing, not
+    producer-anchored (i.e. set outside ``ingest_dftu_run`` -- a
+    Hubbard-only pencil is exactly a state with no XC contribution) --
+    or all-zero is the stripped-XC output and is refused here with the
+    ``empty_xc_source`` reason: an artifact with no XC carrier cannot
+    pass the audit.  The audit detects POST-PRODUCER stripping or
+    substitution of the XC carrier (FR-014); it does not re-derive the
+    physics of the producer SCF.
 
     ``xc_source`` only carries the label of where the XC contribution
     enters the +U total H: ``{"kind": "stored_total_H"}`` (default) or
@@ -1762,6 +1910,24 @@ def build_xc_hubbard_audit_artifact(
             "re-export from a genuine +U run that retains the stored "
             "total H (FR-014)",
         )
+    # Producer anchor: the carrier must be the stored_h extracted from
+    # the producer HSX by the certified ingestion path (ingest_dftu_run
+    # sets stored_h_provenance); a Hubbard-only bundle is not an XC
+    # carrier.
+    carrier_prov = certificate["payload"].get("stored_h_provenance")
+    if (
+        not isinstance(carrier_prov, dict)
+        or carrier_prov.get("kind") != "producer_hsx_stored_total_H"
+    ):
+        raise ProvenanceAuditError(
+            "empty_xc_source",
+            "the certified stored-H payload is not producer-anchored: "
+            "XC presence must come from the certified +U run's stored "
+            "total H extracted by ingest_dftu_run "
+            "(stored_h_provenance kind 'producer_hsx_stored_total_H'); "
+            "a Hubbard-only pencil carries no XC contribution -- "
+            "re-ingest from the producer run (FR-014)",
+        )
     stored_h_arr = np.asarray(stored_h["re"], dtype=float) + 1j * np.asarray(
         stored_h["im"], dtype=float
     )
@@ -1779,9 +1945,21 @@ def build_xc_hubbard_audit_artifact(
     ).hexdigest()
     return {
         "kind": "xc_hubbard_provenance_audit",
-        "version": "1.2",
+        "version": "1.3",
         "vertex_kind": str(vertex_kind),
         "xc_source": {"kind": xc_kind, "digest": xc_digest},
+        "xc_carrier_provenance": {
+            "carrier": "producer HSX via ingest_dftu_run",
+            "kind": carrier_prov.get("kind"),
+            "hsx": carrier_prov.get("hsx"),
+            "edftu_reference_ev": carrier_prov.get("edftu_reference_ev"),
+            "note": (
+                "XC presence is anchored to the certified producer "
+                "output via the certified ingestion path; the audit "
+                "detects post-producer stripping/substitution (FR-014), "
+                "not the physics of the SCF"
+            ),
+        },
         "xc_digest_binding": binding,
         "certificate": certificate,
         "producer_u_ry": float(producer_u_ry),
@@ -1804,7 +1982,9 @@ def audit_xc_hubbard_provenance(artifact):
     * ``malformed_audit_artifact`` -- not an audit envelope/certificate;
     * ``tampered_certificate_payload`` -- certificate digest mismatch;
     * ``empty_xc_source`` -- the certified state carries no stored-H
-      payload (missing or all-zero): no XC carrier exists to audit;
+      payload, one that is not producer-anchored (kind
+      'producer_hsx_stored_total_H', set by ingest_dftu_run), or an
+      all-zero one: no XC carrier exists to audit;
     * ``stripped_xc_contribution`` -- missing/malformed XC source
       identity or digest, a digest not matching the recomputed
       stored-H digest, or a digest breaking its export-time binding;
@@ -1845,6 +2025,18 @@ def audit_xc_hubbard_provenance(artifact):
     try:
         checked = HubbardBundle.from_certificate(certificate)
     except HubbardBundleError as exc:
+        # An unanchored stored-H payload (no producer XC carrier) is the
+        # stripped-XC defect, not a generic tamper.
+        if "producer_hsx_stored_total_H" in str(exc):
+            refuse(
+                "empty_xc_source",
+                "the certified stored-H payload is not producer-anchored: "
+                "XC presence must come from the certified +U run's stored "
+                "total H extracted by ingest_dftu_run "
+                "(stored_h_provenance kind 'producer_hsx_stored_total_H'); "
+                f"a Hubbard-only pencil carries no XC contribution "
+                f"(FR-014) (constructor: {exc})",
+            )
         refuse(
             "tampered_certificate_payload",
             f"certificate payload digest mismatch ({exc}); the +U artifact "
@@ -1905,6 +2097,23 @@ def audit_xc_hubbard_provenance(artifact):
             "carrier, so the output is indistinguishable from an "
             "H0+V^U export with the XC contribution stripped -- "
             "re-export from a genuine +U run (FR-014)",
+        )
+    # The carrier itself must be the producer-extracted stored total H:
+    # ingest_dftu_run sets stored_h_provenance on the bundle; a payload
+    # without it comes from a Hubbard-only pencil (no XC contribution).
+    carrier_prov = certificate["payload"].get("stored_h_provenance")
+    if (
+        not isinstance(carrier_prov, dict)
+        or carrier_prov.get("kind") != "producer_hsx_stored_total_H"
+    ):
+        refuse(
+            "empty_xc_source",
+            "the certified stored-H payload is not producer-anchored: "
+            "XC presence must come from the certified +U run's stored "
+            "total H extracted by ingest_dftu_run "
+            "(stored_h_provenance kind 'producer_hsx_stored_total_H'); "
+            "a Hubbard-only pencil carries no XC contribution -- "
+            "re-ingest from the producer run (FR-014)",
         )
     stored_h_arr = np.asarray(stored_h["re"], dtype=float) + 1j * np.asarray(
         stored_h["im"], dtype=float
@@ -2046,6 +2255,10 @@ def audit_xc_hubbard_provenance(artifact):
             "xc_source_kind": xc_source["kind"],
             "xc_source_digest": xc_digest,
             "xc_digest_intrinsic": True,
+            "xc_carrier_producer_anchored": (
+                carrier_prov.get("kind") == "producer_hsx_stored_total_H"
+            ),
+            "xc_carrier_hsx": carrier_prov.get("hsx"),
             "vertex_kind_xc_plus_hubbard": True,
             "hubbard_operator_scale_ry": w_scale,
             "u_ry_matches_producer": True,

@@ -55,6 +55,7 @@ from TB2J.interfaces.siesta_spiral_hubbard import (
     edftu_oracle,
     hubbard_site_block_components,
     hubbard_site_block_unpack,
+    ingest_dftu_run,
     rotated_hubbard_site_components,
     run_ac008_gate,
     xc_source_payload_sha256,
@@ -79,6 +80,9 @@ from TB2J.interfaces.siesta_spiral_vertex import (
 DATA = Path(__file__).parent / "data"
 NPZ = DATA / "fe4_dftu_story014.npz"
 GT_OCC = DATA / "fe4_occ.dftu_occ"
+PRODUCER_OCC_DUMP = (
+    DATA / "../../../.tmp/siesta-xc-mft/fe4_dftu_probe/occ_dump"
+).resolve()
 
 NORBD = 5  # correlated d shell per site
 NSITES = 4
@@ -124,7 +128,37 @@ def _transverse_frame(normal):
 
 
 @pytest.fixture(scope="module")
-def dftu():
+def producer_hubbard():
+    """HubbardBundle from ingest_dftu_run on the genuine producer export
+    (skip-gated): its ``stored_h`` is the producer HSX's stored total H
+    over the certified correlated subspace -- the XC-bearing carrier the
+    audit must digest (XC presence is a producer fact, never a
+    downstream-assembled Hubbard-only pencil)."""
+    if not (PRODUCER_OCC_DUMP / "fe4_occ.HSX").exists():
+        pytest.skip(
+            "producer +U run '.tmp/siesta-xc-mft/fe4_dftu_probe/occ_dump' "
+            "is unavailable; the AC-008 gate's XC carrier must come from "
+            "ingest_dftu_run on the genuine export (fixture seeding to "
+            "TB2J_test_data is a user action, see story-014)"
+        )
+    dump = PRODUCER_OCC_DUMP
+    _spiral, hb = ingest_dftu_run(
+        dump / "fe4_occ.HSX",
+        dump / "fe4_occ.DM",
+        dump / "fe4_occ.out",
+        dump / "Fe_nc.dftu_proj",
+        occ_dump=dump,
+        species_label="Fe",
+        principal_n=3,
+        site_indices=(1, 2, 3, 4),
+    )
+    assert hb.stored_h is not None
+    assert hb.stored_h_provenance["kind"] == "producer_hsx_stored_total_H"
+    return hb
+
+
+@pytest.fixture(scope="module")
+def dftu(producer_hubbard):
     """Genuine +U state: GT occupations, certified assembler, provenance."""
     if not NPZ.exists():
         pytest.skip("fe4_dftu_story014.npz not seeded (user action)")
@@ -153,20 +187,12 @@ def dftu():
     )
     v_hubbard, v_dc, conventions = assemble_hubbard_operator(occ, prov)
     # Stored total H over the certified correlated subspace
-    # (H_stored = H_xc + H_U): the Gamma frozen pencil assembled through
-    # the certified importer from the Hubbard operators and the genuine
-    # projector overlap.  This is the intrinsic XC carrier digested into
-    # the certificate (FR-014).
-    no_l = 4 * 9  # 9 orbitals per atom in the producer cell
-    S36 = np.zeros((no_l, no_l))
-    np.add.at(S36, (data["s_rows"], data["s_cols"] % no_l), data["s_vals"])
-    didx = [a * 9 + 1 + p for a in range(NSITES) for p in range(NORBD)]
-    S20_block = S36[np.ix_(didx, didx)]
-    fold_asymmetry = float(np.max(np.abs(S20_block - S20_block.T)))
-    S20 = 0.5 * (S20_block + S20_block.T)
-    h_stored, _ = SpiralImporter().assemble_pencil(
-        gamma_hubbard_bundle(v_hubbard, S20), 0.0
-    )
+    # (H_stored = H_xc + H_U): taken from ingest_dftu_run's output on
+    # the genuine producer export -- the certified producer HSX's
+    # stored total H is the XC-bearing carrier digested into the
+    # certificate (FR-014).  The Hubbard-only Gamma pencil below is
+    # response machinery only, never the XC carrier.
+    h_stored = producer_hubbard.stored_h
     bundle = HubbardBundle(
         prov=prov,
         occupations=occ,
@@ -176,7 +202,17 @@ def dftu():
         edftu_reference_ev=float(data["edftu_ref_ev"]),
         conventions=conventions,
         stored_h=h_stored,
+        stored_h_provenance=producer_hubbard.stored_h_provenance,
     )
+    # Response machinery (ADR-005 Gamma pencil): the genuine folded
+    # projector overlap for the frozen channel -- not the XC carrier.
+    no_l = 4 * 9  # 9 orbitals per atom in the producer cell
+    S36 = np.zeros((no_l, no_l))
+    np.add.at(S36, (data["s_rows"], data["s_cols"] % no_l), data["s_vals"])
+    didx = [a * 9 + 1 + p for a in range(NSITES) for p in range(NORBD)]
+    S20_block = S36[np.ix_(didx, didx)]
+    fold_asymmetry = float(np.max(np.abs(S20_block - S20_block.T)))
+    S20 = 0.5 * (S20_block + S20_block.T)
     return {
         "data": data,
         "refs": refs,
@@ -594,7 +630,14 @@ def test_audit_passes_on_genuine_outputs(dftu, audit_artifact):
     assert audit_artifact["xc_source"]["digest"] == xc_source_payload_sha256(
         checked_bundle.stored_h
     )
-    assert audit_artifact["version"] == "1.2"
+    assert audit_artifact["version"] == "1.3"
+    # Producer-anchored XC carrier: XC presence is a producer fact,
+    # delivered by ingest_dftu_run from the producer HSX (FR-014).
+    assert checks["xc_carrier_producer_anchored"] is True
+    carrier = audit_artifact["xc_carrier_provenance"]
+    assert carrier["carrier"] == "producer HSX via ingest_dftu_run"
+    assert carrier["kind"] == "producer_hsx_stored_total_H"
+    assert carrier["hsx"] == dftu["bundle"].stored_h_provenance["hsx"]
     # story-014 open item: the Edftu oracle is recorded, never gated
     info = verdict["informational"]
     assert info["edftu_reference_ev"] == float(dftu["data"]["edftu_ref_ev"])
@@ -679,7 +722,10 @@ def test_build_refuses_missing_stored_h(dftu):
 
 def test_build_refuses_all_zero_stored_h(dftu):
     """An all-zero stored-H payload certifies a state with no XC
-    contribution in the total H: refused as empty_xc_source."""
+    contribution in the total H: refused as empty_xc_source.  The
+    synthetic bundle uses a PRODUCER-REPRESENTATIVE carrier (the
+    stored_h_provenance ingest_dftu_run sets) so the refusal is the
+    all-zero gate, not the missing-producer-anchor gate."""
     zeroed = HubbardBundle(
         prov=dftu["prov"],
         occupations=dftu["occ"],
@@ -689,6 +735,7 @@ def test_build_refuses_all_zero_stored_h(dftu):
         edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
         conventions=dftu["bundle"].conventions,
         stored_h=np.zeros_like(dftu["stored_h"]),
+        stored_h_provenance=dict(dftu["bundle"].stored_h_provenance),
     )
     with pytest.raises(ProvenanceAuditError) as excinfo:
         build_xc_hubbard_audit_artifact(
@@ -700,6 +747,65 @@ def test_build_refuses_all_zero_stored_h(dftu):
         )
     assert excinfo.value.reason == "empty_xc_source"
     assert "all-zero" in str(excinfo.value)
+
+
+def test_build_refuses_non_producer_stored_h(dftu):
+    """A stored-H payload NOT set by the certified ingestion path
+    (no producer anchor -- e.g. a Hubbard-only pencil) is not an XC
+    carrier: refused as empty_xc_source (FR-014)."""
+    unanchored_provenance = {
+        "kind": "downstream_pencil",
+        "note": "Hubbard-only Gamma pencil assembled below the producer",
+    }
+    with pytest.raises(HubbardBundleError) as excinfo:
+        HubbardBundle(
+            prov=dftu["prov"],
+            occupations=dftu["occ"],
+            v_hubbard=dftu["v_hubbard"],
+            v_dc=dftu["v_dc"],
+            edftu_ev=dftu["bundle"].edftu_ev,
+            edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
+            conventions=dftu["bundle"].conventions,
+            stored_h=dftu["stored_h"],
+            stored_h_provenance=unanchored_provenance,
+        )
+    assert "producer_hsx_stored_total_H" in str(excinfo.value)
+    # The producer anchor is also enforced on the import path: a
+    # re-digested certificate carrying an unanchored payload cannot be
+    # reimported (and the audit maps the defect to empty_xc_source --
+    # see test_audit_refuses_audit_side_unanchored_stored_h).
+    certificate = dftu["bundle"].to_certificate()
+    certificate["payload"]["stored_h_provenance"] = unanchored_provenance
+    arrays = {
+        key: np.asarray(certificate["payload"][key]["re"], dtype=float)
+        + 1j * np.asarray(certificate["payload"][key]["im"], dtype=float)
+        for key in ("occupations", "v_hubbard", "v_dc", "stored_h")
+    }
+    certificate["payload_sha256"] = HubbardBundle._digest_with(
+        certificate["payload"], arrays
+    )
+    with pytest.raises(HubbardBundleError) as excinfo:
+        HubbardBundle.from_certificate(certificate)
+    assert "producer_hsx_stored_total_H" in str(excinfo.value)
+
+
+def test_audit_refuses_audit_side_unanchored_stored_h(dftu, audit_artifact):
+    """Even re-digested consistently, a certificate whose stored-H
+    payload lost the producer anchor has no XC carrier: the audit
+    refuses (empty_xc_source)."""
+    certificate = json.loads(json.dumps(audit_artifact["certificate"]))
+    payload = certificate["payload"]
+    payload["stored_h_provenance"] = {"kind": "downstream_pencil"}
+    arrays = {
+        key: np.asarray(payload[key]["re"], dtype=float)
+        + 1j * np.asarray(payload[key]["im"], dtype=float)
+        for key in ("occupations", "v_hubbard", "v_dc", "stored_h")
+    }
+    certificate["payload_sha256"] = HubbardBundle._digest_with(payload, arrays)
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance({**audit_artifact, "certificate": certificate})
+    assert excinfo.value.reason == "empty_xc_source"
+    assert "producer-anchored" in str(excinfo.value)
 
 
 def test_audit_refuses_tampered_stored_h(audit_artifact):
@@ -758,7 +864,11 @@ def test_audit_refuses_stripped_hubbard_operator(dftu, audit_artifact):
         edftu_ev=dftu["bundle"].edftu_ev,
         edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
         conventions=dftu["bundle"].conventions,
+        # Producer-representative carrier (stored_h_provenance as set by
+        # ingest_dftu_run): the refusal under test is the stripped
+        # Hubbard operator, not a missing XC anchor.
         stored_h=dftu["stored_h"],
+        stored_h_provenance=dict(dftu["bundle"].stored_h_provenance),
     )
     stripped = build_xc_hubbard_audit_artifact(
         zeroed,
