@@ -57,6 +57,7 @@ from TB2J.interfaces.siesta_spiral_hubbard import (
     hubbard_site_block_unpack,
     rotated_hubbard_site_components,
     run_ac008_gate,
+    xc_source_payload_sha256,
 )
 from TB2J.interfaces.siesta_spiral_response import (
     CURVATURE_BUDGET_EV_PER_RAD2,
@@ -151,6 +152,21 @@ def dftu():
         ),
     )
     v_hubbard, v_dc, conventions = assemble_hubbard_operator(occ, prov)
+    # Stored total H over the certified correlated subspace
+    # (H_stored = H_xc + H_U): the Gamma frozen pencil assembled through
+    # the certified importer from the Hubbard operators and the genuine
+    # projector overlap.  This is the intrinsic XC carrier digested into
+    # the certificate (FR-014).
+    no_l = 4 * 9  # 9 orbitals per atom in the producer cell
+    S36 = np.zeros((no_l, no_l))
+    np.add.at(S36, (data["s_rows"], data["s_cols"] % no_l), data["s_vals"])
+    didx = [a * 9 + 1 + p for a in range(NSITES) for p in range(NORBD)]
+    S20_block = S36[np.ix_(didx, didx)]
+    fold_asymmetry = float(np.max(np.abs(S20_block - S20_block.T)))
+    S20 = 0.5 * (S20_block + S20_block.T)
+    h_stored, _ = SpiralImporter().assemble_pencil(
+        gamma_hubbard_bundle(v_hubbard, S20), 0.0
+    )
     bundle = HubbardBundle(
         prov=prov,
         occupations=occ,
@@ -159,6 +175,7 @@ def dftu():
         edftu_ev=edftu_oracle(occ, v_hubbard, v_dc, prov=prov),
         edftu_reference_ev=float(data["edftu_ref_ev"]),
         conventions=conventions,
+        stored_h=h_stored,
     )
     return {
         "data": data,
@@ -168,6 +185,10 @@ def dftu():
         "v_hubbard": v_hubbard,
         "v_dc": v_dc,
         "bundle": bundle,
+        "S20": S20,
+        "S20_block": S20_block,
+        "fold_asymmetry": fold_asymmetry,
+        "stored_h": h_stored,
     }
 
 
@@ -243,14 +264,8 @@ def gamma_hubbard_bundle(v_hubbard, S20):
 @pytest.fixture(scope="module")
 def gate(dftu, moments):
     """Bundle, declared ensemble, analytic response (story-009 machinery)."""
-    data = dftu["data"]
-    no_l = 4 * 9  # 9 orbitals per atom in the producer cell
-    S36 = np.zeros((no_l, no_l))
-    np.add.at(S36, (data["s_rows"], data["s_cols"] % no_l), data["s_vals"])
-    didx = [a * 9 + 1 + p for a in range(NSITES) for p in range(NORBD)]
-    block = S36[np.ix_(didx, didx)]
-    fold_asymmetry = float(np.max(np.abs(block - block.T)))
-    S20 = 0.5 * (block + block.T)
+    fold_asymmetry = dftu["fold_asymmetry"]
+    S20 = dftu["S20"]
 
     bundle = gamma_hubbard_bundle(dftu["v_hubbard"], S20)
     bundle.validate()
@@ -382,17 +397,17 @@ def contract_table(dftu, gate):
 
 
 @pytest.fixture(scope="module")
-def audit_artifact(dftu, gate):
-    """Audit envelope with the XC source pinned to the Gamma frozen
-    problem's stored total H (the XC contribution enters through the
-    stored total Hamiltonian, digested at export time)."""
+def audit_artifact(dftu):
+    """Audit envelope with the XC source pinned intrinsically: the
+    digest is derived from the certificate's own stored-H payload (the
+    stored total H, H_stored = H_xc + H_U), never from caller bytes."""
     return build_xc_hubbard_audit_artifact(
         dftu["bundle"],
         vertex_kind="xc+hubbard",
         producer_u_ry=float(dftu["data"]["u_ry"]),
         producer_j_ry=float(dftu["data"]["j_ry"]),
         producer_u_j_source=dftu["refs"]["u_j_stdout"],
-        xc_source={"kind": "stored_total_H", "payload": gate["bundle"].sparse},
+        xc_source={"kind": "stored_total_H"},
     )
 
 
@@ -570,9 +585,16 @@ def test_audit_passes_on_genuine_outputs(dftu, audit_artifact):
     assert checks["j_ry_matches_producer"] is True
     assert checks["projector_identity"] == dftu["prov"].projector_identity
     assert len(checks["rotation_contract_mathdoc_sha256"]) == 64
-    # XC source identity pinned and digested at export time (FR-014)
+    # XC source identity pinned and digested at export time (FR-014);
+    # the digest is intrinsic to the certificate's stored-H payload
     assert checks["xc_source_kind"] == "stored_total_H"
     assert len(checks["xc_source_digest"]) == 64
+    assert checks["xc_digest_intrinsic"] is True
+    checked_bundle = HubbardBundle.from_certificate(audit_artifact["certificate"])
+    assert audit_artifact["xc_source"]["digest"] == xc_source_payload_sha256(
+        checked_bundle.stored_h
+    )
+    assert audit_artifact["version"] == "1.2"
     # story-014 open item: the Edftu oracle is recorded, never gated
     info = verdict["informational"]
     assert info["edftu_reference_ev"] == float(dftu["data"]["edftu_ref_ev"])
@@ -595,8 +617,10 @@ def test_audit_refuses_stripped_xc_source(audit_artifact):
 
 
 def test_audit_refuses_substituted_xc_digest(audit_artifact):
-    """Substituting the XC digest after export breaks the export-time
-    binding to the certificate; the audit refuses fail-closed."""
+    """Substituting the XC digest after export is refused twice over:
+    the recomputed stored-H digest no longer matches, and the
+    export-time binding to the certificate breaks; the audit refuses
+    fail-closed."""
     tampered = {
         **audit_artifact,
         "xc_source": {
@@ -608,6 +632,114 @@ def test_audit_refuses_substituted_xc_digest(audit_artifact):
         audit_xc_hubbard_provenance(tampered)
     assert excinfo.value.reason == "stripped_xc_contribution"
     assert "substituted" in str(excinfo.value)
+
+
+def test_build_refuses_caller_payload(dftu):
+    """The caller payload parameter is gone: presenting XC content as
+    caller bytes is refused -- the digest provenance is the
+    certificate's stored-H payload, not the caller's."""
+    with pytest.raises(HubbardBundleError) as excinfo:
+        build_xc_hubbard_audit_artifact(
+            dftu["bundle"],
+            vertex_kind="xc+hubbard",
+            producer_u_ry=float(dftu["data"]["u_ry"]),
+            producer_j_ry=float(dftu["data"]["j_ry"]),
+            producer_u_j_source=dftu["refs"]["u_j_stdout"],
+            xc_source={
+                "kind": "stored_total_H",
+                "payload": b"unrelated caller bytes",
+            },
+        )
+    assert "payload" in str(excinfo.value)
+
+
+def test_build_refuses_missing_stored_h(dftu):
+    """A bundle whose certified state carries no stored-H payload has
+    no XC carrier: the artifact cannot be built (empty_xc_source)."""
+    bare = HubbardBundle(
+        prov=dftu["prov"],
+        occupations=dftu["occ"],
+        v_hubbard=dftu["v_hubbard"],
+        v_dc=dftu["v_dc"],
+        edftu_ev=dftu["bundle"].edftu_ev,
+        edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
+        conventions=dftu["bundle"].conventions,
+    )
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        build_xc_hubbard_audit_artifact(
+            bare,
+            vertex_kind="xc+hubbard",
+            producer_u_ry=float(dftu["data"]["u_ry"]),
+            producer_j_ry=float(dftu["data"]["j_ry"]),
+            producer_u_j_source=dftu["refs"]["u_j_stdout"],
+        )
+    assert excinfo.value.reason == "empty_xc_source"
+    assert "no XC carrier" in str(excinfo.value)
+
+
+def test_build_refuses_all_zero_stored_h(dftu):
+    """An all-zero stored-H payload certifies a state with no XC
+    contribution in the total H: refused as empty_xc_source."""
+    zeroed = HubbardBundle(
+        prov=dftu["prov"],
+        occupations=dftu["occ"],
+        v_hubbard=dftu["v_hubbard"],
+        v_dc=dftu["v_dc"],
+        edftu_ev=dftu["bundle"].edftu_ev,
+        edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
+        conventions=dftu["bundle"].conventions,
+        stored_h=np.zeros_like(dftu["stored_h"]),
+    )
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        build_xc_hubbard_audit_artifact(
+            zeroed,
+            vertex_kind="xc+hubbard",
+            producer_u_ry=float(dftu["data"]["u_ry"]),
+            producer_j_ry=float(dftu["data"]["j_ry"]),
+            producer_u_j_source=dftu["refs"]["u_j_stdout"],
+        )
+    assert excinfo.value.reason == "empty_xc_source"
+    assert "all-zero" in str(excinfo.value)
+
+
+def test_audit_refuses_tampered_stored_h(audit_artifact):
+    """Tampering the certificate's stored-H arrays (with a re-digested
+    certificate so the payload digest stays consistent) is caught by
+    the intrinsic recompute: the recorded XC digest no longer matches."""
+    certificate = json.loads(json.dumps(audit_artifact["certificate"]))
+    payload = certificate["payload"]
+    re_arr = np.asarray(payload["stored_h"]["re"], dtype=float)
+    payload["stored_h"]["re"] = (re_arr * 1.01).tolist()
+    arrays = {
+        key: np.asarray(payload[key]["re"], dtype=float)
+        + 1j * np.asarray(payload[key]["im"], dtype=float)
+        for key in ("occupations", "v_hubbard", "v_dc", "stored_h")
+    }
+    certificate["payload_sha256"] = HubbardBundle._digest_with(payload, arrays)
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance({**audit_artifact, "certificate": certificate})
+    assert excinfo.value.reason == "stripped_xc_contribution"
+    assert "recomputed" in str(excinfo.value)
+
+
+def test_audit_refuses_audit_side_zeroed_stored_h(audit_artifact):
+    """Even with consistent re-digestion, zeroing the stored-H payload
+    removes the XC carrier entirely: refused as empty_xc_source."""
+    certificate = json.loads(json.dumps(audit_artifact["certificate"]))
+    payload = certificate["payload"]
+    payload["stored_h"] = {
+        "re": np.zeros_like(np.asarray(payload["stored_h"]["re"])).tolist(),
+        "im": np.zeros_like(np.asarray(payload["stored_h"]["im"])).tolist(),
+    }
+    arrays = {
+        key: np.asarray(payload[key]["re"], dtype=float)
+        + 1j * np.asarray(payload[key]["im"], dtype=float)
+        for key in ("occupations", "v_hubbard", "v_dc", "stored_h")
+    }
+    certificate["payload_sha256"] = HubbardBundle._digest_with(payload, arrays)
+    with pytest.raises(ProvenanceAuditError) as excinfo:
+        audit_xc_hubbard_provenance({**audit_artifact, "certificate": certificate})
+    assert excinfo.value.reason == "empty_xc_source"
 
 
 def test_audit_refuses_stripped_hubbard_declaration(audit_artifact):
@@ -626,6 +758,7 @@ def test_audit_refuses_stripped_hubbard_operator(dftu, audit_artifact):
         edftu_ev=dftu["bundle"].edftu_ev,
         edftu_reference_ev=dftu["bundle"].edftu_reference_ev,
         conventions=dftu["bundle"].conventions,
+        stored_h=dftu["stored_h"],
     )
     stripped = build_xc_hubbard_audit_artifact(
         zeroed,
@@ -633,10 +766,6 @@ def test_audit_refuses_stripped_hubbard_operator(dftu, audit_artifact):
         producer_u_ry=float(dftu["data"]["u_ry"]),
         producer_j_ry=float(dftu["data"]["j_ry"]),
         producer_u_j_source=dftu["refs"]["u_j_stdout"],
-        xc_source={
-            "kind": "stored_total_H",
-            "payload": audit_artifact["xc_source"]["digest"],
-        },
     )
     with pytest.raises(ProvenanceAuditError) as excinfo:
         audit_xc_hubbard_provenance(stripped)
@@ -675,6 +804,7 @@ def _repackaged_certificate(dftu, prov_payload_mutator):
                 "occupations": dftu["bundle"].occupations.astype(complex),
                 "v_hubbard": dftu["bundle"].v_hubbard.astype(complex),
                 "v_dc": dftu["bundle"].v_dc.astype(complex),
+                "stored_h": dftu["bundle"].stored_h.astype(complex),
             },
         ),
     }

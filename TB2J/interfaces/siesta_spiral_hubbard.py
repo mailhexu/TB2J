@@ -1082,6 +1082,12 @@ class HubbardBundle:
     the +U potential (H_stored = H_xc + H_U); consumers must not add
     V_U to the stored H again (story-015/016 handle the rotated-frame
     operator algebra on xc and hubbard vertices separately).
+
+    ``stored_h`` (optional) is the stored total H over the certified
+    correlated subspace (H_stored = H_xc + H_U), i.e. the intrinsic XC
+    carrier: it is digested into the certificate so the XC provenance
+    audit derives its digest from certified arrays, never from
+    caller-supplied bytes (FR-014).
     """
 
     prov: DftuProvenance
@@ -1092,6 +1098,7 @@ class HubbardBundle:
     edftu_reference_ev: float
     fixture_digest: str = ""
     conventions: dict = field(default_factory=lambda: dict(_HUBBARD_CONVENTIONS))
+    stored_h: np.ndarray | None = None
     note: str = (
         "H_stored = H_xc + H_U (final_H_f_stress.F): the stored HSX "
         "Hamiltonian already contains the +U potential; do not add "
@@ -1116,6 +1123,13 @@ class HubbardBundle:
                 "HubbardBundle potentials must match the occupation shape "
                 f"{occ.shape}; got {vh.shape} and {vd.shape}"
             )
+        if self.stored_h is not None:
+            sh = np.asarray(self.stored_h, dtype=complex)
+            if sh.ndim != 2 or sh.shape[0] != sh.shape[1]:
+                raise HubbardBundleError(
+                    "HubbardBundle stored_h must be a square (n, n) "
+                    f"stored-total-H array, got {sh.shape}"
+                )
 
     @staticmethod
     def _complex_payload(arr: np.ndarray) -> dict:
@@ -1149,14 +1163,15 @@ class HubbardBundle:
             "conventions": self.conventions,
             "note": self.note,
         }
-        digest = self._digest_with(
-            payload,
-            {
-                "occupations": np.asarray(self.occupations, dtype=complex),
-                "v_hubbard": np.asarray(self.v_hubbard, dtype=complex),
-                "v_dc": np.asarray(self.v_dc, dtype=complex),
-            },
-        )
+        arrays = {
+            "occupations": np.asarray(self.occupations, dtype=complex),
+            "v_hubbard": np.asarray(self.v_hubbard, dtype=complex),
+            "v_dc": np.asarray(self.v_dc, dtype=complex),
+        }
+        if self.stored_h is not None:
+            payload["stored_h"] = self._complex_payload(self.stored_h)
+            arrays["stored_h"] = np.asarray(self.stored_h, dtype=complex)
+        digest = self._digest_with(payload, arrays)
         return {
             "kind": "hubbard_bundle_certificate",
             "version": "1.1",
@@ -1193,6 +1208,8 @@ class HubbardBundle:
             "v_hubbard": _complex("v_hubbard"),
             "v_dc": _complex("v_dc"),
         }
+        if "stored_h" in payload:
+            arrays["stored_h"] = _complex("stored_h")
         digest = cls._digest_with(payload, arrays)
         if digest != cert.get("payload_sha256"):
             raise HubbardBundleError(
@@ -1210,6 +1227,7 @@ class HubbardBundle:
             edftu_reference_ev=payload["edftu_reference_ev"],
             fixture_digest=payload.get("fixture_digest", ""),
             conventions=payload.get("conventions", {}),
+            stored_h=arrays.get("stored_h"),
             note=payload.get("note", ""),
         )
 
@@ -1677,7 +1695,7 @@ def build_xc_hubbard_audit_artifact(
     producer_u_ry,
     producer_j_ry,
     producer_u_j_source,
-    xc_source,
+    xc_source=None,
     rotation_contract_sha256=None,
 ):
     """Assemble the serializable XC+Hubbard provenance-audit artifact.
@@ -1688,53 +1706,80 @@ def build_xc_hubbard_audit_artifact(
     U/J reference (the substitution anchor) and the rotation-contract
     MathDoc sha256.
 
-    ``xc_source`` pins the identity of the XC contribution inside the
-    +U total H (FR-014): a dict with
+    The XC source digest is INTRINSIC (FR-014): it is derived from the
+    certificate's own stored-H payload (``bundle.stored_h``, the stored
+    total H over the certified subspace, H_stored = H_xc + H_U), never
+    from caller-supplied bytes.  A certificate whose certified state
+    carries no stored-H payload -- or an all-zero one -- is exactly the
+    stripped-XC output and is refused here with the ``empty_xc_source``
+    reason: an artifact with no XC carrier cannot pass the audit.
 
-    * ``kind`` -- ``"stored_total_H"`` (the XC contribution enters
-      through the stored total Hamiltonian) or ``"vertex"`` (it enters
-      through the extracted magnetic vertex), and
-    * ``payload`` -- the actual XC source content (array / bytes /
-      mapping / sequence) that is sha256-digested here at export time.
+    ``xc_source`` only carries the label of where the XC contribution
+    enters the +U total H: ``{"kind": "stored_total_H"}`` (default) or
+    ``{"kind": "vertex"}``.  A ``payload`` key is refused -- the digest
+    provenance is the certificate's, not the caller's.
 
     The recorded digest is bound to the certificate digest
     (``xc_digest_binding``), so post-export substitution of the XC
     digest alone is detected by the audit.  Declaring
     ``vertex_kind="xc"`` on a +U run -- or exporting without an
-    XC source identity at all -- is exactly the stripped-XC output
-    the audit must refuse (FR-014/FR-005).
+    XC carrier at all -- is exactly the stripped-XC output the audit
+    must refuse (FR-014/FR-005).
     """
     sha = rotation_contract_sha256
     if sha is None:
         sha = rotation_contract_mathdoc_sha256()
+    if xc_source is None:
+        xc_source = {"kind": "stored_total_H"}
     if not isinstance(xc_source, dict):
         raise HubbardBundleError(
-            "build_xc_hubbard_audit_artifact requires xc_source with "
-            "{'kind': 'stored_total_H'|'vertex', 'payload': <xc content>}; "
-            "a +U export without an XC source identity cannot be audited "
-            "against stripping (FR-014)"
+            "build_xc_hubbard_audit_artifact xc_source must be a label "
+            "dict {'kind': 'stored_total_H'|'vertex'}; the digest is "
+            "derived from the certificate's stored-H payload, not from "
+            "caller bytes (FR-014)"
         )
-    xc_kind = str(xc_source.get("kind", ""))
+    if "payload" in xc_source:
+        raise HubbardBundleError(
+            "xc_source carries a caller payload; the XC digest is "
+            "intrinsic to the certificate's stored-H payload and must "
+            "not be presented as caller bytes (FR-014)"
+        )
+    xc_kind = str(xc_source.get("kind", "stored_total_H"))
     if xc_kind not in ("stored_total_H", "vertex"):
         raise HubbardBundleError(
             f"xc_source kind {xc_kind!r} is not one of 'stored_total_H' "
             "or 'vertex'; identify where the XC contribution enters the "
             "+U total H (FR-014)"
         )
-    xc_payload = xc_source.get("payload")
-    if xc_payload is None:
-        raise HubbardBundleError(
-            "xc_source carries no payload; the XC content must be "
-            "presented at export so it can be digested (FR-014)"
-        )
-    xc_digest = xc_source_payload_sha256(xc_payload)
     certificate = bundle.to_certificate()
+    stored_h = certificate["payload"].get("stored_h")
+    if stored_h is None:
+        raise ProvenanceAuditError(
+            "empty_xc_source",
+            "the certified +U state carries no stored-H payload "
+            "(H_stored = H_xc + H_U); an artifact whose certified state "
+            "has no XC carrier cannot pass the provenance audit -- "
+            "re-export from a genuine +U run that retains the stored "
+            "total H (FR-014)",
+        )
+    stored_h_arr = np.asarray(stored_h["re"], dtype=float) + 1j * np.asarray(
+        stored_h["im"], dtype=float
+    )
+    if stored_h_arr.size == 0 or not np.any(stored_h_arr):
+        raise ProvenanceAuditError(
+            "empty_xc_source",
+            "the certified +U state carries an all-zero stored-H "
+            "payload: no XC contribution is present in the certified "
+            "total H (H_stored = H_xc + H_U) -- the XC channel was "
+            "stripped; re-export from a genuine +U run (FR-014)",
+        )
+    xc_digest = xc_source_payload_sha256(stored_h_arr)
     binding = hashlib.sha256(
         (certificate["payload_sha256"] + xc_digest).encode("utf-8")
     ).hexdigest()
     return {
         "kind": "xc_hubbard_provenance_audit",
-        "version": "1.1",
+        "version": "1.2",
         "vertex_kind": str(vertex_kind),
         "xc_source": {"kind": xc_kind, "digest": xc_digest},
         "xc_digest_binding": binding,
@@ -1758,8 +1803,11 @@ def audit_xc_hubbard_provenance(artifact):
 
     * ``malformed_audit_artifact`` -- not an audit envelope/certificate;
     * ``tampered_certificate_payload`` -- certificate digest mismatch;
+    * ``empty_xc_source`` -- the certified state carries no stored-H
+      payload (missing or all-zero): no XC carrier exists to audit;
     * ``stripped_xc_contribution`` -- missing/malformed XC source
-      identity or digest, or a digest breaking its export-time binding;
+      identity or digest, a digest not matching the recomputed
+      stored-H digest, or a digest breaking its export-time binding;
     * ``stripped_hubbard_contribution`` -- vertex kind xc(-only) or
       vanishing Hubbard operator where +U is declared;
     * ``substituted_u_j`` -- U/J differing from the producer reference;
@@ -1845,6 +1893,39 @@ def audit_xc_hubbard_provenance(artifact):
             f"xc_source digest {xc_digest!r} is not a sha256 hex digest; "
             "re-export the +U artifact so the XC payload is digested at "
             "export time (FR-014)",
+        )
+    # The digest provenance is intrinsic: recompute it from the
+    # certificate's own stored-H payload and refuse any drift.
+    stored_h = certificate["payload"].get("stored_h")
+    if stored_h is None:
+        refuse(
+            "empty_xc_source",
+            "the certified +U state carries no stored-H payload "
+            "(H_stored = H_xc + H_U): the certified state has no XC "
+            "carrier, so the output is indistinguishable from an "
+            "H0+V^U export with the XC contribution stripped -- "
+            "re-export from a genuine +U run (FR-014)",
+        )
+    stored_h_arr = np.asarray(stored_h["re"], dtype=float) + 1j * np.asarray(
+        stored_h["im"], dtype=float
+    )
+    if stored_h_arr.size == 0 or not np.any(stored_h_arr):
+        refuse(
+            "empty_xc_source",
+            "the certified +U state carries an all-zero stored-H "
+            "payload: no XC contribution is present in the certified "
+            "total H -- the XC channel was stripped; re-export from a "
+            "genuine +U run (FR-014)",
+        )
+    intrinsic_digest = xc_source_payload_sha256(stored_h_arr)
+    if xc_digest != intrinsic_digest:
+        refuse(
+            "stripped_xc_contribution",
+            "xc_source digest does not match the digest recomputed from "
+            "the certificate's stored-H payload (payload sha "
+            f"{certificate['payload_sha256'][:12]}...): the XC "
+            "contribution was substituted or re-digested after export -- "
+            "re-export from the producer run",
         )
     expected_binding = hashlib.sha256(
         (certificate["payload_sha256"] + xc_digest).encode("utf-8")
@@ -1964,6 +2045,7 @@ def audit_xc_hubbard_provenance(artifact):
             "certificate_digest": "verified",
             "xc_source_kind": xc_source["kind"],
             "xc_source_digest": xc_digest,
+            "xc_digest_intrinsic": True,
             "vertex_kind_xc_plus_hubbard": True,
             "hubbard_operator_scale_ry": w_scale,
             "u_ry_matches_producer": True,
