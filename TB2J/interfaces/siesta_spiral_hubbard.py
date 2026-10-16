@@ -2410,6 +2410,9 @@ def run_ac008_gate(
         ``TB2J.interfaces.siesta_spiral_validation.validate_finite_rotations``
         on the frozen problem built from this bundle's operator
         (analytic local response vs finite rotations, story-010 machinery).
+        Its certified ``vertex_sha256``, ``source_bundle_sha256`` and
+        ``raw_response_sha256`` are retained verbatim, binding this verdict
+        to the actual frozen operator, source pencil and analytic response.
     contract_table : list of dict
         Per-rotation rows binding the story-015 contract to the same
         frozen problem at the energy level; each row carries ``site``,
@@ -2452,6 +2455,31 @@ def run_ac008_gate(
     except ProvenanceAuditError as exc:
         audit_verdict = {"passed": False, "reason": exc.reason, "diagnostic": str(exc)}
 
+    if not isinstance(bundle, HubbardBundle):
+        raise HubbardBundleError("AC-008 requires the HubbardBundle under audit")
+    input_certificate = bundle.to_certificate()
+    audited_certificate = (
+        audit_artifact.get("certificate") if isinstance(audit_artifact, dict) else None
+    )
+    input_matches_audit = (
+        isinstance(audited_certificate, dict)
+        and audited_certificate.get("payload_sha256")
+        == input_certificate["payload_sha256"]
+    )
+    # These identities are produced by validate_finite_rotations from its
+    # certified FrozenResponseProblem and ResponseSet. A HubbardBundle is
+    # not the Gamma SpiralBundle used by story-016: hashing it in place of
+    # the validated source would certify a different operator/pencil.
+    identity_keys = ("vertex_sha256", "source_bundle_sha256", "raw_response_sha256")
+    identities = {key: cross_check.get(key) for key in identity_keys}
+    missing_identities = [
+        key
+        for key, value in identities.items()
+        if not isinstance(value, str)
+        or len(value) != 64
+        or any(c not in "0123456789abcdef" for c in value)
+    ]
+
     record = ensemble.to_record()
     declared_ensemble_string = (
         "ADR-005 {kind}: n_occupied={n}, electron_count={ne}, "
@@ -2490,6 +2518,12 @@ def run_ac008_gate(
         )
     table_angles = sorted({float(row["angle_rad"]) for row in contract_table})
     reasons = []
+    if missing_identities:
+        reasons.append("missing_certified_response_identity")
+    if not input_matches_audit:
+        reasons.append("audit_certificate_does_not_match_hubbard_input")
+    if cross_check.get("ensemble") != record:
+        reasons.append("cross_check_ensemble_mismatch")
     if not audit_verdict.get("passed"):
         reasons.append("provenance_audit_" + audit_verdict.get("reason", "refused"))
     if not cross_check.get("passed"):
@@ -2549,6 +2583,8 @@ def run_ac008_gate(
         "version": "1.0",
         "passed": not reasons,
         "failure_reasons": reasons,
+        **identities,
+        "hubbard_payload_sha256": input_certificate["payload_sha256"],
         "declared_ensemble": record,
         "declared_ensemble_string": declared_ensemble_string,
         "tolerances": {
@@ -2577,6 +2613,11 @@ def run_ac008_gate(
         },
         "provenance_verdicts": {
             "audit": audit_verdict,
+            "input_certificate": {
+                "payload_sha256": input_certificate["payload_sha256"],
+                "matches_audit": input_matches_audit,
+                "missing_response_identities": missing_identities,
+            },
             "rotation_contract": {
                 "mathdoc": "tb2j/siesta-spiral-hubbard-rotation",
                 "tolerance_relative": HUBBARD_ROTATION_TOLERANCE,

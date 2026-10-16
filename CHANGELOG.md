@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- SIESTA spiral certified exports now bind AC-009 to the complete derivative
+  records (`seam_payload_sha256` for dH/dR+dS/dR and
+  `derivative_payload_sha256` for dV/dR), including geometry, units, gauges
+  and declarations. Partial or missing digest evidence is refused.
+- AC-008 verdicts carry the certified `vertex_sha256` and
+  `source_bundle_sha256`; +U exports require both to match their response.
+  Unknown operator identity requires an explicit `requires_plusu` declaration
+  rather than silently assuming a non-+U calculation. Raw-response-only
+  exports continue to omit exchange parameters.
+- Spiral provenance preserves the revision and independently records
+  `code_sha256` over the relevant implementation modules. Ensemble audits
+  compare the producer's `declaration` as well as numerical fields.
+
 - All projector interfaces (GPAW, ABINIT NC/PAW/savetb2j, VASP
   native/split-SOC, QE) now bound the real-space pair list by the
   k-mesh supercell instead of extending it purely from `Rcut`: the

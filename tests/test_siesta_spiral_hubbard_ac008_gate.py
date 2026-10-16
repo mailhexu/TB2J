@@ -979,6 +979,17 @@ def test_gate_driver_verdict(
     assert verdict["gate"] == "AC-008"
     assert verdict["passed"] is True, verdict["failure_reasons"]
     assert verdict["failure_reasons"] == []
+    for key in ("vertex_sha256", "source_bundle_sha256"):
+        assert verdict[key] == gate["response"].provenance[key]
+        assert verdict[key] == gate["problem"].vertex.certificate[key]
+        assert verdict[key] == cross_check[key]
+    assert (
+        verdict["raw_response_sha256"] == gate["response"].to_dict()["content_sha256"]
+    )
+    assert (
+        verdict["hubbard_payload_sha256"]
+        == dftu["bundle"].to_certificate()["payload_sha256"]
+    )
 
     # declared ensemble (ADR-005 string + record)
     assert "ADR-005" in verdict["declared_ensemble_string"]
@@ -1129,3 +1140,163 @@ def test_gate_driver_refuses_missing_dc_freeze_evidence(
     assert verdict["passed"] is False
     assert "missing_dc_freeze_evidence" in verdict["failure_reasons"]
     assert verdict["contract_wire_in"]["double_counting_frozen"] is False
+
+
+def _identity_producer_case(source_ref):
+    """Full d-shell shapes through the real extraction/response/FD producers.
+
+    This deterministic model is not a genuine SIESTA export and deliberately
+    lacks an XC audit carrier; it must not obtain a passing AC-008 verdict.
+    The genuine-data gate above separately covers a passing certification.
+    """
+    from dataclasses import replace
+
+    from test_siesta_spiral_hubbard import make_prov
+
+    prov = make_prov()
+    prov = replace(prov, source_refs={**prov.source_refs, "u_j_stdout": source_ref})
+    occ = np.zeros((NSITES, 4, NORBD, NORBD), dtype=complex)
+    occ[:, 0] = 0.8 * np.eye(NORBD)
+    occ[:, 1] = 0.2 * np.eye(NORBD)
+    vh, vd, conventions = assemble_hubbard_operator(occ, prov)
+    energy = edftu_oracle(occ, vh, vd, prov=prov)
+    hb = HubbardBundle(prov, occ, vh, vd, energy, energy, conventions=conventions)
+    bundle = gamma_hubbard_bundle(vh, np.eye(NORB))
+    # Add a known model XC field to the Hubbard Hamiltonian before declaring
+    # the total-H +U provenance; a Hubbard-only pencil is not XC+Hubbard.
+    sparse = {}
+    for key, (up, down, real, imag) in bundle.sparse.items():
+        delta = 0.1 if key[0] == key[1] else 0.0
+        sparse[key] = (up + delta, down - delta, real, imag)
+    bundle = replace(bundle, sparse=sparse, hubbard=prov)
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site=ORBITALS_BY_SITE)
+    frames = {site: _transverse_frame((0.0, 0.0, 1.0)) for site in SITE_LABELS}
+    problem = FrozenResponseProblem(
+        bundle, vertex, axes_by_site={s: tuple(f.items()) for s, f in frames.items()}
+    )
+    eig = eigh(*problem.pencil(0.0), eigvals_only=True)
+    gap = float(eig[NOCC] - eig[NOCC - 1])
+    fermi = float((eig[NOCC] + eig[NOCC - 1]) / 2)
+    ensemble = Ensemble(ENSEMBLE_GAPPED_T0, NOCC, float(NOCC), fermi, 0.0, gap)
+    response = evaluate_response_set(
+        problem,
+        ensemble=ensemble,
+        coords=tuple((s, a) for s in SITE_LABELS for a in ("x", "y")),
+        kpoints=[0.0],
+        k_weights=[1.0],
+        contour=EnergyContour.declared(
+            z0=fermi,
+            occupied_min=float(eig[0]),
+            gap_ev=gap,
+            margin_ev=0.3,
+            n_nodes=512,
+        ),
+        finite_steps=(),
+    )
+    cross_check = validate_finite_rotations(
+        problem,
+        response,
+        axes_by_site=frames,
+        reference_directions_by_site={s: (0.0, 0.0, 1.0) for s in SITE_LABELS},
+        ensemble=ensemble,
+        kpoints=[0.0],
+        k_weights=[1.0],
+        angle_ladder=STABLE_WINDOW_ANGLES,
+    ).finite_rotation_cross_check
+    return hb, bundle, vertex, response, ensemble, cross_check
+
+
+def test_gate_producer_identities_match_response_and_distinguish_source_refs():
+    cases = [_identity_producer_case(f"reference-{i}.out:DFTUprojs") for i in (1, 2)]
+    verdicts = []
+    for hb, bundle, vertex, response, ensemble, cross_check in cases:
+        before = response.to_dict()
+        verdict = run_ac008_gate(
+            hb,
+            cross_check=cross_check,
+            contract_table=[],
+            ensemble=ensemble,
+            texture_provenance={},
+            audit_artifact={"certificate": hb.to_certificate()},
+        )
+        assert not verdict["passed"]  # no genuine XC carrier / contract evidence
+        assert verdict["provenance_verdicts"]["input_certificate"]["matches_audit"]
+        for key in ("vertex_sha256", "source_bundle_sha256"):
+            assert verdict[key] == response.provenance[key] == vertex.certificate[key]
+        assert verdict["raw_response_sha256"] == before["content_sha256"]
+        assert response.to_dict() == before
+        assert response.provenance["vertex_kind"] == "xc+hubbard"
+        assert response.provenance["hubbard"] == bundle.hubbard.to_dict()
+        from TB2J.interfaces.siesta_spiral_metallic import (
+            evaluate_metallic_response_set,
+        )
+
+        metallic = evaluate_metallic_response_set(
+            FrozenResponseProblem(
+                bundle,
+                vertex,
+                axes_by_site={
+                    s: tuple(_transverse_frame((0.0, 0.0, 1.0)).items())
+                    for s in SITE_LABELS
+                },
+            ),
+            ensemble=Ensemble(
+                "metallic_fermi_dirac_fixed_n",
+                NOCC,
+                float(NOCC),
+                ensemble.fermi_energy_ev,
+                0.2,
+                ensemble.gap_ev,
+            ),
+            coords=tuple((s, a) for s in SITE_LABELS for a in ("x", "y")),
+            kpoints=[0.0],
+            k_weights=[1.0],
+            finite_steps=(),
+        )
+        assert metallic.provenance["vertex_kind"] == "xc+hubbard"
+        assert metallic.provenance["hubbard"] == bundle.hubbard.to_dict()
+        for key in ("vertex_sha256", "source_bundle_sha256"):
+            assert metallic.provenance[key] == response.provenance[key]
+        verdicts.append(verdict)
+    for key in ("vertex_sha256", "source_bundle_sha256"):
+        assert verdicts[0][key] != verdicts[1][key]
+    assert cases[0][3].curvature == cases[1][3].curvature
+
+
+@pytest.mark.parametrize(
+    "key", ["vertex_sha256", "source_bundle_sha256", "raw_response_sha256"]
+)
+def test_gate_driver_refuses_absent_certified_identity(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments, key
+):
+    stripped = {k: v for k, v in cross_check.items() if k != key}
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check=stripped,
+        contract_table=contract_table,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert not verdict["passed"]
+    assert "missing_certified_response_identity" in verdict["failure_reasons"]
+
+
+def test_gate_driver_refuses_foreign_hubbard_audit_certificate(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    from dataclasses import replace
+
+    other = replace(dftu["bundle"], fixture_digest="different-reference")
+    verdict = run_ac008_gate(
+        other,
+        cross_check=cross_check,
+        contract_table=contract_table,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert not verdict["passed"]
+    assert (
+        "audit_certificate_does_not_match_hubbard_input" in verdict["failure_reasons"]
+    )

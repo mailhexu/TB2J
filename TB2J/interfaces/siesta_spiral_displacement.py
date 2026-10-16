@@ -25,13 +25,17 @@ gauge at assembly.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 
 import numpy as np
 
 from TB2J.interfaces.siesta_spiral import SpiralBundle
-from TB2J.interfaces.siesta_spiral_hubbard import BOHR_TO_ANG, _bundle_from_hs_geometry
+from TB2J.interfaces.siesta_spiral_hubbard import (
+    BOHR_TO_ANG,
+    _bundle_from_hs_geometry,
+    xc_source_payload_sha256,
+)
 
 BOHR_TO_ANG_ = BOHR_TO_ANG
 RY_TO_EV = 13.605693122994
@@ -186,6 +190,39 @@ class DisplacementDerivatives:
     units: dict
     reference_digests: tuple
     reference_geometry: GeometrySource
+
+
+def displacement_payload_sha256(record):
+    """Bind every field of a seam or vertex derivative record canonically.
+
+    Dataclasses (including the pattern and reference geometry) are expanded
+    without copying their arrays. Sparse mappings retain every key/value;
+    units, declarations and provenance are included, not merely the onsite
+    magnetic components compared by AC-009. The shared AC-008 canonical
+    hashing convention refuses unsupported payload values rather than
+    certifying their repr. No vertex-module import is needed here.
+    """
+    if not is_dataclass(record) or isinstance(record, type):
+        raise TypeError("displacement payload must be a derivative dataclass record")
+
+    def payload(value):
+        if is_dataclass(value) and not isinstance(value, type):
+            return {
+                "record_type": type(value).__name__,
+                "fields": {
+                    item.name: payload(getattr(value, item.name))
+                    for item in fields(value)
+                },
+            }
+        if isinstance(value, dict):
+            return {key: payload(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return tuple(payload(item) for item in value)
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
+
+    return xc_source_payload_sha256(payload(record))
 
 
 @dataclass(frozen=True)

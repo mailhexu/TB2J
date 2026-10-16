@@ -62,6 +62,7 @@ from TB2J.interfaces.siesta_spiral_mapping import (
 from TB2J.interfaces.siesta_spiral_response import (
     ENSEMBLE_GAPPED_T0,
     ENSEMBLE_METALLIC_FD,
+    Ensemble,
 )
 from TB2J.interfaces.siesta_spiral_vertex_displacement import (
     run_ac009_validation,
@@ -113,7 +114,7 @@ def exact_response():
     for label in AXES:
         a, b = (SITE_ORDER[0], label), (SITE_ORDER[1], label)
         curvature[(a, b)] = curvature[(b, a)] = -0.1
-    return build_synthetic_response_set(
+    response = build_synthetic_response_set(
         site_order=SITE_ORDER,
         axes_by_site={site: dict(AXES) for site in SITE_ORDER},
         gradient={coord: 0.0 for coord in coords},
@@ -125,6 +126,10 @@ def exact_response():
             "gap_ev": 1.0,
             "synthetic": True,
         },
+    )
+    return replace(
+        response,
+        provenance={**response.provenance, "requires_plusu": False},
     )
 
 
@@ -146,6 +151,10 @@ def incompatible_mapping(exact_response):
         gradient=exact_response.gradient,
         curvature=curvature,
         ensemble=exact_response.ensemble,
+    )
+    response = replace(
+        response,
+        provenance={**response.provenance, "requires_plusu": False},
     )
     return map_response_set(response, reference_directions_by_site=REFERENCES)
 
@@ -204,6 +213,7 @@ def test_provenance_roundtrip_preserves_inputs_revision_time_and_gates():
     provenance = ProvenanceSchema(
         input_digests={"response": "a" * 64, "mapping": "b" * 64},
         code_revision="0123456789abcdef0123456789abcdef01234567",
+        code_sha256="c" * 64,
         created_utc=CREATED_UTC,
         gate_verdicts=({"gate": "synthetic-consumed-gate", "passed": True},),
     )
@@ -213,6 +223,7 @@ def test_provenance_roundtrip_preserves_inputs_revision_time_and_gates():
     restored = ProvenanceSchema.from_dict(_json_value(record))
     assert restored.input_digests == provenance.input_digests
     assert restored.code_revision == provenance.code_revision
+    assert restored.code_sha256 == provenance.code_sha256
     assert restored.created_utc == CREATED_UTC
     assert isinstance(restored.gate_verdicts, tuple)
     assert restored.gate_verdicts == provenance.gate_verdicts
@@ -224,6 +235,7 @@ def test_provenance_roundtrip_preserves_inputs_revision_time_and_gates():
     [
         "input_digests",
         "code_revision",
+        "code_sha256",
         "created_utc",
         "gate_verdicts",
         "content_sha256",
@@ -233,12 +245,14 @@ def test_provenance_refuses_tampered_payload(field):
     record = ProvenanceSchema(
         input_digests={"response": "a" * 64},
         code_revision="0123456789abcdef0123456789abcdef01234567",
+        code_sha256="c" * 64,
         created_utc=CREATED_UTC,
         gate_verdicts=(),
     ).to_dict()
     record[field] = {
         "input_digests": {"response": "b" * 64},
         "code_revision": "changed-revision",
+        "code_sha256": "d" * 64,
         "created_utc": "2026-10-17T08:00:00Z",
         "gate_verdicts": [{"gate": "substituted", "passed": True}],
         "content_sha256": "0" * 64,
@@ -253,6 +267,7 @@ def test_provenance_refuses_missing_content_digest():
     record = ProvenanceSchema(
         input_digests={"response": "a" * 64},
         code_revision="0123456789abcdef0123456789abcdef01234567",
+        code_sha256="c" * 64,
         created_utc=CREATED_UTC,
         gate_verdicts=(),
     ).to_dict()
@@ -307,6 +322,8 @@ def test_certified_mapping_constructs_spinio_and_preserves_fr009_metadata(
     provenance = ProvenanceSchema.from_dict(exported["provenance"])
     assert provenance.created_utc == CREATED_UTC
     assert provenance.code_revision
+    assert len(provenance.code_sha256) == 64
+    int(provenance.code_sha256, 16)
     assert len(provenance.input_digests) >= 2
     assert all(len(digest) == 64 for digest in provenance.input_digests.values())
 
@@ -606,3 +623,214 @@ def test_altered_vertex_derivative_cannot_reuse_unrelated_ac009_pass(
     assert exc.value.reason == "uncertified_displacement"
     assert "AC-009" in str(exc.value)
     assert source.dV[key] == original
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["dS", "offsite_dH", "scalar_onsite_dH", "units", "geometry", "recipe"],
+)
+def test_full_seam_payload_cannot_reuse_ac009_pass(certified_displacements, change):
+    source = certified_displacements["raw"]
+    before = deepcopy(asdict(source))
+    if change == "dS":
+        values = dict(source.dS)
+        key = next(iter(values))
+        values[key] += 0.01
+        changed = replace(source, dS=values)
+    elif change in ("offsite_dH", "scalar_onsite_dH"):
+        values = dict(source.dH)
+        if change == "offsite_dH":
+            key = next(key for key in values if key[0] != key[1] or any(key[2]))
+            values[key] = (values[key][0] + 0.01, *values[key][1:])
+        else:
+            key = next(key for key in values if key[0] == key[1] and not any(key[2]))
+            h1, h2, h3, h4 = values[key]
+            values[key] = (h1 + 0.01, h2 + 0.01, h3, h4)
+        changed = replace(source, dH=values)
+    elif change == "units":
+        changed = replace(source, units={**source.units, "dH": "Ry/bohr"})
+    elif change == "geometry":
+        changed = replace(
+            source,
+            reference_geometry=replace(
+                source.reference_geometry, displaced_axis_offset_bohr=0.125
+            ),
+        )
+    else:
+        changed = replace(source, producer_recipe="another derivative producer")
+    with pytest.raises(UncertifiedDisplacement, match="seam_payload_sha256"):
+        build_exchange_export(
+            displacement=changed, ac009_verdict=certified_displacements["verdict"]
+        )
+    assert asdict(source) == before
+
+
+@pytest.mark.parametrize(
+    ("record_kind", "digest_field"),
+    [
+        ("raw", "seam_payload_sha256"),
+        ("vertex", "derivative_payload_sha256"),
+    ],
+)
+def test_ac009_without_complete_payload_digest_is_refused(
+    certified_displacements, record_kind, digest_field
+):
+    verdict = deepcopy(certified_displacements["verdict"])
+    del verdict[digest_field]
+    with pytest.raises(UncertifiedDisplacement, match=digest_field):
+        build_exchange_export(
+            displacement=certified_displacements[record_kind], ac009_verdict=verdict
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "partition_declared",
+        "partition",
+        "partition_note",
+        "terms_included",
+        "terms_excluded",
+    ],
+)
+def test_ac009_derivative_declarations_must_match(certified_displacements, field):
+    source = certified_displacements["vertex"]
+    changed_value = {
+        "partition_declared": not source.partition_declared,
+        "partition": "moving",
+        "partition_note": "different partition observable",
+        "terms_included": (*source.terms_included, "new contribution"),
+        "terms_excluded": (*source.terms_excluded, "omitted contribution"),
+    }[field]
+    with pytest.raises(UncertifiedDisplacement, match="declaration"):
+        build_exchange_export(
+            displacement=replace(source, **{field: changed_value}),
+            ac009_verdict=certified_displacements["verdict"],
+        )
+
+
+def test_unknown_operator_identity_requires_explicit_declaration(exact_response):
+    provenance = dict(exact_response.provenance)
+    del provenance["requires_plusu"]
+    response = replace(exact_response, provenance=provenance)
+    with pytest.raises(MissingOperatorProvenance, match="requires_plusu"):
+        build_exchange_export(response_set=response)
+    with pytest.raises(UncertifiedPlusU, match="AC-008"):
+        build_exchange_export(response_set=response, requires_plusu=True)
+    assert (
+        build_exchange_export(response_set=response, requires_plusu=False)[
+            "export_kind"
+        ]
+        == "certified_chain"
+    )
+    raw = build_exchange_export(response_set=response, raw_response_only=True)
+    assert "spinio_kwargs" not in raw
+
+
+@pytest.mark.parametrize("requires_plusu", [None, False, True])
+@pytest.mark.parametrize("vertex_kind", ["hubbard", "xc+hubbard"])
+def test_declared_plusu_cannot_opt_out(exact_response, requires_plusu, vertex_kind):
+    response = replace(
+        exact_response,
+        provenance={**exact_response.provenance, "vertex_kind": vertex_kind},
+    )
+    with pytest.raises(UncertifiedPlusU, match="AC-008"):
+        build_exchange_export(response_set=response, requires_plusu=requires_plusu)
+
+
+@pytest.mark.parametrize("requires_plusu", [None, True])
+def test_story016_response_requires_ac008(gate, requires_plusu):
+    with pytest.raises(
+        (MissingOperatorProvenance, UncertifiedPlusU),
+        match="requires_plusu|AC-008",
+    ):
+        build_exchange_export(
+            response_set=gate["response"], requires_plusu=requires_plusu
+        )
+
+
+@pytest.mark.parametrize("field", ["vertex_sha256", "source_bundle_sha256"])
+@pytest.mark.parametrize("substitution", ["missing", "other-reference"])
+def test_ac008_identity_must_match_response(exact_response, field, substitution):
+    identities = {"vertex_sha256": "a" * 64, "source_bundle_sha256": "b" * 64}
+    declarations = deepcopy(exact_response.frozen_declarations)
+    declarations["magnetic_amplitudes"].update(identities)
+    response = replace(
+        exact_response,
+        provenance={**exact_response.provenance, **identities},
+        frozen_declarations=declarations,
+    )
+    verdict = {
+        "gate": "AC-008",
+        "passed": True,
+        **identities,
+    }
+    if substitution == "missing":
+        del verdict[field]
+    else:
+        verdict[field] = "0" * 64
+    with pytest.raises(UncertifiedPlusU, match=field):
+        build_exchange_export(
+            response_set=response, plusu_gate=verdict, requires_plusu=True
+        )
+
+
+def test_genuine_ac008_pass_cannot_authorize_another_reference(
+    dftu, gate, cross_check, contract_table, audit_artifact, moments
+):
+    verdict = run_ac008_gate(
+        dftu["bundle"],
+        cross_check=cross_check,
+        contract_table=contract_table,
+        ensemble=gate["ensemble"],
+        texture_provenance=texture_provenance(dftu, moments),
+        audit_artifact=audit_artifact,
+    )
+    assert verdict["passed"] is True, verdict["failure_reasons"]
+    response = gate["response"]
+    provenance = {**response.provenance, "source_bundle_sha256": "0" * 64}
+    declarations = deepcopy(response.frozen_declarations)
+    declarations["magnetic_amplitudes"]["source_bundle_sha256"] = "0" * 64
+    another_reference = replace(
+        response, provenance=provenance, frozen_declarations=declarations
+    )
+    with pytest.raises(UncertifiedPlusU, match="source_bundle_sha256"):
+        build_exchange_export(
+            response_set=another_reference, plusu_gate=verdict, requires_plusu=True
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "other_value"),
+    [
+        ("declaration", "different occupation and free-energy convention"),
+        ("n_occupied", 3),
+        ("electron_count", 3.0),
+        ("gap_ev", 2.0),
+    ],
+)
+def test_ensemble_producer_fields_are_compared(exact_response, field, other_value):
+    response = replace(
+        exact_response,
+        ensemble=Ensemble(ENSEMBLE_GAPPED_T0, 2, 2.0, 0.0, 0.0, 1.0).to_record(),
+    )
+    verdict = {
+        "gate": "matched-ensemble-evidence",
+        "passed": True,
+        "ensemble": {**response.ensemble, field: other_value},
+    }
+    with pytest.raises(IncompatibleEnsemble, match=field):
+        build_exchange_export(response_set=response, gate_verdicts=(verdict,))
+
+
+@pytest.mark.parametrize(
+    "value", ["", "a" * 40, "g" * 64, "+" + "a" * 63, " " + "a" * 63, None]
+)
+def test_code_sha256_requires_64_hex_digits(value):
+    with pytest.raises(ValueError, match="code_sha256"):
+        ProvenanceSchema(
+            input_digests={},
+            code_revision="git-revision",
+            code_sha256=value,
+            created_utc=CREATED_UTC,
+        )

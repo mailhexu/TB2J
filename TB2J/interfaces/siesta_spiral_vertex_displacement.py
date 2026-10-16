@@ -25,6 +25,7 @@ from .siesta_spiral_displacement import (
     DisplacementDerivatives,
     GaugeMismatch,
     SparsePatternMismatch,
+    displacement_payload_sha256,
 )
 from .siesta_spiral_displacement import (
     DisplacedReferenceFDProvider as _DisplacedReferenceFDProvider,
@@ -366,10 +367,14 @@ def run_ac009_validation(
 
     Returns a JSON-serializable verdict dict carrying the per-site /
     per-component agreement table, the gauge labels, and the ensemble /
-    alignment bookkeeping verbatim.  The verdict is ``"pass"`` only when
-    every compared component is within ``tolerance``; a failed gate
-    returns an evidence-bearing ``"fail"`` verdict, never a fabricated
-    agreement.
+    alignment bookkeeping verbatim. ``derivative_payload_sha256`` binds
+    every field of the constructed vertex record; ``seam_payload_sha256``
+    separately binds the complete dH/dS seam record, including components
+    outside the onsite magnetic comparison. Either record can therefore
+    be exported against this verdict without reconstructing its payload
+    from the agreement table. The verdict is ``"pass"`` only when every
+    compared component is within ``tolerance``; a failed gate returns an
+    evidence-bearing ``"fail"`` verdict, never a fabricated agreement.
     """
     if gauge not in GAUGE_LABELS:
         raise GaugeMismatch(
@@ -491,6 +496,8 @@ def run_ac009_validation(
     verdict = {
         "acceptance_criterion": "AC-009",
         "status": status,
+        "derivative_payload_sha256": displacement_payload_sha256(record),
+        "seam_payload_sha256": displacement_payload_sha256(derivatives),
         "tolerance_ev_per_ang": float(tolerance),
         "tolerance_basis": (
             "pipeline-consistency gate pinned at story-019 approval: the "

@@ -29,11 +29,13 @@ from test_siesta_spiral_displacement import (
 from TB2J.interfaces.siesta_spiral_displacement import (
     DisplacementPattern,
     GaugeMismatch,
+    displacement_payload_sha256,
 )
 from TB2J.interfaces.siesta_spiral_vertex_displacement import (
     AC009_TOLERANCE_EV_PER_ANG,
     LocalizedGaugeUnavailable,
     run_ac009_validation,
+    vertex_displacement_derivative,
 )
 
 STEP_BOHR = 0.05
@@ -124,6 +126,216 @@ def test_routes_agree_within_pinned_tolerance(synthetic_bundle):
         assert len(entry["deviation"]) == 4
     # JSON-serializable
     json.dumps(verdict)
+
+
+@pytest.fixture
+def certified_payloads(synthetic_bundle, monkeypatch):
+    """Capture the actual route-(a) objects before the producer stamps them."""
+    from TB2J.interfaces import siesta_spiral_vertex_displacement as producer
+
+    records = {}
+    provide = producer._DisplacedReferenceFDProvider.provide
+    construct = producer.vertex_displacement_derivative
+
+    def capture_seam(provider):
+        records["seam"] = provide(provider)
+        return records["seam"]
+
+    def capture_vertex(*args, **kwargs):
+        records["vertex"] = construct(*args, **kwargs)
+        return records["vertex"]
+
+    monkeypatch.setattr(producer._DisplacedReferenceFDProvider, "provide", capture_seam)
+    monkeypatch.setattr(producer, "vertex_displacement_derivative", capture_vertex)
+    _, records["verdict"] = _run(synthetic_bundle)
+    return records
+
+
+def test_verdict_binds_both_complete_constructed_payloads(certified_payloads):
+    verdict = certified_payloads["verdict"]
+    assert verdict["status"] == "pass"
+    assert verdict["seam_payload_sha256"] == displacement_payload_sha256(
+        certified_payloads["seam"]
+    )
+    assert verdict["derivative_payload_sha256"] == displacement_payload_sha256(
+        certified_payloads["vertex"]
+    )
+    assert verdict["seam_payload_sha256"] != verdict["derivative_payload_sha256"]
+
+
+@pytest.mark.parametrize("component", ("dS", "offsite_dH", "scalar_onsite_dH"))
+def test_seam_digest_detects_components_outside_vertex_comparison(
+    certified_payloads, synthetic_bundle, component
+):
+    seam = certified_payloads["seam"]
+    if component == "dS":
+        changed = dict(seam.dS)
+        key = next(iter(changed))
+        changed[key] += 0.5
+        modified = replace(seam, dS=changed)
+    else:
+        changed = dict(seam.dH)
+        key = next(
+            key
+            for key in changed
+            if (key[2] != (0, 0, 0)) == (component == "offsite_dH")
+        )
+        values = list(changed[key])
+        # A scalar onsite shift cancels from (dH1-dH2)/2; offsite dH
+        # never enters dV. Both nevertheless belong to the certified seam.
+        values[0] += 0.5
+        values[1] += 0.5
+        changed[key] = tuple(values)
+        modified = replace(seam, dH=changed)
+    changed_vertex = vertex_displacement_derivative(modified, synthetic_bundle)
+    for key, values in certified_payloads["vertex"].dV.items():
+        assert changed_vertex.dV[key] == pytest.approx(values, abs=1e-14)
+    assert (
+        displacement_payload_sha256(modified)
+        != (certified_payloads["verdict"]["seam_payload_sha256"])
+    )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "pattern",
+        "dH",
+        "dS",
+        "producer_recipe",
+        "branch",
+        "step_bohr",
+        "reference_fermi_ev",
+        "gauge",
+        "units",
+        "reference_digests",
+        "reference_geometry",
+    ),
+)
+def test_seam_digest_binds_each_exported_field(certified_payloads, field_name):
+    seam = certified_payloads["seam"]
+    changes = {
+        "pattern": replace(seam.pattern, reference_digests=("changed",)),
+        "dH": {**seam.dH, (9, 9, (0, 0, 0)): (1.0, 1.0, 0.0, 0.0)},
+        "dS": {**seam.dS, (9, 9, (0, 0, 0)): 0.0},
+        "producer_recipe": seam.producer_recipe + " changed",
+        "branch": "changed",
+        "step_bohr": seam.step_bohr * 2,
+        "reference_fermi_ev": 123.0,
+        "gauge": "localized",
+        "units": dict(seam.units, dS="changed"),
+        "reference_digests": ("changed",),
+        "reference_geometry": replace(
+            seam.reference_geometry, displaced_axis_offset_bohr=123.0
+        ),
+    }
+    modified = replace(seam, **{field_name: changes[field_name]})
+    assert (
+        displacement_payload_sha256(modified)
+        != (certified_payloads["verdict"]["seam_payload_sha256"])
+    )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("cell", "orbital_positions", "displaced_orbital_indices"),
+)
+def test_seam_digest_binds_nested_geometry(certified_payloads, field_name):
+    seam = certified_payloads["seam"]
+    geometry = seam.reference_geometry
+    changes = {
+        "cell": ((123.0, 0.0, 0.0), *geometry.cell[1:]),
+        "orbital_positions": ((123.0, 0.0, 0.0), *geometry.orbital_positions[1:]),
+        "displaced_orbital_indices": (123,),
+    }
+    modified = replace(
+        seam, reference_geometry=replace(geometry, **{field_name: changes[field_name]})
+    )
+    assert (
+        displacement_payload_sha256(modified)
+        != (certified_payloads["verdict"]["seam_payload_sha256"])
+    )
+
+
+def test_vertex_digest_binds_all_dv_values(certified_payloads):
+    vertex = certified_payloads["vertex"]
+    for key, values in vertex.dV.items():
+        for component in range(4):
+            changed_values = list(values)
+            changed_values[component] += 0.5
+            changed = dict(vertex.dV)
+            changed[key] = tuple(changed_values)
+            assert (
+                displacement_payload_sha256(replace(vertex, dV=changed))
+                != (certified_payloads["verdict"]["derivative_payload_sha256"])
+            )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "pattern",
+        "dV",
+        "partition",
+        "partition_note",
+        "terms_included",
+        "terms_excluded",
+        "operator_mode",
+        "partition_declared",
+        "gauge",
+        "units",
+        "producer_recipe",
+        "step_bohr",
+        "branch",
+        "provenance",
+    ),
+)
+def test_vertex_digest_binds_each_exported_field(certified_payloads, field_name):
+    vertex = certified_payloads["vertex"]
+    changes = {
+        "pattern": replace(vertex.pattern, reference_digests=("changed",)),
+        "dV": {**vertex.dV, (9, 9, (0, 0, 0)): (0.0, 0.0, 0.0, 0.0)},
+        "partition": "changed",
+        "partition_note": vertex.partition_note + " changed",
+        "terms_included": (*vertex.terms_included, "changed"),
+        "terms_excluded": (*vertex.terms_excluded, "changed"),
+        "operator_mode": "changed",
+        "partition_declared": not vertex.partition_declared,
+        "gauge": "localized",
+        "units": dict(vertex.units, dV="changed"),
+        "producer_recipe": vertex.producer_recipe + " changed",
+        "step_bohr": vertex.step_bohr * 2,
+        "branch": "changed",
+        "provenance": dict(vertex.provenance, changed=True),
+    }
+    modified = replace(vertex, **{field_name: changes[field_name]})
+    assert (
+        displacement_payload_sha256(modified)
+        != (certified_payloads["verdict"]["derivative_payload_sha256"])
+    )
+
+
+def test_payload_digest_is_mapping_order_independent(certified_payloads):
+    seam = certified_payloads["seam"]
+    reordered = replace(
+        seam,
+        dH=dict(reversed(tuple(seam.dH.items()))),
+        dS=dict(reversed(tuple(seam.dS.items()))),
+        units=dict(reversed(tuple(seam.units.items()))),
+    )
+    assert (
+        displacement_payload_sha256(reordered)
+        == (certified_payloads["verdict"]["seam_payload_sha256"])
+    )
+
+
+def test_payload_digest_refuses_unsupported_values(certified_payloads):
+    from TB2J.interfaces.siesta_spiral_hubbard import HubbardBundleError
+
+    vertex = certified_payloads["vertex"]
+    modified = replace(vertex, provenance=dict(vertex.provenance, unsupported=object()))
+    with pytest.raises(HubbardBundleError, match="cannot be digested canonically"):
+        displacement_payload_sha256(modified)
 
 
 def test_failed_gate_returns_evidence_bearing_fail_verdict(synthetic_bundle):

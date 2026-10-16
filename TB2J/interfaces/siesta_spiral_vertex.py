@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
@@ -229,6 +230,13 @@ def _source_bundle_digest(bundle: SpiralBundle) -> str:
         hasher.update(repr(key).encode())
         hasher.update(repr(bundle.sparse[key]).encode())
         hasher.update(repr(bundle.overlap[key]).encode())
+    if bundle.hubbard is not None:
+        hasher.update(b"\0hubbard\0")
+        hasher.update(
+            json.dumps(
+                bundle.hubbard.to_dict(), sort_keys=True, separators=(",", ":")
+            ).encode()
+        )
     return hasher.hexdigest()
 
 
@@ -322,6 +330,11 @@ def extract_magnetic_vertex(
         "allocation": "DZP channels retained",
         "partition_declaration": _partition_declaration(operator, partition_declared),
     }
+    if bundle.hubbard is not None:
+        # A validated +U bundle stores the total HSX Hamiltonian, including
+        # XC and Hubbard terms. Absence of +U metadata is not evidence of XC.
+        certificate["vertex_kind"] = "xc+hubbard"
+        certificate["hubbard"] = deepcopy(bundle.hubbard.to_dict())
     certificate["vertex_sha256"] = _content_digest(blocks, partition, certificate)
     return MagneticVertex(blocks=blocks, partition=partition, certificate=certificate)
 

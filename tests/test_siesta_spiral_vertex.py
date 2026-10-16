@@ -141,6 +141,15 @@ def test_pitch_overlap_bundle_identity_is_bound(producer):
     assert changed.certificate["vertex_sha256"] != vertex.certificate["vertex_sha256"]
 
 
+def test_unknown_plus_u_identity_is_not_inferred_from_freeform_metadata(producer):
+    bundle, _ = producer
+    assert bundle.hubbard is None
+    bundle = replace(bundle, metadata={**bundle.metadata, "vertex_kind": "xc+hubbard"})
+    vertex = extract_magnetic_vertex(bundle)
+    assert "vertex_kind" not in vertex.certificate
+    assert "hubbard" not in vertex.certificate
+
+
 def test_partition_declaration_and_locality(fe3):
     bundle, _ = fe3
     per = bundle.norb // 3

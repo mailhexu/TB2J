@@ -20,9 +20,10 @@ Structure and moment magnitudes are never invented. ``debug_dict`` carries the
 same certified metadata, so existing SpinIO pickling preserves it.
 
 ``ProvenanceSchema`` is a frozen record of input_digests (SHA-256 of every
-consumed artifact payload), code_revision (package git HEAD, or a SHA-256 of
-module digests outside a checkout), created_utc (UTC ISO-8601), and gate_verdicts
-(the consumed verdict chain). to_dict/from_dict use the upstream canonical-JSON
+consumed artifact payload), code_revision (package git HEAD, or a module digest
+outside a checkout), code_sha256 (independent digest of relevant module contents),
+created_utc (UTC ISO-8601), and gate_verdicts (the consumed verdict chain).
+to_dict/from_dict use the upstream canonical-JSON
 content_sha256 convention; from_dict refuses tampering. ``content_sha256`` is
 also available as a property. Nested inputs are detached on construction.
 
@@ -34,7 +35,9 @@ ADR-005 ensemble; NonHeisenbergCompatibleResponse /
 non_heisenberg_compatible_response: obtain an AC-007 compatible mapping or
 request raw_response_only; UncertifiedDisplacement / uncertified_displacement:
 supply the matching AC-009 pass; UncertifiedPlusU / uncertified_plusu: supply
-an AC-008 pass (required when requires_plusu=True or +U is declared).
+an AC-008 pass bound to the response's vertex and source-bundle digests.
+Unknown +U identity requires an explicit requires_plusu declaration; a known
++U response cannot opt out. AC-009 binds the entire exported derivative record.
 Explicit failing AC-009/generic verdicts raise FailedGate, while absent AC-009
 certification raises UncertifiedDisplacement. AC-008 refusals are always
 UncertifiedPlusU. All checks precede assembly of exchange dictionaries.
@@ -57,7 +60,11 @@ from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .siesta_spiral_displacement import GAUGE_LABELS, DisplacementDerivatives
+from .siesta_spiral_displacement import (
+    GAUGE_LABELS,
+    DisplacementDerivatives,
+    displacement_payload_sha256,
+)
 from .siesta_spiral_mapping import HEISENBERG_COMPATIBLE, MappingOutput
 from .siesta_spiral_response import ResponseSet
 from .siesta_spiral_vertex import OPERATOR_MODES
@@ -122,6 +129,14 @@ def _digest(payload):
     ).hexdigest()
 
 
+def _is_sha256(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in value)
+    )
+
+
 def _json_payload(value):
     """Serialize dataclass records, including the sparse tuple-keyed seam."""
     if is_dataclass(value):
@@ -144,6 +159,7 @@ class ProvenanceSchema:
 
     input_digests: dict
     code_revision: str
+    code_sha256: str
     created_utc: str
     gate_verdicts: tuple = ()
 
@@ -152,13 +168,10 @@ class ProvenanceSchema:
         object.__setattr__(
             self, "gate_verdicts", tuple(copy.deepcopy(self.gate_verdicts))
         )
-        for name, digest in self.input_digests.items():
-            if not isinstance(digest, str) or len(digest) != 64:
+        digests = {**self.input_digests, "code_sha256": self.code_sha256}
+        for name, digest in digests.items():
+            if not _is_sha256(digest):
                 raise ValueError(f"{name}: expected a SHA-256 payload digest")
-            try:
-                int(digest, 16)
-            except ValueError as exc:
-                raise ValueError(f"{name}: expected a SHA-256 payload digest") from exc
         stamp = datetime.fromisoformat(self.created_utc.replace("Z", "+00:00"))
         if stamp.utcoffset() is None or stamp.utcoffset().total_seconds() != 0:
             raise ValueError("created_utc must declare UTC")
@@ -185,6 +198,7 @@ class ProvenanceSchema:
         return cls(
             input_digests=payload["input_digests"],
             code_revision=payload["code_revision"],
+            code_sha256=payload["code_sha256"],
             created_utc=payload["created_utc"],
             gate_verdicts=tuple(payload["gate_verdicts"]),
         )
@@ -202,14 +216,20 @@ def _code_revision():
             timeout=5,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
-        modules = sorted(package.joinpath("interfaces").glob("siesta_spiral*.py"))
-        modules.append(package / "io_exchange" / "io_exchange.py")
-        return "module-sha256:" + _digest(
-            {
-                str(p.relative_to(package)): hashlib.sha256(p.read_bytes()).hexdigest()
-                for p in modules
-            }
-        )
+        return "module-sha256:" + _code_sha256()
+
+
+def _code_sha256():
+    """Hash implementation contents independently of the checkout revision."""
+    package = Path(__file__).resolve().parents[1]
+    modules = sorted(package.joinpath("interfaces").glob("siesta_spiral*.py"))
+    modules.append(package / "io_exchange" / "io_exchange.py")
+    return _digest(
+        {
+            str(p.relative_to(package)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in modules
+        }
+    )
 
 
 def _gate_name(verdict):
@@ -279,7 +299,7 @@ def _ensemble_audit(declarations):
             "gap_ev",
             "smearing_width_ev",
             "occupation_smearing_width_ev",
-            "ensemble_declaration",
+            "declaration",
         ):
             if field not in record or record[field] is None:
                 continue
@@ -294,20 +314,41 @@ def _ensemble_audit(declarations):
 
 
 def _declares_plusu(record):
-    """Recognize explicit producer declarations, never guess from splittings."""
+    """Return True/False only for explicit operator identity, else None."""
     if not isinstance(record, dict):
-        return False
+        return None
+    declarations = []
     for key, value in record.items():
-        if key in ("vertex_kind", "declared_vertex_kind") and value in (
-            "xc+hubbard",
-            "hubbard",
-        ):
-            return True
-        if key in ("requires_plusu", "dftu", "hubbard_provenance") and value:
-            return True
-        if isinstance(value, dict) and _declares_plusu(value):
-            return True
-    return False
+        if key in ("vertex_kind", "declared_vertex_kind"):
+            if value in ("xc+hubbard", "hubbard"):
+                declarations.append(True)
+            elif value == "xc":
+                declarations.append(False)
+        if key in ("requires_plusu", "dftu") and isinstance(value, bool):
+            declarations.append(value)
+        if key == "hubbard_provenance" and value:
+            declarations.append(True)
+        if isinstance(value, dict):
+            declarations.append(_declares_plusu(value))
+    if True in declarations:
+        return True
+    return False if False in declarations else None
+
+
+def _plusu_audit(response, verdict):
+    if verdict is None or _gate_name(verdict) != "AC-008" or not _passed(verdict):
+        raise UncertifiedPlusU(
+            "AC-008 pass missing or failed: run run_ac008_gate with the complete "
+            "XC+Hubbard provenance and matched frozen rotations; "
+            f"failure reasons: {(verdict or {}).get('failure_reasons', [])}"
+        )
+    for key in ("vertex_sha256", "source_bundle_sha256"):
+        identity = response.provenance.get(key) if response is not None else None
+        if not _is_sha256(identity) or verdict.get(key) != identity:
+            raise UncertifiedPlusU(
+                f"AC-008 {key} missing or mismatched: rerun run_ac008_gate on "
+                "the same certified vertex and source bundle as this response"
+            )
 
 
 def _displacement_audit(displacement, verdict):
@@ -342,12 +383,33 @@ def _displacement_audit(displacement, verdict):
             raise UncertifiedDisplacement(
                 "AC-009 operator_mode mismatch; rerun the matching gate"
             )
+        if verdict.get("partition_declared") != displacement.partition_declared:
+            raise UncertifiedDisplacement(
+                "AC-009 partition_declared mismatch; certify the same partition declaration"
+            )
+        if _json_payload(verdict.get("declaration")) != _json_payload(
+            displacement.declaration()
+        ):
+            raise UncertifiedDisplacement(
+                "AC-009 declaration mismatch: partition and included/excluded terms "
+                "must match the certified derivative"
+            )
     else:
         references = verdict.get("geometry", {}).get("reference_digests", ())
         if tuple(references) != tuple(displacement.reference_digests):
             raise UncertifiedDisplacement(
                 "AC-009 reference digests differ; validate the same displaced pair"
             )
+    digest_field = (
+        "derivative_payload_sha256"
+        if isinstance(displacement, VertexDisplacementDerivatives)
+        else "seam_payload_sha256"
+    )
+    if verdict.get(digest_field) != displacement_payload_sha256(displacement):
+        raise UncertifiedDisplacement(
+            f"AC-009 {digest_field} missing or mismatched: rerun the matching gate "
+            "to certify the complete derivative payload, including all values and declarations"
+        )
     agreement = verdict.get("agreement", {})
     if not agreement:
         raise UncertifiedDisplacement(
@@ -386,7 +448,7 @@ def build_exchange_export(
     *,
     raw_response_only=False,
     gate_verdicts=(),
-    requires_plusu=False,
+    requires_plusu=None,
     created_utc=None,
 ):
     """Audit first, then assemble the export described in the module reference."""
@@ -400,6 +462,8 @@ def build_exchange_export(
         raise TypeError(
             "displacement must be a certified displacement derivative record"
         )
+    if requires_plusu is not None and not isinstance(requires_plusu, bool):
+        raise TypeError("requires_plusu must be True, False or None")
     response = response_set
     if mapping_output is not None:
         mapped_response = mapping_output.raw_response
@@ -438,24 +502,24 @@ def build_exchange_export(
         )
     _ensemble_audit(ensembles)
     if not raw_response_only:
-        plusu_required = requires_plusu or (
-            response is not None
-            and (
-                _declares_plusu(response.provenance)
-                or _declares_plusu(response.frozen_declarations)
+        identity = (
+            _declares_plusu(
+                {
+                    "provenance": response.provenance,
+                    "frozen_declarations": response.frozen_declarations,
+                }
             )
+            if response is not None
+            else None
         )
-        if plusu_gate is not None or plusu_required:
-            if (
-                plusu_gate is None
-                or _gate_name(plusu_gate) != "AC-008"
-                or not _passed(plusu_gate)
-            ):
-                raise UncertifiedPlusU(
-                    "AC-008 pass missing or failed: run run_ac008_gate with the complete "
-                    "XC+Hubbard provenance and matched frozen rotations; "
-                    f"failure reasons: {(plusu_gate or {}).get('failure_reasons', [])}"
-                )
+        if response is not None and identity is None and requires_plusu is None:
+            raise MissingOperatorProvenance(
+                "operator +U identity is unknown: preserve vertex_kind in the "
+                "producer provenance or explicitly declare requires_plusu=True/False; "
+                "a +U response requires its matching AC-008 pass"
+            )
+        if plusu_gate is not None or requires_plusu is True or identity is True:
+            _plusu_audit(response, plusu_gate)
         for verdict in consumed:
             if not _passed(verdict):
                 if _gate_name(verdict) == "AC-008":
@@ -496,6 +560,7 @@ def build_exchange_export(
     provenance = ProvenanceSchema(
         input_digests=input_digests,
         code_revision=_code_revision(),
+        code_sha256=_code_sha256(),
         created_utc=created_utc or datetime.now(timezone.utc).isoformat(),
         gate_verdicts=tuple(copy.deepcopy(consumed)),
     )

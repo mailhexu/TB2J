@@ -135,6 +135,27 @@ contract, not a no-op: rebuilding V_dc from the co-rotated occupations
 would move it by orders more than any tolerance, while the approved
 contract keeps it bit-exactly at the converged reference.
 
+## AC-008 certification identity
+
+`run_ac008_gate` retains the `vertex_sha256`, `source_bundle_sha256` and
+`raw_response_sha256` emitted by `validate_finite_rotations`. The first two
+must match the provenance of the response being exported: the Hubbard
+certificate itself is not the frozen Gamma-point `SpiralBundle` and must
+not be hashed as a substitute for it. Missing or malformed identities,
+different ensemble declarations, or an audit certificate not matching the
+actual `HubbardBundle` input fail the gate. `hubbard_payload_sha256` records
+that separate Hubbard certificate identity.
+
+Extraction from a bundle carrying validated Hubbard provenance preserves
+`vertex_kind="xc+hubbard"` and the full `hubbard` declaration in the vertex
+certificate and response provenance (both gapped and metallic evaluators).
+The canonical source-bundle digest also binds that declaration, including
+its source references. Bundles without it remain unclassified: free-form
+metadata or absence of Hubbard data is not proof of an XC-only operator.
+Legacy Hubbard-only story-016 Gamma pencils therefore remain unknown and
+require an explicit caller declaration when used by the fail-closed API.
+
+
 ## Limits
 
 - The symbolic covariance is orbital-size independent (proven on a

@@ -349,6 +349,7 @@ def evaluate_metallic_response_set(
             "vertex_convention": VERTEX_CONVENTION,
             "operator_mode": problem.operator_mode,
             "q": list(problem._bundle.q),
+            **{key: cert[key] for key in ("vertex_kind", "hubbard") if key in cert},
             "derivation_authority": "docs/sympy/siesta_spiral_metallic_response.py",
             "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "metric": "S-orthonormal eigenbasis; fixed-N Fermi-Dirac free-energy Hessian",
