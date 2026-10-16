@@ -48,28 +48,52 @@ FORBIDDEN_PRODUCERS = frozenset(
 )
 
 FOURIER_CONVENTION = "gamma(k) = sum_R gamma(R) exp(+2 pi i k . R)"
-UNITS = {"energy": "eV", "displacement": "mass-weighted sqrt(amu) Angstrom"}
+UNITS = {
+    "energy": "eV",
+    "spin_coordinate": "dimensionless local transverse spin components (hbar=1)",
+    "displacement_coordinate": "mass_weighted | cartesian_angstrom",
+}
+DISPLACEMENT_COORDINATES = ("mass_weighted", "cartesian_angstrom")
 
 
 @dataclass(frozen=True)
 class MixedSpinDisplacementHessian:
-    """Typed input for ``hybrid_modes``: bare sectors plus the mixed block.
+    """Typed physical input for ``hybrid_modes``.
 
-    ``spin_coordinate_labels`` names one local complex transverse HP
-    coordinate (its real/imaginary parts are the local transverse
-    quadratures) per magnetic site.  ``displacement_labels`` names each
-    Cartesian atom/axis coordinate.  Both arrays use the declared units
-    and Fourier convention; ``provenance`` identifies how the mixed
-    channels were observed.
+    The mixed input is the second derivative of the energy with respect to
+    (i) the local transverse spin components of each magnetic site,
+    expressed through ``s_i = S_i1 + i S_i2`` (dimensionless spin units,
+    ``hbar = 1``), and (ii) the displacement coordinates named by
+    ``displacement_labels``.  ``displacement_coordinate`` declares that
+    basis: ``"mass_weighted"`` (``w = sqrt(m) u``) or
+    ``"cartesian_angstrom"`` (then ``masses_amu`` is required and the
+    solver converts ``w = sqrt(m) u`` exactly once).  The mixed derivative
+    is in eV per (spin unit, displacement unit).
+
+    The bare magnon provider returns the full Story-006 Nambu Hessian
+    ``(2 n_mag, 2 n_mag)`` per point in eV, including its own
+    opposite-k lower blocks (nonreciprocal systems are preserved, never
+    reconstructed from the upper block).  The bare phonon provider returns
+    the Hermitian mass-weighted dynamical matrix in the same displacement
+    basis with eigenvalues equal to phonon energies squared in eV^2.
+
+    ``docs/sympy/harmonic_magnon_phonon.py`` derives the solver's
+    conversion to the bosonic coupling
+    ``Gamma = G sqrt(S_i/2) e / sqrt(2 omega)``: the spin-length and
+    phonon zero-point factors are applied exactly once, here and nowhere
+    else.
     """
 
     n_mag_sites: int
     displacement_labels: Sequence[Sequence[int]]
     magnon_bare: Callable[[np.ndarray], np.ndarray]
     phonon_bare: Callable[[np.ndarray], np.ndarray]
-    magnon_phonon_coupling: Callable[[np.ndarray], np.ndarray]
+    mixed_derivative: Callable[[np.ndarray], np.ndarray]
+    spin_lengths: Sequence[float]
     producer: str
     provenance: Mapping
+    displacement_coordinate: str = "mass_weighted"
+    masses_amu: Sequence[float] | None = None
     spin_coordinate_labels: Sequence[Sequence] | None = None
     units: Mapping = field(default_factory=lambda: dict(UNITS))
     fourier_convention: str = FOURIER_CONVENTION
@@ -86,6 +110,20 @@ class MixedSpinDisplacementHessian:
             raise ValueError("n_mag_sites must be positive")
         if not self.displacement_labels:
             raise ValueError("displacement_labels must name at least one coordinate")
+        if len(tuple(self.spin_lengths)) != self.n_mag_sites:
+            raise ValueError("spin_lengths must give one spin length per magnetic site")
+        if self.displacement_coordinate not in DISPLACEMENT_COORDINATES:
+            raise ValueError(
+                f"displacement_coordinate must be one of {DISPLACEMENT_COORDINATES}"
+            )
+        if self.displacement_coordinate == "cartesian_angstrom":
+            if self.masses_amu is None or len(tuple(self.masses_amu)) != len(
+                tuple(self.displacement_labels)
+            ):
+                raise ValueError(
+                    "cartesian_angstrom displacement basis requires masses_amu "
+                    "for every displacement coordinate"
+                )
         if self.spin_coordinate_labels is None:
             object.__setattr__(
                 self,
@@ -108,8 +146,8 @@ class MixedSpinDisplacementHessian:
             )
         if not callable(self.magnon_bare) or not callable(self.phonon_bare):
             raise TypeError("bare magnon and phonon Hessian providers must be callable")
-        if not callable(self.magnon_phonon_coupling):
-            raise TypeError("magnon_phonon_coupling must be callable over points")
+        if not callable(self.mixed_derivative):
+            raise TypeError("mixed_derivative must be callable over points")
 
     @classmethod
     def scalar_collinear_forbidden_control(
@@ -119,29 +157,35 @@ class MixedSpinDisplacementHessian:
         displacement_labels: Sequence[Sequence[int]],
         magnon_bare: Callable[[np.ndarray], np.ndarray],
         phonon_bare: Callable[[np.ndarray], np.ndarray],
+        spin_lengths: Sequence[float],
         provenance: Mapping,
+        displacement_coordinate: str = "mass_weighted",
+        masses_amu: Sequence[float] | None = None,
         spin_coordinate_labels: Sequence[Sequence] | None = None,
     ) -> MixedSpinDisplacementHessian:
         """Build the symmetry-forbidden scalar-collinear zero-mixing control.
 
         No scalar exchange derivative is promoted to a mixed Hessian; the
-        mixed block is identically zero while the independently supplied
-        bare sectors are preserved.
+        mixed derivative is identically zero while the independently
+        supplied bare sectors are preserved.
         """
         return cls(
             n_mag_sites=n_mag_sites,
             displacement_labels=displacement_labels,
             magnon_bare=magnon_bare,
             phonon_bare=phonon_bare,
-            magnon_phonon_coupling=lambda points: np.zeros(
+            mixed_derivative=lambda points: np.zeros(
                 (len(points), n_mag_sites, len(displacement_labels)), dtype=complex
             ),
+            spin_lengths=spin_lengths,
             producer="scalar_collinear_forbidden_control",
             provenance={
                 **dict(provenance),
                 "control": "scalar-collinear input; symmetry-forbidden mixed Hessian",
                 "mixed_derivative_inferred": False,
             },
+            displacement_coordinate=displacement_coordinate,
+            masses_amu=masses_amu,
             spin_coordinate_labels=spin_coordinate_labels,
         )
 
@@ -161,6 +205,14 @@ class ControlledTwoBosonModel:
     g_eV: float
 
     def to_mixed_hessian(self) -> MixedSpinDisplacementHessian:
+        """Express the model through its physical mixed derivative.
+
+        With spin length ``S = 2`` (so ``sqrt(S/2) = 1``) and the single
+        mass-weighted normal coordinate (``e = 1``, ``omega = beta``), the
+        derived conversion ``Gamma = G sqrt(S/2)/sqrt(2 omega)`` maps the
+        physical Hessian ``G = g sqrt(2 beta)`` back to the bosonic
+        coupling ``g`` exactly once.
+        """
         a, b, g = float(self.alpha_eV), float(self.beta_eV), float(self.g_eV)
 
         def magnon_bare(points):
@@ -173,21 +225,23 @@ class ControlledTwoBosonModel:
         def phonon_bare(points):
             return np.full((len(points), 1, 1), b**2, dtype=float)
 
-        def coupling(points):
-            return np.full((len(points), 1, 1), g, dtype=complex)
+        def mixed_derivative(points):
+            return np.full((len(points), 1, 1), g * np.sqrt(2.0 * b))
 
         return MixedSpinDisplacementHessian(
             n_mag_sites=1,
             displacement_labels=((0, 0),),
             magnon_bare=magnon_bare,
             phonon_bare=phonon_bare,
-            magnon_phonon_coupling=coupling,
+            mixed_derivative=mixed_derivative,
+            spin_lengths=(2.0,),
             producer="controlled_two_boson",
             provenance={
                 "derivation": "docs/sympy/harmonic_magnon_phonon.py",
                 "alpha_eV": a,
                 "beta_eV": b,
                 "g_eV": g,
+                "spin_length": 2.0,
                 "stability_condition": "4 g^2 < alpha beta",
             },
         )
@@ -210,12 +264,16 @@ class HybridDiagnostics:
 class HybridModes:
     """Positive harmonic hybrid modes and observable weights.
 
-    ``energies`` has NaN entries where the stability threshold is crossed;
-    ``magnetic_weight``/``displacement_weight`` are the squared-amplitude
-    shares of each positive mode on the transverse-spin and displacement
-    coordinates (each pair sums to one).  ``paraunitary`` columns are
-    ordered by ascending positive energy and satisfy
-    ``T^+ g T = g``.
+    ``energies`` has NaN entries where the stability threshold is crossed.
+    ``magnetic_strength`` is the operator-defined one-quantum transverse
+    spin strength ``sum_i |<0|S_i1 + i S_i2|mode>|^2`` (spin-length
+    squared units); ``displacement_strength`` is the physical displacement
+    strength ``sum_beta |<0|w_beta|mode>|^2`` in the declared displacement
+    basis (mass-weighted or Angstrom, including the phonon zero-point
+    factor ``1/sqrt(2 omega)``).  ``magnetic_weight``/``displacement_weight``
+    remain the normalized particle-amplitude species shares (each pair
+    sums to one).  ``paraunitary`` columns are ordered by ascending
+    positive energy and satisfy ``T^+ g T = g``.
     """
 
     kpoints: np.ndarray
@@ -223,6 +281,8 @@ class HybridModes:
     paraunitary: np.ndarray
     magnetic_weight: np.ndarray
     displacement_weight: np.ndarray
+    magnetic_strength: np.ndarray
+    displacement_strength: np.ndarray
     is_stable: np.ndarray
     diagnostics: HybridDiagnostics
     mixed_hessian: MixedSpinDisplacementHessian
@@ -245,12 +305,40 @@ class HarmonicMixedModel:
         )
 
 
-def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint) -> np.ndarray:
-    """Assemble the full Hermitian Nambu Hessian at one point."""
+def _bosonic_coupling(mixed, kpoint, phonon_energies, phonon_modes):
+    """Convert the physical mixed derivative to the bosonic energy coupling.
+
+    Applies the derived conversion exactly once:
+    ``Gamma = G sqrt(S_i/2) e / sqrt(2 omega)`` with the optional
+    Cartesian-to-mass-weighted conversion ``G -> G / sqrt(m)`` first.
+    """
+    n_ph = len(mixed.displacement_labels)
+    G = np.asarray(mixed.mixed_derivative(kpoint[None, :])[0], dtype=complex)
+    if G.shape != (mixed.n_mag_sites, n_ph):
+        raise ValueError(
+            f"mixed_derivative returned {G.shape}, expected "
+            f"{(mixed.n_mag_sites, n_ph)}"
+        )
+    if mixed.displacement_coordinate == "cartesian_angstrom":
+        G = G / np.sqrt(np.asarray(mixed.masses_amu, dtype=float))[None, :]
+    Gamma_raw = G @ phonon_modes  # (n_mag, n_ph modes)
+    spin = np.sqrt(np.asarray(mixed.spin_lengths, dtype=float) / 2.0)
+    return Gamma_raw * spin[:, None] / np.sqrt(2.0 * phonon_energies)[None, :]
+
+
+def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint):
+    """Assemble the full Hermitian Nambu Hessian at one point.
+
+    The supplied magnon block is embedded exactly as given, including its
+    own opposite-k lower blocks (never reconstructed from the upper
+    block).  The mixed rectangles use the converted ``Gamma(k)`` for both
+    the normal and counter-rotating pairing; both pair k with -k through
+    the stated Fourier convention.  Returns the Hessian plus the phonon
+    energies and mass-weighted modes needed for the observable strengths.
+    """
     n_mag = mixed.n_mag_sites
     Hb = np.asarray(mixed.magnon_bare(kpoint[None, :])[0], dtype=complex)
     D = np.asarray(mixed.phonon_bare(kpoint[None, :])[0], dtype=complex)
-    Gamma = np.asarray(mixed.magnon_phonon_coupling(kpoint[None, :])[0], dtype=complex)
     n_ph = D.shape[0]
     if Hb.shape != (2 * n_mag, 2 * n_mag):
         raise ValueError(
@@ -260,11 +348,7 @@ def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint) -> np.ndarray:
         raise ValueError("phonon_bare matrix does not match displacement_labels")
     if not np.allclose(D, D.conj().T, atol=1e-12, rtol=1e-12):
         raise ValueError("phonon_bare dynamical matrix must be Hermitian")
-    if Gamma.shape != (n_mag, n_ph):
-        raise ValueError(
-            f"magnon_phonon_coupling returned {Gamma.shape}, expected {(n_mag, n_ph)}"
-        )
-    # phonon sector of the Nambu Hessian is the positive square root of D
+    # phonon sector: eigendecomposition gives energies and mass-weighted modes
     evals, evecs = np.linalg.eigh(D)
     if evals.min() < 0.0:
         raise ValueError(
@@ -272,12 +356,39 @@ def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint) -> np.ndarray:
             "unstable bare phonons are not clipped or regularized"
         )
     omega = evecs @ np.diag(np.sqrt(evals)) @ evecs.conj().T
+    phonon_energies = np.sqrt(evals)
+    Gamma = _bosonic_coupling(mixed, kpoint, phonon_energies, evecs)
 
-    A_b, B_b = Hb[:n_mag, :n_mag], Hb[:n_mag, n_mag:]
-    A = np.block([[A_b, Gamma], [Gamma.conj().T, omega]])
-    B = np.block([[B_b, Gamma], [Gamma.T, np.zeros((n_ph, n_ph), dtype=complex)]])
-    M = np.block([[A, B], [B.conj().T, A.conj()]])
-    return M
+    # grouped Nambu layout [b(n), a(m), b^+(n), a^+(m)]; the magnon blocks
+    # are embedded exactly as supplied (Hq), including nonreciprocal ones.
+    # Mixed placement mirrors the Colpa bookkeeping of the magnon K block:
+    # normal pairs (b,a)=G,(a,b)=G^+; counter-rotating pairs
+    # (b,a^+)=G,(a,b^+)=G^T with conjugate partners (a^+,b)=G*,
+    # (b^+,a)=G*.
+    dim = 2 * n_mag + 2 * n_ph
+    M = np.zeros((dim, dim), dtype=complex)
+    # A block: normal part
+    M[:n_mag, :n_mag] = Hb[:n_mag, :n_mag]
+    M[:n_mag, n_mag : n_mag + n_ph] = Gamma
+    M[n_mag : n_mag + n_ph, :n_mag] = Gamma.conj().T
+    M[n_mag : n_mag + n_ph, n_mag : n_mag + n_ph] = omega
+    # B block: anomalous part, symmetric like the magnon K block
+    M[:n_mag, n_mag + n_ph : 2 * n_mag + n_ph] = Hb[:n_mag, n_mag:]
+    M[:n_mag, 2 * n_mag + n_ph :] = Gamma
+    M[n_mag : n_mag + n_ph, n_mag + n_ph : 2 * n_mag + n_ph] = Gamma.T
+    # B^+ block
+    M[n_mag + n_ph : 2 * n_mag + n_ph, :n_mag] = Hb[n_mag:, :n_mag]
+    M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag : n_mag + n_ph] = Gamma.conj()
+    M[2 * n_mag + n_ph :, :n_mag] = Gamma.conj()
+    # bottom-right block: Nambu conjugate of A with the supplied magnon
+    # lower block embedded (nonreciprocal-safe) instead of Hb00*
+    M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag + n_ph : n_mag + n_ph + n_mag] = Hb[
+        n_mag:, n_mag:
+    ]
+    M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag + n_ph + n_mag :] = Gamma.conj()
+    M[2 * n_mag + n_ph :, n_mag + n_ph : n_mag + n_ph + n_mag] = Gamma.T.conj()
+    M[2 * n_mag + n_ph :, n_mag + n_ph + n_mag :] = omega.conj()
+    return M, phonon_energies, evecs
 
 
 def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridModes:
@@ -297,6 +408,8 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
     paraunitary = np.full((len(points), 2 * N, 2 * N), np.nan + 0j)
     magnetic_weight = np.full((len(points), N), np.nan)
     displacement_weight = np.full((len(points), N), np.nan)
+    magnetic_strength = np.full((len(points), N), np.nan)
+    displacement_strength = np.full((len(points), N), np.nan)
     is_stable = np.zeros(len(points), dtype=bool)
     min_eig = np.full(len(points), np.nan)
     stability_tol = np.full(len(points), np.nan)
@@ -306,8 +419,9 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
     hermiticity_residual = np.full(len(points), np.nan)
 
     g_metric = np.diag(np.r_[np.ones(N), -np.ones(N)])
+    spin_lengths = np.asarray(mixed.spin_lengths, dtype=float)
     for ik, kpoint in enumerate(points):
-        M = _assemble_nambu(mixed, kpoint)
+        M, phonon_energies, phonon_modes = _assemble_nambu(mixed, kpoint)
         hermiticity_residual[ik] = np.max(np.abs(M - M.conj().T))
         if hermiticity_residual[ik] > np.finfo(float).eps * 4 * N * max(
             1.0, np.max(np.abs(M))
@@ -336,6 +450,22 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
         total = mag + ph
         magnetic_weight[ik] = mag / total
         displacement_weight[ik] = ph / total
+        # Operator-defined physical strengths (derived in
+        # docs/sympy/harmonic_magnon_phonon.py):
+        # <0|S_i1 + i S_i2|mode> = sqrt(2 S_i) T_{b_i, mode}
+        magnetic_strength[ik] = 2.0 * np.sum(
+            spin_lengths[:, None] * weight_sq[:n_mag, :], axis=0
+        )
+        # <0|w_beta|mode> = sum_nu e_{beta nu} T_{a_nu, mode}/sqrt(2 omega_nu)
+        displacement_amp = (phonon_modes @ pos[n_mag:N, :]) / np.sqrt(
+            2.0 * phonon_energies
+        )[:, None]
+        if mixed.displacement_coordinate == "cartesian_angstrom":
+            displacement_amp = (
+                displacement_amp
+                / np.sqrt(np.asarray(mixed.masses_amu, dtype=float))[:, None]
+            )
+        displacement_strength[ik] = np.sum(np.abs(displacement_amp) ** 2, axis=0)
         is_stable[ik] = True
 
     return HybridModes(
@@ -344,6 +474,8 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
         paraunitary=paraunitary,
         magnetic_weight=magnetic_weight,
         displacement_weight=displacement_weight,
+        magnetic_strength=magnetic_strength,
+        displacement_strength=displacement_strength,
         is_stable=is_stable,
         diagnostics=HybridDiagnostics(
             min_eig=min_eig,

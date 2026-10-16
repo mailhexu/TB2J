@@ -267,6 +267,123 @@ def numeric_certificate():
     )
 
 
+def derive_hessian_to_coupling():
+    """Assert the physical mixed-Hessian to bosonic energy conversion.
+
+    The typed input is the second derivative of the energy with respect to
+    (i) a local transverse spin component pair, expressed through the
+    complex amplitude ``s_i = S_i1 + i S_i2``, and (ii) a displacement
+    coordinate.  With unit-commutator HP bosons and the mass-weighted
+    normal coordinate of a mode with energy ``omega``,
+
+        s = sqrt(S/2) (b + b^+),        w = e (a + a^+)/sqrt(2 omega),
+
+    so an energy term ``G s w`` becomes a bosonic coupling
+
+        Gamma = G sqrt(S/2) e / sqrt(2 omega),
+
+    with the spin-length and phonon zero-point factors applied exactly
+    once.  For a Cartesian displacement basis, ``w = sqrt(m) u`` converts
+    first: ``G_massweighted = G_cartesian / sqrt(m)``.
+    """
+    S, m = sp.symbols("S m", positive=True)
+    b, bp, a, ap = sp.symbols("b b^+ a a^+", commutative=False)
+    G, omega = sp.symbols("G omega", positive=True)
+
+    s = sp.sqrt(S / 2) * (b + bp)
+    w = (a + ap) / sp.sqrt(2 * omega)
+    term = sp.expand(G * s * w)
+    Gamma = G * sp.sqrt(S / 2) / sp.sqrt(2 * omega)
+    collected = sp.simplify(term / (b * a + b * ap + bp * a + bp * ap))
+    assert sp.simplify(collected - Gamma) == 0, collected
+
+    # controlled-model round trip: choosing G = g sqrt(2 omega)/sqrt(S/2)
+    # returns exactly the bosonic coupling g of the derived Hamiltonian.
+    g = sp.symbols("g", positive=True)
+    round_trip = sp.simplify(
+        (g * sp.sqrt(2 * omega) / sp.sqrt(S / 2)) * sp.sqrt(S / 2) / sp.sqrt(2 * omega)
+    )
+    assert round_trip == g, round_trip
+
+    # Cartesian variant: u = w / sqrt(m), so the Cartesian-basis derivative
+    # converts to the mass-weighted derivative as G_mw = G_cart / sqrt(m).
+    Gc = sp.symbols("Gc", positive=True)
+    u = sp.Symbol("u", positive=True)
+    bc, bpc, ac, apc = sp.symbols("bc bpc ac apc", positive=True, commutative=True)
+    s_c = sp.sqrt(S / 2) * (bc + bpc)
+    w_c = (ac + apc) / sp.sqrt(2 * omega)
+    Gmw = Gc / sp.sqrt(m)
+    term_from_cart = sp.expand((Gc * s_c * u).subs(u, w_c / sp.sqrt(m)))
+    term_from_mw = sp.expand(Gmw * s_c * w_c)
+    assert sp.simplify(term_from_cart - term_from_mw) == 0
+    print(
+        "[ok] conversion Gamma = G sqrt(S/2) e / sqrt(2 omega); "
+        "controlled round trip exact; Cartesian to mass-weighted G -> G/sqrt(m)"
+    )
+    return Gamma
+
+
+def derive_observable_strengths():
+    """Assert operator-defined magnetic and displacement mode strengths.
+
+    The physical transverse-spin operator is ``zeta_i = S_i1 + i S_i2 =
+    sqrt(2 S_i) b_i`` to linear order, and the mass-weighted normal
+    displacement is ``Q = (a + a^+)/sqrt(2 beta)``.  For a positive hybrid
+    mode with normalized column ``t = (t_b, t_a, t_b^*, t_a^*)`` the
+    one-quantum matrix elements are ``<0|zeta|mode> = sqrt(2 S) t_b`` and
+    ``<0|Q|mode> = t_a / sqrt(2 beta)``, giving the physical strengths
+
+        M = 2 S |t_b|^2,        D = |t_a|^2 / (2 beta).
+
+    The bare limits pin both normalizations: the magnon-like mode has
+    ``M = 2 S`` and ``D = 0``; the phonon-like mode has ``M = 0`` and
+    ``D = 1/(2 beta)`` (the zero-point amplitude of Q).  Normalized
+    shares built from the strengths equal the amplitude shares.
+    """
+    S = sp.symbols("S", positive=True)
+    r = (E**2 - alpha**2) / (2 * gam * beta)
+    u_b = (alpha / E + 1) / sp.sqrt(2)
+    u_a = r * (beta / E + 1) / sp.sqrt(2)
+    gnorm = sp.simplify(2 * (alpha + beta * r**2) / E)
+    t_b2 = sp.simplify(u_b**2 / gnorm)
+    t_a2 = sp.simplify(u_a**2 / gnorm)
+    Mag = sp.simplify(2 * S * t_b2)
+    Dis = sp.simplify(t_a2 / (2 * beta))
+    # bare limits
+    mag_limit = sp.simplify(
+        sp.limit(Mag.subs(E, sp.sqrt(alpha**2 + gam**2)), gam, 0, "+")
+    )
+    assert mag_limit == 2 * S, mag_limit
+    dis_limit_phonon = sp.simplify(
+        sp.limit(Dis.subs(E, sp.sqrt(beta**2 + gam**2)), gam, 0, "+")
+    )
+    assert dis_limit_phonon == 1 / (2 * beta), dis_limit_phonon
+    dis_limit_magnon = sp.simplify(
+        sp.limit(Dis.subs(E, sp.sqrt(alpha**2 + gam**2)), gam, 0, "+")
+    )
+    assert dis_limit_magnon == 0, dis_limit_magnon
+    # Normalized strength shares are the particle-amplitude shares; the
+    # previously recorded W-amp shares include hole amplitudes and are a
+    # separate diagnostic.  Resonance: strength shares are 1/2 on both
+    # branches.
+    disc_res = 16 * alpha**2 * gam**2
+    for branch in (+1, -1):
+        # alpha = beta with r = 1: t_b = t_a exactly, so the operator
+        # strength share is exactly 1/2 on both branches.
+        tb_res = sp.simplify(
+            t_b2.subs(beta, alpha).subs(E**2, alpha**2 + branch * sp.sqrt(disc_res) / 2)
+        )
+        ta_res = sp.simplify(
+            t_a2.subs(beta, alpha).subs(E**2, alpha**2 + branch * sp.sqrt(disc_res) / 2)
+        )
+        assert sp.simplify(tb_res - ta_res) == 0, (tb_res, ta_res)
+    print(
+        "[ok] strengths M = 2 S |t_b|^2, D = |t_a|^2/(2 beta); bare limits "
+        "M=2S / D=1/(2 beta); resonance strengths symmetric"
+    )
+    return Mag, Dis
+
+
 def solver_detuning_sweep():
     """Check the implemented hybrid solver against the derived expressions."""
     from TB2J.magnon_phonon.harmonic import ControlledTwoBosonModel, hybrid_modes
@@ -274,6 +391,7 @@ def solver_detuning_sweep():
     points = np.zeros((1, 3))
     worst_energy = 0.0
     worst_weight = 0.0
+    worst_strength = 0.0
     for ratio in [0.4, 0.7, 1.0, 1.6, 2.5, 4.0]:
         for gscale in [0.05, 0.2, 0.45]:
             beta_v = 2.0
@@ -307,11 +425,25 @@ def solver_detuning_sweep():
                 # species weights recorded by the solver must match too
                 assert abs(res.magnetic_weight[0, mode] - share) < 1e-9
                 assert abs(res.displacement_weight[0, mode] - (1 - share)) < 1e-9
+                # operator-defined physical strengths (S = 2 controlled model):
+                # M = 2 S |t_b|^2, D = |t_a|^2/(2 beta)
+                t_col = res.paraunitary[0][:, mode]
+                mag_expect = 2 * 2.0 * abs(t_col[0]) ** 2
+                dis_expect = abs(t_col[1]) ** 2 / (2 * beta_v)
+                assert abs(res.magnetic_strength[0, mode] - mag_expect) < 1e-9
+                assert abs(res.displacement_strength[0, mode] - dis_expect) < 1e-9
+                worst_strength = max(
+                    worst_strength,
+                    abs(res.magnetic_strength[0, mode] - mag_expect),
+                    abs(res.displacement_strength[0, mode] - dis_expect),
+                )
     assert worst_energy < 1e-10, worst_energy
     assert worst_weight < 1e-9, worst_weight
+    assert worst_strength < 1e-9, worst_strength
     print(
-        f"[ok] implemented solver reproduces derived energies/weights across detuning "
-        f"(max dev E={worst_energy:.2e}, w={worst_weight:.2e})"
+        f"[ok] implemented solver reproduces derived energies/weights/strengths "
+        f"across detuning (max dev E={worst_energy:.2e}, w={worst_weight:.2e}, "
+        f"strength={worst_strength:.2e})"
     )
 
     # Stability threshold: flagged, not regularized.
@@ -333,6 +465,8 @@ if __name__ == "__main__":
     Ep2, Em2, disc = derive_energies()
     derive_stability(Em2, disc)
     derive_weights()
+    derive_hessian_to_coupling()
+    derive_observable_strengths()
     numeric_certificate()
     solver_detuning_sweep()
     print("harmonic_magnon_phonon: all derivation checks green")

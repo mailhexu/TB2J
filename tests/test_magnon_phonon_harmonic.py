@@ -74,7 +74,8 @@ def test_forbidden_scalar_collinear_input_rejected():
             producer="scalar_collinear_exchange_striction",
             magnon_bare=lambda pts: np.zeros((len(pts), 2, 2)),
             phonon_bare=lambda pts: np.ones((len(pts), 1, 1)),
-            magnon_phonon_coupling=lambda pts: np.ones((len(pts), 1, 1)),
+            mixed_derivative=lambda pts: np.ones((len(pts), 1, 1)),
+            spin_lengths=(2.0,),
             provenance={"source": "single collinear transverse measurement"},
         )
 
@@ -94,6 +95,7 @@ def test_scalar_collinear_forbidden_control_returns_bare_modes():
         displacement_labels=((0, 2),),
         magnon_bare=magnon_bare,
         phonon_bare=lambda pts: np.full((len(pts), 1, 1), beta**2),
+        spin_lengths=(2.0,),
         provenance={"source": "scalar-collinear exchange input"},
     )
     res = hybrid_modes(POINTS, mixed)
@@ -166,7 +168,7 @@ def test_hybrid_cli_accepts_typed_npz_hessian(tmp_path):
         points=POINTS,
         magnon_bare=np.array([[[2.0, 0.0], [0.0, 2.0]]]),
         phonon_bare=np.array([[[1.0]]]),
-        coupling=np.array([[[0.1]]]),
+        coupling=np.array([[[0.1 * np.sqrt(2 * 1.0)]]]),  # physical G for g=0.1, S=2
     )
     result = _run_hybrid(
         {
@@ -177,6 +179,8 @@ def test_hybrid_cli_accepts_typed_npz_hessian(tmp_path):
                 "n_mag_sites": 1,
                 "spin_coordinate_labels": [[0, "local-transverse-complex"]],
                 "displacement_labels": [[0, 2]],
+                "spin_lengths": [2.0],
+                "displacement_coordinate": "mass_weighted",
                 "producer": "controlled_mixed_torque",
                 "provenance": {"source": "test controlled Hessian"},
             },
@@ -219,3 +223,129 @@ def test_hybrid_cli_writes_strict_json_for_unstable_modes(monkeypatch, capsys):
     assert result["is_stable"] == [False]
     assert result["energies_eV"] == [[None, None]]
     assert result["diagnostics"]["shift"] == [0.0]
+
+
+def _nonreciprocal_hessian(j0, j1, beta_sq):
+    """Hand-built nonreciprocal one-site FM Hessian: J(k) = j0 + j1 sin(2pi k).
+
+    The Nambu block is [[J(k), 0], [0, J(-k)]] with real J: its lower
+    block is the opposite-k partner, NOT the conjugate of the upper block.
+    """
+
+    def magnon_bare(points):
+        out = np.zeros((len(points), 2, 2), dtype=complex)
+        for i, k in enumerate(points):
+            jk = j0 + j1 * np.sin(2 * np.pi * k[0])
+            jmk = j0 + j1 * np.sin(-2 * np.pi * k[0])
+            out[i, 0, 0] = jk
+            out[i, 1, 1] = jmk
+        return out
+
+    return MixedSpinDisplacementHessian.scalar_collinear_forbidden_control(
+        n_mag_sites=1,
+        displacement_labels=((0, 2),),
+        magnon_bare=magnon_bare,
+        phonon_bare=lambda pts: np.full((len(pts), 1, 1), beta_sq),
+        spin_lengths=(2.0,),
+        provenance={"source": "nonreciprocal zero-mixing control"},
+    )
+
+
+def test_zero_mixing_preserves_nonreciprocal_bare_magnons():
+    """TEST-005: hybrid zero-mixing energies equal the supplied Hq at k and -k."""
+    j0, j1, beta = 2.0, 0.4, 1.3
+    kpts = np.array([[0.25, 0.0, 0.0], [-0.25, 0.0, 0.0]])
+    mixed = _nonreciprocal_hessian(j0, j1, beta**2)
+    res = hybrid_modes(kpts, mixed)
+    for i, k in enumerate(kpts):
+        jk = j0 + j1 * np.sin(2 * np.pi * k[0])
+        expected = np.sort([jk, beta])
+        assert np.allclose(np.sort(res.energies[i]), expected, atol=1e-12), (
+            k,
+            res.energies[i],
+        )
+
+
+def test_physical_hessian_conversion_spin_and_zeropoint():
+    """TEST-006: physical mixed derivative converts to bosonic coupling once."""
+    alpha, beta, g = 2.0, 1.0, 0.12
+    # controlled model via its physical mixed derivative; spin length S = 2
+    # gives sqrt(S/2) = 1 and the single mass-weighted mode carries
+    # e = 1, omega = beta, so G = g sqrt(2 beta).
+    model = ControlledTwoBosonModel(alpha_eV=alpha, beta_eV=beta, g_eV=g)
+    res = hybrid_modes(POINTS, model.to_mixed_hessian())
+    assert np.allclose(
+        np.sort(res.energies[0]), _derived_energies(alpha, beta, g), atol=1e-10
+    )
+
+    # same physical coupling expressed with spin length S = 1: the Hessian
+    # must scale by sqrt(2/S); the solver must undo it exactly once.
+    mixed_s1 = MixedSpinDisplacementHessian(
+        n_mag_sites=1,
+        displacement_labels=((0, 0),),
+        spin_lengths=(1.0,),
+        displacement_coordinate="mass_weighted",
+        magnon_bare=lambda pts: np.array(
+            [[[alpha, 0.0], [0.0, alpha]]] * len(pts), dtype=complex
+        ),
+        phonon_bare=lambda pts: np.full((len(pts), 1, 1), beta**2),
+        mixed_derivative=lambda pts: np.full(
+            (len(pts), 1, 1), g * np.sqrt(2 * beta) / np.sqrt(0.5)
+        ),
+        producer="controlled_two_boson_s1",
+        provenance={"source": "S=1 conversion check"},
+    )
+    res_s1 = hybrid_modes(POINTS, mixed_s1)
+    assert np.allclose(
+        np.sort(res_s1.energies[0]), _derived_energies(alpha, beta, g), atol=1e-10
+    )
+
+    # Cartesian-basis variant: masses convert the derivative exactly once.
+    mass = 4.0  # amu
+    mixed_cart = MixedSpinDisplacementHessian(
+        n_mag_sites=1,
+        displacement_labels=((0, 0),),
+        spin_lengths=(2.0,),
+        displacement_coordinate="cartesian_angstrom",
+        masses_amu=(mass,),
+        magnon_bare=lambda pts: np.array(
+            [[[alpha, 0.0], [0.0, alpha]]] * len(pts), dtype=complex
+        ),
+        phonon_bare=lambda pts: np.full((len(pts), 1, 1), beta**2),
+        mixed_derivative=lambda pts: np.full(
+            (len(pts), 1, 1), g * np.sqrt(2 * beta) * np.sqrt(mass)
+        ),
+        producer="controlled_two_boson_cartesian",
+        provenance={"source": "Cartesian conversion check"},
+    )
+    res_cart = hybrid_modes(POINTS, mixed_cart)
+    assert np.allclose(
+        np.sort(res_cart.energies[0]), _derived_energies(alpha, beta, g), atol=1e-10
+    )
+
+
+def test_observable_strengths_match_operator_matrix_elements():
+    """TEST-007: physical strengths equal derived operator residues."""
+    spin_length = 2.0
+    beta = 1.5
+    for ratio in [0.5, 1.0, 2.4]:
+        alpha = ratio * beta
+        g = 0.3 * np.sqrt(alpha * beta)
+        model = ControlledTwoBosonModel(alpha_eV=alpha, beta_eV=beta, g_eV=g)
+        res = hybrid_modes(POINTS, model.to_mixed_hessian())
+        for mode in range(2):
+            t = res.paraunitary[0][:, mode]
+            tb = t[0]
+            ta = t[1]
+            mag_expect = 2 * spin_length * abs(tb) ** 2
+            dis_expect = abs(ta) ** 2 / (2 * beta)
+            assert abs(res.magnetic_strength[0, mode] - mag_expect) < 1e-10
+            assert abs(res.displacement_strength[0, mode] - dis_expect) < 1e-10
+    # bare limits: g -> 0 gives pure magnon M = 2S and pure phonon D = 1/(2 beta)
+    model = ControlledTwoBosonModel(alpha_eV=2.0, beta_eV=1.0, g_eV=1e-12)
+    res = hybrid_modes(POINTS, model.to_mixed_hessian())
+    order = np.argsort(res.energies[0])  # [phonon-like 1.0, magnon-like 2.0]
+    assert abs(res.magnetic_strength[0][order[0]] - 0.0) < 1e-9
+    assert abs(res.displacement_strength[0][order[0]] - 1.0 / (2 * 1.0)) < 1e-9
+    assert abs(res.magnetic_strength[0][order[1]] - 2 * spin_length) < 1e-9
+    assert abs(res.displacement_strength[0][order[1]] - 0.0) < 1e-9

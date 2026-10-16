@@ -86,6 +86,7 @@ def _typed_hessian_from_npz(model_spec: dict, points: np.ndarray):
         return provide
 
     n_mag = int(model_spec["n_mag_sites"])
+    displacement_coordinate = model_spec.get("displacement_coordinate", "mass_weighted")
     return MixedSpinDisplacementHessian(
         n_mag_sites=n_mag,
         displacement_labels=tuple(
@@ -96,12 +97,23 @@ def _typed_hessian_from_npz(model_spec: dict, points: np.ndarray):
         ),
         magnon_bare=point_provider(magnon),
         phonon_bare=point_provider(phonon),
-        magnon_phonon_coupling=point_provider(coupling),
+        mixed_derivative=point_provider(coupling),
+        spin_lengths=tuple(float(s) for s in model_spec["spin_lengths"]),
+        displacement_coordinate=displacement_coordinate,
+        masses_amu=(
+            tuple(float(m) for m in model_spec["masses_amu"])
+            if "masses_amu" in model_spec
+            else None
+        ),
         producer=model_spec["producer"],
         provenance=model_spec["provenance"],
         units=model_spec.get(
             "units",
-            {"energy": "eV", "displacement": "mass-weighted sqrt(amu) Angstrom"},
+            {
+                "energy": "eV",
+                "spin_coordinate": "dimensionless local transverse spin components (hbar=1)",
+                "displacement_coordinate": "mass_weighted | cartesian_angstrom",
+            },
         ),
         fourier_convention=model_spec.get(
             "fourier_convention",
