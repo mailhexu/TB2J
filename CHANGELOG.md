@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+
+- Added the explicit collinear magnon-phonon vertex `MagnonPhononModel.vertex(k, q)`
+  from canonical Story-006 site-boson modes, full-moment oriented-bond exchange
+  derivatives, and mass-weighted phonon modes. The vertex applies the
+  zero-point amplitude once, enforces the finite-q derivative-row convention,
+  returns one requested `(k, q)` branch block, and has an asserted SymPy
+  derivation plus finite-model, forbidden-mixing, Hermiticity, and rephasing
+  checks.
 - Magnon calculations expose canonical site-boson modes reconstructed from
   the lower-Cholesky metric eigensystem, including physical particle/hole
   amplitudes, local frames, spin lengths, stability diagnostics, and
