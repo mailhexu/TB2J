@@ -87,6 +87,7 @@ class PhononModeInput:
     frequencies_thz: np.ndarray
     masses_amu: np.ndarray
     eigenvectors: np.ndarray
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,30 @@ class PatternBondDerivatives:
     R: np.ndarray
     dJ_pattern: np.ndarray  # (n_bonds, n_phonon_modes) complex
     q: np.ndarray
+
+
+@dataclass(frozen=True)
+class ModeProjectedDerivatives:
+    """Finite-q S002 exchange derivatives projected onto a named mode.
+
+    ``O_pattern`` and ``FD_pattern`` are complex, full-moment ``dJ/dtau``
+    coefficients in eV/Angstrom for the report's unit-Cartesian polarization.
+    The polarization, mode label and source identity are retained; the vertex
+    multiplies the derivative by the corresponding generalized-coordinate
+    zero-point amplitude exactly once.
+    """
+
+    q: np.ndarray
+    mode: str
+    mode_index: int
+    polarization: np.ndarray
+    i: np.ndarray
+    j: np.ndarray
+    R: np.ndarray
+    O_pattern: np.ndarray
+    FD_pattern: np.ndarray
+    source: dict = field(default_factory=dict)
+    mode_evidence_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -192,6 +217,8 @@ def project_home_cell_rows(bonds: OrientedBondDerivatives, phonon: PhononModeInp
             f"q = {q.tolist()}"
         )
     dJ = np.asarray(bonds.dJ_dtau, dtype=complex)
+    if dJ.ndim != 3 or dJ.shape[2] != 3:
+        raise ValueError("home_cell dJ_dtau must contain all three Cartesian axes")
     eig = np.asarray(phonon.eigenvectors, dtype=complex)
     natom = dJ.shape[1]
     if eig.shape[0] != 3 * natom:
@@ -214,6 +241,26 @@ def project_home_cell_rows(bonds: OrientedBondDerivatives, phonon: PhononModeInp
         dJ_pattern=rows,
         q=q,
     )
+
+
+def _projected_mode_zero_point(phonon: PhononModeInput, mode_index: int):
+    """Return unit-Cartesian polarization and its generalized ZPA in Angstrom."""
+    from ase.units import _amu, _hbar
+
+    frequencies = np.asarray(phonon.frequencies_thz, dtype=float)
+    masses = np.asarray(phonon.masses_amu, dtype=float)
+    if mode_index < 0 or mode_index >= len(frequencies):
+        raise ValueError(f"phonon mode index {mode_index} is out of range")
+    mass_weighted = np.asarray(phonon.eigenvectors[:, mode_index], dtype=complex)
+    cart = mass_weighted.reshape(len(masses), 3) / np.sqrt(masses[:, None])
+    norm = np.linalg.norm(cart)
+    if norm <= 0:
+        raise ValueError("phonon mode has a zero Cartesian polarization")
+    cart /= norm
+    omega = 2 * np.pi * frequencies[mode_index] * THZ_TO_HZ
+    effective_mass_kg = np.sum(masses * np.sum(np.abs(cart) ** 2, axis=1)) * _amu
+    zpa_ang = np.sqrt(_hbar / (2 * effective_mass_kg * omega)) * 1e10
+    return cart, float(zpa_ang)
 
 
 def _validate_bonds(bonds: OrientedBondDerivatives, nspin: int):
@@ -249,19 +296,69 @@ class MagnonPhononModel:
         A :class:`TB2J.magnon.magnon3.Magnon` whose ``get_site_boson_modes``
         provides the canonical site-boson modes (Story 006 contract).
     bond_derivatives:
-        :class:`OrientedBondDerivatives` in the full-moment ``JR`` convention.
+        :class:`OrientedBondDerivatives` in the full-moment ``JR`` convention,
+        or a hash-joined :class:`ModeProjectedDerivatives` from the S002 loader.
+        The latter represents one report mode and requires ``mode_index`` in
+        :meth:`vertex`.
     phonons:
         Optional provider with ``modes_at(q) -> PhononModeInput``; otherwise
         pass ``phonon_modes`` explicitly to :meth:`vertex`.
     """
 
-    def __init__(self, magnon, bond_derivatives: OrientedBondDerivatives, phonons=None):
+    def __init__(
+        self,
+        magnon,
+        bond_derivatives: OrientedBondDerivatives | ModeProjectedDerivatives,
+        phonons=None,
+    ):
         self.magnon = magnon
         self.bond_derivatives = bond_derivatives
         self.phonons = phonons
 
-    def _pattern_rows(self, phonon: PhononModeInput):
+    def _pattern_rows(self, phonon: PhononModeInput, mode_index=None):
         bonds = self.bond_derivatives
+        if isinstance(bonds, ModeProjectedDerivatives):
+            if mode_index is None:
+                raise ValueError(
+                    "finite-q mode-projected reports require an explicit phonon mode_index"
+                )
+            if int(mode_index) != bonds.mode_index:
+                raise ValueError(
+                    f"phonon mode index {mode_index} does not match report mode "
+                    f"{bonds.mode!r} index {bonds.mode_index}"
+                )
+            q = np.asarray(phonon.q, dtype=float)
+            if not np.allclose(bonds.q, q, atol=GAMMA_TOL, rtol=0):
+                raise ValueError(
+                    f"mode-projected report q {bonds.q.tolist()} does not match requested q {q.tolist()}"
+                )
+            provenance = dict(phonon.provenance)
+            if provenance.get("mode_evidence_sha256") != bonds.mode_evidence_sha256:
+                raise ValueError(
+                    "unsupported finite-q join: phonon mode evidence provenance "
+                    "does not match the S002 report source"
+                )
+            if provenance.get("mode") != bonds.mode:
+                raise ValueError("phonon mode identity does not match S002 report mode")
+            cart, zpa = _projected_mode_zero_point(phonon, int(mode_index))
+            if bonds.polarization is not None:
+                polarization = np.asarray(bonds.polarization, dtype=complex)
+                if polarization.shape != cart.shape:
+                    raise ValueError(
+                        "report polarization shape does not match phonon mode"
+                    )
+                polarization /= np.linalg.norm(polarization)
+                if abs(np.vdot(polarization.reshape(-1), cart.reshape(-1))) < 1 - 1e-6:
+                    raise ValueError(
+                        f"report polarization does not match phonon mode {mode_index}"
+                    )
+            return PatternBondDerivatives(
+                i=np.asarray(bonds.i, dtype=int),
+                j=np.asarray(bonds.j, dtype=int),
+                R=np.asarray(bonds.R, dtype=int),
+                dJ_pattern=(np.asarray(bonds.O_pattern, dtype=complex) * zpa)[:, None],
+                q=q,
+            )
         if bonds.convention == "pattern_projected":
             q = np.asarray(phonon.q, dtype=float)
             if bonds.source_q is None or not np.allclose(
@@ -303,6 +400,7 @@ class MagnonPhononModel:
         q,
         phonon_modes: PhononModeInput | None = None,
         site_boson_modes: SiteBosonModes | None = None,
+        mode_index: int | None = None,
     ) -> VertexResult:
         """Materialize ``g_{mu nu nu'}(k, q)`` for all branches.
 
@@ -311,6 +409,9 @@ class MagnonPhononModel:
         momenta ``[k+q, k, -(k+q), -k]`` in that order.  Any degenerate
         subspace gauge of the injected modes yields the covariant vertex
         ``g -> Theta g Theta^dag`` with the asserted invariants.
+
+        A :class:`ModeProjectedDerivatives` input represents one S002 report
+        mode and requires its explicit ``mode_index``.
         """
         k = np.asarray(k, dtype=float).reshape(3)
         q = np.asarray(q, dtype=float).reshape(3)
@@ -364,15 +465,25 @@ class MagnonPhononModel:
                 )
         spins = np.asarray(modes.spin_lengths, dtype=float)
 
-        i_b, j_b = _validate_bonds(self.bond_derivatives, len(spins))
-        R_b = np.asarray(self.bond_derivatives.R, dtype=float)
-        rows = self._pattern_rows(phonon)
-        if (
-            len(rows.i) != len(i_b)
-            or not np.array_equal(rows.i, i_b)
-            or not np.array_equal(rows.j, j_b)
-        ):
-            raise ValueError("pattern rows do not match the bond list")
+        if isinstance(self.bond_derivatives, ModeProjectedDerivatives):
+            i_b = np.asarray(self.bond_derivatives.i, dtype=int)
+            j_b = np.asarray(self.bond_derivatives.j, dtype=int)
+            if (
+                i_b.size == 0
+                or j_b.size != i_b.size
+                or i_b.min() < 0
+                or j_b.min() < 0
+                or i_b.max() >= len(spins)
+                or j_b.max() >= len(spins)
+            ):
+                raise ValueError(
+                    "mode-projected report bond sites do not match spin model"
+                )
+            rows = self._pattern_rows(phonon, mode_index=mode_index)
+        else:
+            i_b, j_b = _validate_bonds(self.bond_derivatives, len(spins))
+            rows = self._pattern_rows(phonon, mode_index=mode_index)
+        R_b = np.asarray(rows.R, dtype=float)
         O = np.asarray(rows.dJ_pattern, dtype=complex)
         # full-moment rows -> unit-direction exchange derivative consumed by F
         O = O / (spins[i_b][:, None] * spins[j_b][:, None])
@@ -415,26 +526,38 @@ class MagnonPhononModel:
             - spins[i_b][None, None, :] * p3[None, None, :] * D_j
         )
         g = -np.einsum("bv,mnb->mnv", O, F)
+        reported_mode = isinstance(self.bond_derivatives, ModeProjectedDerivatives)
+        output_frequencies = np.asarray(phonon.frequencies_thz, dtype=float)
+        if reported_mode:
+            output_frequencies = output_frequencies[[int(mode_index)]]
+        conventions = {
+            "fourier": "A(q) = sum_R A(R) exp(-2 pi i q.R)",
+            "spin_hamiltonian": "H = -sum_b J_b S_i.S_j (full-moment JR convention)",
+            "phonon_displacement": (
+                "tau = ZPA e^{mw} e^{2 pi i q L} (b_q + b^dag_-q)/sqrt(N_cell); "
+                "zero-point factor applied once here"
+            ),
+            "vertex": "H_mp = sum g a^dag_{k+q} a_k (b_q + b^dag_-q)/sqrt(N_cell)",
+            "rows_convention": (
+                "mode_projected_report"
+                if reported_mode
+                else self.bond_derivatives.convention
+            ),
+        }
+        if reported_mode:
+            conventions["mode_identity"] = self.bond_derivatives.mode
+            conventions["mode_evidence_sha256"] = (
+                self.bond_derivatives.mode_evidence_sha256
+            )
         result = VertexResult(
             g=np.asarray(g, dtype=complex),
             kpoints=np.array(points, dtype=float),
             phonon_q=np.asarray(phonon.q, dtype=float).copy(),
             magnon_energies=np.asarray(modes.energies, dtype=float).copy(),
-            phonon_frequencies_thz=np.asarray(
-                phonon.frequencies_thz, dtype=float
-            ).copy(),
+            phonon_frequencies_thz=output_frequencies.copy(),
             O_pattern=np.asarray(O, dtype=complex),
             n_bonds=len(i_b),
             collinearity_residual=collinear_residual,
-            conventions={
-                "fourier": "A(q) = sum_R A(R) exp(-2 pi i q.R)",
-                "spin_hamiltonian": "H = -sum_b J_b S_i.S_j (full-moment JR convention)",
-                "phonon_displacement": (
-                    "tau = ZPA e^{mw} e^{2 pi i q L} (b_q + b^dag_-q)/sqrt(N_cell); "
-                    "zero-point factor applied once here"
-                ),
-                "vertex": "H_mp = sum g a^dag_{k+q} a_k (b_q + b^dag_-q)/sqrt(N_cell)",
-                "rows_convention": self.bond_derivatives.convention,
-            },
+            conventions=conventions,
         )
         return result

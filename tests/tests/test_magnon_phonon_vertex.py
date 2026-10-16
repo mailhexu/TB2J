@@ -8,6 +8,7 @@ Acceptance criteria:
 - TEST-004: degenerate-subspace rephasing invariance of contracted quantities.
 """
 
+import hashlib
 import json
 
 import numpy as np
@@ -568,19 +569,50 @@ def _matched_rows_document(axis, atom):
     }
 
 
-def test_load_matched_rows_converts_units_and_fills_axes(tmp_path):
+def test_load_matched_rows_rejects_missing_cartesian_axis_at_vertex(tmp_path):
     paths = []
     for axis in (1, 2):
+        path = tmp_path / f"rows-axis{axis}.json"
+        path.write_text(json.dumps(_matched_rows_document(axis, atom=0)))
+        paths.append(path)
+    with pytest.raises(ValueError, match="all three Cartesian axes"):
+        load_matched_rows(paths)
+
+    # The vertex seam also refuses a manually constructed partial Cartesian
+    # row tensor; an absent axis is not silently treated as a measured zero.
+    magnon = _spring_magnon()
+    partial = OrientedBondDerivatives(
+        i=np.array([0, 1]),
+        j=np.array([1, 0]),
+        R=np.array([[1, 0, 0], [-1, 0, 0]]),
+        dJ_dtau=np.zeros((2, 1, 2)),
+        convention="home_cell",
+    )
+    phonon = PhononModeInput(
+        q=np.zeros(3),
+        frequencies_thz=np.array([5.3]),
+        masses_amu=np.array([1.3]),
+        eigenvectors=np.ones((3, 1), dtype=complex) / np.sqrt(3),
+    )
+    with pytest.raises(ValueError, match="three Cartesian axes"):
+        MagnonPhononModel(magnon, partial).vertex(
+            (1 / 6, 0.0, 0.0), (0.0, 0.0, 0.0), phonon_modes=phonon
+        )
+
+
+def test_load_matched_rows_converts_units_with_complete_axis_coverage(tmp_path):
+    paths = []
+    for axis in (1, 2, 3):
         path = tmp_path / f"rows-axis{axis}.json"
         path.write_text(json.dumps(_matched_rows_document(axis, atom=0)))
         paths.append(path)
     bonds, meta = load_matched_rows(paths)
     assert bonds.convention == "home_cell"
     assert bonds.units == "eV/Angstrom"
-    assert bonds.dJ_dtau.shape == (2, 1, 2)
-    # meV -> eV conversion
+    assert bonds.dJ_dtau.shape == (2, 1, 3)
     np.testing.assert_allclose(bonds.dJ_dtau[0, 0, 0], -1.5e-3)
     np.testing.assert_allclose(bonds.dJ_dtau[1, 0, 1], 0.25e-3)
+    np.testing.assert_allclose(bonds.dJ_dtau[0, 0, 2], -1.5e-3)
     assert meta["schema"] == "matched-periodic-J-v1"
 
 
@@ -594,6 +626,228 @@ def test_load_matched_rows_rejects_inconsistent_bond_sets(tmp_path):
     p2.write_text(json.dumps(bad))
     with pytest.raises(ValueError, match="inconsistent"):
         load_matched_rows([p1, p2])
+
+
+def _s002_report(q, mode, polarization, bonds):
+    rows = []
+    for i, j, R, value in bonds:
+        rows.append(
+            {
+                "iatom": i,
+                "jatom": j,
+                "R": list(R),
+                "O_real_meV_per_Ang": value.real * 1e3,
+                "O_imag_meV_per_Ang": value.imag * 1e3,
+                "FD_real_meV_per_Ang": (value * 0.99).real * 1e3,
+                "FD_imag_meV_per_Ang": (value * 0.99).imag * 1e3,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "campaigns": {
+            "K": {
+                "campaign": {"campaign_id": "fixture-K"},
+                "reports": [
+                    {
+                        "mode": mode,
+                        "q": list(q),
+                        "polarization_real": np.asarray(polarization).real.tolist(),
+                        "polarization_imag": np.asarray(polarization).imag.tolist(),
+                        "rows": rows,
+                    }
+                ],
+            }
+        },
+    }
+
+
+def test_s002_complex_report_loads_into_vertex_and_preserves_identity(tmp_path):
+    from TB2J.magnon_phonon.loaders import load_s002_report
+    from TB2J.magnon_phonon.vertex import ModeProjectedDerivatives
+
+    q = (1 / 3, 1 / 3, 0.0)
+    polarization = np.array([[0.8 + 0.1j, 0.2j, 0.0], [0.4, 0.1, 0.0]], dtype=complex)
+    polarization /= np.linalg.norm(polarization)
+    report_bonds = [
+        (0, 1, (-1, 0, 0), 0.12 + 0.07j),
+        (1, 0, (1, 0, 0), -0.04 + 0.03j),
+    ]
+    path = tmp_path / "s002.json"
+    mode_evidence_path, _ = _write_s002_fixture(
+        path, q, "acoustic-like", polarization, report_bonds, mode_index=0
+    )
+    derivatives = load_s002_report(
+        path,
+        campaign="K",
+        mode="acoustic-like",
+        expected_bonds=[(i, j, R) for i, j, R, _ in report_bonds],
+        mode_evidence_path=mode_evidence_path,
+    )
+    assert isinstance(derivatives, ModeProjectedDerivatives)
+    assert derivatives.mode == "acoustic-like"
+    np.testing.assert_allclose(derivatives.q, q)
+    np.testing.assert_allclose(derivatives.polarization, polarization)
+    np.testing.assert_allclose(derivatives.O_pattern, [0.12 + 0.07j, -0.04 + 0.03j])
+    np.testing.assert_allclose(
+        derivatives.FD_pattern, [0.1188 + 0.0693j, -0.0396 + 0.0297j]
+    )
+
+    magnon = _spring_magnon()
+    masses = np.array([1.3, 0.7])
+    eig = np.sqrt(masses[:, None]) * polarization
+    eig = eig.reshape(-1, 1)
+    eig /= np.linalg.norm(eig)
+    phonon = PhononModeInput(
+        q=np.asarray(q),
+        frequencies_thz=np.array([5.3]),
+        masses_amu=masses,
+        eigenvectors=eig,
+        provenance={
+            "mode_evidence_sha256": derivatives.mode_evidence_sha256,
+            "mode": derivatives.mode,
+        },
+    )
+    model = MagnonPhononModel(magnon, derivatives)
+    with pytest.raises(ValueError, match="mode index"):
+        model.vertex(
+            (1 / 6, 1 / 6, 0),
+            q,
+            phonon_modes=phonon,
+            mode_index=1,
+        )
+    phonon_without_join = PhononModeInput(
+        q=np.asarray(q),
+        frequencies_thz=phonon.frequencies_thz,
+        masses_amu=masses,
+        eigenvectors=eig,
+    )
+    with pytest.raises(ValueError, match="provenance"):
+        model.vertex(
+            (1 / 6, 1 / 6, 0),
+            q,
+            phonon_modes=phonon_without_join,
+            mode_index=0,
+        )
+    block = model.vertex((1 / 6, 1 / 6, 0), q, phonon_modes=phonon, mode_index=0)
+    assert block.g.shape == (2, 2, 1)
+    assert block.conventions["mode_identity"] == "acoustic-like"
+
+    # A conjugate report at -q is the Hermiticity partner; the imported report
+    # O retains its complex phase and directed-bond rows.
+    partner_path = tmp_path / "s002-minus.json"
+    qminus = tuple(-np.asarray(q))
+    partner_mode_path, _ = _write_s002_fixture(
+        partner_path,
+        qminus,
+        "acoustic-like",
+        polarization.conj(),
+        [(i, j, R, value.conjugate()) for i, j, R, value in report_bonds],
+        mode_index=0,
+    )
+    partner = load_s002_report(
+        partner_path,
+        campaign="K",
+        mode="acoustic-like",
+        expected_bonds=[(i, j, R) for i, j, R, _ in report_bonds],
+        mode_evidence_path=partner_mode_path,
+    )
+    phonon_minus = PhononModeInput(
+        q=np.asarray(qminus),
+        frequencies_thz=np.array([5.3]),
+        masses_amu=masses,
+        eigenvectors=eig.conj(),
+        provenance={
+            "mode_evidence_sha256": partner.mode_evidence_sha256,
+            "mode": partner.mode,
+        },
+    )
+    reverse = MagnonPhononModel(magnon, partner).vertex(
+        (1 / 6 + q[0], 1 / 6 + q[1], 0),
+        qminus,
+        phonon_modes=phonon_minus,
+        mode_index=0,
+    )
+    np.testing.assert_allclose(
+        block.g[:, :, 0], np.conj(reverse.g[:, :, 0].T), atol=1e-10
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation, match",
+    [
+        ("wrong_q", "q"),
+        ("missing_component", "O_imag"),
+        ("missing_bond", "bond set"),
+        ("missing_polarization", "missing polarization"),
+        ("wrong_mode", "mode"),
+    ],
+)
+def test_s002_report_rejects_invalid_identity_or_incomplete_rows(
+    tmp_path, mutation, match
+):
+    from TB2J.magnon_phonon.loaders import load_s002_report
+
+    q = (1 / 3, 1 / 3, 0.0)
+    polarization = np.ones((2, 3), dtype=complex)
+    polarization /= np.linalg.norm(polarization)
+    bonds = [
+        (0, 1, (-1, 0, 0), 0.12 + 0.07j),
+        (1, 0, (1, 0, 0), -0.04 + 0.03j),
+    ]
+    mode = "acoustic-like"
+    expected = [(i, j, R) for i, j, R, _ in bonds]
+    path = tmp_path / f"{mutation}.json"
+    mode_evidence_path, mode_evidence = _write_s002_fixture(
+        path, q, mode, polarization, bonds
+    )
+    data = json.loads(path.read_text())
+    report = data["campaigns"]["K"]["reports"][0]
+    if mutation == "wrong_q":
+        report["q"] = [0.25, 0.25, 0.0]
+        path.write_text(json.dumps(data))
+    elif mutation == "missing_component":
+        del report["rows"][0]["O_imag_meV_per_Ang"]
+        path.write_text(json.dumps(data))
+    elif mutation == "missing_bond":
+        report["rows"].pop()
+        path.write_text(json.dumps(data))
+    elif mutation == "missing_polarization":
+        mode_evidence.pop("polarization_real")
+        evidence_bytes = json.dumps(mode_evidence, sort_keys=True).encode()
+        mode_evidence_path.write_bytes(evidence_bytes)
+        report["source_sha256"] = hashlib.sha256(evidence_bytes).hexdigest()
+        path.write_text(json.dumps(data))
+    elif mutation == "wrong_mode":
+        mode = "Cr-dominated-optical"
+    with pytest.raises(ValueError, match=match):
+        load_s002_report(
+            path,
+            campaign="K",
+            mode=mode,
+            expected_bonds=expected,
+            mode_evidence_path=mode_evidence_path,
+        )
+
+
+def _write_s002_fixture(path, q, mode, polarization, bonds, mode_index=0):
+    data = _s002_report(q, mode, polarization, bonds)
+    report = data["campaigns"]["K"]["reports"][0]
+    report.pop("polarization_real")
+    report.pop("polarization_imag")
+    report["source_evidence"] = f"{path.stem}-mode.json"
+    evidence = {
+        "mode": mode,
+        "mode_eigenvector_index": mode_index,
+        "q": list(q),
+        "polarization_real": np.asarray(polarization).real.tolist(),
+        "polarization_imag": np.asarray(polarization).imag.tolist(),
+    }
+    evidence_path = path.parent / report["source_evidence"]
+    evidence_bytes = json.dumps(evidence, sort_keys=True).encode()
+    evidence_path.write_bytes(evidence_bytes)
+    report["source_sha256"] = hashlib.sha256(evidence_bytes).hexdigest()
+    path.write_text(json.dumps(data))
+    return evidence_path, evidence
 
 
 def test_as_phonon_mode_input_duck_typing():

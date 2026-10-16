@@ -108,3 +108,19 @@ g_{mu nu nu'}(k, q) = - sum_b O^pat_{b, nu'}(q) F_b[mu, nu](k, q)
 - The `home_cell` derivative-row convention is exact only at `q = 0` (all
   pattern phases unity).  At general `q` the rows must already be
   pattern-projected (finite-q campaigns) — `vertex.py` enforces this.
+- S002 finite-q reports enter through
+  `TB2J.magnon_phonon.loaders.load_s002_report(report_path, campaign, mode,
+  expected_bonds, mode_evidence_path)`. The adapter hash-checks the companion
+  mode-evidence JSON, requires the report/source q and mode label to agree,
+  preserves its complex Cartesian polarization plus O/FD components, and
+  refuses missing row components or an incomplete directed-bond set. Use the
+  returned `ModeProjectedDerivatives` directly as the model's derivative input;
+  call `model.vertex(k, q, phonon_modes=..., mode_index=...)`.
+- A finite-q mode-projected record is joined only when the supplied
+  `PhononModeInput.provenance` includes the same `mode_evidence_sha256` and
+  `mode` label, and its phonon branch has the report's eigenvector index and
+  matching unit-Cartesian polarization. A missing or mismatched identity is an
+  unsupported input, not a guessed projection.
+- `load_matched_rows` accepts only complete Cartesian-axis coverage for each
+  displaced atom represented in the home-cell evidence. Missing axes are
+  rejected rather than zero-filled.

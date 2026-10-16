@@ -8,7 +8,9 @@
   zero-point amplitude once, enforces the finite-q derivative-row convention,
   returns one requested `(k, q)` branch block, and has an asserted SymPy
   derivation plus finite-model, forbidden-mixing, Hermiticity, and rephasing
-  checks.
+  checks. Finite-q S002 reports now have a hash-pinned adapter that preserves
+  mode, polarization, complex O/FD, and directed-bond identity; incomplete
+  Cartesian home-cell axes and unjoined mode provenance are rejected.
 - Magnon calculations expose canonical site-boson modes reconstructed from
   the lower-Cholesky metric eigensystem, including physical particle/hole
   amplitudes, local frames, spin lengths, stability diagnostics, and
