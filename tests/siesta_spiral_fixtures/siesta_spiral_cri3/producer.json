@@ -1,0 +1,25 @@
+{
+  "executable_version": "5.4.2-23-g549d9de29",
+  "executable_git_commit": "549d9de2985008c2571350029b5d81cd94a3e0e1",
+  "executable_sha256": "3b5f8078fe5113438f51f4c243dbe35ce80a1b200e323fdcabf144ac33adcf6d",
+  "sisl_version": "0.16.2",
+  "source_checkout_sha256": {
+    "Src/diag2kspiral.F90": "03915969991a9088e2b1e78743bf269f7bf59e84beb802390bd59b20c626dabd",
+    "Src/io_hsx.F90": "919c49ae7669813e5c543b128a40a0ee952a81013b34af460319a71dec4cf730",
+    "Src/final_H_f_stress.F": "f1a9067e949581de816d3f44beef99e2e649f9189dd4a845fabbe704d2932545",
+    "Src/bands.F": "d7946f47521c217b65c6ff860ef4c7153680e47155c46bfa17468c50d203113d"
+  },
+  "producer": "SIESTA native generalized Bloch theorem; scalar-relativistic ONCVPSP PSML pseudopotentials",
+  "input": "cri3_q025_dzp_g200_k4.fdf",
+  "basis": {
+    "Cr": "DZP",
+    "I": "DZP",
+    "energy_shift_ev": 0.05
+  },
+  "mesh_cutoff_ry": 200,
+  "k_mesh": [4, 4, 1],
+  "spiral_q_reciprocal_fractional": [0.25, 0.0, 0.0],
+  "temperature_k": 300,
+  "electron_count": 70,
+  "fixture_npz": "../siesta_spiral_cri3.npz"
+}

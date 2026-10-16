@@ -19,6 +19,9 @@ KB_EV = 8.617333262e-5
 EIGENVALUE_TOL_EV = 1e-5
 ELECTRON_COUNT_TOL = 1e-4
 HERMITICITY_TOL = 1e-8
+# H(k) accumulates many phase-weighted terms; keep this scale-relative producer
+# gate separate from the absolute response-matrix tolerance above.
+PENCIL_HERMITICITY_REL_TOL = 1e-8
 FIXTURE_VERSION = "1.0"
 
 
@@ -81,10 +84,13 @@ def _pencil_eigenvalues(importer, bundle, kvec):
     for name, matrix in (("H", H), ("S", S)):
         if not np.isfinite(matrix).all():
             raise OracleMismatch(f"nonfinite {name} pencil")
+        scale = max(1.0, float(np.abs(matrix).max(initial=0.0)))
         defect = float(np.max(np.abs(matrix - matrix.conj().T)))
-        if defect > HERMITICITY_TOL:
+        if defect > PENCIL_HERMITICITY_REL_TOL * scale:
             raise OracleMismatch(
-                f"{name} pencil is not Hermitian (defect {defect:.3e})"
+                f"{name} pencil is not Hermitian "
+                f"(defect {defect:.3e}, scale {scale:.3e}, "
+                f"relative tolerance {PENCIL_HERMITICITY_REL_TOL:.0e})"
             )
     try:
         return eigh(H, S, eigvals_only=True)

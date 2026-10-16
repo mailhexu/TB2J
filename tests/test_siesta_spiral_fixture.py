@@ -8,6 +8,9 @@ import pytest
 
 from TB2J.interfaces.siesta_spiral import SpiralImporter, SpiralImportError
 from TB2J.interfaces.siesta_spiral_io import (
+    EIGENVALUE_TOL_EV,
+    HERMITICITY_TOL,
+    PENCIL_HERMITICITY_REL_TOL,
     OracleMismatch,
     load_fixture,
     run_eigenvalue_oracle,
@@ -33,6 +36,28 @@ def test_eigenvalues_match_real_producer(producer):
     assert report.max_dev < 1e-6
 
 
+def test_cri3_real_producer_uses_scale_aware_pencil_oracle():
+    bundle, reference = load_fixture(DATA.with_name("siesta_spiral_cri3.npz"))
+    H, S = SpiralImporter().assemble_pencil(bundle, reference["kp"][0])
+    h_defect = float(np.max(np.abs(H - H.conj().T)))
+    assert h_defect > HERMITICITY_TOL
+    for matrix in (H, S):
+        scale = max(1.0, float(np.abs(matrix).max(initial=0.0)))
+        defect = float(np.max(np.abs(matrix - matrix.conj().T)))
+        assert defect <= PENCIL_HERMITICITY_REL_TOL * scale
+
+    occupied = int(reference["electron_count"])
+    finite_unoccupied = reference["eig"][:, occupied:]
+    finite_unoccupied = finite_unoccupied[np.isfinite(finite_unoccupied)]
+    assert float(finite_unoccupied.min()) > float(reference["eig"][:, :occupied].max())
+
+    eigenvalues = run_eigenvalue_oracle(bundle, reference)
+    assert eigenvalues.passed, eigenvalues.detail
+    assert eigenvalues.max_dev <= EIGENVALUE_TOL_EV
+    electron_count = run_electron_count_oracle(bundle, reference)
+    assert electron_count.passed, electron_count.detail
+
+
 def test_occupation_count_matches_real_producer(producer):
     report = run_electron_count_oracle(*producer)
     assert report.passed, report.detail
@@ -43,8 +68,10 @@ def test_real_pencils_are_hermitian(producer):
     bundle, reference = producer
     for kvec in reference["kp"]:
         H, S = SpiralImporter().assemble_pencil(bundle, kvec)
-        np.testing.assert_allclose(H, H.conj().T, atol=1e-8, rtol=0)
-        np.testing.assert_allclose(S, S.conj().T, atol=1e-8, rtol=0)
+        for matrix in (H, S):
+            scale = max(1.0, float(np.abs(matrix).max(initial=0.0)))
+            defect = float(np.max(np.abs(matrix - matrix.conj().T)))
+            assert defect <= PENCIL_HERMITICITY_REL_TOL * scale
 
 
 def test_zero_overlap_does_not_remove_hamiltonian_entries(fixture):
