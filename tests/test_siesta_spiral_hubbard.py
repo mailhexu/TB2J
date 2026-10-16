@@ -58,6 +58,7 @@ from TB2J.interfaces.siesta_spiral_hubbard import (
     OccupationMatrixError,
     Radial,
     TwoCenterEngine,
+    _bundle_from_hs_geometry,
     assemble_hubbard_operator,
     edftu_oracle,
     recompute_occupations,
@@ -908,3 +909,106 @@ def test_ingest_dftu_run_refuses_undeclared_subspace(producer_run):
             principal_n=3,
             site_indices=(1, 2, 3, 4),
         )
+
+
+# ---------------------------------------------------------------------------
+# Layout-restricted overlap-equality exception in _bundle_from_hs_geometry
+# ---------------------------------------------------------------------------
+
+
+def _nine_col_hsx(d56_mode):
+    """Synthetic 9-CSR-column HSX sile (fe4_occ layout): file components
+    D1-D4 in columns 0-3, payload under test in columns 4-7, overlap in
+    column 8.  ``d56_mode`` selects columns 4-5: "junk" (significant
+    non-overlap values), "overlap-copy" (the overlap values repeated,
+    which the unrestricted equality exception used to excuse), or
+    "negligible" (zeros, the certified fe4_occ situation).
+    """
+    from test_siesta_spiral_displacement import (  # synthetic fake backend
+        _BASE_H,
+        _BASE_S,
+        CELL,
+        SC_OFF,
+        _FakeCSR,
+        _FakeGeometry,
+    )
+
+    class _Ham:
+        def __init__(self, csr):
+            self._csr = csr
+
+        def shift(self, ef):  # pragma: no cover - Ef is 0 in these fakes
+            self._csr._D[:, :4] += ef
+
+    class _Overlap:
+        def __init__(self, csr):
+            self._csr = csr
+
+    class _Sile:
+        def __init__(self):
+            self._geom = _FakeGeometry(CELL, ((0.0, 0.0, 0.0), (0.0, 0.0, 3.0)), SC_OFF)
+            hcsr = _FakeCSR(_BASE_H, 2, 4)
+            scsr = _FakeCSR(_BASE_S, 2, 4)
+            if d56_mode == "junk":
+                cols45 = np.full((hcsr._D.shape[0], 2), 7.0)
+            elif d56_mode == "overlap-copy":
+                cols45 = np.broadcast_to(scsr._D[:, :1], (hcsr._D.shape[0], 2))
+            else:
+                cols45 = np.zeros((hcsr._D.shape[0], 2))
+            tail = np.concatenate(
+                [cols45, np.zeros((hcsr._D.shape[0], 2)), scsr._D[:, :1]], axis=1
+            )
+            hcsr._D = np.concatenate([hcsr._D, tail], axis=1)
+            self._ham = _Ham(hcsr)
+            self._scsr = scsr
+
+        def read_geometry(self):
+            return self._geom
+
+        def read_hamiltonian(self):
+            return self._ham
+
+        def read_overlap(self):
+            return _Overlap(self._scsr)
+
+        def read_fermi_level(self):
+            return 0.0
+
+    return _Sile()
+
+
+def test_nine_col_layout_junk_at_d56_refuses():
+    with pytest.raises(HubbardBundleError, match="imaginary diagonal"):
+        _bundle_from_hs_geometry(_nine_col_hsx("junk"), "synthetic", "")
+
+
+def test_nine_col_layout_overlap_copies_at_d56_refuse():
+    """Regression: with the overlap at column 8, overlap VALUES repeated
+    at columns 4-5 must NOT be excused by the equality exception."""
+    with pytest.raises(HubbardBundleError, match="imaginary diagonal"):
+        _bundle_from_hs_geometry(_nine_col_hsx("overlap-copy"), "synthetic", "")
+
+
+def test_nine_col_layout_negligible_d56_passes():
+    """The certified fe4_occ layout: columns 4-5 negligible, overlap at
+    column 8 -- the file is accepted."""
+    bundle = _bundle_from_hs_geometry(_nine_col_hsx("negligible"), "synthetic", "")
+    assert bundle.norb == 2
+
+
+def test_five_col_layout_overlap_at_col4_passes():
+    """The fe4 displaced-campaign layout: 5 columns, overlap at column 4,
+    accepted through the equality exception."""
+    from test_siesta_spiral_displacement import (
+        _BASE_H,
+        _BASE_S,
+        CELL,
+        SC_OFF,
+        _FakeHsxFourComponent,
+    )
+
+    sile = _FakeHsxFourComponent(
+        CELL, ((0.0, 0.0, 0.0), (0.0, 0.0, 3.0)), SC_OFF, _BASE_H, _BASE_S, 0.0
+    )
+    bundle = _bundle_from_hs_geometry(sile, "synthetic", "")
+    assert bundle.norb == 2
