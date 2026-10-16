@@ -162,6 +162,19 @@ def test_unstable_reference_is_rejected():
         magnon.get_site_boson_modes([[0.2, 0, 0]])
 
 
+def test_mode_result_arrays_are_read_only_and_cannot_corrupt_paraunitary():
+    modes = _two_sublattice_afm().get_site_boson_modes([[0.17, 0, 0]])
+    before = modes.paraunitary.copy()
+    for amplitudes in (modes.u, modes.v):
+        with pytest.raises(ValueError):
+            amplitudes[0, 0, 0] = amplitudes[0, 0, 0] + 1.0
+    with pytest.raises(ValueError):
+        modes.paraunitary[0, 0, 0] += 1.0
+    with pytest.raises(ValueError):
+        modes.diagnostics.min_eig[0] = 0.0
+    np.testing.assert_array_equal(modes.paraunitary, before)
+
+
 def test_engineered_anomalous_model_against_direct_diagonalization():
     magnon = _engineered_anomalous()
     kpoints = np.array([[0.0, 0.0, 0.0], [0.21, 0.0, 0.0]])

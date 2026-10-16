@@ -22,18 +22,35 @@ def _jsonable(value):
     return value
 
 
-@dataclass
+def _readonly_array(value, dtype):
+    array = np.asarray(value, dtype=dtype)
+    array.setflags(write=False)
+    return array
+
+
+@dataclass(frozen=True)
 class SiteBosonDiagnostics:
-    """Per-k-point stability and Cholesky regularization diagnostics."""
+    """Read-only per-k-point stability and Cholesky regularization diagnostics."""
 
     min_eig: np.ndarray
     shift: np.ndarray
     cholesky_tier: np.ndarray
 
+    def __post_init__(self):
+        object.__setattr__(self, "min_eig", _readonly_array(self.min_eig, float))
+        object.__setattr__(self, "shift", _readonly_array(self.shift, float))
+        object.__setattr__(
+            self, "cholesky_tier", _readonly_array(self.cholesky_tier, int)
+        )
 
-@dataclass
+
+@dataclass(frozen=True)
 class SiteBosonModes:
     """Canonical site-boson modes in the local-frame Holstein--Primakoff basis.
+
+    Arrays are read-only. In particular, ``u`` and ``v`` are views into the
+    positive-norm columns of ``paraunitary``; protecting both prevents callers
+    from changing amplitudes without changing the corresponding matrix.
 
     ``paraunitary`` has columns ordered as positive-norm particles followed by
     their negative-norm hole partners; its row order is ``(b(k), b†(-k))``.
@@ -60,15 +77,18 @@ class SiteBosonModes:
     )
 
     def __post_init__(self):
-        self.kpoints = np.asarray(self.kpoints, dtype=float)
-        self.energies = np.asarray(self.energies, dtype=float)
-        self.u = np.asarray(self.u, dtype=complex)
-        self.v = np.asarray(self.v, dtype=complex)
-        self.paraunitary = np.asarray(self.paraunitary, dtype=complex)
-        self.spin_lengths = np.asarray(self.spin_lengths, dtype=float)
-        self.U = np.asarray(self.U, dtype=complex)
-        self.V = np.asarray(self.V, dtype=float)
-        self.is_zero_mode = np.asarray(self.is_zero_mode, dtype=bool)
+        for name, dtype in (
+            ("kpoints", float),
+            ("energies", float),
+            ("u", complex),
+            ("v", complex),
+            ("paraunitary", complex),
+            ("spin_lengths", float),
+            ("U", complex),
+            ("V", float),
+            ("is_zero_mode", bool),
+        ):
+            object.__setattr__(self, name, _readonly_array(getattr(self, name), dtype))
 
 
 @dataclass
