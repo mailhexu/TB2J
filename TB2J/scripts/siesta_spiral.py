@@ -106,6 +106,23 @@ def _validate_manifest(manifest):
         raise WorkflowRefusal(
             "AC-005: supply at least two positive finite_steps in radians"
         )
+    # AC-005 needs two *distinct* rotation points; a duplicated step is a
+    # mislabeled single-point ladder and cannot support a cross-check.
+    _STEP_DUPLICATE_TOL_RAD = 1e-12
+    duplicates = sorted(
+        {
+            tuple(sorted((steps[i], steps[j])))
+            for i in range(len(steps))
+            for j in range(i + 1, len(steps))
+            if abs(steps[i] - steps[j]) <= _STEP_DUPLICATE_TOL_RAD
+        }
+    )
+    if duplicates:
+        shown = ", ".join(f"{lo!r}/{hi!r}" for lo, hi in duplicates)
+        raise WorkflowRefusal(
+            "AC-005: finite_steps must contain at least two distinct rotation "
+            f"angles; duplicate step(s) within {_STEP_DUPLICATE_TOL_RAD:g} rad: {shown}"
+        )
     gates = manifest["required_gates"]
     supported = {"AC-003", "AC-005", "AC-007", "AC-008", "AC-009"}
     if (
@@ -337,6 +354,7 @@ def _pipeline(manifest, paths):
         DisplacementPattern,
     )
     from TB2J.interfaces.siesta_spiral_io import (
+        KB_EV,
         load_fixture,
         run_eigenvalue_oracle,
         run_electron_count_oracle,
@@ -346,6 +364,7 @@ def _pipeline(manifest, paths):
     from TB2J.interfaces.siesta_spiral_response import (
         CURVATURE_BUDGET_EV_PER_RAD2,
         ENSEMBLE_GAPPED_T0,
+        ENSEMBLE_METALLIC_FD,
         TORQUE_BUDGET_EV_PER_RAD,
         EnergyContour,
         Ensemble,
@@ -364,6 +383,29 @@ def _pipeline(manifest, paths):
         # Preserve the explicit manifest declaration for both independent routes.
         bundle.metadata["displacement_gauge"] = manifest["displacement"]["gauge"]
     ensemble = Ensemble(**manifest["ensemble"])
+    if ensemble.kind == ENSEMBLE_METALLIC_FD:
+        # The AC-003 oracle occupies with the producer temperature; the
+        # metallic response must smear with the *same* width. Fail closed
+        # rather than assume a width the producer never recorded.
+        temperature = reference.get("temperature")
+        if (
+            not isinstance(temperature, (float, int))
+            or float(temperature) <= 0
+            or not float(temperature) < float("inf")
+        ):
+            raise WorkflowRefusal(
+                "metallic smearing consistency: the producer bundle records no "
+                "positive electronic temperature; refuse to assume a smearing "
+                "width it did not record"
+            )
+        producer_width = float(temperature) * KB_EV
+        if abs(float(ensemble.smearing_width_ev) - producer_width) > 1e-10:
+            raise WorkflowRefusal(
+                "metallic smearing consistency: ensemble.smearing_width_ev "
+                f"{float(ensemble.smearing_width_ev)!r} eV does not match the "
+                f"producer temperature-derived width {producer_width!r} eV "
+                "(tolerance 1e-10 eV); align it with the recorded temperature"
+            )
     if not np.isclose(
         ensemble.electron_count, reference["electron_count"], atol=1e-8, rtol=0
     ) or not np.isclose(ensemble.fermi_energy_ev, reference["ef"], atol=1e-8, rtol=0):

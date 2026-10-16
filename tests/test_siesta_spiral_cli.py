@@ -667,3 +667,73 @@ def test_existing_output_directory_is_preserved(tmp_path, analytic_manifest):
     assert result.returncode != 0
     assert "exist" in (result.stdout + result.stderr).lower()
     assert {path.name: path.read_bytes() for path in output.iterdir()} == before
+
+
+def test_duplicate_finite_steps_refuse_ac005(tmp_path, analytic_manifest):
+    """[0.004, 0.004] is one rotation point, not a two-step ladder."""
+    analytic_manifest["response"]["finite_steps"] = [0.004, 0.004]
+    diagnostic = _assert_refused(
+        tmp_path, analytic_manifest, ["ac-005", "distinct", "duplicate"]
+    )
+    assert "0.004" in diagnostic
+
+
+def test_near_duplicate_finite_steps_refuse_ac005(tmp_path, analytic_manifest):
+    """Near-duplicates within 1e-12 rad cannot fake a distinct second step."""
+    analytic_manifest["response"]["finite_steps"] = [0.004, 0.0040000000001]
+    diagnostic = _assert_refused(
+        tmp_path, analytic_manifest, ["ac-005", "distinct", "duplicate"]
+    )
+    assert "0.004" in diagnostic
+
+
+def _as_metallic(manifest, smearing_width_ev):
+    """Turn the analytic pencil manifest into a metallic fixed-N one."""
+    manifest["ensemble"]["kind"] = "metallic_fermi_dirac_fixed_n"
+    manifest["ensemble"]["smearing_width_ev"] = smearing_width_ev
+    manifest["response"].pop("contour", None)
+    manifest["response"].pop("contour_node_rungs", None)
+    return manifest
+
+
+PRODUCER_WIDTH_EV = 8.617333262e-5 * 100.0
+
+
+def test_metallic_matching_producer_temperature_exports(tmp_path, analytic_manifest):
+    """A metallic width equal to the recorded producer temperature passes.
+
+    The analytic pencil is rescaled so the metallic fixed-N free energy is
+    actually resolvable at that width (bands near mu, count still 2 within
+    the AC-003 budget), proving the width gate accepts the aligned case
+    rather than merely failing late elsewhere.
+    """
+    with np.load(tmp_path / "analytic.npz", allow_pickle=False) as data:
+        arrays = {key: data[key].copy() for key in data.files}
+    # Gapped pencil eigenvalues are [-1.2, -0.8, 0.8, 1.2] (gap 1.6 eV).
+    # Rescale so the root gap is 24 smearing widths: occupations still
+    # round to 2 within 1e-4, yet f*(1-f) is far above the derivative floor.
+    scale = (24 * PRODUCER_WIDTH_EV) / 1.6
+    arrays["h"] = scale * arrays["h"]
+    arrays["eig"] = scale * arrays["eig"]
+    bundle = tmp_path / "analytic_metallic.npz"
+    np.savez(bundle, **arrays)
+    analytic_manifest["inputs"]["bundle"] = _descriptor(bundle, tmp_path)
+    manifest = _as_metallic(analytic_manifest, PRODUCER_WIDTH_EV)
+    manifest["ensemble"]["gap_ev"] = 24 * PRODUCER_WIDTH_EV
+    manifest_path = _write_manifest(tmp_path, manifest)
+    output = tmp_path / "out"
+    result = _run_cli(manifest_path, "--output", output)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_metallic_smearing_width_mismatch_refuses_before_response(
+    tmp_path, analytic_manifest
+):
+    """The AC-003 count oracle is width-independent (it uses the producer
+    temperature), so the count stays valid at both widths -- only the
+    width mismatch must refuse, before any response/export."""
+    assert PRODUCER_WIDTH_EV != 2 * PRODUCER_WIDTH_EV
+    manifest = _as_metallic(analytic_manifest, 2 * PRODUCER_WIDTH_EV)
+    _assert_refused(
+        tmp_path, manifest, ["metallic smearing consistency", "width", "temperature"]
+    )
