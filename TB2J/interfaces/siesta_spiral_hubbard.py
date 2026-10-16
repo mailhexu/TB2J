@@ -63,8 +63,10 @@ SIESTA-side energy-truth dump.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from scipy.interpolate import CubicSpline
@@ -142,6 +144,11 @@ class DftuProvenance:
     projector_l: int = 2
     f4_over_f2: float = 0.625
     source_refs: dict = field(default_factory=dict)
+    # subspace identity (no defaults: __post_init__ refuses when absent)
+    correlated_species: str | None = None
+    principal_n: int | None = None
+    site_indices: tuple | None = None
+    projector_identity: str | None = None
 
     def __post_init__(self):
         for name in (
@@ -213,6 +220,43 @@ class DftuProvenance:
                 f"{missing}; every convention must name its pinned "
                 "SIESTA source (file:line)"
             )
+        if not isinstance(self.correlated_species, str) or not self.correlated_species:
+            raise DftuProvenanceError(
+                "incomplete +U provenance: correlated_species must name the "
+                "correlated species label (e.g. 'Fe'); refusing to guess "
+                "which species carries the Hubbard subspace"
+            )
+        if (
+            not isinstance(self.principal_n, int)
+            or isinstance(self.principal_n, bool)
+            or self.principal_n <= 0
+        ):
+            raise DftuProvenanceError(
+                "incomplete +U provenance: principal_n must be the positive "
+                f"principal quantum number of the correlated shell, got "
+                f"{self.principal_n!r}"
+            )
+        if self.site_indices is None:
+            raise DftuProvenanceError(
+                "incomplete +U provenance: site_indices must list the "
+                "correlated site indices; refusing to guess which sites "
+                "carry the Hubbard subspace"
+            )
+        object.__setattr__(
+            self, "site_indices", tuple(int(s) for s in self.site_indices)
+        )
+        if not self.site_indices or any(s < 0 for s in self.site_indices):
+            raise DftuProvenanceError(
+                "incomplete +U provenance: site_indices must be a non-empty "
+                f"tuple of non-negative site indices, got "
+                f"{self.site_indices!r}"
+            )
+        if not isinstance(self.projector_identity, str) or not self.projector_identity:
+            raise DftuProvenanceError(
+                "incomplete +U provenance: projector_identity must label the "
+                "projector source (file path with rc/npts); refusing an "
+                "unidentified projector table"
+            )
 
     def to_dict(self) -> dict:
         return dict(vars(self))
@@ -220,20 +264,51 @@ class DftuProvenance:
     @classmethod
     def from_dict(cls, payload):
         fields = cls.__dataclass_fields__
-        filled = {
-            name: f.default
-            for name, f in fields.items()
-            if name not in payload
-            and f.default is not __import__("dataclasses").MISSING
+        if not isinstance(payload, dict):
+            raise DftuProvenanceError(
+                "DftuProvenance.from_dict requires a mapping payload"
+            )
+        # No defaults are filled here: every declaration must be present
+        # in the payload (fail-closed; spec AC-2).
+        _DECLARATIONS = {
+            "scheme": (
+                "double-counting scheme",
+                "accepted: 'fll_bultmark09'",
+            ),
+            "projector_method": (
+                "projector generation method",
+                "accepted: 1 or 2 (story-014 producer certified with 2)",
+            ),
+            "correlated_species": (
+                "correlated species label",
+                "accepted: species symbol string (e.g. 'Fe')",
+            ),
+            "principal_n": (
+                "principal quantum number of the correlated shell",
+                "accepted: positive int (e.g. 3 for Fe 3d)",
+            ),
+            "site_indices": (
+                "correlated site indices",
+                "accepted: iterable of non-negative ints",
+            ),
         }
+        for key, (what, accepted) in _DECLARATIONS.items():
+            if key not in payload:
+                raise DftuProvenanceError(
+                    f"incomplete +U provenance payload: missing declaration "
+                    f"'{key}' ({what}); {accepted}. from_dict never fills "
+                    "defaults -- the producer must declare it explicitly"
+                )
+        payload = dict(payload)
         if "source_refs" in payload:
-            filled["source_refs"] = dict(payload["source_refs"])
-        payload = {**filled, **payload}
+            payload["source_refs"] = dict(payload["source_refs"])
         missing = [name for name in fields if name not in payload]
         if missing:
             raise DftuProvenanceError(
                 "incomplete +U provenance payload: missing fields "
-                f"{missing}; refusing partial hubbard metadata"
+                f"{missing}; refusing partial hubbard metadata "
+                "(U/J values come from the stdout 'DFTUprojs with U/J' "
+                "lines and the projector table from the dftu_proj header)"
             )
         return cls(**payload)
 
@@ -761,7 +836,31 @@ def edftu_oracle(occupations, v_hubbard, v_dc, rho_local=None, prov=None):
 # ----------------------------------------------------------------------
 
 
-def _digest(arrays: dict) -> str:
+def _canonical_json(obj) -> str:
+    """Deterministic JSON text (sorted keys, tuples as lists)."""
+
+    def _jsonable(o):
+        if isinstance(o, dict):
+            return {str(k): _jsonable(v) for k, v in o.items()}
+        if isinstance(o, (list, tuple)):
+            return [_jsonable(v) for v in o]
+        if isinstance(o, (np.integer,)):
+            return int(o)
+        if isinstance(o, (np.floating,)):
+            return float(o)
+        return o
+
+    return json.dumps(_jsonable(obj), sort_keys=True, separators=(",", ":"))
+
+
+def _digest(arrays: dict, meta: dict | None = None) -> str:
+    """sha256 over sorted array bytes plus canonical-JSON metadata.
+
+    ``meta`` (provenance, conventions, note, scalar energies, fixture
+    identity) is serialized with :func:`_canonical_json` and appended to
+    the hash so provenance substitution is detected, not just array
+    tampering.
+    """
     h = hashlib.sha256()
     for key in sorted(arrays):
         h.update(key.encode())
@@ -769,6 +868,9 @@ def _digest(arrays: dict) -> str:
         h.update(str(arr.dtype).encode())
         h.update(str(arr.shape).encode())
         h.update(arr.tobytes())
+    if meta is not None:
+        h.update(b"meta:")
+        h.update(_canonical_json(meta).encode())
     return h.hexdigest()
 
 
@@ -815,31 +917,49 @@ class HubbardBundle:
                 f"{occ.shape}; got {vh.shape} and {vd.shape}"
             )
 
+    @staticmethod
+    def _complex_payload(arr: np.ndarray) -> dict:
+        arr = np.asarray(arr, dtype=complex)
+        return {"re": arr.real.tolist(), "im": arr.imag.tolist()}
+
+    @staticmethod
+    def _digest_with(payload: dict, arrays: dict) -> str:
+        meta = {
+            "prov": payload["prov"],
+            "conventions": payload.get("conventions", {}),
+            "note": payload.get("note", ""),
+            "fixture_digest": payload.get("fixture_digest", ""),
+            "edftu_ev": float(payload["edftu_ev"]),
+            "edftu_reference_ev": float(payload["edftu_reference_ev"]),
+        }
+        return _digest(arrays, meta=meta)
+
     def to_certificate(self) -> dict:
-        """JSON-serializable certificate with sha256 of payload arrays."""
+        """JSON-serializable certificate with sha256 over arrays AND
+        provenance/conventions/note/fixture identity (canonical JSON),
+        so provenance substitution is detected by the digest."""
         payload = {
             "prov": self.prov.to_dict(),
-            "occupations": self.occupations.tolist(),
-            "v_hubbard": np.stack([self.v_hubbard.real, self.v_hubbard.imag]).tolist(),
-            "v_dc": np.stack([self.v_dc.real, self.v_dc.imag]).tolist(),
-            "edftu_ev": self.edftu_ev,
-            "edftu_reference_ev": self.edftu_reference_ev,
+            "occupations": self._complex_payload(self.occupations),
+            "v_hubbard": self._complex_payload(self.v_hubbard),
+            "v_dc": self._complex_payload(self.v_dc),
+            "edftu_ev": float(self.edftu_ev),
+            "edftu_reference_ev": float(self.edftu_reference_ev),
             "fixture_digest": self.fixture_digest,
             "conventions": self.conventions,
             "note": self.note,
         }
-        digest = _digest(
+        digest = self._digest_with(
+            payload,
             {
                 "occupations": np.asarray(self.occupations, dtype=complex),
                 "v_hubbard": np.asarray(self.v_hubbard, dtype=complex),
                 "v_dc": np.asarray(self.v_dc, dtype=complex),
-                "edftu_ev": np.asarray(self.edftu_ev, dtype=float),
-                "edftu_reference_ev": np.asarray(self.edftu_reference_ev, dtype=float),
-            }
+            },
         )
         return {
             "kind": "hubbard_bundle_certificate",
-            "version": "1.0",
+            "version": "1.1",
             "payload_sha256": digest,
             "payload": payload,
         }
@@ -856,25 +976,24 @@ class HubbardBundle:
         payload = cert.get("payload")
         if not isinstance(payload, dict):
             raise HubbardBundleError("certificate payload missing")
+
+        def _complex(key):
+            block = payload[key]
+            if not isinstance(block, dict) or "re" not in block or "im" not in block:
+                raise HubbardBundleError(
+                    f"certificate array {key!r} must be a "
+                    '{"re": [...], "im": [...]} block'
+                )
+            return np.asarray(block["re"], dtype=float) + 1j * np.asarray(
+                block["im"], dtype=float
+            )
+
         arrays = {
-            "occupations": np.asarray(payload["occupations"], dtype=complex),
-            "v_hubbard": (
-                np.asarray(payload["v_hubbard"][0])
-                + 1j * np.asarray(payload["v_hubbard"][1])
-            ),
-            "v_dc": (
-                np.asarray(payload["v_dc"][0]) + 1j * np.asarray(payload["v_dc"][1])
-            ),
+            "occupations": _complex("occupations"),
+            "v_hubbard": _complex("v_hubbard"),
+            "v_dc": _complex("v_dc"),
         }
-        digest = _digest(
-            {
-                **arrays,
-                "edftu_ev": np.asarray(payload["edftu_ev"], dtype=float),
-                "edftu_reference_ev": np.asarray(
-                    payload["edftu_reference_ev"], dtype=float
-                ),
-            }
-        )
+        digest = cls._digest_with(payload, arrays)
         if digest != cert.get("payload_sha256"):
             raise HubbardBundleError(
                 "certificate payload sha256 mismatch: "
@@ -893,3 +1012,309 @@ class HubbardBundle:
             conventions=payload.get("conventions", {}),
             note=payload.get("note", ""),
         )
+
+
+# ----------------------------------------------------------------------
+# ingestion from a genuine SIESTA +U run (spec AC-1)
+# ----------------------------------------------------------------------
+
+
+def parse_dftu_stdout(text: str):
+    """U, J (Ry) and the last printed 'siesta: Edftu' (eV) from stdout.
+
+    Refuses when the 'DFTUprojs with U/J' declaration lines or the
+    converged Edftu line are absent.
+    """
+    u_ry = j_ry = edftu = None
+    for line in text.splitlines():
+        if "DFTUprojs with U" in line:
+            u_ry = float(line.split("=")[1])
+        elif "DFTUprojs with J" in line:
+            j_ry = float(line.split("=")[1])
+        elif "siesta: Edftu" in line and "=" in line:
+            edftu = float(line.split("=")[1])
+    if u_ry is None or j_ry is None:
+        raise DftuProvenanceError(
+            "stdout does not declare 'DFTUprojs with U/J' lines; the U and "
+            "J values must come from the producer run (refusing to guess)"
+        )
+    if edftu is None:
+        raise DftuProvenanceError(
+            "stdout does not carry a 'siesta: Edftu' line; the Edftu "
+            "oracle cannot be certified without the producer's value"
+        )
+    return u_ry, j_ry, edftu
+
+
+def parse_dftu_proj_header(path):
+    """(npts, delta, rc) from a dftu_proj SIESTA table header."""
+    lines = Path(path).read_text().split("\n")
+    npts, delta, rc = map(float, lines[2].split("#")[0].split())
+    return int(npts), float(delta), float(rc)
+
+
+def ski_to_sp_proj(ski_path, geometry, nsites):
+    """Dense (nsites, 5, no_s) projector-overlap table from the runtime
+    Ski dump (SIESTA's own S_proj-PAO table), matched to sisl column
+    indices by (site, in-cell orbital, displacement rounded to 1e-6)
+    exactly as the story-014 fixture verification does.  Entries the
+    dump omits stay zero, mirroring the zero-initialized runtime table.
+    """
+    from collections import defaultdict
+
+    g = geometry
+    no_l = int(g.lasto[-1]) + 1
+    if no_l % g.na:
+        raise OccupationMatrixError(
+            f"{no_l} orbitals over {g.na} atoms is not a whole number of "
+            "orbitals per atom"
+        )
+    norb_pa = no_l // g.na
+    cell = np.asarray(g.cell) / BOHR_TO_ANG
+    pos = np.asarray(g.xyz) / BOHR_TO_ANG
+    sc_off = np.asarray(g.sc_off, dtype=int)
+    sp = np.zeros((nsites, 5, no_l * len(sc_off)))
+    by_site = {}
+    for line in Path(ski_path).read_text().split("\n"):
+        p = line.split()
+        if len(p) != 8:
+            continue
+        ka, mp, iono = int(p[0]), int(p[1]), int(p[2])
+        x, y, z, s = (float(v) for v in p[4:8])
+        ia = ka - 1
+        if not 0 <= ia < nsites:
+            raise OccupationMatrixError(
+                f"Ski dump site index {ka} outside the declared "
+                f"correlated sites {nsites}"
+            )
+        if ia not in by_site:
+            lk = defaultdict(list)
+            for iscell in range(len(sc_off)):
+                nsc = tuple(int(v) for v in sc_off[iscell])
+                sc = g.sc_index(nsc)
+                for ja in range(g.na):
+                    for j in range(norb_pa):
+                        dvec = tuple(
+                            np.round(
+                                np.asarray(nsc, float) @ cell + pos[ja] - pos[ia],
+                                6,
+                            )
+                        )
+                        lk[(ja, j, dvec)].append(ja * norb_pa + j + no_l * sc)
+            by_site[ia] = lk
+        cands = by_site[ia].get(
+            (
+                ((iono - 1) % no_l) // norb_pa,
+                (iono - 1) % norb_pa,
+                tuple(np.round((x, y, z), 6)),
+            ),
+            [],
+        )
+        for js in cands:
+            if sp[ia, mp - 1, js] == 0.0:
+                sp[ia, mp - 1, js] = s
+    return sp
+
+
+def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
+    """SpiralBundle (vector path, q=0) from a sisl-read SIESTA HSX.
+
+    The stored H is mapped through the pinned file packing
+    ``H1=H11, H2=H22, H3=Re H12, H4=-Im H12``; a significant imaginary
+    diagonal (D5/D6, i.e. a non-spiral SO Hamiltonian) is refused
+    rather than silently truncated.
+    """
+    from TB2J.interfaces.siesta_spiral import BUNDLE_VERSION, SpiralBundle
+
+    g = hsx_sile.read_geometry()
+    hcsr = hsx_sile.read_hamiltonian()._csr
+    scsr = hsx_sile.read_overlap()._csr
+    no_l = int(g.lasto[-1]) + 1
+    if hcsr.shape[0] != no_l or scsr.shape[0] != no_l:
+        raise HubbardBundleError(
+            f"HSX sparse shape {hcsr.shape[0]} does not match the "
+            f"geometry orbital count {no_l}"
+        )
+    hcomp = np.array(hcsr._D[:, :8], dtype=float)
+    hcomp[:, 3] = -hcomp[:, 3]  # back to raw file order (diag3k fix)
+    scale = max(1.0, float(np.abs(hcomp[:, :4]).max()))
+    if np.abs(hcomp[:, 4:6]).max() > 1e-8 * scale:
+        raise HubbardBundleError(
+            "HSX Hamiltonian carries a significant imaginary diagonal "
+            "(file components D5/D6); that is a non-spiral SO reference "
+            "and cannot be declared under the pinned spiral packing "
+            "(refusing silent truncation)"
+        )
+    if not (
+        len(hcsr.ptr) == len(scsr.ptr)
+        and bool((hcsr.ptr == scsr.ptr).all())
+        and bool((hcsr.col == scsr.col).all())
+    ):
+        raise HubbardBundleError(
+            "HSX Hamiltonian and overlap sparse patterns differ; refusing "
+            "to pair blocks positionally"
+        )
+    norb_pa = no_l // g.na
+    cell = np.asarray(g.cell) / BOHR_TO_ANG
+    pos = np.asarray(g.xyz) / BOHR_TO_ANG
+    sc_off = np.asarray(g.sc_off, dtype=int)
+    sparse = {}
+    overlap = {}
+    for io in range(no_l):
+        for ptr in range(scsr.ptr[io], scsr.ptr[io + 1]):
+            js = int(scsr.col[ptr])
+            iscell, o = divmod(js, no_l)
+            nsc = tuple(int(v) for v in sc_off[iscell])
+            s_val = float(scsr._D[ptr, 0])
+            c = hcomp[ptr]
+            comps = (float(c[0]), float(c[1]), float(c[2]), float(c[3]))
+            key = (io, o, nsc)
+            if key in sparse:
+                if not np.allclose(sparse[key], comps, atol=1e-10):
+                    raise HubbardBundleError(
+                        f"duplicate HSX key {key} with inconsistent blocks"
+                    )
+                continue
+            sparse[key] = comps
+            overlap[key] = s_val
+    orb_pos = np.zeros((no_l, 3))
+    for ia in range(g.na):
+        first = int(g.firsto[ia])
+        orb_pos[first : first + norb_pa] = pos[ia]
+    bundle = SpiralBundle(
+        version=BUNDLE_VERSION,
+        norb=no_l,
+        ncell=len(sc_off),
+        q=(0.0, 0.0, 0.0),
+        spin_packing="H4=-ImH12",
+        phase_convention="q_half_per_spin_sector",
+        hermitization="none_hamiltonian_path",
+        fermi_shift="none",
+        pitch_sign="qphs_up_exp_minus",
+        sparse=sparse,
+        overlap=overlap,
+        cell=tuple(tuple(float(v) for v in row) for row in cell),
+        orbital_positions=tuple(tuple(float(v) for v in p) for p in orb_pos),
+        metadata={
+            "origin": "ingest_dftu_run",
+            "stdout": stdout_name,
+            "dftu_proj": proj_name,
+        },
+    )
+    return bundle
+
+
+def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
+    """Build (SpiralBundle with hubbard, HubbardBundle) from a genuine
+    SIESTA +U export (spec AC-1).
+
+    Parameters
+    ----------
+    hsx, dm : path
+        SIESTA HSX and DM files of the converged +U run (read via sisl).
+    stdout : path
+        Producer stdout carrying the 'DFTUprojs with U/J' declaration
+        lines (Ry) and the converged 'siesta: Edftu' line (last
+        occurrence is the reference).
+    proj_path : path
+        The dftu_proj projector table (header gives npts/rc; data kept
+        in the bundle metadata identity).
+    occ_dump : path, optional
+        Directory with the env-instrumented run's ``*.dftu_ski`` dump
+        (SIESTA's own runtime S_proj-PAO table).  Required: recomputing
+        the projector overlaps from PAO radial tables would need the
+        ion.nc basis files, which a bare export does not carry.
+    **ids : required keyword identity declarations
+        ``species_label`` (str), ``principal_n`` (int),
+        ``site_indices`` (iterable of int) -- REFUSED when absent; plus
+        optional ``label`` propagated to the bundle metadata.
+
+    Returns
+    -------
+    (bundle, hubbard_bundle) : (SpiralBundle, HubbardBundle)
+        The spiral bundle carries ``hubbard=provenance``; the Hubbard
+        bundle carries occupations, potentials and the Edftu oracle
+        value with the producer's printed value as reference.
+    """
+    for req in ("species_label", "principal_n", "site_indices"):
+        if ids.get(req) is None:
+            raise DftuProvenanceError(
+                f"ingest_dftu_run requires the explicit identity kwarg "
+                f"'{req}'; the correlated subspace (species, shell n, "
+                "site indices) must be declared, never guessed"
+            )
+    if occ_dump is None:
+        raise OccupationMatrixError(
+            "ingest_dftu_run requires occ_dump with the instrumented "
+            "*.dftu_ski projector-overlap dump; a bare HSX/DM export "
+            "does not carry the projector tables"
+        )
+    occ_dump = Path(occ_dump)
+    stdout_path = Path(stdout)
+    u_ry, j_ry, edftu_ref = parse_dftu_stdout(stdout_path.read_text())
+    npts, _delta, rc = parse_dftu_proj_header(proj_path)
+    ski_path = sorted(occ_dump.glob("*.dftu_ski"))
+    if not ski_path:
+        raise OccupationMatrixError(
+            f"no *.dftu_ski dump found under {occ_dump}; the runtime "
+            "projector-overlap table is required to recompute the "
+            "occupations"
+        )
+    import sisl
+
+    hsx_sile = sisl.get_sile(str(hsx))
+    g = hsx_sile.read_geometry()
+    dcsr = sisl.get_sile(str(dm)).read_density_matrix()._csr
+    no_l = int(g.lasto[-1]) + 1
+    dm_comp = np.array(dcsr._D[:, :8], dtype=float)
+    dm_comp[:, 3] = -dm_comp[:, 3]  # back to raw file order (diag3k)
+    dm_rows = np.repeat(np.arange(no_l), np.diff(dcsr.ptr))
+    dm_cols = dcsr.col.copy()
+    sp_proj = ski_to_sp_proj(ski_path[0], g, len(tuple(ids["site_indices"])))
+    proj_name = Path(proj_path).name
+    prov = DftuProvenance(
+        u_ev=u_ry * RY_TO_EV,
+        j_ev=j_ry * RY_TO_EV,
+        u_ry=u_ry,
+        j_ry=j_ry,
+        projector_rc_bohr=rc,
+        projector_npts=npts,
+        slater_f0_ry=u_ry,
+        slater_f2_ry=14.0 * j_ry / 1.625,
+        slater_f4_ry=0.625 * 14.0 * j_ry / 1.625,
+        source_refs={
+            "u_j_stdout": f"{stdout_path.name}:DFTUprojs lines",
+            "slater_integrals": "dftu_specs.f:1749-1758",
+            "dc_potential": "m_pot_dftu.F90:974-1035",
+            "hubbard_potential": "m_pot_dftu.F90:1057-1141",
+            "occupation_loop": "m_occ_proj_dftu.F90:681-741",
+            "projector_dump": f"{proj_name} header",
+        },
+        correlated_species=str(ids["species_label"]),
+        principal_n=int(ids["principal_n"]),
+        site_indices=tuple(int(s) for s in ids["site_indices"]),
+        projector_identity=f"{proj_name}:rc={rc:.6f},npts={npts}",
+    )
+    occ = recompute_occupations(dm_rows, dm_cols, dm_comp, sp_proj, prov)
+    vh, vd, conv = assemble_hubbard_operator(occ, prov)
+    e = edftu_oracle(occ, vh, vd, prov=prov)
+    bundle = _bundle_from_hs_geometry(hsx_sile, stdout_path.name, proj_name)
+    bundle.hubbard = prov
+    bundle.validate()
+    hubbard_bundle = HubbardBundle(
+        prov=prov,
+        occupations=occ,
+        v_hubbard=vh,
+        v_dc=vd,
+        edftu_ev=e,
+        edftu_reference_ev=edftu_ref,
+        conventions=conv,
+        fixture_digest="",
+        note=ids.get(
+            "note",
+            "Ingested by ingest_dftu_run from a genuine SIESTA +U run; "
+            "H_stored = H_xc + H_U (final_H_f_stress.F): do not add V_U "
+            "to the stored Hamiltonian again.",
+        ),
+    )
+    return bundle, hubbard_bundle

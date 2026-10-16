@@ -90,6 +90,10 @@ def make_prov(**overrides):
         slater_f2_ry=14.0 * (0.7 / RY_TO_EV) / 1.625,
         slater_f4_ry=0.625 * 14.0 * (0.7 / RY_TO_EV) / 1.625,
         source_refs=dict(SOURCE_REFS),
+        correlated_species="Fe",
+        principal_n=3,
+        site_indices=(0, 1, 2, 3),
+        projector_identity="Fe_nc.dftu_proj:rc=2.975687,npts=500",
     )
     fields.update(overrides)
     return DftuProvenance(**fields)
@@ -343,6 +347,49 @@ def test_provenance_from_dict_refuses_partial_payload():
         DftuProvenance.from_dict(partial)
 
 
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "scheme",
+        "projector_method",
+        "correlated_species",
+        "principal_n",
+        "site_indices",
+    ],
+)
+def test_provenance_from_dict_refuses_missing_declaration(declaration):
+    full = make_prov().to_dict()
+    partial = {k: v for k, v in full.items() if k != declaration}
+    with pytest.raises(DftuProvenanceError, match=declaration) as excinfo:
+        DftuProvenance.from_dict(partial)
+    msg = str(excinfo.value)
+    assert "never fills" in msg
+    if declaration == "scheme":
+        assert "fll_bultmark09" in msg
+    elif declaration == "projector_method":
+        assert "1 or 2" in msg
+
+
+def test_provenance_from_dict_refuses_missing_u_j_lines():
+    """The U/J declaration class: without u_ry/u_ev (the stdout
+    'DFTUprojs with U/J' values) the payload is refused, naming the
+    source of those numbers."""
+    full = make_prov().to_dict()
+    partial = {k: v for k, v in full.items() if k not in ("u_ry", "u_ev")}
+    with pytest.raises(DftuProvenanceError, match="DFTUprojs with U/J"):
+        DftuProvenance.from_dict(partial)
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    ["correlated_species", "principal_n", "site_indices", "projector_identity"],
+)
+def test_provenance_direct_construction_refuses_missing_identity(declaration):
+    fields = {k: v for k, v in make_prov().to_dict().items() if k != declaration}
+    with pytest.raises(DftuProvenanceError, match=declaration):
+        DftuProvenance(**fields)
+
+
 def test_spinor_layout_matches_pinned_source():
     rho = spinor_components_to_rho(np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]))
     assert rho[0, 0] == 1.0 + 5.0j  # uu = D1 + i D5
@@ -455,7 +502,18 @@ def _prov_from_fixture(fx):
             "slater_f0_ry": float(fx["u_ry"]),
             "slater_f2_ry": 14.0 * float(fx["j_ry"]) / 1.625,
             "slater_f4_ry": 0.625 * 14.0 * float(fx["j_ry"]) / 1.625,
+            "scheme": "fll_bultmark09",
+            "projector_method": 2,
+            "projector_l": 2,
+            "f4_over_f2": 0.625,
             "source_refs": json.loads(str(fx["refs_json"])),
+            "correlated_species": "Fe",
+            "principal_n": 3,
+            "site_indices": (0, 1, 2, 3),
+            "projector_identity": (
+                f"Fe_nc.dftu_proj:rc={float(fx['proj_rc']):.6f},"
+                f"npts={int(fx['proj_npts'])}"
+            ),
         }
     )
 
@@ -660,13 +718,128 @@ def test_hubbard_bundle_certificate_round_trip(fx, certified_engine):
         edftu_reference_ev=6.7672,
         fixture_digest="deadbeef",
     )
-    cert = bundle.to_certificate()
+    # The certificate MUST survive a real JSON serialization round trip
+    # (complex arrays are emitted as {"re": [...], "im": [...]} blocks).
+    cert = json.loads(json.dumps(bundle.to_certificate()))
     restored = HubbardBundle.from_certificate(cert)
     assert np.abs(restored.occupations - occ).max() == 0.0
     assert np.abs(restored.v_hubbard - vh).max() == 0.0
+    assert np.abs(restored.v_dc - vd).max() == 0.0
     assert restored.prov == prov
-    tampered = dict(cert)
-    tampered["payload"] = dict(cert["payload"])
+    assert restored.edftu_ev == e
+    assert restored.fixture_digest == "deadbeef"
+    tampered = json.loads(json.dumps(bundle.to_certificate()))
     tampered["payload"]["edftu_ev"] = e + 1.0
     with pytest.raises(HubbardBundleError, match="sha256"):
         HubbardBundle.from_certificate(tampered)
+
+
+def test_hubbard_bundle_certificate_detects_provenance_substitution(
+    fx, certified_engine
+):
+    """The digest covers the provenance dict (canonical JSON): swapping
+    any provenance field breaks the sha256 and the import refuses."""
+    prov = make_prov()
+    occ = recompute_occupations(
+        fx["dm_rows"], fx["dm_cols"], fx["dm_comp8"], fx["sp_proj"], prov
+    )
+    vh, vd, _ = assemble_hubbard_operator(occ, prov)
+    e = edftu_oracle(occ, vh, vd, prov=prov)
+    bundle = HubbardBundle(
+        prov=prov,
+        occupations=occ,
+        v_hubbard=vh,
+        v_dc=vd,
+        edftu_ev=e,
+        edftu_reference_ev=6.7672,
+    )
+    for field, value in (
+        ("u_ev", 4.0),
+        ("correlated_species", "Ni"),
+        ("site_indices", (0, 1, 2)),
+    ):
+        tampered = json.loads(json.dumps(bundle.to_certificate()))
+        tampered["payload"]["prov"][field] = value
+        with pytest.raises(HubbardBundleError, match="sha256"):
+            HubbardBundle.from_certificate(tampered)
+    # conventions and note are covered too
+    tampered = json.loads(json.dumps(bundle.to_certificate()))
+    tampered["payload"]["note"] = "substituted note"
+    with pytest.raises(HubbardBundleError, match="sha256"):
+        HubbardBundle.from_certificate(tampered)
+    tampered = json.loads(json.dumps(bundle.to_certificate()))
+    tampered["payload"]["conventions"]["projector_method"] = 1
+    with pytest.raises(HubbardBundleError, match="sha256"):
+        HubbardBundle.from_certificate(tampered)
+
+
+PRODUCER_OCC_DUMP = (
+    DATA / "../../../.tmp/siesta-xc-mft/fe4_dftu_probe/occ_dump"
+).resolve()
+
+
+@pytest.fixture(scope="module")
+def producer_run():
+    if not (PRODUCER_OCC_DUMP / "fe4_occ.HSX").exists():
+        pytest.skip(
+            "producer +U run '.tmp/siesta-xc-mft/fe4_dftu_probe/occ_dump' "
+            "is unavailable; ingest_dftu_run is exercised against the "
+            "genuine export when the probe directory is present "
+            "(fixture seeding to TB2J_test_data is a user action, see "
+            "story-014)"
+        )
+    return PRODUCER_OCC_DUMP
+
+
+def test_ingest_dftu_run_from_producer(producer_run):
+    """AC-1: a genuine export produces a validated bundle+hubbard and a
+    HubbardBundle whose occupations match the ground-truth dump and
+    whose Edftu oracle closes on the producer's printed value."""
+    from TB2J.interfaces.siesta_spiral_hubbard import ingest_dftu_run
+
+    dump = producer_run
+    bundle, hb = ingest_dftu_run(
+        dump / "fe4_occ.HSX",
+        dump / "fe4_occ.DM",
+        dump / "fe4_occ.out",
+        dump / "Fe_nc.dftu_proj",
+        occ_dump=dump,
+        species_label="Fe",
+        principal_n=3,
+        site_indices=(0, 1, 2, 3),
+    )
+    assert bundle.hubbard is hb.prov
+    assert hb.prov.correlated_species == "Fe"
+    gt = parse_gt_occ(dump / "fe4_occ.dftu_occ")
+    assert np.abs(hb.occupations - gt).max() < 0.30
+    deviation = abs(hb.edftu_ev - hb.edftu_reference_ev)
+    assert deviation < 0.05, (
+        f"Edftu oracle {hb.edftu_ev:.6f} eV vs producer "
+        f"{hb.edftu_reference_ev:.6f} eV: {deviation:.3f} eV"
+    )
+
+
+def test_ingest_dftu_run_refuses_undeclared_subspace(producer_run):
+    from TB2J.interfaces.siesta_spiral_hubbard import ingest_dftu_run
+
+    dump = producer_run
+    with pytest.raises(DftuProvenanceError, match="site_indices"):
+        ingest_dftu_run(
+            dump / "fe4_occ.HSX",
+            dump / "fe4_occ.DM",
+            dump / "fe4_occ.out",
+            dump / "Fe_nc.dftu_proj",
+            occ_dump=dump,
+            species_label="Fe",
+            principal_n=3,
+        )
+    with pytest.raises(DftuProvenanceError, match="species_label"):
+        ingest_dftu_run(
+            dump / "fe4_occ.HSX",
+            dump / "fe4_occ.DM",
+            dump / "fe4_occ.out",
+            dump / "Fe_nc.dftu_proj",
+            occ_dump=dump,
+            principal_n=3,
+            site_indices=(0, 1, 2, 3),
+        )
