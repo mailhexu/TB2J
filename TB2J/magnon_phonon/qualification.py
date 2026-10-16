@@ -419,7 +419,13 @@ def verify_structure_identity(
     structure_symbols = (
         phonon_structure.get("symbols") if isinstance(phonon_structure, dict) else None
     )
-    if structure_symbols is not None:
+    if structure_symbols is None:
+        # Structure-to-atom-map identity is uncheckable without symbols.
+        checks["phonon_structure_symbols"] = None
+        warnings.append(
+            "phonon structure carries no symbols; structure identity unverified"
+        )
+    else:
         checks["phonon_structure_symbols"] = list(structure_symbols) == phonon_symbols
         if not checks["phonon_structure_symbols"]:
             warnings.append(
@@ -574,9 +580,10 @@ def verify_structure_identity(
     }
 
     any_failed = any(value is False for value in checks.values()) or not bonds_resolve
+    all_certified = all(value is True for value in checks.values()) and bonds_resolve
     if any_failed:
         status = "failed"
-    elif checks["positions"] is True:
+    elif all_certified and checks["positions"] is True:
         status = "verified"
     else:
         status = "unverified"

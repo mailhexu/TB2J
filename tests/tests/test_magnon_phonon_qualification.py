@@ -384,6 +384,16 @@ def test_structure_identity_rejects_structure_symbol_atom_map_mismatch():
     assert not report["checks"]["phonon_structure_symbols"]
 
 
+def test_structure_without_symbols_key_is_unverified():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    del modes.structure["symbols"]
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert report["status"] == "unverified"
+    assert report["checks"]["phonon_structure_symbols"] is None
+
+
 def test_structure_identity_rejects_wrong_spin_to_atom_mapping():
     magnon = _structured_magnon()
     # Spin 1 is remapped from Cr (atom 1) to nonmagnetic I (atom 2).
