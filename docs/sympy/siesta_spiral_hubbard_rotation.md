@@ -54,14 +54,18 @@ spin-free, so the spin rotation passes through unchanged.
 
 ### [C] Double counting frozen under the MFT variation
 
-- `V_dc` is exactly scalar x identity per spin channel (every
-  orbital/spin off-diagonal entry zero);
+- `V_dc` is exactly scalar x orbital identity, with all FOUR spinor
+  channels on the orbital diagonal (uu, dd, ud, du as in the certified
+  assembler): every orbital-off-diagonal entry zero, the orbital-
+  diagonal ud/du entries carrying `+delta J t_ud` / `+delta J t_du`;
 - `d V_dc / d theta = 0` exactly — the contract freezes V_dc at the
   reference traces; no rebuild happens;
 - the isotropic piece `-U (n_tot - 1/2)` is trace-protected (a rebuild
   would reproduce it, because `n_tot` is invariant per [A]);
-- the J channel piece is NOT protected: a rebuilt dc would drift by
-  exactly `-J (t_uu' - t_uu)` per channel;
+- the J pieces of ALL channels (uu/dd AND ud/du) are NOT protected:
+  `t_uu` and `t_ud` are single channel traces, not invariant per [A];
+  a rebuilt channel drifts by exactly `+J (t_x' - t_x)` (for uu/dd the
+  U term cancels against the invariant `n_tot`);
 - co-rotating `V_dc` would give a DIFFERENT operator (rejected reading,
   pinned by the nonidentity of the spin off-diagonal entry);
 - `W` genuinely varies (`dW/dtheta != 0`): freezing W entirely or
@@ -73,6 +77,12 @@ $$
 B_{tot}(\theta) = U_s B_{xc} U_s^{\dagger} + V_U^s(\theta),\qquad
 V_U^s = W - \tfrac{1}{2}\mathrm{Tr}_{spin}(W)\otimes I_{orb}
 $$
+
+The spin-trace subtraction is the orbital identity times the spin-trace
+scalar: entry `(p, q)` of `Tr_spin(W)` is
+`sum_sigma W[sigma, p, sigma, q]`, subtracted (times 1/2) from BOTH
+spin-diagonal entries of EVERY orbital block `(p, q)` — not only the
+orbital-diagonal ones.
 
 - `V_U^s` co-rotates (its spin trace is SU(2) invariant) and carries no
   B_xc symbols (clean separation);

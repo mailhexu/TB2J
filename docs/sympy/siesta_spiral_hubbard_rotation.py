@@ -43,8 +43,8 @@ with every contribution separately labeled, and the contract pins:
       DIFFERENT operator, and freezing W entirely or reducing it to a
       static scalar splitting is refused (ADR-007 rejected
       alternatives); the isotropic dc piece is trace-protected (it
-      would survive a rebuild) but the J channel piece would drift as
-      -J (t_uu' - t_uu): freezing is a real contract, not a no-op,
+      would survive a rebuild) but the J pieces of ALL channels drift
+      as +J (t_x' - t_x): freezing is a real contract, not a no-op,
   [D] the assembled rotated magnetic operator is the labeled sum
           B_tot(theta) = U_s B_xc U_s^dag + V_U^s(theta),
       where B_xc enters as frozen extracted data (the density channel
@@ -64,7 +64,7 @@ with every contribution separately labeled, and the contract pins:
       dc term is frozen bit-exactly while the dc rebuilt from the
       rotated traces drifts by a reported finite amount that
       decomposes exactly into the invariant isotropic piece plus
-      -J (t_uu' - t_uu).
+      +J (t_uu' - t_uu).
 
 Everything internal is Ry; provenance carries eV alongside.
 Nonzero exit on any failed check (AssertionError; the __main__ block
@@ -350,35 +350,41 @@ def test_kernel_covariance():
 
 
 def symbolic_dc_potential(t_uu, t_dd, t_ud, t_du, size_orb):
-    """V_dc per m_pot_dftu.F90:974-1035: scalar x identity per spin channel,
-    built from the CONVERGED reference traces (frozen under MFT):
+    """V_dc per m_pot_dftu.F90:974-1035: scalar x orbital identity, all
+    four spinor channels on the orbital diagonal, built from the
+    CONVERGED reference traces (frozen under MFT):
         V_dc[uu] = -delta (U (n_tot - 1/2) - J (t_uu - 1/2))
         V_dc[dd] = -delta (U (n_tot - 1/2) - J (t_dd - 1/2))
         V_dc[ud] = +delta J t_ud,   V_dc[du] = +delta J t_du."""
     n_tot = t_uu + t_dd
     entries = [
-        -(U_FLL * (n_tot - HALF) - J_FLL * (t_uu - HALF)),
-        -(U_FLL * (n_tot - HALF) - J_FLL * (t_dd - HALF)),
-        J_FLL * t_ud,
-        J_FLL * t_du,
+        -(U_FLL * (n_tot - HALF) - J_FLL * (t_uu - HALF)),  # uu
+        J_FLL * t_ud,  # ud
+        J_FLL * t_du,  # du
+        -(U_FLL * (n_tot - HALF) - J_FLL * (t_dd - HALF)),  # dd
     ]
     return sp.Matrix(
         2 * size_orb,
         2 * size_orb,
-        lambda i, j: (entries[2 * (i % 2) + (j % 2)] if i == j else sp.Integer(0)),
+        lambda i, j: (
+            entries[2 * (i % 2) + (j % 2)] if i // 2 == j // 2 else sp.Integer(0)
+        ),
     )
 
 
 def test_dc_frozen():
-    print("[C] Double counting frozen: scalar x identity, delta V_dc = 0")
+    print("[C] Double counting frozen: scalar x orbital identity, delta V_dc = 0")
     size = 2
     n_mat = generic_occupation(size, "n")
     v_dc = symbolic_dc_potential(*channel_traces(n_mat, size), size)
-    # scalar x identity per spin channel: every off-diagonal entry is exactly 0
+    # scalar x orbital identity: every orbital-off-diagonal entry is 0;
+    # the orbital-diagonal ud/du entries carry J t_ud / J t_du (nonzero)
     for i in range(2 * size):
         for j in range(2 * size):
-            if i != j:
+            if i // 2 != j // 2:
                 zero(v_dc[i, j])
+    nonzero(v_dc[0, 1])
+    nonzero(v_dc[1, 0])
     # frozen at the reference traces: no theta dependence at all
     assert THETA not in v_dc.free_symbols
     zero(sp.diff(v_dc[0, 0], THETA))
@@ -391,11 +397,16 @@ def test_dc_frozen():
     t_uu1, t_dd1, t_ud1, _ = channel_traces(n_rot, size)
     zero((t_uu1 + t_dd1) - (t_uu0 + t_dd0))
     zero(-(U_FLL * ((t_uu1 + t_dd1) - HALF)) + (U_FLL * ((t_uu0 + t_dd0) - HALF)))
-    # the J channel piece is NOT trace-protected: a rebuilt dc would drift
-    nonzero(-J_FLL * (t_uu1 - t_uu0))
+    # the uu/dd J channel pieces are NOT trace-protected: a rebuilt dc
+    # drifts as +J (t_uu' - t_uu) (the U term cancels by n_tot invariance)
+    nonzero(+J_FLL * (t_uu1 - t_uu0))
+    # the ud/du channels are NOT trace-protected either: t_ud is a
+    # single channel trace, NOT invariant per [A]; a rebuild of the
+    # ud channel drifts as +J (t_ud' - t_ud)
+    nonzero(+J_FLL * (t_ud1 - t_ud0))
+    zero(J_FLL * t_ud1 - v_dc[0, 1] - J_FLL * (t_ud1 - t_ud0))
     # the contract freezes V_dc at the reference value (no rebuild);
     # co-rotating V_dc would give a DIFFERENT operator (rejected reading):
-    # the spin off-diagonal entry (0,1) is orbital-diagonal so it does move
     v_dc_rot = (u4 * v_dc * u4.H).applyfunc(sp.expand)
     zero(v_dc_rot[0, 2])  # orbital-diagonal structure survives (spin-only U)
     nonzero(v_dc_rot[0, 1] - v_dc[0, 1])
@@ -407,14 +418,15 @@ def test_dc_frozen():
     dw = conj_w.applyfunc(lambda e: sp.diff(e, THETA))
     nonzero(dw[0, 0])
     nonzero(dw[0, 2])
-    print("   PASS: V_dc scalar x identity; d V_dc/dtheta = 0 (frozen at the")
-    print("         reference traces); isotropic piece trace-protected; the")
-    print("         J piece would drift as -J (t_uu' - t_uu); co-rotating V_dc")
-    print("         is a different operator; W genuinely varies")
+    print("   PASS: V_dc scalar x orbital identity (all four spinor channels);")
+    print("         d V_dc/dtheta = 0 (frozen at the reference traces); the")
+    print("         isotropic piece is trace-protected; the J pieces of all")
+    print("         channels would drift as +J (t_x' - t_x); co-rotating")
+    print("         V_dc is a different operator; W genuinely varies")
     return {
         "dc_uu_frozen": sp.expand(v_dc[0, 0]),
         "dc_isotropic_invariant_piece": -U_FLL * (sp.Symbol("n_tot") - HALF),
-        "dc_channel_drift": sp.expand(-J_FLL * (t_uu1 - t_uu0)),
+        "dc_channel_drift": sp.expand(+J_FLL * (t_uu1 - t_uu0)),
     }
 
 
@@ -424,12 +436,18 @@ def test_dc_frozen():
 
 
 def spin_dependent_part(w, size_orb):
-    """V_U^s = W - (1/2) Tr_spin(W) (x) I_orb (spin-outer indexation)."""
+    """V_U^s = W - (1/2) Tr_spin(W) (x) I_orb (spin-inner indexation):
+    the spin-trace scalar (1/2) sum_sigma W[sigma,p,sigma,q] is
+    subtracted from EVERY orbital entry (p, q), both spin-diagonal
+    entries within the orbital block."""
     out = sp.Matrix(w)
     for p in range(size_orb):
-        trace_half = HALF * (w[2 * p, 2 * p] + w[2 * p + 1, 2 * p + 1])
-        out[2 * p, 2 * p] = sp.expand(out[2 * p, 2 * p] - trace_half)
-        out[2 * p + 1, 2 * p + 1] = sp.expand(out[2 * p + 1, 2 * p + 1] - trace_half)
+        for q in range(size_orb):
+            trace_half = HALF * (w[2 * p, 2 * q] + w[2 * p + 1, 2 * q + 1])
+            for s in range(2):
+                out[2 * p + s, 2 * q + s] = sp.expand(
+                    out[2 * p + s, 2 * q + s] - trace_half
+                )
     return out
 
 
@@ -776,7 +794,7 @@ def test_numeric_contract():
             worst_dc_drift = max(
                 worst_dc_drift, float(np.max(np.abs(v_dc_rebuilt[0] - v_dc_ref[site])))
             )
-            # drift decomposition: rebuilt - frozen == -J (t_uu' - t_uu) +
+            # drift decomposition: rebuilt - frozen == +J (t_uu' - t_uu) -
             # invariant isotropic piece (numerically zero by trace invariance)
             t_uu0 = np.trace(occ[site, 0])
             t_uu1 = np.trace(occ_rot[0])
