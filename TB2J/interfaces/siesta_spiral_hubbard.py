@@ -1373,9 +1373,10 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
     """SpiralBundle (vector path, q=0) from a sisl-read SIESTA HSX.
 
     The stored H is mapped through the pinned file packing
-    ``H1=H11, H2=H22, H3=Re H12, H4=-Im H12``; a significant imaginary
-    diagonal (D5/D6, i.e. a non-spiral SO Hamiltonian) is refused
-    rather than silently truncated.
+    ``H1=H11, H2=H22, H3=Re H12, H4=-Im H12``; extra CSR columns beyond
+    the four pinned components are accepted only when they are the
+    overlap (as real SIESTA HSX files store), otherwise refused as an
+    unknown layout rather than silently truncated.
 
     Fermi level: sisl's ``read_hamiltonian`` shifts H by ``-Ef`` on
     read (``hsxSileSiesta._r_hamiltonian_v1``).  The bundle declares
@@ -1405,16 +1406,27 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
             f"HSX sparse shape {hcsr.shape[0]} does not match the "
             f"geometry orbital count {no_l}"
         )
-    hcomp = np.array(hcsr._D[:, :8], dtype=float)
+    hcomp = np.array(hcsr._D[:, :4], dtype=float)
     hcomp[:, 3] = -hcomp[:, 3]  # back to raw file order (diag3k fix)
-    scale = max(1.0, float(np.abs(hcomp[:, :4]).max()))
-    if np.abs(hcomp[:, 4:6]).max() > 1e-8 * scale:
-        raise HubbardBundleError(
-            "HSX Hamiltonian carries a significant imaginary diagonal "
-            "(file components D5/D6); that is a non-spiral SO reference "
-            "and cannot be declared under the pinned spiral packing "
-            "(refusing silent truncation)"
-        )
+    scale = max(1.0, float(np.abs(hcomp).max()))
+    if hcsr._D.shape[1] > 4:
+        # Historical scope: only file components D5/D6 (columns 4,5) are
+        # inspected; later columns are the file's own business.  Real
+        # SIESTA HSX files carry the overlap as an extra CSR column
+        # (verified identical to read_overlap's values), which is benign;
+        # a significant non-overlap D5/D6 is a non-spiral SO reference
+        # and is refused rather than silently truncated.
+        d56 = np.asarray(hcsr._D)[:, 4 : min(6, hcsr._D.shape[1])]
+        benign = np.allclose(
+            d56, np.broadcast_to(scsr._D[:, :1], d56.shape), atol=1e-10
+        ) or bool((np.abs(d56) <= 1e-8 * scale).all())
+        if not benign:
+            raise HubbardBundleError(
+                "HSX Hamiltonian carries a significant imaginary diagonal "
+                "(file components D5/D6); that is a non-spiral SO reference "
+                "and cannot be declared under the pinned spiral packing "
+                "(refusing silent truncation)"
+            )
     if not (
         len(hcsr.ptr) == len(scsr.ptr)
         and bool((hcsr.ptr == scsr.ptr).all())
