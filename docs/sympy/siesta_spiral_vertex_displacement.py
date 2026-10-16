@@ -90,21 +90,20 @@ def test_vertex_derivative_packing():
     assert sp.simplify(coeffs[2] - V_UP) == 0, coeffs[2]
     # Pauli decomposition: H_block = h0 I + v.sigma with h0 = (H1+H2)/2 I_orb
     h0 = (H1 + H2) / 2
-    v_vec = (0, 0, V_UP)  # the splitting vertex: diagonal spinor only
-    recon = h0 * sp.eye(2) + v_vec[2] * sz
-    assert sp.simplify(recon[0, 1]) == 0 and sp.simplify(recon[1, 0]) == 0
+    recon = h0 * sp.eye(2) + vertex_spinor((V_UP, -V_UP, H3, H4))
+    assert sp.simplify(recon[0, 0] - H1) == 0 and sp.simplify(recon[1, 1] - H2) == 0
     # derivative: the ADR-004 vertex derivative is the derivative of the
-    # diagonal-spinor splitting only
-    dv_mat = sp.Matrix([[DV_UP, 0], [0, -DV_UP]])
-    d_split = (
-        sp.diff(h_mat[0, 0] - h_mat[1, 1], H1) * D1
-        + sp.diff(h_mat[0, 0] - h_mat[1, 1], H2) * D2
-    )
-    assert sp.simplify(d_split - (D1 - D2)) == 0, d_split
-    assert sp.simplify(dv_mat[0, 0] - d_split / 2) == 0
-    print("   A PASS: dV_up = (dH1-dH2)/2; mixing components are not part of")
-    print("      the declared diagonal-spinor vertex derivative")
-    return {"dv_up": DV_UP}
+    # FULL story-005 vertex block (v_up, -v_up, H3, H4), i.e. the
+    # componentwise map (dH1, dH2, dH3, dH4) under the pinned packing
+    dv_block = vertex_spinor(vertex_block(D1, D2, D3, D4))
+    dh_mat = sp.Matrix([[D1, D3 - sp.I * D4], [D3 + sp.I * D4, D2]])
+    dh0 = (D1 + D2) / 2
+    assert dv_block == dh_mat - dh0 * sp.eye(2)
+    assert sp.simplify(dv_block[0, 0] - (D1 - D2) / 2) == 0
+    assert sp.simplify(dv_block[1, 1] + (D1 - D2) / 2) == 0
+    print("   A PASS: dV = (dV_up, -dV_up, dH3, dH4) with dV_up=(dH1-dH2)/2;")
+    print("      the transverse components pass through the adjoint map")
+    return {"dv_up": DV_UP, "dv_block": dv_block}
 
 
 # ---------------------------------------------------------------------------
@@ -116,17 +115,17 @@ def test_onsite_hermiticity():
     print("[B] onsite (mu=nu, R=0) block: Hermitian 2x2 spinor; declared")
     h_onsite = sp.Matrix([[H1, H3 - sp.I * H4], [H3 + sp.I * H4, H2]])
     zero(h_onsite - h_onsite.H)  # hermiticity holds for any real components
-    # the DECLARED onsite derivative record is the diagonal-spinor splitting
-    # only: dV = ((d1-d2)/2, -(d1-d2)/2, 0, 0) — the mixing transport
-    # components (dH3, dH4) are declared excluded (see [E])
-    d_onsite = ((D1 - D2) / 2, -(D1 - D2) / 2, sp.Integer(0), sp.Integer(0))
+    # the DECLARED onsite derivative record is the full vertex-block
+    # derivative: dV = ((d1-d2)/2, -(d1-d2)/2, d3, d4) — the transverse
+    # packed components pass through the adjoint map (see [C])
+    d_onsite = ((D1 - D2) / 2, -(D1 - D2) / 2, D3, D4)
     assert sp.simplify(d_onsite[0] + d_onsite[1]) == 0  # traceless in spin
     # the onsite derivative spinor block is Hermitian and spin-traceless
     dv_onsite = vertex_spinor(d_onsite)
     assert dv_onsite == dv_onsite.H
     assert sp.trace(dv_onsite) == 0
-    print("   B PASS: onsite derivative record (dV_up, -dV_up, 0, 0) is the")
-    print("      Hermitian, spin-traceless declared derivative block")
+    print("   B PASS: onsite derivative record (dV_up, -dV_up, dH3, dH4) is")
+    print("      the Hermitian, spin-traceless declared derivative block")
     return {"onsite_dv": sp.Matrix(dv_onsite)}
 
 
@@ -166,7 +165,13 @@ def test_transposed_adjoint_r_symmetry():
     zero(dn.H - dm)
     # consequently the derivative record at (nu,mu,-R) is the adjoint of
     # the record at (mu,nu,R): no independent data at reversed R, and the
-    # hopping partner never needs a separate dH4 sign rule
+    # hopping partner never needs a separate dH4 sign rule.  Componentwise,
+    # the componentwise derivative dM/dX is the adjoint map on the packed
+    # derivative components: the transverse entries (da3, da4) pass
+    # through UNCHANGED under the pinned packing (the naive conjugation
+    # would flip da4 and is refused, exactly as at the H level)
+    dn_naive = block_matrix(da1, da2, da3, -da4)
+    assert dn_naive - dm.H != sp.zeros(2, 2)
     print("   C PASS: partner block at (nu,mu,-R) = adjoint of (mu,nu,R),")
     print("      identical packed components at derivative level; the naive")
     print("      conjugation map (H4 -> -H4 without transpose) is refused")
@@ -218,22 +223,18 @@ def test_fixed_partition_theorem():
 def terms_declaration():
     """Included vs excluded derivative terms, machine-checkable."""
     declaration = {
-        "vertex": True,  # dV/dR from dH1-dH2 on the onsite same-site blocks
+        "vertex": True,  # dV/dR = (dV_up, -dV_up, dH3, dH4) on the onsite
+        # same-site blocks: ALL FOUR packed components are part of the
+        # vertex derivative (the transverse entries pass through the
+        # adjoint map, section [C])
         "partition": False,  # constant index data: d(partition)/dR = 0 exactly
-        "onsite_mixing_transport": False,  # dH3/dH4 excluded: the declared
-        # vertex derivative is the diagonal-spinor splitting only
         "scalar_h0": False,  # spin-scalar part untouched by the vertex
         "overlap_S": False,  # S derivatives are not vertex data
     }
     included = tuple(sorted(k for k, v in declaration.items() if v))
     excluded = tuple(sorted(k for k, v in declaration.items() if not v))
     assert included == ("vertex",)
-    assert excluded == (
-        "onsite_mixing_transport",
-        "overlap_S",
-        "partition",
-        "scalar_h0",
-    )
+    assert excluded == ("overlap_S", "partition", "scalar_h0")
     print(
         "[E] declaration: terms_included = %s; terms_excluded = %s"
         % (included, excluded)
@@ -276,11 +277,12 @@ def vertex_blocks(h_map):
 
 
 def record_vertex_derivative(onsite_keys):
-    """The record-level rule: dV/dR = (dH1-dH2)/2 per onsite key."""
+    """The record-level rule: the derivative of the full story-005 vertex
+    block, (dV_up, -dV_up, dH3, dH4) per onsite key."""
     out = {}
     for key in onsite_keys:
-        d1, d2, _d3, _d4 = ALPHA[key]
-        out[key] = ((d1 - d2) / 2.0, -(d1 - d2) / 2.0, 0.0, 0.0)
+        d1, d2, d3, d4 = ALPHA[key]
+        out[key] = ((d1 - d2) / 2.0, -(d1 - d2) / 2.0, d3, d4)
     return out
 
 
@@ -292,18 +294,19 @@ def test_numeric_fixture():
     v_minus = vertex_blocks(h_minus)
     onsite_keys = [k for k in H0 if k[0] == k[1] and k[2] == (0, 0, 0)]
     record = record_vertex_derivative(onsite_keys)
+    # fixture sanity: at least one onsite key carries NONZERO transverse
+    # components (dH3/dH4), so the four-component gate is not vacuous
+    assert any(
+        record[key][2] != 0.0 or record[key][3] != 0.0 for key in onsite_keys
+    ), "fixture has no nonzero dH3/dH4 onsite: the transverse gate is vacuous"
     for key in onsite_keys:
-        fd_up = (v_plus[key][0] - v_minus[key][0]) / (2.0 * STEP_ANG)
-        fd_dn = (v_plus[key][1] - v_minus[key][1]) / (2.0 * STEP_ANG)
-        assert abs(fd_up - record[key][0]) <= NUMERIC_TOL, (key, fd_up, record[key][0])
-        assert abs(fd_dn - record[key][1]) <= NUMERIC_TOL, (key, fd_dn, record[key][1])
-        # V3/V4 are excluded from the declared derivative
-        assert record[key][2] == 0.0 and record[key][3] == 0.0
-    print(
-        "   F PASS: dV/dR == FD of the extracted vertex blocks on %d onsite"
-        % len(onsite_keys)
-    )
-    print("      keys to %.1e" % NUMERIC_TOL)
+        fd = tuple(
+            (v_plus[key][i] - v_minus[key][i]) / (2.0 * STEP_ANG) for i in range(4)
+        )
+        for i in range(4):
+            assert abs(fd[i] - record[key][i]) <= NUMERIC_TOL, (key, i, fd, record)
+    print("   F PASS: all four dV/dR components == FD of the extracted vertex")
+    print("      blocks on %d onsite keys to %.1e" % (len(onsite_keys), NUMERIC_TOL))
     return {"numeric_fd_tolerance": sp.Float(NUMERIC_TOL)}
 
 

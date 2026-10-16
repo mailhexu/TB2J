@@ -3,7 +3,9 @@
 Forms the displacement derivative of the ADR-004 production magnetic vertex
 (total-H spin splitting, story-005/006 machinery, story-017 dH/dR seam):
 ``dV/dR = (dH1 - dH2)/2`` on the onsite same-site blocks, packed as
-``(v_up, -v_up, 0, 0)`` — the declared diagonal-spinor splitting only.
+``(dV_up, -dV_up, dH3, dH4)`` — the derivative of the full story-005
+vertex block, whose certified packing is ``(v_up, -v_up, H3, H4)``
+(``H3 = Re H12``, ``H4 = -Im H12``).
 
 Refusals (FR-014 pattern): an ambiguous vertex request (displacement response
 without a declared vertex-derivative / fixed-partition label) and a story-006
@@ -38,13 +40,12 @@ PARTITION_NOTE = (
     "fixed-partition observable (exact, not approximate): the site "
     "partition map enters the vertex as CONSTANT index data, so "
     "d(partition)/dR = 0 identically; the declared vertex derivative "
-    "carries the dH1-dH2 splitting components only. PRD risk: "
+    "carries all four packed components of the vertex block. PRD risk: "
     f"{PRD_PARTITION_RISK}."
 )
 
 TERMS_INCLUDED = ("vertex",)
 TERMS_EXCLUDED = (
-    "onsite_mixing_transport",
     "overlap_S",
     "partition",
     "scalar_h0",
@@ -91,8 +92,11 @@ class VertexDisplacementDerivatives:
     """Sparse dV/dR in the bundle's conventions, fixed-partition labeled.
 
     ``dV`` maps onsite same-site ``(mu, nu, R=0)`` keys to the 4-component
-    packing ``(v_up, -v_up, 0.0, 0.0)`` with ``v_up = (dH1 - dH2)/2`` in
-    eV/Ang (file packing as in :class:`DisplacementDerivatives`).
+    packing ``(dV_up, -dV_up, dH3, dH4)`` with ``dV_up = (dH1 - dH2)/2``
+    in eV/Ang (file packing as in :class:`DisplacementDerivatives`; the
+    transverse components are the packed derivatives of ``H3 = Re H12``
+    and ``H4 = -Im H12``, i.e. the derivative of the full story-005
+    vertex block).
     """
 
     pattern: object
@@ -238,15 +242,16 @@ def vertex_displacement_derivative(
             # mu != nu blocks would be a guess: only diagonal onsite
             # entries (each site's own orbital) are certified
             continue
-        d1, d2, _d3, _d4 = derivatives.dH[key]
+        d1, d2, d3, d4 = derivatives.dH[key]
         v_up = (d1 - d2) / 2.0
-        dV[key] = (v_up, -v_up, 0.0, 0.0)
+        dV[key] = (v_up, -v_up, d3, d4)
     provenance = {
         "source_producer_recipe": derivatives.producer_recipe,
         "vertex_displacement_version": VERTEX_DISPLACEMENT_VERSION,
         "mathdoc": "tb2j/siesta-spiral-vertex-displacement",
-        "packing": "(v_up, -v_up, 0, 0); v_up = (dH1 - dH2)/2 on onsite "
-        "same-site (mu, nu, R=0) blocks",
+        "packing": "(dV_up, -dV_up, dH3, dH4); dV_up = (dH1 - dH2)/2 on "
+        "onsite same-site (mu, nu, R=0) blocks (derivative of the full "
+        "story-005 vertex block)",
     }
     return VertexDisplacementDerivatives(
         pattern=derivatives.pattern,

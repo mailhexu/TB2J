@@ -113,13 +113,16 @@ def test_vertex_derivative_equals_dh_difference(record, synthetic_bundle):
     result = vertex_displacement_derivative(record, synthetic_bundle)
     onsite_keys = [k for k in H0 if k[0] == k[1] and k[2] == (0, 0, 0)]
     assert sorted(result.dV) == sorted(onsite_keys)
+    # fixture sanity: at least one onsite key carries nonzero dH3/dH4
+    assert any(ALPHA[key][2] != 0.0 or ALPHA[key][3] != 0.0 for key in onsite_keys)
     for key in onsite_keys:
-        d1, d2, _d3, _d4 = ALPHA[key]
+        d1, d2, d3, d4 = ALPHA[key]
         v_up = (d1 - d2) / 2.0
         got = result.dV[key]
         assert abs(got[0] - v_up) <= NUMERIC_TOL
         assert abs(got[1] + v_up) <= NUMERIC_TOL
-        assert got[2] == 0.0 and got[3] == 0.0
+        assert abs(got[2] - d3) <= NUMERIC_TOL
+        assert abs(got[3] - d4) <= NUMERIC_TOL
 
 
 def test_vertex_derivative_matches_finite_differenced_vertex_blocks(
@@ -131,10 +134,11 @@ def test_vertex_derivative_matches_finite_differenced_vertex_blocks(
     h_minus = {k: tuple(h - a * STEP_ANG for h, a in zip(H0[k], ALPHA[k])) for k in H0}
     v_plus, v_minus = _vertex_blocks(h_plus), _vertex_blocks(h_minus)
     for key, comps in result.dV.items():
-        fd_up = (v_plus[key][0] - v_minus[key][0]) / (2.0 * STEP_ANG)
-        fd_dn = (v_plus[key][1] - v_minus[key][1]) / (2.0 * STEP_ANG)
-        assert abs(fd_up - comps[0]) <= NUMERIC_TOL
-        assert abs(fd_dn - comps[1]) <= NUMERIC_TOL
+        fd = tuple(
+            (v_plus[key][i] - v_minus[key][i]) / (2.0 * STEP_ANG) for i in range(4)
+        )
+        for i in range(4):
+            assert abs(fd[i] - comps[i]) <= NUMERIC_TOL, (key, i, fd, comps)
 
 
 def test_hopping_and_nonzero_r_keys_excluded(record, synthetic_bundle):
