@@ -66,13 +66,13 @@ paraunitary $T$ satisfying
 $$T^\dagger G T=G,\qquad T^\dagger M T=
 \operatorname{diag}(E_-,E_+,E_+,E_-).$$
 
-The script checks the generalized problem $Mt=EGt$ and the unit metric norm
-$t^\dagger Gt=1$ symbolically for the controlled positive branch, and
-checks the full paraunitary/diagonalization identities numerically at
-rational stable parameter points.  This uses the same lower-Cholesky
-convention and physical-vector reconstruction as
-[`site_boson_modes.md`](site_boson_modes.md); it is not an electron-like
-Hermitian eigensolver.
+The numerical implementation uses the shared
+`TB2J.magnon.eigenstates.colpa_diagonalize_factor` primitive called by both
+`Magnon.get_site_boson_modes` and the mixed solver.  The derivation checks
+the generalized problem $Mt=EGt$ and the unit metric norm $t^\dagger Gt=1$
+symbolically for the controlled positive branch, and checks the full
+paraunitary/diagonalization identities numerically at rational stable
+parameter points.  It is not an electron-like Hermitian eigensolver.
 
 ## Observable weight shares
 

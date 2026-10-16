@@ -28,6 +28,38 @@ def _readonly_array(value, dtype):
     return array
 
 
+def colpa_diagonalize_factor(cholesky_factor, metric=None):
+    """Return positive bosonic energies and the physical paraunitary matrix.
+
+    ``cholesky_factor`` is the lower factor ``K`` with ``H = K K^+``.
+    This is the shared Story-006 Colpa reconstruction used by both the
+    canonical site-boson modes and mixed harmonic modes.  It performs the
+    Hermitian diagonalization of ``K^+ g K``, maps Euclidean vectors back
+    through ``K^{-+}``, scales by ``sqrt(|epsilon|)``, and orders positive
+    norm columns before reversed negative-norm partners.
+    """
+    K = np.asarray(cholesky_factor, dtype=complex)
+    if K.ndim != 2 or K.shape[0] != K.shape[1] or K.shape[0] % 2:
+        raise ValueError("Colpa factor must be an even-dimensional square matrix")
+    dim = K.shape[0]
+    n = dim // 2
+    if metric is None:
+        metric = np.diag(np.r_[np.ones(n), -np.ones(n)])
+    else:
+        metric = np.asarray(metric, dtype=float)
+        if metric.shape != (dim, dim):
+            raise ValueError(f"Colpa metric must have shape {(dim, dim)}")
+    KH = K.conj().T
+    eigvals, eigvecs = np.linalg.eigh(KH @ metric @ K)
+    if np.any(eigvals[:n] >= 0) or np.any(eigvals[n:] <= 0):
+        raise ValueError(
+            "Colpa metric spectrum does not have stable positive/negative branches"
+        )
+    physical = np.linalg.solve(KH, eigvecs) * np.sqrt(np.abs(eigvals))[None, :]
+    paraunitary = np.concatenate((physical[:, n:], physical[:, :n][:, ::-1]), axis=1)
+    return eigvals[n:], paraunitary
+
+
 @dataclass(frozen=True)
 class SiteBosonDiagnostics:
     """Read-only per-k-point stability and Cholesky regularization diagnostics."""

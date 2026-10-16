@@ -27,6 +27,8 @@ from typing import Callable, Mapping, Sequence
 
 import numpy as np
 
+from TB2J.magnon.eigenstates import colpa_diagonalize_factor
+
 __all__ = [
     "MixedSpinDisplacementHessian",
     "ControlledTwoBosonModel",
@@ -292,18 +294,7 @@ def hybrid_modes(points, mixed_hessian: MixedSpinDisplacementHessian) -> HybridM
         B_block = M[:N, N:]
         pairing_residual[ik] = np.max(np.abs(B_block - B_block.T))
         K = np.linalg.cholesky(M)
-        KH = K.conj().T
-        eigvals, eigvecs = np.linalg.eigh(KH @ g_metric @ K)
-        if np.any(eigvals[:N] >= 0) or np.any(eigvals[N:] <= 0):
-            raise ValueError(
-                "Cholesky metric spectrum does not have stable positive/negative "
-                f"branches at k={kpoint}."
-            )
-        physical = np.linalg.solve(KH, eigvecs) * np.sqrt(np.abs(eigvals))[None, :]
-        paraunitary[ik] = np.concatenate(
-            (physical[:, N:], physical[:, :N][:, ::-1]), axis=1
-        )
-        energies[ik] = eigvals[N:]
+        energies[ik], paraunitary[ik] = colpa_diagonalize_factor(K, metric=g_metric)
         pos = paraunitary[ik, :, :N]  # (2N coordinates, N modes)
         weight_sq = np.abs(pos) ** 2
         mag = weight_sq[:n_mag, :] + weight_sq[N : N + n_mag, :]
