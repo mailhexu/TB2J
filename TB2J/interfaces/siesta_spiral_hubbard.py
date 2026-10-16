@@ -42,8 +42,12 @@ All internal energies are Ry; provenance fields carry eV alongside
 
 The stored HSX Hamiltonian already contains the +U potential folded in
 (H_stored = H_xc + H_U, final_H_f_stress.F); the HubbardBundle records
-that fact so no consumer double-counts.  Operator algebra on the
-rotated frame is story-015/016 scope and deliberately absent here.
+that fact so no consumer double-counts.  The story-015 local rotation
+contract (ADR-007: the occupation matrix co-rotates with the site spin,
+the double-counting term is frozen under the MFT variation) is derived
+in docs/sympy/siesta_spiral_hubbard_rotation.py and implemented below as
+site_spin_rotation / rotate_site_occupations / rotate_hubbard_site_operator;
+the matched frozen-rotation response gates are story-016 scope.
 
 VALIDATION STATUS (story 014, against the env-instrumented occ_dump
 run): the projector-overlap tables match SIESTA's runtime Ski dump to
@@ -74,6 +78,10 @@ from scipy.special import spherical_jn
 
 RY_TO_EV = 13.605693122994
 BOHR_TO_ANG = 0.529177210903
+
+#: Story-015 approved numeric tolerance (relative) for the +U rotation
+#: contract gates: W[n'] vs U W[n] U^dag, spin-trace invariance, traces.
+HUBBARD_ROTATION_TOLERANCE = 1e-12
 
 _SUPPORTED_SCHEMES = frozenset({"fll_bultmark09"})
 _REQUIRED_SOURCE_REFS = frozenset(
@@ -831,6 +839,196 @@ def edftu_oracle(occupations, v_hubbard, v_dc, rho_local=None, prov=None):
         n_corr = np.trace(occ[site, 0]) + np.trace(occ[site, 1])
         e_ry += 0.25 * (prov.u_ry - prov.j_ry) * n_corr
     return float(np.real(e_ry) * RY_TO_EV)
+
+
+# ----------------------------------------------------------------------
+# story-015: local rotation contract (ADR-007, derivation-first)
+# ----------------------------------------------------------------------
+
+
+def site_spin_rotation(axis, angle):
+    """Local spin rotation U_s = exp(-i angle sigma.n_hat / 2) (2x2).
+
+    Right-handed active rotation about the unit axis ``n_hat``; a zero
+    angle is exactly the identity.  Refuses a zero or non-finite axis.
+    """
+    axis = np.asarray(axis, dtype=float)
+    if axis.shape != (3,) or not np.isfinite(axis).all() or np.linalg.norm(axis) == 0.0:
+        raise HubbardImportError("rotation axis must be a nonzero finite 3-vector")
+    n = axis / np.linalg.norm(axis)
+    half = 0.5 * float(angle)
+    c, s = np.cos(half), np.sin(half)
+    kx, ky, kz = n
+    return np.array(
+        [
+            [c - 1j * s * kz, -1j * s * (kx - 1j * ky)],
+            [-1j * s * (kx + 1j * ky), c + 1j * s * kz],
+        ]
+    )
+
+
+def rotate_site_occupations(occupations, site, *, axis=(0.0, 0.0, 1.0), angle=0.0):
+    """Co-rotate ONE site's spinor occupation blocks (contract item (i)).
+
+    ``N' = (U_s (x) I_orb) N (U_s^dag (x) I_orb)`` on the site's
+    (4, 5, 5) channels (uu, dd, ud, du).  The full spinor trace
+    ``Tr N`` is invariant while the single channel traces generally are
+    NOT (story-015 derivation, section [A] — the algebraic reason the
+    double-counting freeze is a contract, not a consequence).  Every
+    other site is returned bit-exactly unchanged; a zero angle is an
+    exact no-op.
+    """
+    occ = np.asarray(occupations, dtype=complex)
+    if occ.ndim != 4 or occ.shape[1:] != (4, 5, 5):
+        raise OccupationMatrixError(
+            f"occupations must be (nsites, 4, 5, 5), got {occ.shape}"
+        )
+    site = int(site)
+    if not 0 <= site < occ.shape[0]:
+        raise HubbardImportError(
+            f"rotation requested for unknown site index {site}; the payload "
+            f"holds {occ.shape[0]} correlated sites"
+        )
+    u2 = site_spin_rotation(axis, angle)
+    n = np.zeros((2, 2, 5, 5), dtype=complex)
+    n[0, 0] = occ[site, 0]
+    n[1, 1] = occ[site, 1]
+    n[0, 1] = occ[site, 2]
+    n[1, 0] = occ[site, 3]
+    n_rot = np.einsum("ia,abpq,jb->ijpq", u2, n, u2.conj())
+    out = occ.copy()
+    out[site, 0] = n_rot[0, 0]
+    out[site, 1] = n_rot[1, 1]
+    out[site, 2] = n_rot[0, 1]
+    out[site, 3] = n_rot[1, 0]
+    return out
+
+
+# MathDoc: tb2j/siesta-spiral-hubbard-rotation
+def rotate_hubbard_site_operator(
+    occupations, prov, site, *, axis=(0.0, 0.0, 1.0), angle=0.0
+):
+    """Story-015 contract: finite local rotation of one +U vertex (ADR-007).
+
+    The site's occupation matrix co-rotates, the FLL Hubbard part is
+    reassembled from the co-rotated occupations (certified vee slot
+    order), and the double-counting potential is FROZEN bit-exactly at
+    the converged reference value (MFT: the density is frozen, so
+    delta V_dc = 0 exactly while delta V_U != 0; the counterfactual
+    rebuild drift is recorded in the report).  The story-006
+    rotation-legitimacy discipline is applied to the +U vertex: the
+    Hubbard contribution transforms per the derived contract
+    (``W[n'] == U W[n] U^dag`` within ``HUBBARD_ROTATION_TOLERANCE``
+    relative), the spin-trace (charge-channel) Hubbard part is
+    untouched, every other site is bit-exactly unchanged, traces are
+    preserved and a zero angle is an exact no-op.
+
+    Returns a dict with ``occupations_rotated`` (nsites, 4, 5, 5),
+    ``v_hubbard_rotated`` (nsites, 4, 5, 5), ``v_dc_frozen``
+    (nsites, 4, 5, 5, identical to the reference assembly) and a
+    ``report`` dict recording every gate value (Ry units).
+    """
+    if prov is None:
+        raise DftuProvenanceError(
+            "rotate_hubbard_site_operator requires valid +U provenance"
+        )
+    occ = np.asarray(occupations, dtype=complex)
+    if occ.ndim != 4 or occ.shape[1:] != (4, 5, 5):
+        raise OccupationMatrixError(
+            f"occupations must be (nsites, 4, 5, 5), got {occ.shape}"
+        )
+    site = int(site)
+    if not 0 <= site < occ.shape[0]:
+        raise HubbardImportError(
+            f"rotation requested for unknown site index {site}; the payload "
+            f"holds {occ.shape[0]} correlated sites"
+        )
+    v_hub_ref, v_dc_ref, conventions = assemble_hubbard_operator(occ, prov)
+    occ_rot = rotate_site_occupations(occ, site, axis=axis, angle=angle)
+    v_hub_rot_site, v_dc_rebuilt, _ = assemble_hubbard_operator(
+        occ_rot[site : site + 1], prov
+    )
+    v_hub_rot = v_hub_ref.copy()
+    v_hub_rot[site] = v_hub_rot_site[0]
+
+    # covariance gate: reassembled W[n'] vs explicit U W[n] U^dag
+    u2 = site_spin_rotation(axis, angle)
+    v_ref = np.zeros((2, 2, 5, 5), dtype=complex)
+    v_ref[0, 0] = v_hub_ref[site, 0]
+    v_ref[1, 1] = v_hub_ref[site, 1]
+    v_ref[0, 1] = v_hub_ref[site, 2]
+    v_ref[1, 0] = v_hub_ref[site, 3]
+    v_conj = np.einsum("ia,abpq,jb->ijpq", u2, v_ref, u2.conj())
+    v_conj_channels = np.zeros((4, 5, 5), dtype=complex)
+    v_conj_channels[0] = v_conj[0, 0]
+    v_conj_channels[1] = v_conj[1, 1]
+    v_conj_channels[2] = v_conj[0, 1]
+    v_conj_channels[3] = v_conj[1, 0]
+    scale = max(float(np.max(np.abs(v_ref))), 1e-30)
+    covariance = float(np.max(np.abs(v_hub_rot[site] - v_conj_channels))) / scale
+
+    # charge channel (spin trace) of the Hubbard part: SU(2) invariant
+    spin_trace_change = float(
+        np.max(
+            np.abs(
+                0.5 * (v_hub_rot[site, 0] + v_hub_rot[site, 1])
+                - 0.5 * (v_hub_ref[site, 0] + v_hub_ref[site, 1])
+            )
+        )
+    )
+    tr0 = np.trace(occ[site, 0]) + np.trace(occ[site, 1])
+    tr1 = np.trace(occ_rot[site, 0]) + np.trace(occ_rot[site, 1])
+    trace_dev = float(abs(tr1 - tr0))
+    magnetic_change = float(np.sqrt(np.sum(np.abs(v_conj - v_ref) ** 2)))
+    untouched = all(
+        np.array_equal(occ_rot[other], occ[other])
+        for other in range(occ.shape[0])
+        if other != site
+    )
+    zero_noop = float(angle) == 0.0
+    # the contract freezes the dc at the reference: the returned dc IS
+    # the reference array; record what a rebuild WOULD have moved
+    would_drift = float(np.max(np.abs(v_dc_rebuilt[0] - v_dc_ref[site])))
+    passed = (
+        covariance <= HUBBARD_ROTATION_TOLERANCE
+        and spin_trace_change <= HUBBARD_ROTATION_TOLERANCE
+        and trace_dev <= HUBBARD_ROTATION_TOLERANCE
+        and untouched
+        and (magnetic_change > 1e-8 if not zero_noop else magnetic_change == 0.0)
+    )
+    report = {
+        "passed": bool(passed),
+        "rotated_site": site,
+        "axis": [float(x) for x in np.asarray(axis, dtype=float)],
+        "angle_rad": float(angle),
+        "hubbard_covariance_relative": covariance,
+        "hubbard_covariance_tolerance": HUBBARD_ROTATION_TOLERANCE,
+        "magnetic_change": magnetic_change,
+        "spin_trace_change_max": spin_trace_change,
+        "dc_change_max": 0.0,  # contract: reference dc returned untouched
+        "would_be_dc_drift_ry": would_drift,
+        "untouched_sites_unchanged": bool(untouched),
+        "max_trace_deviation": trace_dev,
+        "zero_angle_noop": bool(zero_noop),
+        "convention": {
+            "adr": "ADR-007",
+            "vertex_kind": conventions.get("vertex_kind", "hubbard_local"),
+            "scheme": prov.scheme,
+            "dc": "frozen_at_reference_traces",
+            "hubbard": (
+                "occupation co-rotates; W reassembled from the co-rotated "
+                "occupations (certified vee slot order)"
+            ),
+            "units": conventions.get("units", "Ry"),
+            "spinor_layout": conventions.get("spinor_layout", _SPINOR_LAYOUT),
+        },
+    }
+    return {
+        "occupations_rotated": occ_rot,
+        "v_hubbard_rotated": v_hub_rot,
+        "v_dc_frozen": v_dc_ref,
+        "report": report,
+    }
 
 
 # ----------------------------------------------------------------------
