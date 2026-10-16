@@ -367,7 +367,8 @@ def test_provenance_from_dict_refuses_missing_declaration(declaration):
     if declaration == "scheme":
         assert "fll_bultmark09" in msg
     elif declaration == "projector_method":
-        assert "1 or 2" in msg
+        assert "2 only" in msg
+        assert "1 or 2" not in msg
 
 
 def test_provenance_from_dict_refuses_missing_u_j_lines():
@@ -584,6 +585,50 @@ def test_ski_dump_matches_sp_proj_table(fx):
     assert missing == 0
     assert matched > 9000
     assert worst < 1e-5
+
+
+def test_ski_to_sp_proj_non_prefix_site_indices(tmp_path):
+    """The dump's global 1-based atom ka is matched against the
+    DECLARED site_indices, not used as an ordinal: with
+    site_indices=(2, 4), rows of global atoms 2 and 4 land at table
+    positions 0 and 1 and rows of uncorrelated atoms (1, 3) are
+    dropped."""
+    import sisl
+
+    from TB2J.interfaces.siesta_spiral_hubbard import ski_to_sp_proj
+
+    _r = np.linspace(0.0, 1.0, 50)
+    orb = sisl.SphericalOrbital(0, (_r, np.exp(-_r)))
+    atom = sisl.Atom("H", orb)
+    pos = [[0.0, 0.0, float(i) * 3.0] for i in range(4)]
+    geo = sisl.Geometry(pos, atom)
+    lines = []
+    values = {1: 0.11, 2: 0.22, 3: 0.33, 4: 0.44}
+    for ka in (1, 2, 3, 4):
+        for mp in (1, 2):
+            # ka, mp, iono (atom ka's only orbital), unused, x, y, z, s
+            lines.append(
+                f"{ka:3d} {mp:3d} {ka:4d} {0:4d} "
+                f"{0.0:22.14E} {0.0:22.14E} {0.0:22.14E} {values[ka] * mp:22.14E}"
+            )
+    ski = tmp_path / "synthetic.dftu_ski"
+    ski.write_text("\n".join(lines) + "\n")
+
+    sp = ski_to_sp_proj(ski, geo, (2, 4))
+    assert sp.shape == (2, 5, geo.no)
+    # global atom 2 -> table position 0, its only orbital (no_l == na)
+    assert sp[0, 0, 1] == pytest.approx(0.22)
+    assert sp[0, 1, 1] == pytest.approx(0.44)
+    # global atom 4 -> table position 1
+    assert sp[1, 0, 3] == pytest.approx(0.44)
+    assert sp[1, 1, 3] == pytest.approx(0.88)
+    # exactly these entries are filled; undeclared atoms dropped
+    assert np.count_nonzero(sp) == 4
+    # prefix declaration keeps the historical 1:1 behaviour
+    sp_prefix = ski_to_sp_proj(ski, geo, (1, 2, 3, 4))
+    assert sp_prefix[0, 0, 0] == pytest.approx(0.11)
+    assert sp_prefix[3, 1, 3] == pytest.approx(0.88)
+    assert np.count_nonzero(sp_prefix) == 8
 
 
 def test_occupation_sanity(fx, gt_occ, certified_engine):
@@ -806,7 +851,7 @@ def test_ingest_dftu_run_from_producer(producer_run):
         occ_dump=dump,
         species_label="Fe",
         principal_n=3,
-        site_indices=(0, 1, 2, 3),
+        site_indices=(1, 2, 3, 4),
     )
     assert bundle.hubbard is hb.prov
     assert hb.prov.correlated_species == "Fe"
@@ -817,6 +862,26 @@ def test_ingest_dftu_run_from_producer(producer_run):
         f"Edftu oracle {hb.edftu_ev:.6f} eV vs producer "
         f"{hb.edftu_reference_ev:.6f} eV: {deviation:.3f} eV"
     )
+    # Fermi-shift truthfulness: sisl's read_hamiltonian shifts H by
+    # -Ef on read; the bundle must store the *unshifted* producer H
+    # while declaring fermi_shift="none".  Proof: stored diagonal H11
+    # equals (plain sisl read + Ef) -- the double-read shift
+    # consistency -- i.e. the raw HSX value.
+    import sisl
+
+    hsx_sile = sisl.get_sile(str(dump / "fe4_occ.HSX"))
+    Ef = float(hsx_sile.read_fermi_level())
+    H_plain = hsx_sile.read_hamiltonian()
+    ptr0, ptr1 = int(H_plain._csr.ptr[0]), int(H_plain._csr.ptr[1])
+    col0 = H_plain._csr.col[ptr0:ptr1]
+    plain_h11 = float(H_plain._csr._D[ptr0 + int(np.argmax(col0 == 0)), 0])
+    stored_h11 = bundle.sparse[(0, 0, (0, 0, 0))][0]
+    raw_h11 = plain_h11 + Ef
+    assert abs(stored_h11 - raw_h11) < 1e-8, (
+        f"stored H11 {stored_h11:.10f} eV vs raw (sisl read + Ef) "
+        f"{raw_h11:.10f} eV: sisl's -Ef shift was not undone"
+    )
+    assert abs(stored_h11 - plain_h11) > abs(Ef) / 2  # shift is real
 
 
 def test_ingest_dftu_run_refuses_undeclared_subspace(producer_run):
@@ -841,5 +906,5 @@ def test_ingest_dftu_run_refuses_undeclared_subspace(producer_run):
             dump / "Fe_nc.dftu_proj",
             occ_dump=dump,
             principal_n=3,
-            site_indices=(0, 1, 2, 3),
+            site_indices=(1, 2, 3, 4),
         )

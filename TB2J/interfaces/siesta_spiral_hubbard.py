@@ -277,7 +277,9 @@ class DftuProvenance:
             ),
             "projector_method": (
                 "projector generation method",
-                "accepted: 1 or 2 (story-014 producer certified with 2)",
+                "accepted: 2 only (the construction supports DFTU."
+                "ProjectorGenerationMethod 2; the story-014 producer "
+                "used 2)",
             ),
             "correlated_species": (
                 "correlated species label",
@@ -1053,14 +1055,24 @@ def parse_dftu_proj_header(path):
     return int(npts), float(delta), float(rc)
 
 
-def ski_to_sp_proj(ski_path, geometry, nsites):
+def ski_to_sp_proj(ski_path, geometry, site_indices):
     """Dense (nsites, 5, no_s) projector-overlap table from the runtime
     Ski dump (SIESTA's own S_proj-PAO table), matched to sisl column
     indices by (site, in-cell orbital, displacement rounded to 1e-6)
     exactly as the story-014 fixture verification does.  Entries the
     dump omits stay zero, mirroring the zero-initialized runtime table.
+
+    ``site_indices`` are the declared global 1-based atom numbers, as
+    printed in the Ski dump's ``ka`` column.  A dump row is placed at
+    its declared site's position in ``site_indices``; rows belonging to
+    atoms outside the declared correlated subspace (uncorrelated
+    atoms) are dropped, so a non-prefix declaration such as ``(2, 4)``
+    selects exactly the dumped rows of global atoms 2 and 4.
     """
     from collections import defaultdict
+
+    site_indices = tuple(int(s) for s in site_indices)
+    site_pos = {ka: pos for pos, ka in enumerate(site_indices)}
 
     g = geometry
     no_l = int(g.lasto[-1]) + 1
@@ -1073,7 +1085,7 @@ def ski_to_sp_proj(ski_path, geometry, nsites):
     cell = np.asarray(g.cell) / BOHR_TO_ANG
     pos = np.asarray(g.xyz) / BOHR_TO_ANG
     sc_off = np.asarray(g.sc_off, dtype=int)
-    sp = np.zeros((nsites, 5, no_l * len(sc_off)))
+    sp = np.zeros((len(site_indices), 5, no_l * len(sc_off)))
     by_site = {}
     for line in Path(ski_path).read_text().split("\n"):
         p = line.split()
@@ -1081,11 +1093,16 @@ def ski_to_sp_proj(ski_path, geometry, nsites):
             continue
         ka, mp, iono = int(p[0]), int(p[1]), int(p[2])
         x, y, z, s = (float(v) for v in p[4:8])
-        ia = ka - 1
-        if not 0 <= ia < nsites:
+        # ka is the global 1-based atom number from the dump; only rows
+        # of DECLARED correlated atoms are kept, the rest belong to
+        # uncorrelated atoms and are dropped.
+        isite = site_pos.get(ka)
+        if isite is None:
+            continue
+        ia = ka - 1  # 0-based position for geometry lookup
+        if not 0 <= ia < g.na:
             raise OccupationMatrixError(
-                f"Ski dump site index {ka} outside the declared "
-                f"correlated sites {nsites}"
+                f"Ski dump site index {ka} outside the cell's {g.na} atoms"
             )
         if ia not in by_site:
             lk = defaultdict(list)
@@ -1111,8 +1128,8 @@ def ski_to_sp_proj(ski_path, geometry, nsites):
             [],
         )
         for js in cands:
-            if sp[ia, mp - 1, js] == 0.0:
-                sp[ia, mp - 1, js] = s
+            if sp[isite, mp - 1, js] == 0.0:
+                sp[isite, mp - 1, js] = s
     return sp
 
 
@@ -1123,11 +1140,25 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
     ``H1=H11, H2=H22, H3=Re H12, H4=-Im H12``; a significant imaginary
     diagonal (D5/D6, i.e. a non-spiral SO Hamiltonian) is refused
     rather than silently truncated.
+
+    Fermi level: sisl's ``read_hamiltonian`` shifts H by ``-Ef`` on
+    read (``hsxSileSiesta._r_hamiltonian_v1``).  The bundle declares
+    ``fermi_shift="none"``, so the shift is undone here by adding the
+    Fermi level back (read via ``read_fermi_level``); the stored H is
+    therefore the unshifted producer H.  When the file carries no
+    usable Ef (sisl's sentinel), it reads as 0 and the undo is a
+    no-op.
     """
     from TB2J.interfaces.siesta_spiral import BUNDLE_VERSION, SpiralBundle
 
     g = hsx_sile.read_geometry()
-    hcsr = hsx_sile.read_hamiltonian()._csr
+    hamiltonian = hsx_sile.read_hamiltonian()
+    Ef = float(hsx_sile.read_fermi_level())
+    if Ef != 0.0:
+        # undo sisl's H.shift(-Ef) so the stored H is the raw producer H
+        # (shift modifies the Hamiltonian in place)
+        hamiltonian.shift(Ef)
+    hcsr = hamiltonian._csr
     scsr = hsx_sile.read_overlap()._csr
     no_l = int(g.lasto[-1]) + 1
     if hcsr.shape[0] != no_l or scsr.shape[0] != no_l:
@@ -1226,8 +1257,10 @@ def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
         ion.nc basis files, which a bare export does not carry.
     **ids : required keyword identity declarations
         ``species_label`` (str), ``principal_n`` (int),
-        ``site_indices`` (iterable of int) -- REFUSED when absent; plus
-        optional ``label`` propagated to the bundle metadata.
+        ``site_indices`` (iterable of int) -- REFUSED when absent;
+        ``site_indices`` are the correlated atoms' global 1-based atom
+        numbers, as printed in the runtime Ski dump's ``ka`` column;
+        plus optional ``label`` propagated to the bundle metadata.
 
     Returns
     -------
@@ -1270,7 +1303,7 @@ def ingest_dftu_run(hsx, dm, stdout, proj_path, occ_dump=None, **ids):
     dm_comp[:, 3] = -dm_comp[:, 3]  # back to raw file order (diag3k)
     dm_rows = np.repeat(np.arange(no_l), np.diff(dcsr.ptr))
     dm_cols = dcsr.col.copy()
-    sp_proj = ski_to_sp_proj(ski_path[0], g, len(tuple(ids["site_indices"])))
+    sp_proj = ski_to_sp_proj(ski_path[0], g, tuple(int(s) for s in ids["site_indices"]))
     proj_name = Path(proj_path).name
     prov = DftuProvenance(
         u_ev=u_ry * RY_TO_EV,
