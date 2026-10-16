@@ -1153,7 +1153,10 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
 
     g = hsx_sile.read_geometry()
     hamiltonian = hsx_sile.read_hamiltonian()
-    Ef = float(hsx_sile.read_fermi_level())
+    # sisl returns None for HSX version 0 files (no Ef stored, and the
+    # reader leaves H unshifted) - treat as zero so the undo is a no-op.
+    ef_raw = hsx_sile.read_fermi_level()
+    Ef = float(ef_raw) if ef_raw is not None else 0.0
     if Ef != 0.0:
         # undo sisl's H.shift(-Ef) so the stored H is the raw producer H
         # (shift modifies the Hamiltonian in place)
