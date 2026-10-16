@@ -92,10 +92,16 @@ derived criterion holds at a reciprocal-lattice point: the global-rotation
 Holstein--Primakoff displacement
 $\beta_i=\sqrt{S_i/2}\,U_i^*\cdot(n\times V_i)$ (one candidate per Cartesian
 axis, particle and hole blocks conjugated) must be a null vector of the
-unshifted Hessian, with residual $\|H\beta\|/\|\beta\|$ reported in
-`diagnostics.symmetry_residual`, and the certified candidate count must be
-even (global rotations pair particles and holes). The count caps the zeroed
-modes. References whose Hessian minimum lies below
+unshifted Hessian, with residual $\|H\beta\|$ (unit-normalized candidate)
+reported in `diagnostics.symmetry_residual`, and the certified candidates
+must span the full null space of the unshifted dynamical matrix $gH$. The
+number of vanishing branches is then half the algebraic multiplicity of the
+zero eigenvalue of $gH$; bosonic particle-hole symmetry makes the
+characteristic polynomial even in $\lambda$, so that multiplicity is
+certified even. The multiplicity is measured as the null space of
+$(gH)^{2N}$ ranked against the Hessian's own scale, never against the
+vanishing scale of the power itself. A branch whose energy is nonzero keeps
+its unshifted value. References whose Hessian minimum lies below
 $-n\,\varepsilon_{\mathrm{mach}}\,\|H\|$ (a scale-aware numeric-zero
 tolerance, reported per point as `stability_tol`) are rejected as unstable;
 the legacy $10^{-6}$ eV Cholesky retry shift is never used to mask a

@@ -280,7 +280,17 @@ class Magnon:
 
     @staticmethod
     def _global_rotation_null_modes(H, kpoint, spin_lengths, U, V, stability_tol):
-        """Certify Γ-point zero modes from global-rotation Hessian null vectors."""
+        """Certify Γ-point vanishing magnon branches from global rotations.
+
+        The candidate displacement for each Cartesian axis is the
+        Holstein--Primakoff image of a uniform rotation. Every candidate must
+        be a null vector of the unshifted Hessian within the numeric-zero
+        tolerance, and the certified candidates must span the whole null
+        space of the dynamical matrix ``g @ H``. The vanishing-branch count
+        is then half the algebraic multiplicity of the zero eigenvalue of
+        ``g @ H``; bosonic particle-hole symmetry makes that multiplicity
+        even. Returns ``(n_zero_modes, worst_candidate_residual)``.
+        """
         eps = np.finfo(float).eps
         q_scale = max(1.0, float(np.max(np.abs(kpoint))))
         if np.max(np.abs(kpoint - np.rint(kpoint))) > eps * q_scale:
@@ -297,18 +307,32 @@ class Magnon:
             norm = np.linalg.norm(candidate)
             if norm == 0.0:
                 continue
+            candidate = candidate / norm
             candidates.append(candidate)
-            residuals.append(np.linalg.norm(H @ candidate) / norm)
+            residuals.append(np.linalg.norm(H @ candidate))
         if not candidates:
             return 0, np.nan
         residual = float(max(residuals))
         if residual > stability_tol:
             return 0, residual
 
-        rank = np.linalg.matrix_rank(np.column_stack(candidates))
-        if rank == 0 or rank % 2:
+        dim = H.shape[0]
+        n = dim // 2
+        g = np.diag(np.r_[np.ones(n), -np.ones(n)])
+        dynamical = g @ H
+        scale = float(np.max(np.abs(np.linalg.eigvalsh(H))))
+        rank_tol = eps * dim * scale
+        nullity = dim - np.linalg.matrix_rank(dynamical, tol=rank_tol)
+        # Algebraic multiplicity of the zero eigenvalue: nonzero-eigenvalue
+        # blocks stay full rank under powers, zero Jordan chains vanish. The
+        # power's entries are pure rounding noise, so rank against the
+        # Hessian scale, not the power's own (vanishing) scale.
+        power = np.linalg.matrix_power(dynamical, dim)
+        algebraic_zero = dim - np.linalg.matrix_rank(power, tol=rank_tol)
+        span = np.linalg.matrix_rank(np.column_stack(candidates), tol=rank_tol)
+        if span != nullity or algebraic_zero < nullity or algebraic_zero % 2:
             return 0, residual
-        return min(H.shape[0] // 2, rank // 2), residual
+        return algebraic_zero // 2, residual
 
     def get_site_boson_modes(self, kpoints):
         """Return canonical physical site-boson modes at fractional k-points.
@@ -322,7 +346,10 @@ class Magnon:
 
         A one-magnon energy is set to exact zero only when the global-rotation
         HP displacement is a null vector of the unshifted Hessian within its
-        floating-point backward-error tolerance. The reported stability and
+        floating-point backward-error tolerance and the certified candidates
+        span the full null space; the number of vanishing branches is half
+        the even algebraic multiplicity of the zero eigenvalue of the
+        unshifted dynamical matrix. The reported stability and
         symmetry residuals make both decisions auditable.
         """
         kpoints = np.asarray(kpoints, dtype=float)

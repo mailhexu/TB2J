@@ -144,6 +144,15 @@ def main():
     weps, _, veps, _, _, _ = _colpa_two_component(Aeps, b0, eps)
     assert sp.simplify(weps - eps) == 0
     assert sp.limit(veps**2, eps, 0, dir="+") is sp.oo
+
+    # Vanishing-branch halving: for a real-A BdG pair, tr(gH)=0 makes the
+    # dynamical characteristic polynomial even in lambda, so a zero
+    # eigenvalue carries an even algebraic multiplicity and the number of
+    # vanishing branches is half of it (FM: one branch; two-sublattice AFM
+    # at Gamma: two branches).
+    lam = sp.symbols("lambda", real=True)
+    char_poly = lam**2 + (b0**2 - A0**2)
+    assert sp.simplify(char_poly - char_poly.subs(lam, -lam)) == 0
     print(
         "lower-Cholesky reconstruction, paraunitarity, FM/AFM/anomalous models, "
         "spin factors, reciprocal partners, and zero-mode limits: OK"

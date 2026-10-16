@@ -214,6 +214,7 @@ def test_gamma_zero_mode_limit_and_diagnostics():
         atol=1e-9,
     )
     assert modes.is_zero_mode[0, 0]
+    assert int(modes.is_zero_mode[0].sum()) == 1
     small_k = magnon.get_site_boson_modes([[1e-4, 0, 0]])
     assert small_k.energies[0, 0] > 0.0
     assert not small_k.is_zero_mode[0, 0]
@@ -258,6 +259,24 @@ def test_engineered_anomalous_model_against_direct_diagonalization():
         1.0,
         atol=1e-10,
     )
+
+
+def test_afm_gamma_zeroes_both_goldstone_branches_with_residuals():
+    magnon = _two_sublattice_afm()
+    modes = magnon.get_site_boson_modes([[0.0, 0, 0]])
+    np.testing.assert_array_equal(modes.energies[0], [0.0, 0.0])
+    assert modes.is_zero_mode[0].all()
+    assert modes.diagnostics.symmetry_residual[0] <= modes.diagnostics.stability_tol[0]
+    n = magnon.nspin
+    g = np.diag(np.r_[np.ones(n), -np.ones(n)])
+    np.testing.assert_allclose(
+        modes.paraunitary[0].conj().T @ g @ modes.paraunitary[0],
+        g,
+        atol=1e-9,
+    )
+    small = magnon.get_site_boson_modes([[1e-3, 0, 0]])
+    assert np.all(small.energies[0] > 0.0)
+    assert not small.is_zero_mode[0].any()
 
 
 def test_scale_aware_stability_rejects_negative_hessian_within_legacy_shift():
