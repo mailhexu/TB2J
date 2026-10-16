@@ -152,10 +152,11 @@ class DisplacementPattern:
 class GeometrySource:
     """Reference geometry as recorded by a provider (Bohr).
 
-    ``displaced_axis_offset_bohr`` is the magnitude of the displaced
-    atom's offset along the declared axis present in the recorded
-    positions (0.0 for direct-derivative producers whose geometry IS
-    the reference geometry).
+    ``displaced_axis_offset_bohr`` is the SIGNED displaced atom's offset
+    along the declared axis present in the recorded positions, measured
+    against the undisplaced reference geometry (0.0 for direct-derivative
+    producers whose geometry IS the reference geometry).  A central
+    finite-difference record's geometry is the +h side, so this is +step.
     """
 
     cell: tuple
@@ -365,12 +366,14 @@ class DisplacedReferenceFDProvider:
         minus_sile=None,
         reference_fermi_ev=None,
         hsx_opener=None,
+        reference_bundle=None,
     ):
         self.pattern = pattern
         self._paths = (plus_path, minus_path)
         self._siles = (plus_sile, minus_sile)
         self._reference_fermi_ev = reference_fermi_ev
         self._hsx_opener = hsx_opener or self._default_opener
+        self.reference_bundle = reference_bundle
 
     @staticmethod
     def _default_opener(path):
@@ -387,6 +390,15 @@ class DisplacedReferenceFDProvider:
         plus, minus = self._resolve_siles()
         plus_bundle = self._read(plus)
         minus_bundle = self._read(minus)
+        if self.reference_bundle is None:
+            raise DisplacementSeamError(
+                "the undisplaced reference bundle is required: the central "
+                "difference must be validated as +h/-h displacements OF THE "
+                "REFERENCE GEOMETRY, not merely of the pair's own midpoint "
+                "(a pair displaced about a wrong centre would otherwise "
+                "pass); pass reference_bundle= or an explicit reference "
+                "geometry anchor"
+            )
         self._check_signed_displacements(plus_bundle, minus_bundle)
         if set(plus_bundle.sparse) != set(minus_bundle.sparse):
             raise SparsePatternMismatch(
@@ -424,9 +436,29 @@ class DisplacedReferenceFDProvider:
             )
         offset = 0.0
         if displaced_orbitals:
-            # plus-minus difference is 2h along the declared axis
-            offset = 0.5 * abs(
-                float(np.dot(delta[displaced_orbitals[0]], self.pattern.direction))
+            # SIGNED plus-side offset vs the reference geometry (the gate
+            # above already required +h; recorded for assembly checks)
+            ref_pos = np.mean(
+                [
+                    np.asarray(self.reference_bundle.orbital_positions[i], dtype=float)
+                    for i in _atom_orbital_group(
+                        self.reference_bundle, self.pattern.atom_index
+                    )
+                ],
+                axis=0,
+            )
+            offset = float(
+                np.dot(
+                    np.mean(
+                        [
+                            np.asarray(plus_bundle.orbital_positions[i], dtype=float)
+                            for i in displaced_orbitals
+                        ],
+                        axis=0,
+                    )
+                    - ref_pos,
+                    self.pattern.direction,
+                )
             )
         if plus_bundle.cell != minus_bundle.cell:
             raise GeometryMismatch(
@@ -467,32 +499,40 @@ class DisplacedReferenceFDProvider:
     def _check_signed_displacements(self, plus_bundle, minus_bundle):
         """Signed geometry gate: each side must move the declared atom by
         the SIGNED declared step along the declared axis, measured against
-        the pair's midpoint as the reference geometry (both bundles'
-        orbital positions are in Bohr, like ``step_bohr``).
+        the declared reference geometry (both bundles' orbital positions
+        are in Bohr, like ``step_bohr``).  The reference is the bundle's
+        undisplaced geometry — not the pair's midpoint, which would pass
+        a pair displaced around a wrong centre.
 
-        Refuses zero-offset (identical files), sign-swapped, and
-        half-step pairs with distinct actionable messages; a bare
-        +/- displacement magnitude is not evidence of a central pair.
+        Refuses zero-offset (undisplaced file used as a side),
+        sign-swapped, and half-step pairs with distinct actionable
+        messages; a bare +/- displacement magnitude is not evidence of a
+        central pair about the reference.
         """
         pattern = self.pattern
         axis = np.asarray(pattern.direction, dtype=float)
         step = float(pattern.step_bohr)
-        mid = {}
+        side_pos = {}
         for label, bundle in (("+h", plus_bundle), ("-h", minus_bundle)):
             orbitals = _atom_orbital_group(bundle, pattern.atom_index)
-            pos = np.mean(
+            side_pos[label] = np.mean(
                 [
                     np.asarray(bundle.orbital_positions[i], dtype=float)
                     for i in orbitals
                 ],
                 axis=0,
             )
-            mid[label] = pos
-        reference = 0.5 * (mid["+h"] + mid["-h"])
+        reference = np.mean(
+            [
+                np.asarray(self.reference_bundle.orbital_positions[i], dtype=float)
+                for i in _atom_orbital_group(self.reference_bundle, pattern.atom_index)
+            ],
+            axis=0,
+        )
         tol = GEOMETRY_TOL_BOHR
         expected = {"+h": step, "-h": -step}
         for label in ("+h", "-h"):
-            observed = float(np.dot(mid[label] - reference, axis))
+            observed = float(np.dot(side_pos[label] - reference, axis))
             want = expected[label]
             if abs(observed - want) <= tol:
                 continue
@@ -753,13 +793,14 @@ def _check_positions(bundle, derivatives, geom):
         d = delta[i]
         along = float(np.dot(d, pattern.direction))
         if i in displaced:
-            allowed = (0.0, pattern.step_bohr)
-            if not any(abs(abs(along) - a) <= 1e-4 for a in allowed):
+            # SIGNED: the record's geometry is the +h side of a central
+            # pair, anchored to the reference (bundle) geometry
+            if abs(along - pattern.step_bohr) > 1e-4:
                 raise GeometryMismatch(
-                    f"displaced atom's orbital {i} offset along "
-                    f"{pattern.axis} is {abs(along):.6f} Bohr; expected ~0 "
-                    f"(direct derivative) or ~{pattern.step_bohr} (the "
-                    "declared step)"
+                    f"displaced atom's orbital {i} signed offset along "
+                    f"{pattern.axis} is {along:+.6f} Bohr; the recorded "
+                    f"geometry must be the +h side (+{pattern.step_bohr} "
+                    "Bohr) of the central pair about the reference"
                 )
             if np.abs(d - along * np.asarray(pattern.direction)).max() > 1e-4:
                 raise GeometryMismatch(

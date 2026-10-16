@@ -176,12 +176,13 @@ def synthetic_bundle():
 
 
 @pytest.fixture
-def synthetic_provider():
+def synthetic_provider(synthetic_bundle):
     pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
+        pattern=pattern,
         plus_sile=_fake_sile(+0.05),
         minus_sile=_fake_sile(-0.05),
-        pattern=pattern,
+        reference_bundle=synthetic_bundle,
         reference_fermi_ev=-4.5,
     )
     return pattern, provider.provide()
@@ -322,39 +323,46 @@ def test_convention_drift_refused(synthetic_provider, synthetic_bundle):
 def test_missing_displaced_reference_refused(tmp_path):
     pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
-        plus_path=tmp_path / "plus.HSX",
-        minus_path=tmp_path / "minus.HSX",
         pattern=pattern,
     )
     with pytest.raises(MissingDisplacedReference):
         provider.provide()
 
 
-def test_zero_offset_pair_refused():
+def test_zero_offset_pair_refused(synthetic_bundle):
     """Identical +/- files (zero displacement) must refuse."""
     pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
-        plus_sile=_fake_sile(0.0), minus_sile=_fake_sile(0.0), pattern=pattern
+        plus_sile=_fake_sile(0.0),
+        minus_sile=_fake_sile(0.0),
+        pattern=pattern,
+        reference_bundle=synthetic_bundle,
     )
     with pytest.raises(WrongDisplacementSign, match="ZERO offset"):
         provider.provide()
 
 
-def test_wrong_sign_pair_refused():
+def test_wrong_sign_pair_refused(synthetic_bundle):
     """A sign-swapped pair (+ file at -h) must refuse with a sign message."""
     pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
-        plus_sile=_fake_sile(-0.05), minus_sile=_fake_sile(+0.05), pattern=pattern
+        plus_sile=_fake_sile(-0.05),
+        minus_sile=_fake_sile(+0.05),
+        pattern=pattern,
+        reference_bundle=synthetic_bundle,
     )
     with pytest.raises(WrongDisplacementSign, match="signs are swapped"):
         provider.provide()
 
 
-def test_half_step_pair_refused():
+def test_half_step_pair_refused(synthetic_bundle):
     """A +/-h/2 half-step pair must refuse with a half-step message."""
     pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
-        plus_sile=_fake_sile(+0.025), minus_sile=_fake_sile(-0.025), pattern=pattern
+        plus_sile=_fake_sile(+0.025),
+        minus_sile=_fake_sile(-0.025),
+        pattern=pattern,
+        reference_bundle=synthetic_bundle,
     )
     with pytest.raises(WrongDisplacementSign, match="half-step"):
         provider.provide()
@@ -365,7 +373,7 @@ def test_half_step_pair_refused():
 # ---------------------------------------------------------------------------
 
 
-def _path_backed_provider(tmp_path, declared):
+def _path_backed_provider(tmp_path, declared, reference_bundle=None):
     plus = tmp_path / "plus.HSX"
     minus = tmp_path / "minus.HSX"
     plus.write_bytes(b"displaced-plus-payload")
@@ -379,32 +387,38 @@ def _path_backed_provider(tmp_path, declared):
         return _fake_sile(+0.05 if "plus" in Path(str(path)).name else -0.05)
 
     return DisplacedReferenceFDProvider(
-        plus_path=plus, minus_path=minus, pattern=pattern, hsx_opener=opener
+        plus_path=plus,
+        minus_path=minus,
+        pattern=pattern,
+        hsx_opener=opener,
+        reference_bundle=reference_bundle,
     )
 
 
-def test_digest_binding_computes_and_accepts_matching(tmp_path):
+def test_digest_binding_computes_and_accepts_matching(tmp_path, synthetic_bundle):
     import hashlib
 
     digests = tuple(
         "sha256:" + hashlib.sha256(payload).hexdigest()
         for payload in (b"displaced-plus-payload", b"displaced-minus-payload")
     )
-    provider = _path_backed_provider(tmp_path, digests)
+    provider = _path_backed_provider(tmp_path, digests, synthetic_bundle)
     derivatives = provider.provide()
     assert derivatives.reference_digests == digests
 
 
-def test_digest_mismatch_refused(tmp_path):
-    provider = _path_backed_provider(tmp_path, ("sha256:stale", "sha256:digests"))
+def test_digest_mismatch_refused(tmp_path, synthetic_bundle):
+    provider = _path_backed_provider(
+        tmp_path, ("sha256:stale", "sha256:digests"), synthetic_bundle
+    )
     with pytest.raises(DigestMismatch, match="have changed"):
         provider.provide()
 
 
-def test_digest_unhashable_file_refused(tmp_path, monkeypatch):
+def test_digest_unhashable_file_refused(tmp_path, monkeypatch, synthetic_bundle):
     from TB2J.interfaces import siesta_spiral_displacement as mod
 
-    provider = _path_backed_provider(tmp_path, ())
+    provider = _path_backed_provider(tmp_path, (), synthetic_bundle)
     monkeypatch.setattr(
         mod,
         "_sha256",
@@ -414,7 +428,7 @@ def test_digest_unhashable_file_refused(tmp_path, monkeypatch):
         provider.provide()
 
 
-def test_sile_backed_declared_digests_refused():
+def test_sile_backed_declared_digests_refused(synthetic_bundle):
     """Digests declared without hashable files = missing digest evidence."""
     pattern = DisplacementPattern(
         atom_index=1,
@@ -423,15 +437,16 @@ def test_sile_backed_declared_digests_refused():
         reference_digests=("sha256:plus", "sha256:minus"),
     )
     provider = DisplacedReferenceFDProvider(
+        pattern=pattern,
         plus_sile=_fake_sile(+0.05),
         minus_sile=_fake_sile(-0.05),
-        pattern=pattern,
+        reference_bundle=synthetic_bundle,
     )
     with pytest.raises(DigestMismatch, match="no hashable files"):
         provider.provide()
 
 
-def test_fd_provider_refuses_divergent_displaced_patterns():
+def test_fd_provider_refuses_divergent_displaced_patterns(synthetic_bundle):
     plus = _fake_sile(+0.05)
     trimmed_entries = dict(list(_BASE_H.items())[:-1])
     trimmed_s = {k: v for k, v in _BASE_S.items() if k in trimmed_entries}
@@ -440,7 +455,10 @@ def test_fd_provider_refuses_divergent_displaced_patterns():
     )
     pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
-        plus_sile=plus, minus_sile=broken, pattern=pattern
+        plus_sile=plus,
+        minus_sile=broken,
+        pattern=pattern,
+        reference_bundle=synthetic_bundle,
     )
     with pytest.raises(SparsePatternMismatch):
         provider.provide()
@@ -579,9 +597,12 @@ def test_real_fe4_z_displacement_der(real_campaign):
         step_bohr=0.05,
     )
     provider = DisplacedReferenceFDProvider(
-        plus_path=CAMPAIGN / "a1zp" / "fe4d_a1zp.HSX",
-        minus_path=CAMPAIGN / "a1zm" / "fe4d_a1zm.HSX",
         pattern=pattern,
+        plus_sile=None,
+        minus_sile=None,
+        plus_path=str(CAMPAIGN / "a1zp" / "fe4d_a1zp.HSX"),
+        minus_path=str(CAMPAIGN / "a1zm" / "fe4d_a1zm.HSX"),
+        reference_bundle=bundle,
         reference_fermi_ev=None,
     )
     derivatives = provider.provide()
