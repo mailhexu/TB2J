@@ -20,8 +20,12 @@ convention rather than guessing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from TB2J.interfaces.siesta_spiral_hubbard import DftuProvenance
 
 BUNDLE_VERSION = "1.1"
 
@@ -81,6 +85,7 @@ class SpiralBundle:
     metadata: dict = field(default_factory=dict)
     cell: tuple | None = None
     orbital_positions: tuple | None = None
+    hubbard: "DftuProvenance | None" = None
 
     @staticmethod
     def _neg(R):
@@ -90,10 +95,18 @@ class SpiralBundle:
 
     def validate(self) -> None:
         if self.version != BUNDLE_VERSION:
-            raise SpiralImportError(
-                f"version {self.version!r} unsupported (expected {BUNDLE_VERSION!r}); "
-                "refusing to guess conventions"
-            )
+            if self.version == "1.0" and self.hubbard is None:
+                pass  # 1.0 predates the +U payload; imports as hubbard=None
+            elif self.version == "1.0":
+                raise SpiralImportError(
+                    "version 1.0 bundles predate the +U payload and cannot "
+                    "carry hubbard metadata; refusing partial hubbard-on-1.0"
+                )
+            else:
+                raise SpiralImportError(
+                    f"version {self.version!r} unsupported (expected "
+                    f"{BUNDLE_VERSION!r}); refusing to guess conventions"
+                )
         if self.spin_packing not in _SUPPORTED_SPIN_PACKINGS:
             raise SpiralImportError(f"spin_packing {self.spin_packing!r} unsupported")
         if self.phase_convention not in _SUPPORTED_PHASE_CONVENTIONS:
@@ -175,6 +188,17 @@ class SpiralBundle:
                     f"missing overlap entry for sparse key (mu={mu}, nu={nu}, "
                     f"R={R}); every stored Hamiltonian block needs its phased "
                     "overlap"
+                )
+        if self.hubbard is not None:
+            from TB2J.interfaces.siesta_spiral_hubbard import DftuProvenance
+
+            if not isinstance(self.hubbard, DftuProvenance):
+                raise SpiralImportError(
+                    "hubbard payload present but not a validated "
+                    "DftuProvenance; build it through "
+                    "DftuProvenance.from_dict, which refuses partial +U "
+                    "metadata (refusing hubbard-on-bundle with incomplete "
+                    "provenance)"
                 )
 
 
