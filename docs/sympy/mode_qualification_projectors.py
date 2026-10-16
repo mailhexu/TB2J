@@ -34,9 +34,11 @@ def main():
     Pp = (B * W) * (B * W).H
     assert sp.simplify(Pp - P) == sp.zeros(2)
 
-    # Converse: mixing with a vector outside the cluster changes P.
+    # Converse: perturbing a cluster column by a vector with a component
+    # outside the cluster subspace (third axis, while the cluster spans the
+    # z=0 plane) changes P; the assertion is nonvanishing, not a magnitude.
     eps = sp.symbols("epsilon", real=True, nonzero=True)
-    out = sp.Matrix([sp.exp(sp.I * ph1), 0, 0])
+    out = sp.Matrix([0, 0, 1])
     # 3-dimensional illustration: first column of B perturbed out of subspace.
     B3 = sp.diag(sp.Matrix([[b11, b12], [b21, b22]]), 1)
     col_out = B3[:, 0] + eps * out

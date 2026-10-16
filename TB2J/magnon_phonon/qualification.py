@@ -104,11 +104,14 @@ def qualify_phonon_modes(modes, *, acoustic_tol: float | None = None) -> dict:
     if at_gamma:
         acoustic_mask = eigenvalues <= acoustic_tol
         acoustic_count = int(np.count_nonzero(acoustic_mask))
-        acoustic_residual = (
-            float(np.max(np.abs(frequencies_thz[acoustic_mask])))
-            if acoustic_count
-            else None
-        )
+        if acoustic_count:
+            acoustic_residual = float(np.max(np.abs(frequencies_thz[acoustic_mask])))
+        else:
+            # Failure must still carry a residual value: the smallest
+            # branch frequency magnitude at Gamma.
+            acoustic_residual = (
+                float(np.min(np.abs(frequencies_thz))) if frequencies_thz.size else None
+            )
     else:
         acoustic_mask = np.zeros(eigenvalues.shape, dtype=bool)
         acoustic_count = None
@@ -118,7 +121,8 @@ def qualify_phonon_modes(modes, *, acoustic_tol: float | None = None) -> dict:
     if at_gamma and acoustic_count == 0:
         warnings.append(
             f"Gamma: no acoustic branch within tolerance {acoustic_tol:.3g} "
-            "eV/Ang^2/amu; expected at least the translational null modes"
+            "eV/Ang^2/amu; expected at least the translational null modes; "
+            f"smallest branch magnitude {acoustic_residual:.6g} THz"
         )
     instabilities = list(modes.instabilities)
     if instabilities:
@@ -273,8 +277,8 @@ def magnon_determinism(producer, kpoint, *, energy_tol=1e-9, projector_tol=1e-8)
     """Repeated-diagonalization determinism for canonical magnon modes.
 
     ``producer(kpoint)`` must return a ``SiteBosonModes``; the positive-norm
-    columns of each run's paraunitary are compared through their degenerate
-    subspace projectors.
+    mode columns (first ``n`` columns of the paraunitary) are compared
+    through their degenerate subspace projectors.
     """
     kpoint = np.asarray(kpoint, float).reshape(1, 3)
     first = producer(kpoint)
@@ -282,16 +286,37 @@ def magnon_determinism(producer, kpoint, *, energy_tol=1e-9, projector_tol=1e-8)
     n = first.energies.shape[1]
     result = degenerate_subspace_determinism(
         first.energies[0],
-        first.paraunitary[0].T,
+        first.paraunitary[0][:, :n],
         second.energies[0],
-        second.paraunitary[0].T,
+        second.paraunitary[0][:, :n],
         energy_tol=energy_tol,
         projector_tol=projector_tol,
     )
     result["kind"] = "magnon"
     result["kpoint"] = kpoint[0].tolist()
     result["n_modes"] = int(n)
+    result["n_zero_modes"] = int(np.count_nonzero(first.is_zero_mode[0]))
     return result
+
+
+def magnon_determinism_per_point(
+    producer, kpoints, *, energy_tol=1e-9, projector_tol=1e-8
+):
+    """Determinism witness at every requested k-point."""
+    per_point = [
+        magnon_determinism(
+            producer,
+            kpoint,
+            energy_tol=energy_tol,
+            projector_tol=projector_tol,
+        )
+        for kpoint in np.asarray(kpoints, float).reshape(-1, 3)
+    ]
+    return {
+        "kind": "magnon",
+        "per_point": per_point,
+        "ok": all(point["ok"] for point in per_point),
+    }
 
 
 def phonon_determinism(modes, *, repeats=2, energy_tol=1e-9, projector_tol=1e-8):
@@ -332,32 +357,56 @@ def phonon_determinism(modes, *, repeats=2, energy_tol=1e-9, projector_tol=1e-8)
     }
 
 
-def verify_structure_identity(spin_model, phonon_modes, *, position_tol=1e-8) -> dict:
+def verify_structure_identity(
+    spin_model, phonon_modes, *, position_tol=1e-8, mass_tol=1e-2
+) -> dict:
     """Verify one-structure atom/mass/bond-map identity.
 
-    The exchange model must expose ``nspin``, ``magmom`` and ``Rlist``/``JR``
-    and, for the full identity check, ``symbols`` and ``positions``. The
-    phonon side is a Story-007 ``PhononModes`` with ``masses_amu`` and
-    ``atom_map`` (including ``symbols_primitive_order``).
+    The exchange model must expose ``nspin``, ``magmom``, ``Rlist``/``JR``
+    and its full structure: ``atom_symbols``/``atom_positions`` (all atoms,
+    including nonmagnetic ones) with ``magnetic_atom_indices`` mapping spins
+    into that structure. The phonon side is a Story-007 ``PhononModes`` with
+    ``masses_amu`` and ``atom_map`` (including ``symbols_primitive_order``);
+    when it also carries a ``structure`` record with ``positions``, the
+    geometry is certified. Without phonon coordinates the identity is
+    reported as ``unverified`` (never ``ok``).
+
+    Status: ``verified`` (all checks passed, geometry certified),
+    ``unverified`` (checks passed but the phonon record carries no
+    coordinates) or ``failed`` (any check rejected).
     """
     checks = {}
     warnings = []
     atom_map = dict(getattr(phonon_modes, "atom_map", {}) or {})
     masses = np.asarray(getattr(phonon_modes, "masses_amu", []), float)
     phonon_symbols = list(atom_map.get("symbols_primitive_order", []))
+    phonon_structure = getattr(phonon_modes, "structure", None)
 
     nspin = int(getattr(spin_model, "nspin"))
-    checks["natom"] = bool(masses.size == nspin)
+    magnetic_indices = getattr(spin_model, "magnetic_atom_indices", None)
+    if magnetic_indices is None:
+        magnetic_indices = list(range(nspin))
+    magnetic_indices = [int(index) for index in magnetic_indices]
+
+    # Full structure (all atoms, not the spin-only subset) on the exchange side.
+    model_symbols = getattr(spin_model, "atom_symbols", None)
+    if model_symbols is None:
+        model_symbols = getattr(spin_model, "symbols", None)
+    model_positions = getattr(spin_model, "atom_positions", None)
+    if model_positions is None:
+        model_positions = getattr(spin_model, "positions", None)
+    structure_natom = len(model_symbols) if model_symbols is not None else None
+
+    expected_natom = structure_natom if structure_natom is not None else nspin
+    checks["natom"] = bool(masses.size == len(phonon_symbols) == expected_natom)
     if not checks["natom"]:
         warnings.append(
-            f"atom count mismatch: exchange model has {nspin} spins, "
-            f"phonon masses have {masses.size} entries"
+            f"atom count mismatch: exchange structure has {expected_natom} "
+            f"atoms, phonon map has {len(phonon_symbols)} symbols and "
+            f"{masses.size} masses"
         )
 
-    model_symbols = getattr(spin_model, "symbols", None)
-    if model_symbols is None:
-        model_symbols = getattr(spin_model, "atom_symbols", None)
-    if model_symbols is None or phonon_symbols is None:
+    if not model_symbols or not phonon_symbols:
         checks["symbols"] = False
         warnings.append("symbols unavailable on one side; identity incomplete")
     else:
@@ -368,24 +417,33 @@ def verify_structure_identity(spin_model, phonon_modes, *, position_tol=1e-8) ->
                 f"phonon {phonon_symbols}"
             )
 
-    model_positions = getattr(spin_model, "positions", None)
-    if model_positions is None:
-        model_positions = getattr(spin_model, "atom_positions", None)
-    if model_positions is None:
-        checks["positions"] = False
-        warnings.append(
-            "positions unavailable on the exchange model; identity incomplete"
-        )
+    if model_positions is None or phonon_structure is None:
+        # No coordinates on one side: positions cannot be certified here.
+        checks["positions"] = None
+        if model_positions is None:
+            warnings.append(
+                "positions unavailable on the exchange model; identity unverified"
+            )
+        else:
+            warnings.append(
+                "phonon record carries no coordinates; positions unverified"
+            )
     else:
         model_positions = np.asarray(model_positions, float)
-        if model_positions.shape[0] != len(phonon_symbols):
+        phonon_positions = np.asarray(phonon_structure["positions"], float)
+        if model_positions.shape != phonon_positions.shape:
             checks["positions"] = False
-            warnings.append("position count does not match phonon atom count")
+            warnings.append(
+                "position shapes differ: exchange "
+                f"{model_positions.shape} vs phonon {phonon_positions.shape}"
+            )
         else:
             # Identity up to a global lattice translation of the whole map.
-            shift = model_positions[0] - _phonon_reference_position(phonon_modes, 0)
+            shift = model_positions[0] - phonon_positions[0]
             checks["positions"] = bool(
-                _positions_match(phonon_modes, model_positions + shift, position_tol)
+                np.allclose(
+                    model_positions, phonon_positions + shift, atol=position_tol
+                )
             )
             if not checks["positions"]:
                 warnings.append(
@@ -393,28 +451,25 @@ def verify_structure_identity(spin_model, phonon_modes, *, position_tol=1e-8) ->
                     f"{position_tol:g} Ang (up to a global translation)"
                 )
 
-    # Masses: one value per symbol, consistent across occurrences; compared
-    # against the exchange model when it carries masses.
-    per_symbol = {}
-    masses_consistent = masses.size == len(phonon_symbols)
-    for symbol, mass in zip(phonon_symbols, masses):
-        if symbol in per_symbol and not np.isclose(per_symbol[symbol], mass):
-            masses_consistent = False
-        per_symbol.setdefault(symbol, float(mass))
-    model_masses = getattr(spin_model, "masses", None)
-    if model_masses is not None:
-        model_masses = np.asarray(model_masses, float)
-        if model_masses.size == masses.size:
-            masses_consistent = masses_consistent and bool(
-                np.allclose(model_masses, masses)
-            )
-        else:
-            masses_consistent = False
-    checks["masses"] = masses_consistent
-    if not checks["masses"]:
-        warnings.append("mass map is inconsistent between the two models")
+    # Masses: phonon values are verified against the standard (ASE) masses
+    # of the mapped structure symbols, not merely internally consistent.
+    if phonon_symbols and masses.size == len(phonon_symbols):
+        from ase import Atoms
 
-    # Directed bond map: indices in range, values finite, count recorded.
+        standard = np.asarray(Atoms(phonon_symbols).get_masses(), float)
+        checks["masses"] = bool(np.allclose(masses, standard, atol=mass_tol))
+        if not checks["masses"]:
+            warnings.append(
+                "phonon masses deviate from the standard masses of "
+                f"{phonon_symbols} beyond {mass_tol:g} u"
+            )
+    else:
+        checks["masses"] = False
+        warnings.append("mass map incomplete relative to the phonon atom map")
+
+    # Directed bond map: indices in range and finite, and the spin -> atom
+    # resolution must be a bijection into the phonon-mapped structure so
+    # every bond endpoint resolves in the phonon symbols.
     Rlist = np.asarray(getattr(spin_model, "Rlist"), int)
     JR = np.asarray(getattr(spin_model, "JR"), float)
     n_bonds = int(Rlist.shape[0]) if Rlist.ndim == 2 else 0
@@ -425,39 +480,62 @@ def verify_structure_identity(spin_model, phonon_modes, *, position_tol=1e-8) ->
         and JR.shape[1] == JR.shape[2] == nspin
         and np.all(np.isfinite(JR))
     )
+    bijection = bool(
+        len(magnetic_indices) == nspin
+        and len(set(magnetic_indices)) == nspin
+        and all(0 <= index < len(phonon_symbols) for index in magnetic_indices)
+    )
+    bonds_resolve = bijection and indices_valid
+    if bonds_resolve and n_bonds:
+        active = (
+            np.any(JR != 0.0, axis=(3, 4))
+            if JR.size
+            else np.zeros((n_bonds, nspin, nspin), bool)
+        )
+        bond_b, bond_i, bond_j = np.nonzero(active)
+        resolved = np.asarray(magnetic_indices)
+        bonds_resolve = bool(
+            bond_i.size == 0
+            or (
+                np.all(resolved[bond_i] < len(phonon_symbols))
+                and np.all(resolved[bond_j] < len(phonon_symbols))
+            )
+        )
+    if indices_valid and not bonds_resolve:
+        warnings.append(
+            "exchange bond map does not resolve against the phonon atom map"
+        )
     bond_map = {
         "n_directed_bonds": n_bonds,
         "indices_valid": indices_valid,
+        "bijection": bijection,
+        "resolved_atom_indices": magnetic_indices,
+        "bonds_resolve": bonds_resolve,
         "supercell_matrix": np.asarray(atom_map.get("supercell_matrix"), int).tolist()
         if atom_map.get("supercell_matrix") is not None
         else None,
     }
-    if not indices_valid:
-        warnings.append("exchange bond map has out-of-range or non-finite entries")
+
+    any_failed = any(value is False for value in checks.values()) or not bonds_resolve
+    if any_failed:
+        status = "failed"
+    elif checks["positions"] is True:
+        status = "verified"
+    else:
+        status = "unverified"
     return {
-        "ok": bool(all(checks.values()) and indices_valid),
+        "ok": status == "verified",
+        "status": status,
         "checks": checks,
         "bond_map": bond_map,
         "warnings": warnings,
-        "provenance": {"atom_map": atom_map, "masses_u": masses.tolist()},
+        "provenance": {
+            "atom_map": atom_map,
+            "masses_u": masses.tolist(),
+            "position_tol_ang": position_tol,
+            "mass_tol_u": mass_tol,
+        },
     }
-
-
-def _phonon_reference_position(phonon_modes, index):
-    structure = getattr(phonon_modes, "structure", None)
-    if structure is None:
-        return np.zeros(3)
-    return np.asarray(structure["positions"], float)[index]
-
-
-def _positions_match(phonon_modes, positions, tol):
-    structure = getattr(phonon_modes, "structure", None)
-    if structure is None:
-        # Without phonon positions the check is a count/presence witness only.
-        return True
-    return bool(
-        np.allclose(positions, np.asarray(structure["positions"], float), atol=tol)
-    )
 
 
 def qualification_report(
@@ -482,9 +560,9 @@ def qualification_report(
     modes = spin_model.get_site_boson_modes(kpoints)
     report["magnon"] = qualify_magnon_modes(modes)
     report["cross_checks"] = {
-        "determinism": magnon_determinism(
+        "determinism": magnon_determinism_per_point(
             spin_model.get_site_boson_modes,
-            kpoints[0],
+            kpoints,
             energy_tol=energy_tol,
             projector_tol=projector_tol,
         )

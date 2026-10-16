@@ -14,8 +14,10 @@ $$P = X X^{\dagger}$$
 is invariant: $P' = XW (XW)^{\dagger} = X X^{\dagger}$, since $WW^{\dagger} =
 I$. Comparing projectors between repeated diagonalizations is therefore a
 gauge-invariant determinism witness; comparing individual eigenvectors is
-not. Mixing with a vector outside the cluster changes $P$ by $O(\epsilon^2)$
-in the perturbation $\epsilon$, so genuine degeneracy-breaking is flagged.
+not. Conversely, the script constructs a genuinely outside-cluster perturbation
+(adding an explicit out-of-cluster vector to one column) and asserts the
+projector difference is *nonzero*, i.e. genuine degeneracy-breaking is
+detected. No magnitude claim is made about that detection.
 
 ## Production use
 

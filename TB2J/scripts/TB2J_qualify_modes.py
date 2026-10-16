@@ -40,6 +40,9 @@ class _PhononModesFromRecord:
         self.atom_map = record["atom_map"]
         self.normalization = record["normalization"]
         self.diagnostics = record["diagnostics"]
+        # Optional structure block (symbols/positions in phonon order);
+        # when present, the identity check certifies the geometry.
+        self.structure = record.get("structure")
 
     @property
     def instabilities(self):
