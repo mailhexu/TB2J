@@ -143,9 +143,66 @@ def test_hybrid_cli_manifest_result():
     assert len(result["energies_eV"][0]) == 2
 
 
+def test_hybrid_cli_accepts_typed_npz_hessian(tmp_path):
+    """The CLI loads pre-supplied typed Hessian blocks outside the kernel."""
+    from TB2J.magnon_phonon.cli import _run_hybrid
+
+    path = tmp_path / "mixed.npz"
+    np.savez(
+        path,
+        points=POINTS,
+        magnon_bare=np.array([[[2.0, 0.0], [0.0, 2.0]]]),
+        phonon_bare=np.array([[[1.0]]]),
+        coupling=np.array([[[0.1]]]),
+    )
+    result = _run_hybrid(
+        {
+            "calculation": "hybrid",
+            "model": {
+                "type": "mixed_hessian_npz",
+                "npz_path": str(path),
+                "n_mag_sites": 1,
+                "spin_coordinate_labels": [[0, "local-transverse-complex"]],
+                "displacement_labels": [[0, 2]],
+                "producer": "controlled_mixed_torque",
+                "provenance": {"source": "test controlled Hessian"},
+            },
+            "points": POINTS.tolist(),
+        }
+    )
+    assert result["is_stable"] == [True]
+    assert np.allclose(np.sort(result["energies_eV"][0]), _derived_energies(2, 1, 0.1))
+
+
 def test_model_hybrid_modes_facade():
     """The model facade exposes the requested hybrid_modes(points, Hessian) API."""
     model = ControlledTwoBosonModel(alpha_eV=2.0, beta_eV=1.0, g_eV=0.15)
     mixed = model.to_mixed_hessian()
     result = HarmonicMixedModel(mixed).hybrid_modes(POINTS, mixed)
     assert np.allclose(result.energies[0], _derived_energies(2.0, 1.0, 0.15))
+
+
+def test_hybrid_cli_writes_strict_json_for_unstable_modes(monkeypatch, capsys):
+    """Flagged NaN numerical outputs are emitted as standards-compliant JSON null."""
+    import io
+    import json
+    import sys
+
+    from TB2J.magnon_phonon.cli import main
+
+    manifest = {
+        "calculation": "hybrid",
+        "model": {
+            "type": "controlled_two_boson",
+            "alpha_eV": 2.0,
+            "beta_eV": 2.0,
+            "g_eV": 1.05,
+        },
+        "points": [[0.0, 0.0, 0.0]],
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(manifest)))
+    main(["hybrid", "-"])
+    result = json.loads(capsys.readouterr().out)
+    assert result["is_stable"] == [False]
+    assert result["energies_eV"] == [[None, None]]
+    assert result["diagnostics"]["shift"] == [0.0]
