@@ -466,3 +466,233 @@ def test_multimode_mixed_eigenvectors_lehmann():
         assert abs(res.energies[0][mode] - (evals[lehmann_idx] - evals[0])) < 5e-3
         assert abs(res.displacement_strength[0][mode] - lehmann_dis[rank]) < 5e-3
         assert abs(res.magnetic_strength[0][mode] - lehmann_mag[rank]) < 5e-3
+
+
+def test_complex_coupling_lehmann_raw_nambu_sum():
+    """TEST-009: complex coupling distinguishes raw-sum from conjugated hole.
+
+    The Fock reference builds its coupling independently from the fixture
+    G, spin length and mode energies through the derived expression
+    Gamma_nu = G_beta e_{beta nu} sqrt(S/2)/sqrt(2 omega_nu).
+    """
+    from TB2J.magnon_phonon.harmonic import MixedSpinDisplacementHessian
+
+    alpha, omega1, omega2 = 2.0, 1.1, 2.1
+    spin_length = 2.0
+    theta = 0.9
+    rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    dyn = rot @ np.diag([omega1**2, omega2**2]) @ rot.T
+    phase = np.exp(0.8j)
+    g_row = np.array([[0.10, 0.10 * 0.5 * phase]]) * np.sqrt(2 * omega1)
+
+    def magnon_bare(pts):
+        out = np.zeros((len(pts), 2, 2), dtype=complex)
+        out[:, 0, 0] = alpha
+        out[:, 1, 1] = alpha
+        return out
+
+    mixed = MixedSpinDisplacementHessian(
+        n_mag_sites=1,
+        displacement_labels=((0, 0), (0, 1)),
+        magnon_bare=magnon_bare,
+        phonon_bare=lambda pts: np.array([dyn] * len(pts)),
+        mixed_derivative=lambda pts: np.array([g_row] * len(pts)),
+        spin_lengths=(spin_length,),
+        producer="complex_coupling_control",
+        provenance={"source": "complex coupling raw-sum check"},
+    )
+    res = hybrid_modes(POINTS, mixed)
+
+    # independent coupling arithmetic (no solver conversion routine)
+    gammas = np.array(
+        [
+            (g_row @ rot)[0, nu]
+            * np.sqrt(spin_length / 2.0)
+            / np.sqrt(2 * (omega1 if nu == 0 else omega2))
+            for nu in range(2)
+        ]
+    )
+
+    nb = 7
+    dim = nb**3
+
+    def state(ib, i1, i2):
+        return (ib * nb + i1) * nb + i2
+
+    def op(kind, which):
+        mat = np.zeros((dim, dim))
+        for ib in range(nb):
+            for i1 in range(nb):
+                for i2 in range(nb):
+                    s = state(ib, i1, i2)
+                    occ = (ib, i1, i2)[which]
+                    if kind == "n":
+                        mat[s, s] = occ
+                    elif kind == "p" and occ + 1 < nb:
+                        mat[
+                            state(
+                                ib + (which == 0), i1 + (which == 1), i2 + (which == 2)
+                            ),
+                            s,
+                        ] = np.sqrt(occ + 1)
+                    elif kind == "m" and occ > 0:
+                        mat[
+                            state(
+                                ib - (which == 0), i1 - (which == 1), i2 - (which == 2)
+                            ),
+                            s,
+                        ] = np.sqrt(occ)
+        return mat
+
+    b, a1, a2 = op("m", 0), op("m", 1), op("m", 2)
+    b_d, a1_d, a2_d = op("p", 0), op("p", 1), op("p", 2)
+    n_op = op("n", 0) + op("n", 1) + op("n", 2)
+    ham = (alpha * op("n", 0) + omega1 * op("n", 1) + omega2 * op("n", 2)).astype(
+        complex
+    )
+    for gamma_nu, a_pair in zip(gammas, [a1 + a1_d, a2 + a2_d]):
+        ham = ham + gamma_nu * (b + b_d) @ a_pair
+    evals, evecs = np.linalg.eigh(ham)
+    ground = evecs[:, 0]
+    quanta = np.real(np.einsum("ij,jk,ki->i", evecs.conj().T, n_op, evecs))
+    one_q = sorted(np.argsort(np.abs(quanta - 1.0))[:3])
+
+    def strength(op_beta):
+        return np.abs([ground @ (op_beta @ evecs[:, idx]) for idx in one_q]) ** 2
+
+    w0 = rot[0, 0] * (a1 + a1_d) / np.sqrt(2 * omega1) + rot[0, 1] * (
+        a2 + a2_d
+    ) / np.sqrt(2 * omega2)
+    w1 = rot[1, 0] * (a1 + a1_d) / np.sqrt(2 * omega1) + rot[1, 1] * (
+        a2 + a2_d
+    ) / np.sqrt(2 * omega2)
+    lehmann_dis = strength(w0) + strength(w1)
+    lehmann_mag = strength(np.sqrt(2 * spin_length) * b)
+
+    order = np.argsort(res.energies[0])
+    for rank, mode in enumerate(order):
+        idx = one_q[rank]
+        assert abs(res.energies[0][mode] - (evals[idx] - evals[0])) < 5e-3
+        assert abs(res.displacement_strength[0][mode] - lehmann_dis[rank]) < 5e-3
+        assert abs(res.magnetic_strength[0][mode] - lehmann_mag[rank]) < 5e-3
+
+
+def test_conversion_from_declared_energy_finite_difference():
+    """TEST-010: independently differentiated Cartesian energy, mixed
+    spins/masses/frequencies, matches a separate Fock-space oracle."""
+    from TB2J.magnon_phonon.harmonic import MixedSpinDisplacementHessian
+
+    alphas = np.array([1.8, 2.4])
+    omegas = np.array([0.8, 2.1])
+    spins = np.array([1.0, 3.0])
+    masses = np.array([4.0, 9.0])
+    coeff = np.array([[0.4, 0.2], [0.25, 0.35]])  # declared E = sum C_ij s_i u_j
+
+    def magnon_bare(pts):
+        out = np.zeros((len(pts), 4, 4), dtype=complex)
+        out[:, :2, :2] = np.diag(alphas)
+        out[:, 2:, 2:] = np.diag(alphas)
+        return out
+
+    # Independently finite-difference the declared physical energy function.
+    h = 1e-4
+
+    def energy(spin_vec, displacement):
+        return float(spin_vec @ coeff @ displacement)
+
+    G_cart = np.zeros_like(coeff)
+    for i in range(2):
+        for j in range(2):
+            si_p, si_m = np.zeros(2), np.zeros(2)
+            uj_p, uj_m = np.zeros(2), np.zeros(2)
+            si_p[i], si_m[i] = h, -h
+            uj_p[j], uj_m[j] = h, -h
+            G_cart[i, j] = (
+                energy(si_p, uj_p)
+                - energy(si_m, uj_p)
+                - energy(si_p, uj_m)
+                + energy(si_m, uj_m)
+            ) / (4 * h * h)
+    assert np.allclose(G_cart, coeff, atol=1e-9)
+
+    mixed = MixedSpinDisplacementHessian(
+        n_mag_sites=2,
+        displacement_labels=((0, 2), (1, 2)),
+        magnon_bare=magnon_bare,
+        phonon_bare=lambda pts: np.array([np.diag(omegas**2)] * len(pts)),
+        mixed_derivative=lambda pts: np.array([G_cart] * len(pts)),
+        spin_lengths=tuple(spins),
+        displacement_coordinate="cartesian_angstrom",
+        masses_amu=tuple(masses),
+        producer="declared_energy_control",
+        provenance={"source": "finite-differenced E(s_i,u_j)"},
+    )
+    result = hybrid_modes(POINTS, mixed)
+
+    # Independent conversion from the declared energy derivatives:
+    # Cartesian u -> mass-weighted w, then HP spin and phonon zero-point.
+    expected_gamma = (
+        G_cart
+        / np.sqrt(masses)[None, :]
+        * np.sqrt(spins / 2.0)[:, None]
+        / np.sqrt(2.0 * omegas)[None, :]
+    )
+
+    # Independent truncated-Fock Lehmann oracle for four unit-commutator
+    # bosons; the Fock coefficients above use expected_gamma directly.
+    nb = 4
+    dim = nb**4
+
+    def state(n0, n1, n2, n3):
+        return ((n0 * nb + n1) * nb + n2) * nb + n3
+
+    def boson_op(kind, which):
+        mat = np.zeros((dim, dim))
+        for occ in np.ndindex((nb, nb, nb, nb)):
+            col = state(*occ)
+            n = occ[which]
+            if kind == "n":
+                mat[col, col] = n
+            elif kind == "p" and n + 1 < nb:
+                target = list(occ)
+                target[which] += 1
+                mat[state(*target), col] = np.sqrt(n + 1)
+            elif kind == "m" and n > 0:
+                target = list(occ)
+                target[which] -= 1
+                mat[state(*target), col] = np.sqrt(n)
+        return mat
+
+    annih = [boson_op("m", i) for i in range(4)]
+    create = [boson_op("p", i) for i in range(4)]
+    number = [boson_op("n", i) for i in range(4)]
+    ham = sum(alphas[i] * number[i] for i in range(2))
+    ham = ham + sum(omegas[j] * number[2 + j] for j in range(2))
+    for i in range(2):
+        for j in range(2):
+            ham = ham + expected_gamma[i, j] * (annih[i] + create[i]) @ (
+                annih[2 + j] + create[2 + j]
+            )
+    evals, evecs = np.linalg.eigh(ham)
+    ground = evecs[:, 0]
+    n_total = sum(number)
+    n_expect = np.real(np.einsum("ij,jk,ki->i", evecs.conj().T, n_total, evecs))
+    one_q = sorted(np.argsort(np.abs(n_expect - 1.0))[:4])
+
+    def lehmann_strength(operator):
+        return np.abs([ground @ (operator @ evecs[:, idx]) for idx in one_q]) ** 2
+
+    mag_strength = sum(
+        lehmann_strength(np.sqrt(2 * spins[i]) * annih[i]) for i in range(2)
+    )
+    disp_strength = sum(
+        lehmann_strength(
+            (annih[2 + j] + create[2 + j]) / np.sqrt(2 * omegas[j] * masses[j])
+        )
+        for j in range(2)
+    )
+    for rank, mode in enumerate(np.argsort(result.energies[0])):
+        idx = one_q[rank]
+        assert abs(result.energies[0, mode] - (evals[idx] - evals[0])) < 1e-2
+        assert abs(result.magnetic_strength[0, mode] - mag_strength[rank]) < 1e-2
+        assert abs(result.displacement_strength[0, mode] - disp_strength[rank]) < 1e-2

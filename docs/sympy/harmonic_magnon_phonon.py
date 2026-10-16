@@ -348,12 +348,11 @@ def derive_observable_strengths():
     gnorm = sp.simplify(2 * (alpha + beta * r**2) / E)
     t_b2 = sp.simplify(u_b**2 / gnorm)
     t_a2 = sp.simplify(u_a**2 / gnorm)
-    v_a2 = sp.simplify(v_a**2 / gnorm)
     Mag = sp.simplify(2 * S * t_b2)
-    # Hermitian displacement field: particle + conjugated hole component
+    # Hermitian displacement field: raw particle + hole row coefficients
     # <0|Q|mode> = (t_a + t_bar_a)/sqrt(2 beta) for the real model, so
     # D = (t_a + t_bar_a)^2 / (2 beta)
-    Dis = sp.simplify(((sp.sqrt(t_a2) + sp.sqrt(v_a2)) ** 2) / (2 * beta))
+    Dis = sp.simplify((u_a + v_a) ** 2 / (gnorm * 2 * beta))
     # bare limits
     mag_limit = sp.simplify(
         sp.limit(Mag.subs(E, sp.sqrt(alpha**2 + gam**2)), gam, 0, "+")
@@ -404,7 +403,7 @@ def derive_displacement_matrix_element():
     enter the one-quantum matrix element:
 
         <0|w_beta|lam> = sum_nu e_{beta nu}
-                         (t_{a nu, lam} + t^*_{a-bar nu, lam})
+                         (t_{a nu, lam} + t_{a-bar nu, lam})
                          / sqrt(2 omega_nu),
 
     and the per-mode zero-point factor multiplies the normal-mode
@@ -418,7 +417,7 @@ def derive_displacement_matrix_element():
     # mixed two-mode eigenvector rotation
     e = sp.Matrix([[sp.cos(theta), -sp.sin(theta)], [sp.sin(theta), sp.cos(theta)]])
     # correct: per-mode zero point applied to mode amplitudes, then project
-    x = sp.Matrix([x1 + t_ah1, x2 + t_ah2])  # particle + conjugated hole
+    x = sp.Matrix([x1 + t_ah1, x2 + t_ah2])  # raw particle + hole row sum
     amp_correct_0 = e[0, 0] * x[0] / sp.sqrt(2 * omega1) + e[0, 1] * x[1] / sp.sqrt(
         2 * omega2
     )
@@ -429,10 +428,10 @@ def derive_displacement_matrix_element():
         diff != 0
     ), "zero-point ordering is indistinguishable only for degenerate omega"
     print(
-        "[ok] displacement element uses particle + conjugated hole amplitudes "
+        "[ok] displacement element uses raw particle + hole row amplitudes "
         "with per-mode 1/sqrt(2 omega) applied before eigenvector projection"
     )
-    # controlled-model strength: D = |t_a + t_bar_a*|^2 / (2 beta)
+    # controlled-model strength: D = |t_a + t_bar_a|^2 / (2 beta)
     rr = (E**2 - alpha**2) / (2 * gam * beta)
     t_a = (rr * (beta / E + 1) / sp.sqrt(2)) / sp.sqrt(2 * (alpha + beta * rr**2) / E)
     t_ah = (rr * (beta / E - 1) / sp.sqrt(2)) / sp.sqrt(2 * (alpha + beta * rr**2) / E)
@@ -450,6 +449,37 @@ def derive_displacement_matrix_element():
         "D = (t_a + t_bar_a)^2/(2 beta); bare limits preserved"
     )
     return D
+
+
+def derive_nambu_coefficient_extraction():
+    """Assert the raw-sum coefficient rule for the paired Nambu rows.
+
+    With ``Psi = (b_k, a_k, b^+_{-k}, a^+_{-k}) = T eta`` the column entry
+    ``T_{i lam}`` is the coefficient of ``gamma_{lam k}`` in operator ``i``
+    itself (inverted form ``gamma_{lam k} = sum_i g_i T^*_{i lam} Psi_i``;
+    the conjugate sits in the INVERSION, not in the row entries).  Hence
+
+        <0| a_k + a^+_{-k} |lam> = T_{a, lam} + T_{a-bar, lam}
+
+    with NO second conjugation of the hole row.  Conjugating instead
+    produces wrong interference for complex couplings:
+    |t_a + t_abar|^2 - |t_a + conj(t_abar)|^2 = +4 Im(t_a) Im(t_abar),
+    nonzero for a complex coupling.
+    """
+    xa, ya, xh, yh = sp.symbols("xa ya xh yh", real=True)
+    ta = xa + sp.I * ya
+    tah = xh + sp.I * yh
+    wrong = sp.expand(sp.Abs(ta + sp.conjugate(tah)) ** 2)
+    right = sp.expand(sp.Abs(ta + tah) ** 2)
+    diff = sp.simplify(right - wrong)
+    expected = 4 * ya * yh
+    assert sp.simplify(diff - expected) == 0, diff
+    assert diff != 0
+    print(
+        "[ok] Nambu coefficient rule: displacement element is the raw sum "
+        "T_a + T_a-bar (no conjugation); conjugation differs by "
+        "+4 Im(t_a) Im(t_a-bar) for complex couplings"
+    )
 
 
 def solver_detuning_sweep():
@@ -495,11 +525,11 @@ def solver_detuning_sweep():
                 assert abs(res.displacement_weight[0, mode] - (1 - share)) < 1e-9
                 # operator-defined physical strengths (S = 2 controlled model):
                 # M = 2 S |t_b|^2,
-                # D = |t_a + t_bar_a*|^2/(2 beta)  (Hermitian field: both
-                # phonon components enter)
+                # D = |t_a + t_bar_a|^2/(2 beta): raw Nambu row sum (the
+                # Hermitian field mixes both phonon rows)
                 t_col = res.paraunitary[0][:, mode]
                 mag_expect = 2 * 2.0 * abs(t_col[0]) ** 2
-                dis_expect = abs(t_col[1] + np.conj(t_col[3])) ** 2 / (2 * beta_v)
+                dis_expect = abs(t_col[1] + t_col[3]) ** 2 / (2 * beta_v)
                 assert abs(res.magnetic_strength[0, mode] - mag_expect) < 1e-9
                 assert abs(res.displacement_strength[0, mode] - dis_expect) < 1e-9
                 worst_strength = max(
@@ -538,6 +568,7 @@ if __name__ == "__main__":
     derive_hessian_to_coupling()
     derive_observable_strengths()
     derive_displacement_matrix_element()
+    derive_nambu_coefficient_extraction()
     numeric_certificate()
     solver_detuning_sweep()
     print("harmonic_magnon_phonon: all derivation checks green")

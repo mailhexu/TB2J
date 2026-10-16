@@ -388,7 +388,7 @@ def _assemble_nambu(mixed: MixedSpinDisplacementHessian, kpoint):
     M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag + n_ph : n_mag + n_ph + n_mag] = Hb[
         n_mag:, n_mag:
     ]
-    M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag + n_ph + n_mag :] = Gamma.conj()
+    M[n_mag + n_ph : 2 * n_mag + n_ph, n_mag + n_ph + n_mag :] = Gamma
     M[2 * n_mag + n_ph :, n_mag + n_ph : n_mag + n_ph + n_mag] = Gamma.T.conj()
     M[2 * n_mag + n_ph :, n_mag + n_ph + n_mag :] = omega.conj()
     return M, phonon_energies, evecs

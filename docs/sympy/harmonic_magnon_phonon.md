@@ -133,17 +133,22 @@ $G=g\sqrt{2\beta}$ returns exactly the bosonic coupling $g$.
 
 The physical transverse-spin operator is $\zeta_i=S_{i1}+iS_{i2}=
 \sqrt{2S_i}\,b_i$ to linear order (pure annihilation, so its residue is
-the particle component alone) and the Hermitian mass-weighted
-displacement is $Q=(a+a^\dagger)/\sqrt{2\beta}$.  With the hybrid
-expansion $a=\sum_\lambda(t_a\gamma_\lambda+t_{\bar a}\gamma_
-\lambda^\dagger)$ the conjugate gives
-$\langle0|a^\dagger|\lambda\rangle=t_{\bar a}^*$, so BOTH phonon
-components enter the displacement element:
+the particle component alone).  For the Hermitian mass-weighted
+displacement $Q_k=(a_k+a^\dagger_{-k})/\sqrt{2\beta}$, the paired
+Nambu convention $\Psi=(b_k,a_k,b^\dagger_{-k},a^\dagger_{-k})=T\eta$
+means each column entry is the coefficient of $\gamma_{\lambda k}$ in
+that row operator.  Thus BOTH phonon rows enter as a raw sum, without a
+second conjugation:
 
 $$\langle0|\zeta|\nu\rangle=\sqrt{2S}\,t_b,\qquad
-\langle0|Q|\nu\rangle=(t_a+t_{\bar a}^*)/\sqrt{2\beta},$$
+\langle0|Q_k|\nu_k\rangle=(t_a+t_{\bar a})/\sqrt{2\beta},$$
 
-$$M_\nu=2S\,|t_b|^2,\qquad D_\nu=|t_a+t_{\bar a}^*|^2/(2\beta).$$
+$$M_\nu=2S\,|t_b|^2,\qquad D_\nu=|t_a+t_{\bar a}|^2/(2\beta).$$
+
+For a complex column, replacing the raw hole row by its conjugate changes
+$D$ by the interference term $4\,\mathrm{Im}(t_a)\,\mathrm{Im}(t_{\bar a})$;
+TEST-009 and its independent complex-coupling Fock-space oracle catch this
+otherwise invisible real-coupling convention error.
 
 Bare limits pin both normalizations: the magnon-like mode has
 $M=2S$, $D=0$; the phonon-like mode has $M=0$, $D=1/(2\beta)$ (the
