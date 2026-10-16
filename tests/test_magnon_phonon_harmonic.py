@@ -79,11 +79,24 @@ def test_forbidden_scalar_collinear_input_rejected():
         )
 
 
-def test_zero_coupling_returns_bare_modes():
-    """TEST-003b: typed zero-coupling control reproduces bare spectra, zero mixing."""
+def test_scalar_collinear_forbidden_control_returns_bare_modes():
+    """TEST-003b: scalar-collinear control produces bare modes, never mixing."""
     alpha, beta = 2.0, 1.0
-    model = ControlledTwoBosonModel(alpha_eV=alpha, beta_eV=beta, g_eV=0.0)
-    res = hybrid_modes(POINTS, ControlledTwoBosonModel.to_mixed_hessian(model))
+
+    def magnon_bare(points):
+        result = np.zeros((len(points), 2, 2))
+        result[:, 0, 0] = alpha
+        result[:, 1, 1] = alpha
+        return result
+
+    mixed = MixedSpinDisplacementHessian.scalar_collinear_forbidden_control(
+        n_mag_sites=1,
+        displacement_labels=((0, 2),),
+        magnon_bare=magnon_bare,
+        phonon_bare=lambda pts: np.full((len(pts), 1, 1), beta**2),
+        provenance={"source": "scalar-collinear exchange input"},
+    )
+    res = hybrid_modes(POINTS, mixed)
     energies = np.sort(res.energies[0])
     assert np.allclose(energies, np.sort([alpha, beta]), atol=1e-12)
     # each bare mode carries unit weight on its own species

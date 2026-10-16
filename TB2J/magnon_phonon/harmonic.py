@@ -111,6 +111,40 @@ class MixedSpinDisplacementHessian:
         if not callable(self.magnon_phonon_coupling):
             raise TypeError("magnon_phonon_coupling must be callable over points")
 
+    @classmethod
+    def scalar_collinear_forbidden_control(
+        cls,
+        *,
+        n_mag_sites: int,
+        displacement_labels: Sequence[Sequence[int]],
+        magnon_bare: Callable[[np.ndarray], np.ndarray],
+        phonon_bare: Callable[[np.ndarray], np.ndarray],
+        provenance: Mapping,
+        spin_coordinate_labels: Sequence[Sequence] | None = None,
+    ) -> MixedSpinDisplacementHessian:
+        """Build the symmetry-forbidden scalar-collinear zero-mixing control.
+
+        No scalar exchange derivative is promoted to a mixed Hessian; the
+        mixed block is identically zero while the independently supplied
+        bare sectors are preserved.
+        """
+        return cls(
+            n_mag_sites=n_mag_sites,
+            displacement_labels=displacement_labels,
+            magnon_bare=magnon_bare,
+            phonon_bare=phonon_bare,
+            magnon_phonon_coupling=lambda points: np.zeros(
+                (len(points), n_mag_sites, len(displacement_labels)), dtype=complex
+            ),
+            producer="scalar_collinear_forbidden_control",
+            provenance={
+                **dict(provenance),
+                "control": "scalar-collinear input; symmetry-forbidden mixed Hessian",
+                "mixed_derivative_inferred": False,
+            },
+            spin_coordinate_labels=spin_coordinate_labels,
+        )
+
 
 @dataclass(frozen=True)
 class ControlledTwoBosonModel:

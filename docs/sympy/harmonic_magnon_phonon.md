@@ -111,11 +111,15 @@ and (5) producer provenance including observed channels.  Its bare magnon
 Nambu Hessian in eV; its bare phonon provider returns the mass-weighted
 dynamical matrix in eV$^2$ in the same displacement ordering; and the
 complex rectangular mixed block is in eV.  The full assembled Nambu Hessian
-retains the normal and anomalous mixed blocks; counter-rotating terms are
-not discarded.  A scalar-collinear exchange-striction producer is rejected
+retains the normal and anomalous mixed blocks, so counter-rotating terms
+are kept.
+
+A scalar-collinear producer claiming a nonzero mixed Hessian is rejected
 because it does not observe the required transverse/longitudinal mixed
-torque channels.  A correctly typed zero mixed block is the forbidden
-control and exactly recovers bare modes and zero transfer.
+torque channels.  The explicit
+`scalar_collinear_forbidden_control(...)` input instead supplies the bare
+sectors with an identically zero mixed block, reproducing bare modes and
+zero transfer without fabricating a derivative.
 
 `HarmonicMixedModel` exposes the consumer call
 `model.hybrid_modes(points, mixed_hessian)`; the same calculation is
