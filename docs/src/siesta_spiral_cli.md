@@ -261,14 +261,17 @@ Additional contract rules:
   poles only: `occupied_min < z0`, with `z0` inside the gap, and
   `0 < margin_ev < gap_ev / 2`. All contour energies are in eV.
 - Metallic mode uses positive `smearing_width_ev` in eV and **one global fixed-N
-  Fermi-Dirac chemical potential**. Declare the producer's Fermi reference,
-  count, width and sampled gap, not a convenient fictitious insulating gap.
-  Remove both `contour` and `contour_node_rungs`: the metallic evaluator has
-  no occupied-pole contour.
-- `finite_steps` are positive rotation angles in radians, with at least two
-  rungs. Optional `contour_node_rungs` changes gapped contour quadrature node
-  counts only. `sampling` is always `recorded`: no interpolation, new k mesh,
-  k-point ladder or unrecorded integration setting is silently substituted.
+  Fermi-Dirac chemical potential**. It must equal the producer's recorded
+  electronic temperature times `k_B` (`8.617333262145e-5 eV/K`) within
+  `1e-10 eV`; missing or invalid producer temperature is refused. Declare the
+  producer's Fermi reference, count, width and sampled gap, not a convenient
+  fictitious insulating gap. Remove both `contour` and `contour_node_rungs`:
+  the metallic evaluator has no occupied-pole contour.
+- `finite_steps` are positive, pairwise-distinct rotation angles in radians,
+  with at least two independent rungs. Values within `1e-12 rad` are refused
+  as duplicates. Optional `contour_node_rungs` changes gapped contour quadrature
+  node counts only. `sampling` is always `recorded`: no interpolation, new k
+  mesh, k-point ladder or unrecorded integration setting is silently substituted.
 - The optional mapping floors are precisely the two `map_response_set`
   keyword arguments shown above; omission or `null` uses the API defaults.
   They are statistic denominator floors, not new material uncertainty data.
