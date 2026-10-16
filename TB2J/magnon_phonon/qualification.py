@@ -416,6 +416,16 @@ def verify_structure_identity(
                 f"symbol mismatch: exchange {list(model_symbols)} vs "
                 f"phonon {phonon_symbols}"
             )
+    structure_symbols = (
+        phonon_structure.get("symbols") if isinstance(phonon_structure, dict) else None
+    )
+    if structure_symbols is not None:
+        checks["phonon_structure_symbols"] = list(structure_symbols) == phonon_symbols
+        if not checks["phonon_structure_symbols"]:
+            warnings.append(
+                "phonon structure symbols do not match the phonon atom map: "
+                f"{list(structure_symbols)} vs {phonon_symbols}"
+            )
 
     if (
         model_positions is None
