@@ -20,12 +20,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .siesta_spiral_displacement import DisplacementDerivatives
+from .siesta_spiral_displacement import (
+    GAUGE_LABELS,
+    DisplacementDerivatives,
+    GaugeMismatch,
+    SparsePatternMismatch,
+)
+from .siesta_spiral_displacement import (
+    DisplacedReferenceFDProvider as _DisplacedReferenceFDProvider,
+)
+from .siesta_spiral_hubbard import BOHR_TO_ANG
 from .siesta_spiral_vertex import (
     DEFAULT_OPERATOR_MODE,
     OPERATOR_MODE_ONSITE_DELTA,
     OPERATOR_MODE_WEIGHTED_TOTAL_H,
     OPERATOR_MODES,
+    extract_magnetic_vertex,
 )
 
 VERTEX_DISPLACEMENT_VERSION = "1.0"
@@ -271,3 +281,244 @@ def vertex_displacement_derivative(
         branch=derivatives.branch,
         provenance=provenance,
     )
+
+
+# ---------------------------------------------------------------------------
+# Story 019: AC-009 validation driver
+# ---------------------------------------------------------------------------
+
+# Pipeline-consistency gate pinned at story-019 approval: the vertex
+# functional is LINEAR in H, so the derivative-based route and the
+# reference-based route differ only by floating-point ordering.  1e-10
+# eV/Ang absolute is the pinned tolerance; this is a correctness gate,
+# NOT a numerical-convergence claim (NFR-006; convergence is story-022).
+AC009_TOLERANCE_EV_PER_ANG = 1e-10
+
+# Ensemble/alignment bookkeeping (ADR-005), recorded verbatim in every
+# verdict.  Story-004 lesson: two independent SCFs can differ ~0.1
+# eV/cell; this gate compares Hamiltonian blocks under a matched
+# per-file energy alignment, never cross-SCF energies.
+AC009_ENSEMBLE_BOOKKEEPING = {
+    "ensemble_declaration": (
+        "ADR-005 frozen-MFT response with declared ensemble: occupations "
+        "fixed by the producer; each displaced reference is an INDEPENDENT "
+        "SCF and the gate compares Hamiltonian/vertex blocks only — no "
+        "cross-SCF energy difference enters the gate"
+    ),
+    "energy_alignment": (
+        "per-file: sisl stores H-Ef(file)S; the certified loader "
+        "(_bundle_from_hs_geometry) undoes each file's -Ef shift, so both "
+        "routes consume the raw producer H (fermi_shift='none')"
+    ),
+    "electronic_branch": (
+        "central finite differences (branch='central'); the derivative "
+        "ladder is the pinned +/-0.05 Bohr displaced-SCF pair"
+    ),
+    "perturbation_definition": (
+        "displacement of the declared atom along the declared Cartesian "
+        "axis of the reference geometry, its periodic copies included "
+        "(periodic-image-sum gauge)"
+    ),
+}
+
+
+class LocalizedGaugeUnavailable(GaugeMismatch):
+    """A localized-gauge AC-009 validation was requested from periodic
+    displaced-SCF sampling; the localized observable requires the
+    localized-gauge displaced set (dP endpoints), which the periodic
+    campaign does not provide."""
+
+
+def run_ac009_validation(
+    bundle,
+    pattern,
+    plus_path=None,
+    minus_path=None,
+    *,
+    plus_sile=None,
+    minus_sile=None,
+    hsx_opener=None,
+    reference_fermi_ev=None,
+    orbitals_by_site=None,
+    operator: str = DEFAULT_OPERATOR_MODE,
+    gauge: str = "periodic-image-sum",
+    tolerance: float = AC009_TOLERANCE_EV_PER_ANG,
+) -> dict:
+    """Validate the vertex displacement derivative against independent
+    displaced references (AC-009, FR-012).
+
+    Two independent routes are run on the SAME displaced +h/-h pair:
+
+    (a) derivative-based: :class:`DisplacedReferenceFDProvider` forms the
+        sparse dH/dR record and :func:`vertex_displacement_derivative`
+        packs the fixed-partition dV/dR;
+    (b) reference-based: ``extract_magnetic_vertex`` is applied to each
+        displaced HSX independently (through the certified loader, with
+        each file's Fermi shift undone) and the vertex blocks are
+        finite-differenced directly.
+
+    Route (a) is compared against route (b) on ALL FOUR components of
+    every onsite block.  Because the vertex functional is linear in H,
+    agreement must be tight; the default absolute tolerance
+    (``AC009_TOLERANCE_EV_PER_ANG`` = 1e-10 eV/Ang) is pinned at
+    story-019 approval and is a pipeline-consistency gate, not a
+    convergence claim.
+
+    Returns a JSON-serializable verdict dict carrying the per-site /
+    per-component agreement table, the gauge labels, and the ensemble /
+    alignment bookkeeping verbatim.  The verdict is ``"pass"`` only when
+    every compared component is within ``tolerance``; a failed gate
+    returns an evidence-bearing ``"fail"`` verdict, never a fabricated
+    agreement.
+    """
+    if gauge not in GAUGE_LABELS:
+        raise GaugeMismatch(
+            f"requested gauge {gauge!r} is unknown; expected one of "
+            f"{sorted(GAUGE_LABELS)}"
+        )
+    if gauge == "localized":
+        raise LocalizedGaugeUnavailable(
+            "a localized-gauge AC-009 validation is refused: the localized "
+            "observable requires the localized-gauge displaced set — the "
+            "translated dP endpoints (displaced-projector references) — "
+            "which the periodic displaced-SCF campaign does not provide. "
+            "The periodic campaign's +/- displaced SCFs realize only the "
+            "'periodic-image-sum' gauge; run a localized-gauge displaced "
+            "set (dP endpoints) to certify the localized observable."
+        )
+    bundle_gauge = bundle.metadata.get("displacement_gauge")
+    if bundle_gauge != gauge:
+        raise GaugeMismatch(
+            f"the reference bundle declares displacement gauge "
+            f"{bundle_gauge!r} but the validation requests {gauge!r}; "
+            "gauges are different observables and must not be mixed"
+        )
+
+    # route (a): derivative-based vertex displacement record
+    provider = _DisplacedReferenceFDProvider(
+        pattern=pattern,
+        plus_path=plus_path,
+        minus_path=minus_path,
+        plus_sile=plus_sile,
+        minus_sile=minus_sile,
+        reference_bundle=bundle,
+        reference_fermi_ev=reference_fermi_ev,
+        hsx_opener=hsx_opener,
+    )
+    derivatives = provider.provide()
+    if derivatives.gauge != gauge:
+        raise GaugeMismatch(
+            f"the seam record carries gauge {derivatives.gauge!r} but the "
+            f"validation requests {gauge!r}"
+        )
+    record = vertex_displacement_derivative(
+        derivatives,
+        bundle,
+        PARTITION_FIXED,
+        orbitals_by_site=orbitals_by_site,
+        operator=operator,
+    )
+    if record.gauge != gauge:
+        raise GaugeMismatch(
+            f"the vertex-derivative record carries gauge {record.gauge!r} "
+            f"but the validation requests {gauge!r}"
+        )
+
+    # route (b): reference-based FD of the extracted vertex blocks
+    opener = hsx_opener or _default_hsx_opener
+    plus_sile_b = plus_sile if plus_sile is not None else opener(plus_path)
+    minus_sile_b = minus_sile if minus_sile is not None else opener(minus_path)
+    from TB2J.interfaces.siesta_spiral_hubbard import _bundle_from_hs_geometry
+
+    plus_bundle = _bundle_from_hs_geometry(plus_sile_b, "displaced_plus", "")
+    minus_bundle = _bundle_from_hs_geometry(minus_sile_b, "displaced_minus", "")
+    if set(plus_bundle.sparse) != set(minus_bundle.sparse):
+        raise SparsePatternMismatch(
+            "route (b): the +h and -h displaced HSX exports carry different "
+            "sparse patterns; matched displaced references are required"
+        )
+    plus_vertex = extract_magnetic_vertex(plus_bundle, operator=operator)
+    minus_vertex = extract_magnetic_vertex(minus_bundle, operator=operator)
+    route_b_gauge = "periodic-image-sum"  # loader semantics: periodic SCF,
+    # per-file Fermi undone; certified loader output, fermi_shift='none'
+
+    h_step_ang = pattern.step_bohr * BOHR_TO_ANG
+    agreement = {}
+    max_deviation = 0.0
+    worst = None
+    for key in sorted(record.dV):
+        if key not in plus_vertex.blocks:
+            raise SparsePatternMismatch(
+                f"route (b): onsite key {key} is absent from the displaced "
+                "references' vertex blocks; the displaced HSX pattern does "
+                "not cover the reference bundle's onsite blocks"
+            )
+        derived = record.dV[key]
+        reference_fd = tuple(
+            (p - m) / (2.0 * h_step_ang)
+            for p, m in zip(plus_vertex.blocks[key], minus_vertex.blocks[key])
+        )
+        devs = [abs(a - b) for a, b in zip(derived, reference_fd)]
+        agreement[str(key)] = {
+            "derived": [float(v) for v in derived],
+            "reference_fd": [float(v) for v in reference_fd],
+            "deviation": [float(d) for d in devs],
+        }
+        for i, d in enumerate(devs):
+            if d > max_deviation:
+                max_deviation = d
+                worst = (key, i)
+    status = "pass" if max_deviation <= tolerance else "fail"
+    geom = derivatives.reference_geometry
+    verdict = {
+        "acceptance_criterion": "AC-009",
+        "status": status,
+        "tolerance_ev_per_ang": float(tolerance),
+        "tolerance_basis": (
+            "pipeline-consistency gate pinned at story-019 approval: the "
+            "vertex functional is linear in H, so the two routes must "
+            "agree to floating-point ordering only; NOT a numerical "
+            "convergence claim (NFR-006, story-022)"
+        ),
+        "max_deviation_ev_per_ang": float(max_deviation),
+        "worst_component": (
+            None if worst is None else {"key": str(worst[0]), "component": worst[1]}
+        ),
+        "pattern": {
+            "atom_index": pattern.atom_index,
+            "axis": pattern.axis,
+            "step_bohr": pattern.step_bohr,
+            "branch": pattern.branch,
+            "direction": list(pattern.direction),
+        },
+        "gauge": {
+            "seam_record": derivatives.gauge,
+            "vertex_derivative_record": record.gauge,
+            "displaced_reference_route": route_b_gauge,
+            "requested": gauge,
+        },
+        "ensemble": dict(AC009_ENSEMBLE_BOOKKEEPING),
+        "agreement": agreement,
+        "geometry": {
+            "reference_digests": tuple(derivatives.reference_digests),
+            "displaced_axis_offset_bohr": float(geom.displaced_axis_offset_bohr),
+            "n_orbitals": len(geom.orbital_positions),
+            "cell_bohr": [list(map(float, row)) for row in geom.cell],
+            "producer_recipe_route_a": derivatives.producer_recipe,
+            "producer_recipe_route_b": (
+                "extract_magnetic_vertex on each displaced HSX independently "
+                "through the certified loader (_bundle_from_hs_geometry, "
+                "per-file -Ef shift undone), central FD of the vertex blocks"
+            ),
+        },
+        "partition_declared": record.partition_declared,
+        "operator_mode": record.operator_mode,
+        "declaration": record.declaration(),
+    }
+    return verdict
+
+
+def _default_hsx_opener(path):
+    import sisl
+
+    return sisl.get_sile(str(path))
