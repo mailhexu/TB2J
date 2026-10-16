@@ -77,6 +77,14 @@ class SparsePatternMismatch(DisplacementSeamError):
     """Derivative sparse pattern differs from the bundle's H/S pattern."""
 
 
+class WrongDisplacementSign(DisplacementSeamError):
+    """The +/- pair's signed displacements contradict the declared pattern."""
+
+
+class DigestMismatch(DisplacementSeamError):
+    """Path-backed references' sha256 contradicts ``reference_digests``."""
+
+
 class UnsupportedBranch(DisplacementSeamError):
     """Only the central finite-difference branch is supported."""
 
@@ -379,6 +387,7 @@ class DisplacedReferenceFDProvider:
         plus, minus = self._resolve_siles()
         plus_bundle = self._read(plus)
         minus_bundle = self._read(minus)
+        self._check_signed_displacements(plus_bundle, minus_bundle)
         if set(plus_bundle.sparse) != set(minus_bundle.sparse):
             raise SparsePatternMismatch(
                 "the +h and -h displaced HSX exports carry different sparse "
@@ -428,9 +437,7 @@ class DisplacedReferenceFDProvider:
         if reference_fermi is None and self._siles[0] is None:
             ef = plus.read_fermi_level()
             reference_fermi = float(ef) if ef is not None else 0.0
-        digests = self.pattern.reference_digests
-        if not digests and self._paths[0] is not None:
-            digests = tuple(_sha256(p) for p in self._paths)
+        digests = self._bind_reference_digests()
         recipe = (
             "siesta displaced-SCF HSX central finite difference "
             "(sisl read, -Ef shift undone per story-014); "
@@ -456,6 +463,97 @@ class DisplacedReferenceFDProvider:
                 displaced_orbital_indices=tuple(displaced_orbitals),
             ),
         )
+
+    def _check_signed_displacements(self, plus_bundle, minus_bundle):
+        """Signed geometry gate: each side must move the declared atom by
+        the SIGNED declared step along the declared axis, measured against
+        the pair's midpoint as the reference geometry (both bundles'
+        orbital positions are in Bohr, like ``step_bohr``).
+
+        Refuses zero-offset (identical files), sign-swapped, and
+        half-step pairs with distinct actionable messages; a bare
+        +/- displacement magnitude is not evidence of a central pair.
+        """
+        pattern = self.pattern
+        axis = np.asarray(pattern.direction, dtype=float)
+        step = float(pattern.step_bohr)
+        mid = {}
+        for label, bundle in (("+h", plus_bundle), ("-h", minus_bundle)):
+            orbitals = _atom_orbital_group(bundle, pattern.atom_index)
+            pos = np.mean(
+                [
+                    np.asarray(bundle.orbital_positions[i], dtype=float)
+                    for i in orbitals
+                ],
+                axis=0,
+            )
+            mid[label] = pos
+        reference = 0.5 * (mid["+h"] + mid["-h"])
+        tol = GEOMETRY_TOL_BOHR
+        expected = {"+h": step, "-h": -step}
+        for label in ("+h", "-h"):
+            observed = float(np.dot(mid[label] - reference, axis))
+            want = expected[label]
+            if abs(observed - want) <= tol:
+                continue
+            if abs(observed) <= tol:
+                raise WrongDisplacementSign(
+                    f"the {label} displaced reference shows ZERO offset of "
+                    f"atom {pattern.atom_index} along {pattern.axis} "
+                    f"({observed:+.6f} Bohr, expected {want:+.6f}); the +h/-h "
+                    "pair must be two genuinely displaced SCFs — identical "
+                    "or undisplaced files are refused"
+                )
+            if abs(abs(observed) - step) <= tol:
+                raise WrongDisplacementSign(
+                    f"the {label} displaced reference moves atom "
+                    f"{pattern.atom_index} along {pattern.axis} by "
+                    f"{observed:+.6f} Bohr but the declared pattern expects "
+                    f"{want:+.6f} Bohr; the pair's displacement signs are "
+                    "swapped relative to the declared +h/-h roles"
+                )
+            raise WrongDisplacementSign(
+                f"the {label} displaced reference moves atom "
+                f"{pattern.atom_index} along {pattern.axis} by "
+                f"{observed:+.6f} Bohr but the declared pattern expects "
+                f"{want:+.6f} Bohr; the pair is not a full-step central pair "
+                f"(step {step} Bohr) — refusing a half-step or corrupted pair"
+            )
+
+    def _bind_reference_digests(self):
+        """Digest binding: path-backed references are hashed and compared
+        to the declared ``reference_digests``; hash failures and
+        sile-backed references with a digest declaration are refused as
+        missing digest evidence.
+        """
+        declared = tuple(self.pattern.reference_digests)
+        if self._paths[0] is not None and self._paths[1] is not None:
+            computed = []
+            for label, p in (("+h", self._paths[0]), ("-h", self._paths[1])):
+                try:
+                    computed.append(_sha256(p))
+                except OSError as exc:
+                    raise DigestMismatch(
+                        f"cannot hash the {label} displaced reference "
+                        f"{p}: {exc}; the declared reference_digests "
+                        "require verifiable HSX files"
+                    ) from exc
+            computed = tuple(computed)
+            if declared and declared != computed:
+                raise DigestMismatch(
+                    "displaced reference digests do not match the declared "
+                    f"reference_digests: declared {declared}, computed "
+                    f"{computed}; the pinned displaced references have "
+                    "changed since the pattern was declared"
+                )
+            return computed if not declared else declared
+        if declared:
+            raise DigestMismatch(
+                "reference_digests are declared but the displaced references "
+                "are pre-built siles with no hashable files; provide the HSX "
+                "paths or drop the digest declaration"
+            )
+        return ()
 
     def _resolve_siles(self):
         if self._siles[0] is not None and self._siles[1] is not None:

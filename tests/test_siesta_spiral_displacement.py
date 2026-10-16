@@ -19,6 +19,7 @@ from TB2J.interfaces.siesta_spiral_displacement import (
     ConventionDrift,
     DhsdrNcProvider,
     DhsdrUnavailable,
+    DigestMismatch,
     DisplacedReferenceFDProvider,
     DisplacementPattern,
     DisplacementSeamError,
@@ -28,6 +29,7 @@ from TB2J.interfaces.siesta_spiral_displacement import (
     MissingDisplacedReference,
     SparsePatternMismatch,
     UnsupportedBranch,
+    WrongDisplacementSign,
     assemble_onto_bundle,
     expected_units,
 )
@@ -175,12 +177,7 @@ def synthetic_bundle():
 
 @pytest.fixture
 def synthetic_provider():
-    pattern = DisplacementPattern(
-        atom_index=1,
-        axis="z",
-        step_bohr=0.05,
-        reference_digests=("sha256:plus", "sha256:minus"),
-    )
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
     provider = DisplacedReferenceFDProvider(
         plus_sile=_fake_sile(+0.05),
         minus_sile=_fake_sile(-0.05),
@@ -330,6 +327,107 @@ def test_missing_displaced_reference_refused(tmp_path):
         pattern=pattern,
     )
     with pytest.raises(MissingDisplacedReference):
+        provider.provide()
+
+
+def test_zero_offset_pair_refused():
+    """Identical +/- files (zero displacement) must refuse."""
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
+    provider = DisplacedReferenceFDProvider(
+        plus_sile=_fake_sile(0.0), minus_sile=_fake_sile(0.0), pattern=pattern
+    )
+    with pytest.raises(WrongDisplacementSign, match="ZERO offset"):
+        provider.provide()
+
+
+def test_wrong_sign_pair_refused():
+    """A sign-swapped pair (+ file at -h) must refuse with a sign message."""
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
+    provider = DisplacedReferenceFDProvider(
+        plus_sile=_fake_sile(-0.05), minus_sile=_fake_sile(+0.05), pattern=pattern
+    )
+    with pytest.raises(WrongDisplacementSign, match="signs are swapped"):
+        provider.provide()
+
+
+def test_half_step_pair_refused():
+    """A +/-h/2 half-step pair must refuse with a half-step message."""
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
+    provider = DisplacedReferenceFDProvider(
+        plus_sile=_fake_sile(+0.025), minus_sile=_fake_sile(-0.025), pattern=pattern
+    )
+    with pytest.raises(WrongDisplacementSign, match="half-step"):
+        provider.provide()
+
+
+# ---------------------------------------------------------------------------
+# Digest binding: path-backed references are hashed and verified
+# ---------------------------------------------------------------------------
+
+
+def _path_backed_provider(tmp_path, declared):
+    plus = tmp_path / "plus.HSX"
+    minus = tmp_path / "minus.HSX"
+    plus.write_bytes(b"displaced-plus-payload")
+    minus.write_bytes(b"displaced-minus-payload")
+    pattern = DisplacementPattern(
+        atom_index=1, axis="z", step_bohr=0.05, reference_digests=declared
+    )
+
+    def opener(path):
+        # route the (dummy) HSX files to the synthetic sile backend
+        return _fake_sile(+0.05 if "plus" in Path(str(path)).name else -0.05)
+
+    return DisplacedReferenceFDProvider(
+        plus_path=plus, minus_path=minus, pattern=pattern, hsx_opener=opener
+    )
+
+
+def test_digest_binding_computes_and_accepts_matching(tmp_path):
+    import hashlib
+
+    digests = tuple(
+        "sha256:" + hashlib.sha256(payload).hexdigest()
+        for payload in (b"displaced-plus-payload", b"displaced-minus-payload")
+    )
+    provider = _path_backed_provider(tmp_path, digests)
+    derivatives = provider.provide()
+    assert derivatives.reference_digests == digests
+
+
+def test_digest_mismatch_refused(tmp_path):
+    provider = _path_backed_provider(tmp_path, ("sha256:stale", "sha256:digests"))
+    with pytest.raises(DigestMismatch, match="have changed"):
+        provider.provide()
+
+
+def test_digest_unhashable_file_refused(tmp_path, monkeypatch):
+    from TB2J.interfaces import siesta_spiral_displacement as mod
+
+    provider = _path_backed_provider(tmp_path, ())
+    monkeypatch.setattr(
+        mod,
+        "_sha256",
+        lambda p: (_ for _ in ()).throw(OSError("disk gone")),
+    )
+    with pytest.raises(DigestMismatch, match="cannot hash"):
+        provider.provide()
+
+
+def test_sile_backed_declared_digests_refused():
+    """Digests declared without hashable files = missing digest evidence."""
+    pattern = DisplacementPattern(
+        atom_index=1,
+        axis="z",
+        step_bohr=0.05,
+        reference_digests=("sha256:plus", "sha256:minus"),
+    )
+    provider = DisplacedReferenceFDProvider(
+        plus_sile=_fake_sile(+0.05),
+        minus_sile=_fake_sile(-0.05),
+        pattern=pattern,
+    )
+    with pytest.raises(DigestMismatch, match="no hashable files"):
         provider.provide()
 
 
@@ -518,6 +616,8 @@ def test_refusal_classes_are_distinct():
         SparsePatternMismatch,
         UnsupportedBranch,
         DhsdrUnavailable,
+        WrongDisplacementSign,
+        DigestMismatch,
     )
     assert all(issubclass(c, DisplacementSeamError) for c in classes)
     assert len({c.__name__ for c in classes}) == len(classes)
