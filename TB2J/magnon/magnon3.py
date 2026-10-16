@@ -9,7 +9,11 @@ from scipy.spatial.transform import Rotation
 
 from TB2J.io_exchange import SpinIO
 from TB2J.kpoints import monkhorst_pack
-from TB2J.magnon.eigenstates import MagnonEigenstateData
+from TB2J.magnon.eigenstates import (
+    MagnonEigenstateData,
+    SiteBosonDiagnostics,
+    SiteBosonModes,
+)
 from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
 from TB2J.magnon.magnon_parameters import (
@@ -239,18 +243,16 @@ class Magnon:
         H = np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
         return H
 
-    def _diagonalize_magnon_hamiltonian(self, kpoints, include_wavefunctions=False):
-        """Diagonalize magnon Hamiltonian and optionally return positive modes."""
-        H = self.Hq(kpoints)
+    @staticmethod
+    def _cholesky_with_retries(H):
+        """Return the legacy lower Cholesky factor and its retry diagnostics."""
         n = H.shape[-1] // 2
-        I = np.eye(n)
-
         min_eig = 0.0
         try:
-            K = np.linalg.cholesky(H)
+            return np.linalg.cholesky(H), min_eig, 0
         except np.linalg.LinAlgError:
             try:
-                K = np.linalg.cholesky(H + 1e-6 * np.eye(2 * n))
+                return np.linalg.cholesky(H + 1e-6 * np.eye(2 * n)), min_eig, 1
             except np.linalg.LinAlgError:
                 from warnings import warn
 
@@ -259,6 +261,14 @@ class Magnon:
                 warn(
                     f"WARNING: The system may be far from the magnetic ground-state. Minimum eigenvalue: {min_eig}. The magnon energies might be unphysical."
                 )
+                return K, min_eig, 2
+
+    def _diagonalize_magnon_hamiltonian(self, kpoints, include_wavefunctions=False):
+        """Diagonalize magnon Hamiltonian and optionally return positive modes."""
+        H = self.Hq(kpoints)
+        n = H.shape[-1] // 2
+        I = np.eye(n)
+        K, min_eig, _tier = self._cholesky_with_retries(H)
 
         g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
         KH = K.swapaxes(-1, -2).conj()
@@ -267,6 +277,85 @@ class Magnon:
             eigvals, eigvecs = np.linalg.eigh(eig_matrix)
             return eigvals[:, n:] + min_eig, eigvecs[:, :, n:].swapaxes(1, 2)
         return np.linalg.eigvalsh(eig_matrix)[:, n:] + min_eig, None
+
+    def get_site_boson_modes(self, kpoints):
+        """Return canonical physical site-boson modes at fractional k-points.
+
+        The returned paraunitary has row order ``(b(k), b†(-k))`` and columns
+        ordered as positive-norm particles followed by negative-norm partners.
+        ``u`` and ``v`` are the particle and hole blocks of its positive-norm
+        columns, in ``(kpoint, mode, site)`` order.  They multiply unit-
+        commutator Holstein--Primakoff bosons; transverse spin amplitudes carry
+        the additional local factor ``sqrt(2 * spin_lengths[i])``.
+
+        References requiring the legacy large stability shift are rejected.
+        Exact Goldstone points are evaluated as the limit of a 1e-6 eV
+        regularization, while their energies remain exactly those returned by
+        ``_magnon_energies``.
+        """
+        kpoints = np.asarray(kpoints, dtype=float)
+        H = self.Hq(kpoints)
+        n = H.shape[-1] // 2
+        point_min = np.linalg.eigvalsh(H)[:, 0]
+        K, energy_offset, tier = self._cholesky_with_retries(H)
+        if tier == 2 or np.any(point_min < -1e-6):
+            raise ValueError(
+                "Cannot construct site-boson modes for an unstable reference "
+                f"(minimum Hamiltonian eigenvalue {point_min.min():.6g} eV)."
+            )
+
+        g = np.diag(np.r_[np.ones(n), -np.ones(n)])
+        energies = (
+            np.linalg.eigvalsh(K.swapaxes(-1, -2).conj() @ g @ K)[:, n:] + energy_offset
+        )
+        paraunitary = np.empty((len(kpoints), 2 * n, 2 * n), dtype=complex)
+        shifts = np.full(len(kpoints), 1e-6 if tier == 1 else 0.0)
+        tiers = np.full(len(kpoints), tier, dtype=int)
+        for ik in range(len(kpoints)):
+            Ki = K[ik]
+            # A semidefinite Goldstone matrix can pass LAPACK Cholesky with a
+            # singular factor. Regularize only the mode reconstruction; keep
+            # the energy path identical to the established diagonalizer.
+            if tier == 0 and point_min[ik] <= 1e-12:
+                shifts[ik] = 1e-6
+                tiers[ik] = 1
+                Ki = np.linalg.cholesky(H[ik] + shifts[ik] * np.eye(2 * n))
+            KH = Ki.conj().T
+            eig_matrix = KH @ g @ Ki
+            eigvals, eigvecs = np.linalg.eigh(eig_matrix)
+            if np.any(eigvals[:n] >= 0) or np.any(eigvals[n:] <= 0):
+                raise ValueError(
+                    "Cannot construct site-boson modes: Cholesky metric spectrum "
+                    "does not have stable positive/negative branches."
+                )
+            # Since numpy returns a lower factor H=K K†, the eigenvectors of
+            # K†gK map to physical generalized eigenvectors via K^{-†}.
+            physical = np.linalg.solve(KH, eigvecs) * np.sqrt(np.abs(eigvals))[None, :]
+            paraunitary[ik] = np.concatenate(
+                (physical[:, n:], physical[:, :n][:, ::-1]), axis=1
+            )
+
+        positive = paraunitary[:, :n, :n].swapaxes(1, 2)
+        hole = paraunitary[:, n:, :n].swapaxes(1, 2)
+        normalized_spins = self.magmom / np.linalg.norm(self.magmom, axis=-1)[:, None]
+        U, V = get_rotation_arrays(normalized_spins, u=self._uz)
+        zero_mode = energies <= 1e-5
+        return SiteBosonModes(
+            kpoints=kpoints,
+            energies=energies,
+            u=positive,
+            v=hole,
+            paraunitary=paraunitary,
+            spin_lengths=self.Snorm,
+            U=U,
+            V=V,
+            diagnostics=SiteBosonDiagnostics(
+                min_eig=point_min,
+                shift=shifts,
+                cholesky_tier=tiers,
+            ),
+            is_zero_mode=zero_mode,
+        )
 
     def _magnon_energies(self, kpoints, u=None):
         """Calculate magnon energies"""

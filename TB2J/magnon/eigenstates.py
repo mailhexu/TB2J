@@ -23,6 +23,55 @@ def _jsonable(value):
 
 
 @dataclass
+class SiteBosonDiagnostics:
+    """Per-k-point stability and Cholesky regularization diagnostics."""
+
+    min_eig: np.ndarray
+    shift: np.ndarray
+    cholesky_tier: np.ndarray
+
+
+@dataclass
+class SiteBosonModes:
+    """Canonical site-boson modes in the local-frame Holstein--Primakoff basis.
+
+    ``paraunitary`` has columns ordered as positive-norm particles followed by
+    their negative-norm hole partners; its row order is ``(b(k), b†(-k))``.
+    ``u`` and ``v`` are the two row blocks of the positive-norm columns,
+    transposed to ``(kpoint, mode, site)``.
+    """
+
+    kpoints: np.ndarray
+    energies: np.ndarray
+    u: np.ndarray
+    v: np.ndarray
+    paraunitary: np.ndarray
+    spin_lengths: np.ndarray
+    U: np.ndarray
+    V: np.ndarray
+    diagnostics: SiteBosonDiagnostics
+    is_zero_mode: np.ndarray
+    component_order: tuple = ("particle", "hole")
+    reciprocal_convention: str = (
+        "fractional_reciprocal; J(q)=sum_R J(R) exp(-2*pi*i*q.R)"
+    )
+    amplitude_convention: str = (
+        "z(k)=T(k) gamma(k), z=(b(k), b†(-k)); positive-norm columns"
+    )
+
+    def __post_init__(self):
+        self.kpoints = np.asarray(self.kpoints, dtype=float)
+        self.energies = np.asarray(self.energies, dtype=float)
+        self.u = np.asarray(self.u, dtype=complex)
+        self.v = np.asarray(self.v, dtype=complex)
+        self.paraunitary = np.asarray(self.paraunitary, dtype=complex)
+        self.spin_lengths = np.asarray(self.spin_lengths, dtype=float)
+        self.U = np.asarray(self.U, dtype=complex)
+        self.V = np.asarray(self.V, dtype=float)
+        self.is_zero_mode = np.asarray(self.is_zero_mode, dtype=bool)
+
+
+@dataclass
 class MagnonEigenstateData:
     """Container for magnon energies, optional wavefunctions, and metadata.
 

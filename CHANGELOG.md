@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Magnon calculations expose canonical site-boson modes reconstructed from
+  the lower-Cholesky metric eigensystem, including physical particle/hole
+  amplitudes, local frames, spin lengths, stability diagnostics, and
+  zero-mode regularization metadata. Unstable references are rejected by
+  this accessor; existing magnon energies and transformed eigenstate output
+  are unchanged.
 
 - SIESTA spiral certified exports now bind AC-009 to the complete derivative
   records (`seam_payload_sha256` for dH/dR+dS/dR and

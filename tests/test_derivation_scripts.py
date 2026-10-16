@@ -5,9 +5,8 @@ single source of truth for the spiral MFT conventions (conventions,
 rebuild rule, gates, Toth-Lake flat-screw identities).  Each script is
 executed as a subprocess with the suite's interpreter from the repo
 root; the assertion checks pass silently on success, so exit status 0
-plus emitted progress output is the contract.  Total runtime of the
-four scripts is a few seconds (no slow marker needed - the default
-pytest profile runs them).
+plus emitted progress output is the contract. The scripts cover the four
+spiral derivations and the canonical magnon site-boson reconstruction.
 """
 
 from __future__ import annotations
@@ -22,12 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SYMPY_DIR = REPO_ROOT / "docs" / "sympy"
 TIMEOUT_S = 600.0
 
-#: normative assertion-checked derivation scripts (story-002..005 set)
+#: normative assertion-checked derivation scripts
 SCRIPTS = [
     "spin_spiral_generalized_bloch",
     "spiral_force_theorem_J",
     "spiral_green_function_mft",
     "spiral_state_mft",
+    "site_boson_modes",
 ]
 
 
