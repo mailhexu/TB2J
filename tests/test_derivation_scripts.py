@@ -28,6 +28,7 @@ SCRIPTS = [
     "spiral_green_function_mft",
     "spiral_state_mft",
     "site_boson_modes",
+    "harmonic_magnon_phonon",
 ]
 
 
