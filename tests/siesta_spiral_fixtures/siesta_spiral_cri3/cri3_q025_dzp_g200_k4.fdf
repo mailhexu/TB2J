@@ -1,0 +1,68 @@
+SystemName CrI3 monolayer noncollinear GBT q=0.25 DZP
+SystemLabel cri3_q025_dzp_g200_k4
+NumberOfAtoms 8
+NumberOfSpecies 2
+
+%block ChemicalSpeciesLabel
+ 1 24 Cr
+ 2 53 I
+%endblock ChemicalSpeciesLabel
+
+LatticeConstant 1.0 Ang
+%block LatticeVectors
+  6.8670000000   0.0000000000   0.0000000000
+ -3.4335000000   5.9461788950   0.0000000000
+  0.0000000000   0.0000000000  20.0000000000
+%endblock LatticeVectors
+
+AtomicCoordinatesFormat Fractional
+%block AtomicCoordinatesAndAtomicSpecies
+ 0.3333333333333334 0.6666666666666667 0.5000000000000000 1
+ 0.6666666666666666 0.3333333333333333 0.5000000000000000 1
+ 0.6495050000000000 0.0000000000000000 0.5782046383333332 2
+ 0.0000000000000000 0.6495050000000000 0.5782046383333332 2
+ 0.3504950000000002 0.3504950000000002 0.5782046383333332 2
+ 0.3504950000000001 0.0000000000000000 0.4217953616666668 2
+ 0.0000000000000000 0.3504950000000002 0.4217953616666668 2
+ 0.6495050000000000 0.6495050000000000 0.4217953616666668 2
+%endblock AtomicCoordinatesAndAtomicSpecies
+
+PAO.EnergyShift 0.05 eV
+MeshCutoff 200 Ry
+%block PAO.BasisSizes
+ Cr DZP
+ I DZP
+%endblock PAO.BasisSizes
+
+XC.functional GGA
+XC.authors PBE
+
+Spin non-collinear
+Spin.Spiral.Scale ReciprocalLatticeVectors
+%block Spin.Spiral
+ 0.25 0.0 0.0
+%endblock Spin.Spiral
+
+%block DM.InitSpin
+ 1 +3.0 0.0 0.0
+ 2 +3.0 0.0 0.0
+%endblock DM.InitSpin
+
+ElectronicTemperature 300 K
+%block kgrid_Monkhorst_Pack
+ 4 0 0 0.0
+ 0 4 0 0.0
+ 0 0 1 0.0
+%endblock kgrid_Monkhorst_Pack
+
+SCF.MustConverge T
+MaxSCFIterations 300
+SCF.H.Converge F
+SCF.DM.Converge T
+DM.Tolerance 1.d-5
+DM.MixingWeight 0.02
+DM.NumberPulay 8
+DM.UseSaveDM F
+
+SaveHS T
+WriteMullikenPop 1
