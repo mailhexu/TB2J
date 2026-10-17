@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Story 010 magnon-phonon scattering: fixed the one-loop magnon kernel
+  contraction (the phonon branch index is now contracted between both
+  vertex operands; the external frequency stays a distinct output axis);
+  the phonon hot-band kernel returns the Dyson-partitioned self-energy
+  `Sigma_nu = D0^-1 deltaD D0^-1` separately from the additive coordinate
+  Green-function correction `delta D` (which is not a self-energy), and
+  linewidths are defined from the self-energy.  A nearest-grid sampling
+  offset is reported per on-shell evaluation (`grid_error`, mirrored in
+  metadata) separately from the linewidths.  The `scattering_spectra` seam
+  is attached unconditionally on package import, and a `scattering`
+  subcommand was added to `python -m TB2J.magnon_phonon.cli` (JSON
+  manifest in, JSON result out).  The Born scattering derivation script
+  keeps structure-factor detailed balance and commutator-spectrum oddness
+  distinct, replaces self-referential numeric checks with independently
+  constructed Fock/intermediate-state checks, and the phonon test oracle
+  rebuilds its double-pole weights from its own Fock-space interaction
+  and energy shifts.
 - Added the explicit collinear magnon-phonon vertex `MagnonPhononModel.vertex(k, q)`
   from canonical Story-006 site-boson modes, full-moment oriented-bond exchange
   derivatives, and mass-weighted phonon modes. The vertex applies the

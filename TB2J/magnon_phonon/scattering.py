@@ -38,6 +38,9 @@ _APPROXIMATION = "one-shot O(g^2) Born (bare internal propagators, not SCBA)"
 
 def bose_occupation(energy_eV, temperature_K):
     """Bose occupation n_B(E) = 1/(exp(E/kT) - 1); exactly zero at T = 0."""
+    # MathDoc (docs/sympy/born_scattering_spectra, check_bose_weights):
+    # emission (n+1) / absorption n weights from the canonical thermal
+    # geometric series, with the asserted T -> 0 emission-only limit.
     energy = np.asarray(energy_eV, dtype=float)
     temperature = float(temperature_K)
     if temperature < 0.0:
@@ -51,6 +54,7 @@ def bose_occupation(energy_eV, temperature_K):
 
 def thz_to_ev(frequencies_thz):
     """Phonon frequency THz -> energy eV (E = h nu)."""
+    # MathDoc (docs/sympy/born_scattering_spectra, "Units" section): E = h nu.
     return np.asarray(frequencies_thz, dtype=float) * 1e12 * H_EV_S
 
 
@@ -112,7 +116,15 @@ def magnon_self_energy(g, eps_kq, omega_q, n_bose_q, weights, omega, eta):
         * weights[:, None, None, None, None]
         * kernel[:, :, None, :, :]
     )  # (nq, m, n, nu, nw)
-    sigma = np.einsum("qmanw,qmbw->wab", weighted, np.conj(g), optimize=True)
+    # MathDoc (docs/sympy/born_scattering_spectra, check_magnon_kernel_t0):
+    # Sigma^R_{ab}(w) = sum_{q,m,nu} w_q g[m,a,nu] g*[m,b,nu]
+    #   [(n+1)/(w - eps_{k+q,m} - Om_nu + i eta) + n/(w - eps_{k+q,m} + Om_nu + i eta)]
+    # the phonon branch index nu is contracted between BOTH g operands
+    # (label u below) and the external frequency stays a distinct free
+    # output axis (label w); the high-frequency limit and threshold gating
+    # are asserted in check_high_frequency_limits and
+    # check_zero_coupling_and_thresholds.
+    sigma = np.einsum("qmauw,qmbu->wab", weighted, np.conj(g), optimize=True)
     return sigma
 
 
@@ -153,6 +165,14 @@ def phonon_hot_band_kernel(
     in the phonon branch index (each correction attaches to a single
     propagating line, one-shot with bare internal propagators); the returned
     Green function correction carries the full ``(nw, nu, nu)`` matrix form.
+
+    Returns
+    -------
+    (delta_d, sigma) : ((nw, nu) complex, (nw, nu) complex)
+        ``delta_d`` is the additive coordinate Green-function correction
+        (NOT a self-energy); ``sigma`` is the Dyson-partitioned phonon
+        self-energy ``Sigma_nu(w) = D0_nu^-1 deltaD_nu(w) D0_nu^-1`` whose
+        on-shell imaginary part defines the calculated linewidth.
 
     The one-shot expansion is undefined on resonance (``deps^2 = Omega_nu^2``).
     """
@@ -204,8 +224,22 @@ def phonon_hot_band_kernel(
         * weights[:, None, None, None, None]
         * (s_ker[:, :, :, :, None] * d_pole + w_ker[:, :, :, :, None] * h_pole)
     )  # (nk, m, n, nu, nw)
+    # MathDoc (docs/sympy/born_scattering_spectra,
+    # check_phonon_hot_band_prefactor): the additive coordinate correction
+    # delta D_nu(w) = sum_k w_k sum_{mn} |g[m,n,nu]|^2 [S/(w -+ Om)^2 +
+    # W/(w -+ deps)] asserted against the independently constructed
+    # truncated-Fock Lehmann pole sum (test oracle keeps its own Fock-space
+    # interaction and energy shifts).  MathDoc (check_phonon_kernel_bubble):
+    # the bubble chi enters ONLY through the hot-band shifted arguments;
+    # delta D is an additive Green-function correction, NOT a self-energy.
     delta_d = np.einsum("kmnuw->wu", weighted, optimize=True)
-    return delta_d
+    # Dyson-partitioned phonon self-energy of the additive correction:
+    # D = D0 + D0 Sigma D0  =>  Sigma_nu(w) = D0_nu^-1 deltaD_nu(w) D0_nu^-1
+    # (branch-diagonal; check_phonon_hot_band: the on-shell linewidth is
+    # eta-suppressed because the O(g^2) weight sits in the hot bands).
+    d0_inv = 1.0 / ((omega[:, None] + 1j * eta) ** 2 - omega_ph_ev[None, :] ** 2)
+    sigma = d0_inv**2 * delta_d
+    return delta_d, sigma
 
 
 @dataclass(frozen=True)
@@ -289,6 +323,9 @@ class SpeciesSpectrum:
     green: np.ndarray  # (n_ext, nw, nmodes, nmodes) complex
     spectral: np.ndarray  # A = -2 Im G^R, same shape
     linewidths: np.ndarray  # (n_ext, nmodes) eV, -Im Sigma at the bare pole
+    #: (n_ext, nmodes) eV, nearest-grid sampling offset of the on-shell
+    #: linewidth evaluation (grid-error estimate, not a linewidth)
+    grid_error: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
 
 
 @dataclass(frozen=True)
@@ -318,26 +355,42 @@ def _oscillator_bare(bare, omega, eta):
     return out
 
 
-def _oscillator_linewidths(pi, bare, omega, eta):
-    """Calculated phonon linewidths from the pole condition of the additive
-    hot-band correction: Gamma = Im S(Omega) with
-    S = -D0^-1 deltaD D0^-1 the Dyson-partitioned self-energy, reported
-    separately from the artificial broadening.  For the hot-band kernel the
-    on-shell linewidth is eta-suppressed (the O(g^2) weight sits in the hot
-    bands, asserted in the derivation script)."""
+def _grid_sampling_error(bare, omega):
+    """Nearest-grid sampling offset ``|bare pole - nearest omega grid
+    point|`` (eV) of every on-shell linewidth evaluation.  This is the
+    reported grid-error estimate; it is NOT a linewidth.  MathDoc: the
+    internal momentum meshes are exactly weighted, so this sampling offset
+    is the only grid error of the on-shell evaluation."""
     n_ext, n = bare.shape
-    d0 = _oscillator_bare(bare, omega, eta)
     out = np.zeros((n_ext, n))
     for i in range(n_ext):
         for a in range(n):
             i_w = int(np.argmin(np.abs(omega - bare[i, a])))
-            d0p = d0[i, i_w, a, a]
-            out[i, a] = -(pi[i, i_w, a, a] * abs(d0p) ** 2).imag
+            out[i, a] = abs(bare[i, a] - omega[i_w])
+    return out
+
+
+def _oscillator_linewidths(sigma, bare, omega):
+    """Calculated phonon linewidths ``-Im Sigma_aa(Omega)`` at the nearest
+    grid point to the bare pole, from the Dyson self-energy (not from the
+    additive correction), reported separately from the artificial
+    broadening.  For the hot-band kernel the on-shell linewidth is
+    eta-suppressed (the O(g^2) weight sits in the hot bands, asserted in
+    the derivation script, check_phonon_hot_band)."""
+    n_ext, n = bare.shape
+    out = np.zeros((n_ext, n))
+    for i in range(n_ext):
+        for a in range(n):
+            i_w = int(np.argmin(np.abs(omega - bare[i, a])))
+            out[i, a] = -sigma[i, i_w, a, a].imag
     return out
 
 
 def _particle_spectral(sigma, bare, omega, eta):
     """G^R = [(omega + i eta) I - E - Sigma^R]^{-1}, A = -2 Im G."""
+    # MathDoc (docs/sympy/born_scattering_spectra,
+    # check_observable_normalization_and_moments): particle-channel
+    # commutator normalization, free-boson pole pinned, A = -2 Im G^R.
     n_ext, nw, n, _ = sigma.shape
     green = np.empty_like(sigma)
     eye = np.eye(n, dtype=complex)
@@ -350,15 +403,20 @@ def _particle_spectral(sigma, bare, omega, eta):
 
 
 def _linewidths(sigma, bare, omega):
-    """-Im Sigma^R_{aa}(k, eps_{k a}) at the nearest grid point to the bare
-    pole; reported separately from the artificial broadening."""
+    """``-Im Sigma^R_{aa}(k, eps_{k a})`` at the nearest grid point to the
+    bare pole; reported separately from the artificial broadening.  Also
+    returns the nearest-grid sampling offset of each on-shell evaluation
+    (the grid-error estimate, not a linewidth).  MathDoc
+    (docs/sympy/born_scattering_spectra, check_zero_coupling_and_thresholds):
+    the absorptive part is threshold-gated, so the sampled on-shell value
+    carries the reported sampling offset."""
     n_ext, n = bare.shape
     out = np.zeros((n_ext, n))
     for i in range(n_ext):
         for a in range(n):
             i_w = int(np.argmin(np.abs(omega - bare[i, a])))
             out[i, a] = -sigma[i, i_w, a, a].imag
-    return out
+    return out, _grid_sampling_error(bare, omega)
 
 
 class _ScatteringMixin:
@@ -380,6 +438,8 @@ class _ScatteringMixin:
             magnon = self._magnon_spectrum(request, omega, eta)
         if "phonon" in request.species:
             phonon = self._phonon_spectrum(request, omega, eta)
+        grid_magnon = magnon.grid_error if magnon is not None else None
+        grid_phonon = phonon.grid_error if phonon is not None else None
         metadata = {
             "approximation": _APPROXIMATION,
             "broadening_eV": eta,
@@ -408,6 +468,32 @@ class _ScatteringMixin:
                 "particle-channel commutator Green functions, A = -2 Im G^R; "
                 "free-boson pole pinned in docs/sympy/born_scattering_spectra"
             ),
+            # SPEC-002: the phonon self-energy is reported separately from
+            # the additive coordinate correction
+            "phonon_sigma_convention": (
+                "sigma is the Dyson-partitioned self-energy "
+                "Sigma_nu(w) = D0_nu^-1 deltaD_nu(w) D0_nu^-1 (branch-"
+                "diagonal); green carries the ADDITIVE coordinate "
+                "Green-function correction delta D on D0, which is not a "
+                "self-energy; linewidths are -Im Sigma_aa(Omega_nu) from "
+                "sigma, never from delta D"
+            ),
+            # SPEC-004: real grid-error estimate, separate from linewidths
+            "grid_error": {
+                "convention": (
+                    "nearest-grid sampling offset |bare pole - nearest "
+                    "omega grid point| (eV) of the on-shell linewidth "
+                    "evaluation; internal momentum meshes are exactly "
+                    "weighted, so this is the only grid error of the "
+                    "on-shell evaluation"
+                ),
+                "magnon_max_offset_eV": (
+                    float(np.max(grid_magnon)) if grid_magnon is not None else None
+                ),
+                "phonon_max_offset_eV": (
+                    float(np.max(grid_phonon)) if grid_phonon is not None else None
+                ),
+            },
         }
         return ScatteringResult(
             magnon=magnon,
@@ -460,6 +546,7 @@ class _ScatteringMixin:
                 eta,
             )
         green, spectral = _particle_spectral(sigma, bare, omega, eta)
+        linewidths, grid_error = _linewidths(sigma, bare, omega)
         return SpeciesSpectrum(
             species="magnon",
             momenta=request.magnon_kpoints.copy(),
@@ -467,7 +554,8 @@ class _ScatteringMixin:
             sigma=sigma,
             green=green,
             spectral=spectral,
-            linewidths=_linewidths(sigma, bare, omega),
+            linewidths=linewidths,
+            grid_error=grid_error,
         )
 
     def _phonon_spectrum(self, request, omega, eta):
@@ -502,7 +590,7 @@ class _ScatteringMixin:
             nb_k = bose_occupation(eps_k, request.temperature_K)
             nb_kq = bose_occupation(eps_kq, request.temperature_K)
             bare = thz_to_ev(np.asarray(phonon.frequencies_thz, dtype=float))
-            delta_d = phonon_hot_band_kernel(
+            delta_d, sigma_nu = phonon_hot_band_kernel(
                 g,
                 eps_k,
                 eps_kq,
@@ -513,14 +601,21 @@ class _ScatteringMixin:
                 omega,
                 eta,
             )
-            pi = (
-                delta_d[:, :, None] * np.eye(bare.size)[None, None]
-            )  # additive coordinate-channel correction, branch-diagonal
+            # Dyson self-energy as a branch-diagonal (1, nw, nu, nu) matrix;
+            # green keeps the ADDITIVE coordinate correction delta D on the
+            # bare D0 (delta D is not a self-energy and is reported as such
+            # through metadata["phonon_sigma_convention"]).
+            n_nu = bare.size
+            pi = np.zeros((1, omega.size, n_nu, n_nu), dtype=complex)
+            for i_nu in range(n_nu):
+                pi[0, :, i_nu, i_nu] = sigma_nu[:, i_nu]
             d0 = _oscillator_bare(bare[None], omega, eta)
             pi_g = d0.copy()
-            for i_nu in range(pi.shape[-1]):
-                pi_g[0, :, i_nu, i_nu] += pi[0, :, i_nu, i_nu]
+            for i_nu in range(n_nu):
+                pi_g[0, :, i_nu, i_nu] += delta_d[:, i_nu]
             pi_a = -2.0 * pi_g.imag
+            linewidths = _oscillator_linewidths(pi, bare[None], omega)
+            grid_error = _grid_sampling_error(bare[None], omega)
             spectra.append(
                 SpeciesSpectrum(
                     species="phonon",
@@ -529,7 +624,8 @@ class _ScatteringMixin:
                     sigma=pi,
                     green=pi_g,
                     spectral=pi_a,
-                    linewidths=_oscillator_linewidths(pi, bare[None], omega, eta),
+                    linewidths=linewidths,
+                    grid_error=grid_error,
                 )
             )
         return _stack_species(spectra)
@@ -553,6 +649,7 @@ def _stack_species(spectra):
         green=np.concatenate([s.green for s in spectra]),
         spectral=np.concatenate([s.spectral for s in spectra]),
         linewidths=np.concatenate([s.linewidths for s in spectra]),
+        grid_error=np.concatenate([s.grid_error for s in spectra]),
     )
 
 

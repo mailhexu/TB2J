@@ -145,8 +145,14 @@ is what separates `Sigma^R_dyn` from static bookkeeping below.
 For a transition of gap Delta between states of Boltzmann weights
 `p` and `p e^{-beta Delta}`, the dynamic-structure-factor weights are
 `S(+Delta) = p`, `S(-Delta) = p e^{-beta Delta}` (asserted), so
-`S(-omega) = e^{-beta omega} S(omega)`, and the commutator spectral
-function is odd. In kernel form: `(n_B + 1) = e^{beta Omega} n_B` for the
+`S(-omega) = e^{-beta omega} S(omega)`.  This is a statement about the
+structure factor S only.  The commutator spectral function is a
+DIFFERENT object, `A(omega) = sum (p_m - p_n) |A_mn|^2 delta(...)`,
+whose pair weights are exactly opposite:
+`A(+-Delta) = +- p (1 - e^{-beta Delta})`, i.e. `A` is exactly ODD at
+any temperature -- oddness is not inherited from detailed balance.  The
+two are bridged by `A(omega) = (1 - e^{-beta omega}) S(omega)`.
+In kernel form: `(n_B + 1) = e^{beta Omega} n_B` for the
 emission/absorption pair, and the Lindhard numerator
 `(n_{k,n} - n_{k+q,m})` combines the same adjacent-ladder Boltzmann
 weights whose ratio is `e^{-beta (eps_{k+q} - eps_k)}`. The reported

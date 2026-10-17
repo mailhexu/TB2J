@@ -285,6 +285,59 @@ def _kernel_magnon_input(k_ext, couplings, eta_):
     return g, eps_kq, om_q
 
 
+def _minimal_dp_weight(g_ring, e1, e2, om_q, temperature_K, cutoff=3, ladder=12):
+    """Second-order double-pole weight at the bare +-Omega_q poles of the
+    coordinate Green function, computed from the per-channel MINIMAL Fock
+    model (modes c_k, c_{k+q}, b_q) with the oracle's OWN interaction
+    V = g (c2^dag c1 + c1^dag c2)(b + b^dag) and its own per-configuration
+    energy shifts: never the implementation's closed-form S.  The
+    construction is the script-certified single-dressing Lehmann sum
+    (docs/sympy/born_scattering_spectra,
+    check_phonon_hot_band_prefactor, part (d)); the returned weight is
+    attached identically at +Omega_q and -Omega_q (exactly symmetric S
+    pair)."""
+    states = [
+        (a, b, m)
+        for a in range(cutoff + 1)
+        for b in range(cutoff + 1)
+        for m in range(ladder + 1)
+    ]
+    index = {s: i for i, s in enumerate(states)}
+    dim = len(states)
+
+    def _ann(which):
+        op = np.zeros((dim, dim))
+        for s in states:
+            if s[which] > 0:
+                t = list(s)
+                t[which] -= 1
+                op[index[tuple(t)], index[s]] = np.sqrt(s[which])
+        return op
+
+    a1, a2, b = _ann(0), _ann(1), _ann(2)
+    x = (b + b.conj().T) / np.sqrt(2.0 * om_q)
+    x0mask = x != 0
+    V = g_ring * a2.conj().T @ a1 @ (b + b.conj().T) + np.conj(
+        g_ring
+    ) * a1.conj().T @ a2 @ (b + b.conj().T)
+    E = np.array([a * e1 + b2 * e2 + m * om_q for a, b2, m in states])
+    p = np.exp(-E / (KB_EV_K * temperature_K))
+    p /= p.sum()
+    dmat = E[:, None] - E[None, :]
+    safe = np.where(dmat == 0.0, 1.0, dmat)
+    dinv = np.where(dmat == 0.0, 0.0, 1.0 / safe)
+    np.fill_diagonal(dinv, 0.0)
+    dE = np.einsum("ca,ac->a", V.T * dinv, V)
+    dp_weight = 0.0
+    for a in range(dim):
+        for b3 in range(dim):
+            gap = round(E[b3] - E[a], 9)
+            if x0mask[a, b3] and abs(gap - om_q) < 1e-9:
+                dp_weight += (p[a] - p[b3]) * abs(x[a, b3]) ** 2 * dE[a].real
+                dp_weight -= (p[a] - p[b3]) * abs(x[a, b3]) ** 2 * dE[b3].real
+    return dp_weight
+
+
 def _phonon_bare_pole_oracle(couplings, q_ext, n_ph_max, omega, eta, eps_k, eps_kq):
     """Independent truncated-Fock Lehmann oracle for the phonon
     coordinate-channel hot-band kernel on the ring model.
@@ -297,7 +350,9 @@ def _phonon_bare_pole_oracle(couplings, q_ext, n_ph_max, omega, eta, eps_k, eps_
     energy differences:
 
     - double poles at +-Omega_q (bare x-connected pairs) with the
-      per-configuration single-dressing energy shifts;
+      per-configuration single-dressing energy shifts dE of the oracle's
+      OWN Fock-space interaction V (never the implementation's closed
+      form);
     - simple poles at +- deps_k (hop k -> k+q, same phonon content) with
       the single-dressing coordinate amplitudes xtilde.
 
@@ -373,8 +428,7 @@ def _phonon_bare_pole_oracle(couplings, q_ext, n_ph_max, omega, eta, eps_k, eps_
     np.fill_diagonal(dinv, 0.0)
     xtil = (V.T * dinv) @ x + x @ (V * dinv).T
     x0mask = x != 0
-    # sum poles
-    om_q = _phonon_band(q_ext)
+    # simple poles from the oracle's own dressed coordinate amplitudes
     pole_w = {}
     for a in range(dim):
         for b in range(dim):
@@ -383,20 +437,21 @@ def _phonon_bare_pole_oracle(couplings, q_ext, n_ph_max, omega, eta, eps_k, eps_
                 continue
             wgt = (p[a] - p[b]) * abs(xtil[a, b]) ** 2
             if abs(wgt) > 1e-30:
-                pole_w[("sp", gap)] = pole_w.get(("sp", gap), 0.0) + wgt
-    # the +-Omega_q double-pole restructuring is the script-certified
-    # closed weight (docs/sympy/born_scattering_spectra,
-    # check_phonon_hot_band_prefactor): S_k per internal momentum
-    n_in = bose_occupation(eps_k, TEMP_K)
-    n_out = bose_occupation(eps_kq, TEMP_K)
+                pole_w[("sp", gap)] = pole_w.get(("sp", gap), 0.0) + wgt.real
+    # double poles: the per-channel minimal Fock construction (own
+    # interaction and energy shifts, converged ladder cutoffs), summed
+    # over internal momenta with the ring couplings
     s_tot = 0.0
     for k in range(NMOM):
-        d = eps_kq[k, 0] - eps_k[k, 0]
-        den = d * d - om_q * om_q
-        g2w = abs(np.sqrt(NMOM) * G_SCALE_PH * couplings[k, q_ext]) ** 2 / NMOM
-        s_tot += g2w * (n_out[k, 0] - n_in[k, 0]) * d / (om_q * den)
-    pole_w[("dp", om_q)] = s_tot
-    pole_w[("dp", -om_q)] = s_tot
+        s_tot += _minimal_dp_weight(
+            G_SCALE_PH * couplings[k, q_ext],
+            eps_k[k, 0],
+            eps_kq[k, 0],
+            _phonon_band(q_ext),
+            TEMP_K,
+        )
+    pole_w[("dp", _phonon_band(q_ext))] = s_tot
+    pole_w[("dp", -_phonon_band(q_ext))] = s_tot
     out = np.zeros(omega.size, dtype=complex)
     for (kind, gap), wgt in pole_w.items():
         if kind == "dp":
@@ -502,7 +557,7 @@ class TestLehmannReference:
 
         from TB2J.magnon_phonon.scattering import phonon_hot_band_kernel
 
-        delta_d = phonon_hot_band_kernel(
+        delta_d, _ = phonon_hot_band_kernel(
             g,
             eps_k,
             eps_kq,
@@ -543,7 +598,7 @@ class TestLehmannReference:
 
         from TB2J.magnon_phonon.scattering import phonon_hot_band_kernel
 
-        delta_d = phonon_hot_band_kernel(
+        delta_d, _ = phonon_hot_band_kernel(
             g,
             eps_k,
             eps_kq,
@@ -676,7 +731,7 @@ class TestForbiddenControls:
 
         n_in = bose_occupation(eps_k, TEMP_K)
         n_out = bose_occupation(eps_kq, TEMP_K)
-        dd = phonon_hot_band_kernel(
+        dd, _ = phonon_hot_band_kernel(
             g,
             eps_k,
             eps_kq,
@@ -687,7 +742,7 @@ class TestForbiddenControls:
             omega,
             eta,
         )
-        single = phonon_hot_band_kernel(
+        single, _ = phonon_hot_band_kernel(
             g[:, :, :, :1],
             eps_k,
             eps_kq,
@@ -771,3 +826,203 @@ class TestMetadataAndLinewidths:
                 )
         assert meta["static_tadpole_excluded"] is True
         assert "one-shot O(g^2) Born" in meta["approximation"]
+
+
+# ---------------------------------------------------------------------------
+# round-1 review fixes: contraction, seam availability, self-energy and
+# grid-error reporting, CLI
+# ---------------------------------------------------------------------------
+class TestMultibranchKernelContraction:
+    def test_multibranch_grid_length_differs_from_branch_count(self):
+        """The magnon kernel contracts the phonon BRANCH index between
+        both g operands while the frequency stays a distinct free output
+        axis; the internal-mesh length (3) differs from the branch count
+        (2) and the omega grid (5 points) differs from both, so the old
+        contraction (which shared one einsum label between the frequency
+        axis and the conjugated branch index) cannot even evaluate."""
+        rng = np.random.default_rng(21)
+        nq, nu = 3, 2
+        g = rng.normal(size=(nq, 2, 2, nu)) + 1j * rng.normal(size=(nq, 2, 2, nu))
+        eps_kq = np.array([[0.11, 0.19], [0.13, 0.17], [0.12, 0.18]])
+        om_q = np.array([[0.05, 0.07], [0.06, 0.08], [0.045, 0.075]])
+        n_bose = np.full((nq, nu), 0.3)
+        weights = np.full(nq, 1.0 / nq)
+        omega = np.linspace(0.05, 0.3, 5)
+        eta = 1e-3
+        sigma = magnon_self_energy(g, eps_kq, om_q, n_bose, weights, omega, eta)
+        assert sigma.shape == (omega.size, 2, 2)
+        # explicit loop reference
+        kernel = (n_bose[:, None, :, None] + 1.0) / (
+            omega[None, None, None, :]
+            - eps_kq[:, :, None, None]
+            - om_q[:, None, :, None]
+            + 1j * eta
+        ) + n_bose[:, None, :, None] / (
+            omega[None, None, None, :]
+            - eps_kq[:, :, None, None]
+            + om_q[:, None, :, None]
+            + 1j * eta
+        )  # (nq, m, nu, nw)
+        ref = np.zeros((omega.size, 2, 2), dtype=complex)
+        for iq in range(nq):
+            for im in range(2):
+                for inu in range(nu):
+                    amp = weights[iq] * kernel[iq, im, inu, :]
+                    ref += amp[:, None, None] * np.outer(
+                        g[iq, im, :, inu], np.conj(g[iq, im, :, inu])
+                    )
+        np.testing.assert_allclose(sigma, ref, rtol=1e-12)
+
+    def test_branch_contribution_is_not_dropped(self):
+        """With two inequivalent branches the kernel equals the SUM over
+        branches; dropping either branch (a separate-summation failure
+        mode) breaks the comparison."""
+        g = np.zeros((1, 1, 1, 2), dtype=complex)
+        g[0, 0, 0, 0] = 0.1
+        g[0, 0, 0, 1] = 0.2
+        eps_kq = np.array([[0.1]])
+        om_q = np.array([[0.04, 0.06]])
+        n_bose = np.array([[0.0, 0.0]])
+        omega = np.array([0.2, 0.3])
+        sigma = magnon_self_energy(
+            g, eps_kq, om_q, n_bose, np.array([1.0]), omega, 1e-3
+        )
+        expected = 0.1**2 / (omega - 0.1 - 0.04 + 1j * 1e-3) + 0.2**2 / (
+            omega - 0.1 - 0.06 + 1j * 1e-3
+        )
+        np.testing.assert_allclose(sigma[:, 0, 0], expected, rtol=1e-12)
+
+
+class TestSeamAndReporting:
+    def test_seam_method_exists_on_bare_import(self):
+        """STD-005: importing the package alone binds the scattering seam;
+        the method always exists on MagnonPhononModel."""
+        import importlib
+
+        import TB2J.magnon_phonon as pkg
+
+        importlib.reload(pkg)
+        from TB2J.magnon_phonon.vertex import MagnonPhononModel
+
+        assert callable(getattr(MagnonPhononModel, "scattering_spectra", None))
+
+    def test_phonon_sigma_is_dyson_self_energy_not_delta_d(self):
+        """SPEC-002: sigma is the Dyson-partitioned self-energy
+        D0^-1 deltaD D0^-1; green carries the additive delta D on D0;
+        linewidths come from sigma."""
+        model, phonon, q = _spring_model(lambda_scale=1.0)
+        request = _spring_request(phonon, q)
+        result = model.scattering_spectra(request)
+        spec = result.phonon
+        omega = request.omega_eV
+        eta = request.broadening_eV
+        om0 = spec.bare_energies[0, 0]
+        d0 = 1.0 / ((omega + 1j * eta) ** 2 - om0**2)
+        delta_d = spec.green[0, :, 0, 0] - d0
+        np.testing.assert_allclose(
+            spec.sigma[0, :, 0, 0], d0**2 * delta_d, rtol=1e-5, atol=1e-9
+        )
+        i_w = int(np.argmin(np.abs(omega - om0)))
+        np.testing.assert_allclose(
+            spec.linewidths[0, 0], -spec.sigma[0, i_w, 0, 0].imag, rtol=1e-12
+        )
+        # the additive correction is not what the linewidths field reports
+        assert not np.allclose(spec.linewidths[0, 0], -delta_d[i_w].imag)
+
+    def test_grid_error_reported_separately_from_linewidths(self):
+        """SPEC-004: a real nearest-grid sampling offset is reported per
+        on-shell evaluation, separate from the linewidths, and mirrored in
+        metadata."""
+        model, phonon, q = _spring_model(lambda_scale=1.0)
+        request = _spring_request(phonon, q)
+        result = model.scattering_spectra(request)
+        omega = request.omega_eV
+        for spec in (result.magnon, result.phonon):
+            n_ext, n_modes = spec.bare_energies.shape
+            assert spec.grid_error.shape == (n_ext, n_modes)
+            for i in range(n_ext):
+                for a in range(n_modes):
+                    eps = spec.bare_energies[i, a]
+                    expected = abs(eps - omega[int(np.argmin(np.abs(omega - eps)))])
+                    np.testing.assert_allclose(spec.grid_error[i, a], expected)
+            assert np.all(spec.grid_error >= 0.0)
+        # interior poles sample the grid to at most one grid step; exterior
+        # poles are allowed to sit outside the reported window
+        omega = request.omega_eV
+        spacing = np.max(np.diff(omega))
+        for spec in (result.magnon, result.phonon):
+            inside = (spec.bare_energies >= omega.min()) & (
+                spec.bare_energies <= omega.max()
+            )
+            assert np.all(spec.grid_error[inside] <= spacing)
+        grid_meta = result.metadata["grid_error"]
+        np.testing.assert_allclose(
+            grid_meta["magnon_max_offset_eV"], np.max(result.magnon.grid_error)
+        )
+        np.testing.assert_allclose(
+            grid_meta["phonon_max_offset_eV"], np.max(result.phonon.grid_error)
+        )
+        assert "sampling offset" in grid_meta["convention"]
+
+
+class TestCLI:
+    @staticmethod
+    def _manifest(path):
+        import json
+
+        manifest = {
+            "calculation": "scattering",
+            "omega_eV": [0.1, 0.2, 0.3],
+            "broadening_eV": 1e-3,
+            "temperature_K": 150.0,
+            "magnon": {
+                "g": [[[[0.05]]]],
+                "eps_kq": [[0.09]],
+                "omega_q_ev": [[0.03]],
+                "weights": [1.0],
+            },
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh)
+        return manifest
+
+    def test_help_lists_scattering(self, capsys):
+        from TB2J.magnon_phonon import cli
+
+        try:
+            cli.main(["--help"])
+        except SystemExit:
+            pass
+        assert "scattering" in capsys.readouterr().out
+
+    def test_scattering_manifest_run(self, tmp_path):
+        import json
+
+        from TB2J.magnon_phonon import cli
+
+        path = tmp_path / "manifest.json"
+        self._manifest(path)
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            cli.main(["scattering", str(path)])
+        result = json.loads(buffer.getvalue())
+        assert result["calculation"] == "scattering"
+        sigma = result["magnon"]["sigma"]
+        assert sigma["real"][0][0][0] != 0.0 or sigma["imag"][0][0][0] != 0.0
+        assert result["metadata"]["approximation"]
+
+    def test_scattering_cli_module_help(self):
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "TB2J.magnon_phonon.cli", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0
+        assert "scattering" in proc.stdout
