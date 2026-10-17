@@ -320,7 +320,7 @@ def _sweep_record(level_name, offsets, temperature, coupled, mesh_sizes):
             "bare_meV": (np.asarray(magnon["bare_energies_eV"], float) * 1e3).tolist(),
         },
         "blocks": {
-            f"{_q_label(entry['q'])}:+{'+'.join(entry['modes'])}": {
+            f"{_q_label(entry['q'])}:{'+'.join(entry['modes'])}": {
                 "max_abs_sigma": float(np.max(np.abs(entry["sigma"]))),
                 "max_abs_delta_d": float(np.max(np.abs(entry["delta_d"]))),
                 "bare_meV": (
