@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -137,6 +138,8 @@ class CoveredBlock:
     modes_table_sha256: str
     max_fd_error_meV_per_Ang: float
     j0_eV: float
+    #: vault path of the hash-joined mode-evidence file ("" for fixture blocks)
+    evidence_path: str = ""
 
     @property
     def natom(self):
@@ -207,8 +210,6 @@ def load_cri3_blocks(
     eigenvalue lies below ``ir_cutoff`` are skipped and reported under the
     declared infrared cutoff; nothing else is filtered.
     """
-    from pathlib import Path
-
     store_path = Path(s002_store_path)
     store = json.loads(store_path.read_text())
     evidence_dir = Path(evidence_dir)
@@ -284,6 +285,7 @@ def load_cri3_blocks(
                     )
                     * 1e3,
                     j0_eV=CRI3_J0_MEV * 1e-3,
+                    evidence_path=str(evidence_path),
                 )
             )
     return blocks, skipped
@@ -612,6 +614,11 @@ def block_from_fixture(record: dict) -> CoveredBlock:
     )
 
 
+#: provenance-manifest schema (v2: convergence section, per-reference
+#: validation statuses, block evidence paths)
+MANIFEST_SCHEMA = "s013-material-spectra-manifest-v2"
+
+
 def provenance_manifest(
     settings: MaterialSettings,
     fixture_path,
@@ -619,10 +626,11 @@ def provenance_manifest(
     internal_magnon_points,
     phonon_loop_meshes,
     extra: dict | None = None,
+    thermal_prescription: str = THERMAL_PRESCRIPTION,
 ) -> dict:
     """Provenance manifest bound to the artifacts (TEST-002 schema)."""
     required = {
-        "schema": "s013-material-spectra-manifest-v1",
+        "schema": MANIFEST_SCHEMA,
         "story": {
             "local_id": "013",
             "project": "nonorth-spin-lattice",
@@ -650,7 +658,7 @@ def provenance_manifest(
                 )
             },
         },
-        "thermal_prescription": THERMAL_PRESCRIPTION,
+        "thermal_prescription": thermal_prescription,
         "mixing_availability": MIXING_UNAVAILABLE_STATEMENT,
         "interpolation_status": (
             "none: bare phonons only at covered commensurate points; coupled "
@@ -671,6 +679,7 @@ def provenance_manifest(
                 "evidence_sha256": b.evidence_sha256,
                 "modes_table_sha256": b.modes_table_sha256,
                 "max_fd_error_meV_per_Ang": b.max_fd_error_meV_per_Ang,
+                **({"evidence_path": b.evidence_path} if b.evidence_path else {}),
             }
             for b in blocks
         ],
@@ -683,9 +692,44 @@ def provenance_manifest(
     return required
 
 
-def validate_manifest(manifest: dict, fixture_path) -> None:
-    """TEST-002 gate: every field non-empty and the fixture hash matches."""
-    if manifest.get("schema") != "s013-material-spectra-manifest-v1":
+def _manifest_hash_references(manifest: dict):
+    """Declared (label, path, expected_sha256) triples referenced by a manifest.
+
+    Covers the S002 store and the s012 qualification report (``path`` +
+    ``sha256`` fields) and every block's mode-evidence file (``evidence_path``
+    + ``evidence_sha256``).  The fixture is validated separately (required).
+    """
+    references = []
+    for key in ("s002_store", "s012_qualification_report"):
+        reference = manifest.get(key)
+        if (
+            isinstance(reference, dict)
+            and "path" in reference
+            and "sha256" in reference
+        ):
+            references.append((key, reference["path"], reference["sha256"]))
+    for index, block in enumerate(manifest.get("blocks", [])):
+        if "evidence_sha256" in block:
+            references.append(
+                (
+                    f"blocks[{index}]",
+                    block.get("evidence_path"),
+                    block["evidence_sha256"],
+                )
+            )
+    return references
+
+
+def validate_manifest(manifest: dict, fixture_path) -> dict:
+    """TEST-002 gate: every field non-empty, the fixture hash matches, and
+    every referenced file (S002 store, s012 qualification report, block
+    evidence) hashes to its recorded value when the file is present.
+
+    Referenced files that are absent are recorded as ``"unresolved"`` in
+    ``manifest["reference_validation"]`` (also the returned dict); a present
+    file whose sha256 differs from the recorded hash is a hard error.
+    """
+    if manifest.get("schema") != MANIFEST_SCHEMA:
         raise ValueError("manifest schema mismatch")
 
     def _check(value, path):
@@ -703,3 +747,15 @@ def validate_manifest(manifest: dict, fixture_path) -> None:
     _check(manifest, "manifest")
     if manifest["fixture"]["sha256"] != sha256_file(fixture_path):
         raise ValueError("manifest fixture hash does not match the fixture file")
+    statuses = {}
+    for label, path, expected_sha256 in _manifest_hash_references(manifest):
+        if not path or not Path(path).exists():
+            statuses[label] = "unresolved"
+            continue
+        if sha256_file(path) != expected_sha256:
+            raise ValueError(
+                f"manifest referenced file hash mismatch for {label}: {path}"
+            )
+        statuses[label] = "resolved"
+    manifest["reference_validation"] = statuses
+    return statuses
