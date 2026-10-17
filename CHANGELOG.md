@@ -363,3 +363,16 @@ Unreleased
 - No `WannierManager` API change; wsvec is auto-detected from the Wannier90
   output directory. To force scheme 1 for A/B comparison, temporarily move
   `{prefix}_wsvec.dat` aside.
+- Story 010 (in progress): added the one-shot Born scattering seam
+  `MagnonPhononModel.scattering_spectra(request)` with certified magnon
+  kernels (emission/absorption Bose structure, coordinate/commutator
+  observable normalization pinned by the free-boson pole, verified against
+  truncated-Fock Lehmann references with truncation convergence, g -> 0
+  exact bare recovery, threshold-gated absorptive parts, T = 0 and finite-T
+  Bose occupations, broadening/grid metadata reported separately from
+  calculated linewidths).  The phonon coordinate-channel correction is
+  derived as a hot-band (Lang-Firsov) structure rather than a static
+  Lindhard self-energy; its closed-form prefactor derivation is pending and
+  reported via `phonon_kernel_status` seam metadata (phonon certification
+  test xfailed/skipped until certified).  Asserted derivation:
+  `docs/sympy/born_scattering_spectra.py` + `.md`.

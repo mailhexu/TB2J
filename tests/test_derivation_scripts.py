@@ -29,6 +29,7 @@ SCRIPTS = [
     "spiral_state_mft",
     "site_boson_modes",
     "magnon_phonon_vertex",
+    "born_scattering_spectra",
 ]
 
 
