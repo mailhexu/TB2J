@@ -237,7 +237,10 @@ def phonon_hot_band_kernel(
     # D = D0 + D0 Sigma D0  =>  Sigma_nu(w) = D0_nu^-1 deltaD_nu(w) D0_nu^-1
     # (branch-diagonal; check_phonon_hot_band: the on-shell linewidth is
     # eta-suppressed because the O(g^2) weight sits in the hot bands).
-    d0_inv = 1.0 / ((omega[:, None] + 1j * eta) ** 2 - omega_ph_ev[None, :] ** 2)
+    # D0 = 1/((w+i eta)^2 - Om_nu^2), so its branch-diagonal inverse is
+    # ((w+i eta)^2 - Om_nu^2); the left and right D0^-1 factors are then
+    # one elementwise square on the (nw, nu) arrays.
+    d0_inv = (omega[:, None] + 1j * eta) ** 2 - omega_ph_ev[None, :] ** 2
     sigma = d0_inv**2 * delta_d
     return delta_d, sigma
 

@@ -917,10 +917,12 @@ class TestSeamAndReporting:
         omega = request.omega_eV
         eta = request.broadening_eV
         om0 = spec.bare_energies[0, 0]
-        d0 = 1.0 / ((omega + 1j * eta) ** 2 - om0**2)
-        delta_d = spec.green[0, :, 0, 0] - d0
+        # D0^-1 = (omega + i eta)^2 - om0^2, written from the definition of
+        # the bare oscillator propagator, not by inverting d0
+        d0_inv = (omega + 1j * eta) ** 2 - om0**2
+        delta_d = spec.green[0, :, 0, 0] - 1.0 / d0_inv
         np.testing.assert_allclose(
-            spec.sigma[0, :, 0, 0], d0**2 * delta_d, rtol=1e-5, atol=1e-9
+            spec.sigma[0, :, 0, 0], d0_inv * delta_d * d0_inv, rtol=1e-5, atol=1e-9
         )
         i_w = int(np.argmin(np.abs(omega - om0)))
         np.testing.assert_allclose(
