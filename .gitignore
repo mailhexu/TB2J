@@ -152,3 +152,5 @@ ENV/
 # mypy
 .mypy_cache/
 tests/_spiral_integration_cache/
+
+.kosmic/
