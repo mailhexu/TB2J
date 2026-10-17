@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Story 013 material run (`TB2J/magnon_phonon.material`,
+  `scripts/s013_material_run.py`): the monolayer-CrI3 bare and coupled
+  spectral run on the hash-verified S001/S002 derivative stores and the
+  Story-012 qualified `s012-h005-3x` phonon dataset. The module adds no
+  physics: the declared first-neighbour FM magnon model, the
+  `load_cri3_blocks` hash-joined (q, mode) coverage loader (gates passed,
+  declared infrared cutoff), and coupled spectra composed from the
+  certified Story-009 vertex and Story-010 Born kernels with declared
+  per-channel internal meshes (the phonon loop excludes the M+M -> Gamma
+  goldstone channel; the anisotropy-regularized contribution is declared
+  unavailable). Bare magnons run on the Gamma-K-M-Gamma path; bare phonons
+  only at the covered commensurate points (M is incommensurate with the 3x
+  dataset and is not interpolated). Harmonic mixing is stated as
+  unavailable; the run script emits npz/JSON/PNG artifacts with a
+  provenance manifest (dataset hashes, mesh, T, eta, approximation
+  string), and TEST-001/002 live in
+  `tests/tests/test_material_spectra_run.py` on the cached fixture.
+
 - Story 010 magnon-phonon scattering: fixed the one-loop magnon kernel
   contraction (the phonon branch index is now contracted between both
   vertex operands; the external frequency stays a distinct output axis);
