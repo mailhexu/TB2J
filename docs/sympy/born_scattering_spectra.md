@@ -76,24 +76,56 @@ a Fock space), so there is no two-magnon phonon decay: the bubble chi is
                  / (nu + eps_{k,n} - eps_{k+q,m} + i eta),
 
 which vanishes exactly at T = 0 and has its particle-hole pole at
-eps_{k+q} - eps_k.  CERTIFIED against exact truncated-Fock Lehmann
-reference (two-mode model): the phonon COORDINATE-channel correction
-x = (b + b^dag)/sqrt(2 Omega_nu)
+eps_{k+q} - eps_k.  CERTIFIED against the exact truncated-Fock Lehmann
+intermediate-state sum (two-mode model, `check_phonon_hot_band_prefactor`):
+the phonon COORDINATE-channel correction
+x = (b + b^dag)/sqrt(2 Omega_nu) has the closed one-shot Born form
 
-- is O(g^2) with the thermal density (vanishes at T = 0, quadratic in g),
-- carries absorptive weight in HOT BANDS at
-  omega = +- Omega_nu -+ (eps_{k+q,m} - eps_{k,n})
-  (Lang-Firsov/polaron structure), NOT at the bare pole omega = Omega_nu,
-- and the coordinate spectral function A = -2 Im D is exactly odd (KMS).
+    delta D_nu(omega) = sum_k w_k sum_{mn} |g[m,n,nu](k,q)|^2 *
+        [ S / (omega - Omega_nu + i eta)^2
+        + S / (omega + Omega_nu + i eta)^2
+        + W / (omega - deps + i eta) ],
+    deps = eps_{k+q,m} - eps_{k,n},
+    S = (n_{k+q,m} - n_{k,n}) deps / (Omega_nu (deps^2 - Omega_nu^2)),
+    W = 2 Omega_nu (n_{k,n} - n_{k+q,m}) / (deps^2 - Omega_nu^2)^2.
 
-PENDING (Story-010 follow-up, flagged as `phonon_kernel_status` in the
-seam metadata): the closed-form prefactor of the hot-band kernel
-(candidate forms: Lindhard-Dyson `D^-1 = D0^-1 - 2 Omega chi` and polaron
-structure-factor shifts) is NOT yet certified against the exact Lehmann
-reference at the asserted tolerance; the seam implements the certified
-hot-band kernel shape with its derivation status reported, and the
-multi-branch phonon certification test is skipped until the prefactor is
-derived.  The magnon kernel above is fully certified.
+One hot-band pole is carried per internal channel; on a full momentum
+mesh the reversed channel k' = k + q carries deps_k' = -deps_k and
+supplies the -deps partner, making the hot-band pair exactly KMS
+antisymmetric (the derivation writes both terms explicitly for a mesh
+containing a single hop direction, as in the minimal two-mode model).
+
+- the `S` pair restructures the bare `+-Omega_nu` poles at second order
+  (the ladder shifts `dE(c1,c2,m) = -2 Omega_nu (2m+1)(N2-N1) g^2 /
+  (deps^2 - Omega_nu^2)` telescope over the Bose ladders to `S`);
+- the `W` pair is the HOT BAND: new simple poles at `omega = +- deps` with
+  the m-independent single-dressing coordinate amplitude
+  `xtilde = g (1/(deps - Omega_nu) - 1/(deps + Omega_nu)) / sqrt(2 Omega_nu)`,
+  whose configuration ladder telescopes to `W` (each hop family
+  `(c1,c2) -> (c1-1,c2+1)` contributes `c1(c2+1) |xtilde|^2
+  (P1(c1)P2(c2) - P1(c1-1)P2(c2+1))`, and the double sum collapses to
+  `(n1 - n2)`);
+- both weights depend only on the magnon Bose occupations, so the
+  correction vanishes EXACTLY at T = 0 (asserted: the exact
+  diagonalization satisfies `D(g) == D(0)` to machine precision);
+- the `W` pair is exactly KMS antisymmetric and the `S` pair symmetric,
+  so the coordinate spectral function stays exactly odd, and
+  `m0 = W - W = 0` identically.
+
+Certification: the closed weights reproduce the explicit discrete
+Lehmann intermediate-state sum of the truncated Fock space to machine
+precision at T = 150 K and T = 300 K (both channel orientations,
+`S(+Omega) = S(-Omega)`, `W(-deps) = -W(+deps)`), together with the
+exact T = 0 vanishing and the KMS oddness of the exact-diagonalization
+correction.  As with the magnon kernel, this is the declared one-shot
+Born object (bare internal propagators): the exact diagonalization
+additionally reorganizes the external `+-Omega_nu` poles at O(g^2)
+(hybridization-level shifts), which the one-shot object deliberately
+does not track.  The kernel is implemented in
+`TB2J.magnon_phonon.scattering.phonon_hot_band_kernel` and the
+consumer-facing test compares it against the independent truncated-Fock
+Lehmann oracle with truncation convergence.  The magnon kernel above is
+fully certified.
 
 ## High-frequency limits and moments
 

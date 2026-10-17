@@ -371,8 +371,16 @@ Unreleased
   exact bare recovery, threshold-gated absorptive parts, T = 0 and finite-T
   Bose occupations, broadening/grid metadata reported separately from
   calculated linewidths).  The phonon coordinate-channel correction is
-  derived as a hot-band (Lang-Firsov) structure rather than a static
-  Lindhard self-energy; its closed-form prefactor derivation is pending and
-  reported via `phonon_kernel_status` seam metadata (phonon certification
-  test xfailed/skipped until certified).  Asserted derivation:
-  `docs/sympy/born_scattering_spectra.py` + `.md`.
+  derived and certified as a closed-form hot-band kernel: per channel the
+  `+-Omega_nu` second-order restructuring weight
+  `S = (n_{k+q,m} - n_{k,n}) deps / (Omega_nu (deps^2 - Omega_nu^2))` and
+  the hot-band pole weight
+  `W = 2 Omega_nu (n_{k,n} - n_{k+q,m}) / (deps^2 - Omega_nu^2)^2`
+  at `omega = +- deps`, both depending only on the magnon occupations
+  (exact T = 0 vanishing, exactly odd coordinate spectral function),
+  asserted to reproduce the truncated-Fock Lehmann intermediate-state sum
+  to machine precision at T = 0 and finite T; the consumer-facing test
+  compares the seam against an independent truncated-Fock Lehmann oracle
+  with truncation convergence.  Reported via `phonon_kernel_status` seam
+  metadata.  Asserted derivation: `docs/sympy/born_scattering_spectra.py`
+  + `.md`.

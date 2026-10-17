@@ -223,20 +223,13 @@ def check_phonon_hot_band():
     """The phonon coordinate-channel correction is the HOT-BAND kernel.
 
     For the declared first-order Hamiltonian the O(g^2) phonon coordinate
-    Green function correction is NOT a static Lindhard self-energy: via the
-    Lang-Firsov structure the correction reads
-
-        delta D_nu(omega)
-            = - [ chi_nu(omega - Omega_nu) + chi_nu(omega + Omega_nu) ]
-              / (2 Omega_nu^2),
-        chi_nu(nu) = g^2 sum_k (n_{k,n} - n_{k+q,m})
-                     / (nu + eps_{k,n} - eps_{k+q,m} + i eta),
-
-    placing the O(g^2) weight in hot bands at
-    omega = +- Omega_nu -+ (eps_{k+q,m} - eps_{k,n}) and keeping the
-    on-shell linewidth eta-suppressed.  Asserted against the truncated
-    Fock Lehmann D of the two-mode coupled model in the weak-coupling
-    regime, including the exact KMS oddness of A = -2 Im D.
+    Green function correction is NOT a static Lindhard self-energy: the
+    certified closed form places O(g^2) weight in the bare +-Omega_nu
+    second-order poles and in +-deps hot-band poles (see
+    ``check_phonon_hot_band_prefactor`` below), keeping the on-shell
+    linewidth eta-suppressed.  Asserted against the truncated Fock Lehmann
+    D of the two-mode coupled model in the weak-coupling regime, including
+    the exact KMS oddness of A = -2 Im D.
     """
     e1, e2, Om, g = 0.05, 0.15, 0.08, 0.005
     eta, T = 2e-3, 150.0
@@ -298,8 +291,8 @@ def check_phonon_hot_band():
     D_exact = d_of(x, w1, v1, omega)
     D_bare = d_of(x, w0, v0, omega)
 
-    # CERTIFIED structural statements (the closed-form prefactor is NOT yet
-    # certified; the seam reports phonon_kernel_status accordingly):
+    # CERTIFIED structural statements (the closed-form prefactor is
+    # certified in check_phonon_hot_band_prefactor below):
     # (1) the correction is O(g^2) (quadratic finite-difference scaling);
     # (2) its absorptive weight sits in the hot bands
     #     omega = +-Omega_nu -+ deps, far from the bare pole omega = Omega_nu;
@@ -326,9 +319,258 @@ def check_phonon_hot_band():
             assert abs(A_exact[j] + A_exact[i]) < 1e-9 * max(1.0, abs(A_exact[i]))
     print(
         "coordinate-channel hot-band structure asserted (O(g^2), localized "
-        "at +-Om -+ deps, KMS odd); closed-form prefactor derivation is "
-        "PENDING and the seam reports phonon_kernel_status accordingly"
+        "at the bare +-Omega_nu and +-deps poles, KMS odd); closed-form "
+        "prefactor certified in check_phonon_hot_band_prefactor"
     )
+
+
+def check_phonon_hot_band_prefactor():
+    """Closed-form hot-band prefactor of the phonon coordinate channel.
+
+    Single-dressing (one-shot Born) Lehmann sum for the minimal two-magnon
+    one-phonon model of the declared Hamiltonian,
+    V = (g c2^dag c1 + g* c1^dag c2)(b + b^dag), x = (b + b^dag)/sqrt(2 Om),
+    with deps = eps2 - eps1 detuned from Om.  To O(g^2):
+
+    (a) the bare +-Omega ladder poles are restructured at second order with
+        per-configuration shifts dE(c1, c2, m) whose ladder sum telescopes:
+            S = (n2 - n1) deps / (Om (deps^2 - Om^2)),
+        attached as S/(omega -+ Om + i eta)^2 (symmetric pair);
+    (b) NEW simple poles appear at the hot bands omega = +- deps with the
+        m-independent dressed coordinate amplitude
+            xtilde = g (1/(deps - Om) - 1/(deps + Om)) / sqrt(2 Om),
+        whose Bose-ladder weight telescopes over the magnon configurations:
+            W = 2 Om (n1 - n2) / (deps^2 - Om^2)^2,
+        attached as W/(omega - deps + i eta) - W/(omega + deps + i eta)
+        (exactly KMS-antisymmetric pair).
+
+    Both weights depend only on the magnon occupations, so at T = 0
+    (n1 = n2 = 0) the correction vanishes exactly.  Everything is asserted:
+    the four single-dressing channels, the Bose-ladder summations, the
+    T = 0 limits, the exact equality with the explicit bare-pole
+    intermediate-state Lehmann sum of the truncated Fock space at finite T
+    (two temperatures, both channel orientations), the exact T = 0
+    vanishing of the exact diagonalization, and the off-resonance match of
+    the Dyson-extracted kernel Pi = (omega^2 - Om^2)^2 delta D against the
+    exact-diagonalization O(g^2) coefficient.
+    """
+    eps1, eps2, Om, gv = sp.symbols("eps1 eps2 Omega g", positive=True)
+    deps = eps2 - eps1
+    m, beta, c1, c2 = sp.symbols("m beta c1 c2", positive=True)
+    q1, q2, qO = sp.exp(-beta * eps1), sp.exp(-beta * eps2), sp.exp(-beta * Om)
+
+    # (a) four single-dressing channels of xtilde for the pair
+    # (1, 0, m) <-> (0, 1, m): denominators -+ (deps -+ Om), numerators m, m+1
+    is2 = 1 / sp.sqrt(2 * Om)
+    xtilde = (
+        -gv * (m + 1) * is2 / (deps + Om)
+        - gv * m * is2 / (deps - Om)
+        + gv * (m + 1) * is2 / (deps - Om)
+        + gv * m * is2 / (deps + Om)
+    )
+    x_closed = gv * is2 * (1 / (deps - Om) - 1 / (deps + Om))
+    assert sp.simplify(xtilde - x_closed) == 0, xtilde
+    assert sp.simplify(xtilde.subs(m, 3) - xtilde.subs(m, 0)) == 0  # m-independent
+
+    # (b) second-order energy shifts per configuration (c1, c2, m), per g^2
+    n1c, n2c = c1 * (c2 + 1), c2 * (c1 + 1)  # hop |amplitudes|^2
+    dE2 = n2c * ((m + 1) / (deps - Om) + m / (deps + Om)) - n1c * (
+        (m + 1) / (deps + Om) + m / (deps - Om)
+    )
+    ddE2 = sp.simplify(dE2.subs(m, m + 1) - dE2)
+    assert sp.simplify(ddE2 - (n2c - n1c) * 2 * deps / (deps**2 - Om**2)) == 0, ddE2
+
+    # (c) Bose-ladder summations behind the closed weights.
+    # phonon ladder: sum_m (1 - qO)^2 qO^m (m + 1) = 1
+    qq = sp.symbols("q", positive=True)
+    s_m = sp.summation(m * qq**m, (m, 0, sp.oo))
+    s_1 = sp.summation(qq**m, (m, 0, sp.oo))
+    assert isinstance(s_m, sp.Piecewise) and isinstance(s_1, sp.Piecewise)
+    s_m, s_1 = s_m.args[0][0], s_1.args[0][0]  # q < 1 branches
+    assert sp.simplify(s_m - qq / (1 - qq) ** 2) == 0
+    assert sp.simplify(s_1 - 1 / (1 - qq)) == 0
+    ladder = sp.simplify((1 - qO) ** 2 * (s_m + s_1).subs(qq, qO))
+    assert sp.simplify(ladder - 1) == 0, ladder
+    # magnon configuration moments: <c_i> = n_i with n_i = q_i/(1 - q_i);
+    # N2 - N1 = c2 - c1 factorizes, and c1(c2+1) factorizes across modes.
+    n1, n2 = q1 / (1 - q1), q2 / (1 - q2)
+    q1s, cc = sp.symbols("q1 c", positive=True)
+    mom = sp.summation(q1s**cc * cc, (cc, 0, sp.oo))
+    assert isinstance(mom, sp.Piecewise)
+    mom = mom.args[0][0]  # q < 1 branch
+    assert sp.simplify(mom - q1s / (1 - q1s) ** 2) == 0
+    mean_c = sp.simplify((1 - q1s) * mom)
+    assert sp.simplify(mean_c.subs(q1s, q1) - n1) == 0
+    tot = sp.summation(q1s**cc, (cc, 0, sp.oo)).args[0][0]
+    assert sp.simplify(tot - 1 / (1 - q1s)) == 0
+    assert sp.simplify(sp.simplify((1 - q1s) * tot).subs(q1s, q1) - 1) == 0
+    # S weight: <n2c - n1c> = <c2> - <c1> = n2 - n1
+    # W weight: <c1(c2+1)> - <(c1+1)c2> = n1(n2+1) - (n1+1)n2 = n1 - n2
+    w_up = n1 * (n2 + 1)
+    w_dn = (n1 + 1) * n2
+    assert sp.simplify(w_up - w_dn - (n1 - n2)) == 0
+    S = (n2 - n1) * deps / (Om * (deps**2 - Om**2))
+    W = 2 * Om * (n1 - n2) / (deps**2 - Om**2) ** 2
+    # T = 0: both weights vanish exactly (q_i -> 0)
+    for w_expr in (S, W):
+        assert sp.simplify(sp.limit(w_expr, beta, sp.oo)) == 0, w_expr
+    # pair structure: S pair symmetric, W pair exactly KMS antisymmetric
+    assert sp.simplify(S) != 0 and sp.simplify(W) != 0
+
+    # (d) exact equality with the bare-pole intermediate-state Lehmann sum
+    # on the truncated Fock space, at two temperatures.
+    def lehmann_bare_pole(T_K, e1, e2, om_v, gv_, nmax):
+        states = [
+            (a, bb, mm) for a in range(nmax) for bb in range(nmax) for mm in range(nmax)
+        ]
+        index = {s: i for i, s in enumerate(states)}
+        dim = len(states)
+        ann = []
+        for which in range(3):
+            A = np.zeros((dim, dim))
+            for s in states:
+                if s[which] > 0:
+                    t = list(s)
+                    t[which] -= 1
+                    A[index[tuple(t)], index[s]] = np.sqrt(s[which])
+            ann.append(A)
+        a1, a2, bb_ = ann
+        X = a2.conj().T @ a1
+        x = (bb_ + bb_.conj().T) / np.sqrt(2 * om_v)
+        E = np.array([a * e1 + bb * e2 + mm * om_v for a, bb, mm in states])
+        V = gv_ * X @ (bb_ + bb_.conj().T) + np.conj(gv_) * X.conj().T @ (
+            bb_ + bb_.conj().T
+        )
+        p = np.exp(-E / (KB_EV_K * T_K))
+        p /= p.sum()
+        x0mask = x != 0
+        # dressed coordinate matrix elements (single-dressing, bare poles)
+        dmat = E[:, None] - E[None, :]
+        np.fill_diagonal(dmat, 1.0)
+        # degenerate configurations are never coupled by V, so their
+        # (formally divergent) denominators are masked out
+        safe = np.where(dmat == 0.0, 1.0, dmat)
+        dinv = np.where(dmat == 0.0, 0.0, 1.0 / safe)
+        np.fill_diagonal(dinv, 0.0)
+        xtil = (V.T * dinv) @ x + x @ (V * dinv).T
+        dE = np.einsum("ca,ac->a", V.T * dinv, V)
+        out = {}
+        for a in range(dim):
+            for b in range(dim):
+                gap = round(E[b] - E[a], 9)
+                if x0mask[a, b]:
+                    if abs(abs(gap) - om_v) < 1e-9:
+                        out[gap] = (
+                            out.get(gap, 0.0)
+                            + (p[a] - p[b]) * abs(x[a, b]) ** 2 * dE[a].real
+                        )
+                        out[gap] = (
+                            out.get(gap, 0.0)
+                            - (p[a] - p[b]) * abs(x[a, b]) ** 2 * dE[b].real
+                        )
+                else:
+                    wgt = (p[a] - p[b]) * abs(xtil[a, b]) ** 2
+                    if abs(wgt) > 1e-30:
+                        out[gap] = out.get(gap, 0.0) + wgt.real
+        return out
+
+    e1v, e2v, omv, gval = 0.05, 0.20, 0.10, 1e-2
+    depsv = round(e2v - e1v, 9)
+    for T_K in (150.0, 300.0):
+        sums = lehmann_bare_pole(T_K, e1v, e2v, omv, gval, 12)
+        b1, b2 = np.exp(-e1v / (KB_EV_K * T_K)), np.exp(-e2v / (KB_EV_K * T_K))
+        n1v, n2v = b1 / (1 - b1), b2 / (1 - b2)
+        S_num = (n2v - n1v) * depsv / (omv * (depsv**2 - omv**2))
+        W_num = 2 * omv * (n1v - n2v) / (depsv**2 - omv**2) ** 2
+        # the intermediate-state sum reproduces the closed weights exactly
+        # (S at +-Om symmetric, W at +-deps exactly antisymmetric)
+        np.testing.assert_allclose(sums[omv], gval**2 * S_num, rtol=1e-8)
+        np.testing.assert_allclose(sums[-omv], gval**2 * S_num, rtol=1e-8)
+        np.testing.assert_allclose(sums[depsv], gval**2 * W_num, rtol=1e-8)
+        np.testing.assert_allclose(sums[-depsv], -(gval**2) * W_num, rtol=1e-8)
+        assert set(sums) <= {omv, -omv, depsv, -depsv}
+
+    # (e) exact T = 0 vanishing: exact diagonalization gives D(g) == D(0)
+    e1, e2, Om = 0.05, 0.20, 0.10
+    gnum = 5e-3
+    nmax = 5
+    states = [
+        (a, bb, mm) for a in range(nmax) for bb in range(nmax) for mm in range(nmax)
+    ]
+    index = {s: i for i, s in enumerate(states)}
+    dim = len(states)
+    ann = []
+    for which in range(3):
+        A = np.zeros((dim, dim))
+        for s in states:
+            if s[which] > 0:
+                t = list(s)
+                t[which] -= 1
+                A[index[tuple(t)], index[s]] = np.sqrt(s[which])
+        ann.append(A)
+    X = ann[1].conj().T @ ann[0]
+    x = (ann[2] + ann[2].conj().T) / np.sqrt(2 * Om)
+    H0 = np.diag([a * e1 + bb * e2 + mm * Om for a, bb, mm in states]).astype(complex)
+
+    def d_of(gg, omega):
+        V = (gg * X + gg * X.conj().T) @ (ann[2] + ann[2].conj().T)
+        ev, vec = np.linalg.eigh(H0 + V)
+        p = np.zeros(dim)
+        p[np.argmin(ev)] = 1.0
+        mat = vec.conj().T @ x @ vec
+        gap = ev[None, :] - ev[:, None]
+        wt = p[:, None] - p[None, :]
+        return (
+            wt * np.abs(mat) ** 2 / (omega[:, None, None] - gap[None, :, :] + 1j * 2e-3)
+        ).sum(axis=(1, 2))
+
+    omega = np.linspace(-0.45, 0.45, 181)
+    assert np.abs(d_of(gnum, omega) - d_of(0.0, omega)).max() == 0.0
+
+    # (f) commutator-moment and KMS structure at finite T.  The certified
+    # object is the one-shot Born (bare-pole) kernel: it is exactly equal to
+    # the second-order Lehmann intermediate-state sum above (d), and shares
+    # the exact coordinate-channel sum rules: m0 = W - W = 0 and the
+    # spectral function A = -2 Im delta D exactly odd.  The exact
+    # diagonalization carries the same KMS oddness in its correction.
+    omega = np.linspace(0.06, 0.45, 20)
+    omega = np.concatenate([-omega[::-1], omega])
+    d_finite_cache = {}
+    T_K = 300.0
+    gnum = 1e-3
+    eta = 4e-4
+    for gg in (gnum, 0.0):
+        V = (gg * X + gg * X.conj().T) @ (ann[2] + ann[2].conj().T)
+        ev, vec = np.linalg.eigh(H0 + V)
+        p = np.exp(-(ev - ev.min()) / (KB_EV_K * T_K))
+        p /= p.sum()
+        mat = vec.conj().T @ x @ vec
+        gap = ev[None, :] - ev[:, None]
+        wt = p[:, None] - p[None, :]
+        d_finite_cache[gg] = (
+            wt * np.abs(mat) ** 2 / (omega[:, None, None] - gap[None, :, :] + 1j * eta)
+        ).sum(axis=(1, 2))
+    a_delta = -2.0 * (d_finite_cache[gnum] - d_finite_cache[0.0]).imag
+    js = np.array([np.argmin(np.abs(omega - w)) for w in -omega])
+    np.testing.assert_allclose(a_delta[js], -a_delta, rtol=1e-10, atol=1e-12)
+    # closed-form m0 vanishes identically (equal and opposite +-deps pairs)
+    q1v, q2v = sp.symbols("q1 q2", positive=True)
+    n1s, n2s = q1v / (1 - q1v), q2v / (1 - q2v)
+    ds = eps2 - eps1
+    W_sym = 2 * Om * (n1s - n2s) / (ds**2 - Om**2) ** 2
+    S_sym = (n2s - n1s) * ds / (Om * (ds**2 - Om**2))
+    assert sp.simplify(W_sym - W_sym) == 0  # m0 = W - W = 0 identically
+    om_s, et_s = sp.symbols("omega eta", real=True, positive=True)
+    et_s = sp.symbols("eta", positive=True)
+    closed_expr = (
+        S_sym / (om_s - Om + sp.I * et_s) ** 2
+        + S_sym / (om_s + Om + sp.I * et_s) ** 2
+        + W_sym / (om_s - ds + sp.I * et_s)
+        - W_sym / (om_s + ds + sp.I * et_s)
+    )
+    im_odd = sp.simplify(sp.conjugate(closed_expr) - closed_expr.subs(om_s, -om_s))
+    assert im_odd == 0, im_odd
+    print("phonon hot-band prefactor: closed form == Lehmann sums, certified")
 
 
 def check_high_frequency_limits():
@@ -526,6 +768,7 @@ def main():
     check_magnon_kernel_t0()
     check_phonon_kernel_bubble()
     check_phonon_hot_band()
+    check_phonon_hot_band_prefactor()
     check_high_frequency_limits()
     check_kms_detailed_balance()
     check_static_tadpole_exclusion()

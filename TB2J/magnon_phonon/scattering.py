@@ -119,32 +119,42 @@ def magnon_self_energy(g, eps_kq, omega_q, n_bose_q, weights, omega, eta):
 def phonon_hot_band_kernel(
     g, eps_k, eps_kq, n_bose_k, n_bose_kq, omega_ph_ev, weights, omega, eta
 ):
-    """One-shot O(g^2) phonon correction kernel (coordinate channel).
+    """Certified one-shot O(g^2) phonon coordinate-channel kernel.
 
     For the declared first-order Hamiltonian the phonon coordinate Green
-    function correction is NOT a static Lindhard self-energy: the thermal
-    magnon-density fluctuations of the vertex shift the phonon line through
-    the Lang-Firsov (polaron) structure, placing the O(g^2) spectral weight
-    in HOT BANDS at ``omega = +- Omega_nu +- (eps_{k+q,m} - eps_{k,n})``.
-    The asserted kernel (derivation script, ``check_phonon_hot_band``) is,
-    per propagating branch nu,
+    function correction is NOT a static Lindhard self-energy.  The certified
+    closed form (derivation script, ``check_phonon_hot_band_prefactor``:
+    single-dressing Lehmann intermediate-state sum over the Bose ladders,
+    asserted against the truncated-Fock reference at T = 0 and finite T) is,
+    per propagating branch ``nu`` and channel ``(k, m, n)`` with
+    ``deps = eps_{k+q,m} - eps_{k,n}``,
 
-        delta D_nu(omega) =
-            - [ chi_nu(omega - Omega_nu) + chi_nu(omega + Omega_nu) ]
-              / (2 Omega_nu^2),
-        chi_nu(nu) = sum_k w_k sum_{m n}
-            |g[m, n, nu]|^2 (n_{k,n} - n_{k+q,m})
-            / (nu + eps_{k,n} - eps_{k+q,m} + i eta).
+        delta D_nu(omega) = sum_k w_k sum_{mn} |g[m,n,nu]|^2 *
+            [ S_nu / (omega - Omega_nu + i eta)^2
+            + S_nu / (omega + Omega_nu + i eta)^2
+            + W_nu / (omega - deps + i eta) ],
+        S_nu = (n_{k+q,m} - n_{k,n}) deps / (Omega_nu (deps^2 - Omega_nu^2)),
+        W_nu = 2 Omega_nu (n_{k,n} - n_{k+q,m}) / (deps^2 - Omega_nu^2)^2.
 
-    The correction is diagonal in the phonon branch index because each
-    self-energy attaches to a single propagating line (one-shot, bare
-    internal propagators); the returned Green function is still the full
-    matrix object.
+    One hot-band pole is carried per internal channel; on the full momentum
+    meshes used by the seam the reversed channel ``k' = k + q`` supplies the
+    ``-deps`` partner pole, reproducing the exactly KMS-antisymmetric
+    hot-band pair of the derivation (which writes both terms for a mesh
+    containing a single hop direction).
 
-    Returns ``(delta_d_minus, delta_d_plus, chi_scale)`` where the first
-    two are the additive Green-function corrections ``(nw, nu, nu)`` for
-    the ``omega -+ Omega_nu`` arguments (complex; already prefactored) and
-    ``chi_scale`` carries ``1/(2 Omega_nu^2)`` for the seam.
+    The ``S`` pieces are the O(g^2) second-order restructuring of the bare
+    ``+- Omega_nu`` poles (the ladder-shifted phonon line); the ``W`` pieces
+    are the hot-band poles at ``omega = +- deps`` created by the
+    magnon-density dressing of the coordinate vertex.  Both weights depend
+    only on the magnon Bose occupations: at T = 0 (``n_{k,n} = n_{k+q,m} =
+    0``) the correction vanishes exactly.  The full-mesh hot-band pair is
+    exactly KMS antisymmetric and the double-pole pair symmetric, so the
+    coordinate spectral function stays exactly odd.  The kernel is diagonal
+    in the phonon branch index (each correction attaches to a single
+    propagating line, one-shot with bare internal propagators); the returned
+    Green function correction carries the full ``(nw, nu, nu)`` matrix form.
+
+    The one-shot expansion is undefined on resonance (``deps^2 = Omega_nu^2``).
     """
     g = np.asarray(g, dtype=complex)
     eps_k = np.asarray(eps_k, dtype=float)
@@ -166,26 +176,36 @@ def phonon_hot_band_kernel(
     if omega_ph_ev.shape != (g.shape[3],):
         raise ValueError("omega_ph_ev must match the phonon branch count")
 
-    def chi_of(nu):
-        """(nw, nu) chi_nu at shifted frequencies nu (broadcast per branch)."""
-        denom = (
-            nu[None, None, :]
-            + eps_k[:, None, :, None]
-            - eps_kq[:, :, None, None]
-            + 1j * eta
-        )  # (nk, m, n, nw)
-        chi = (n_bose_k - n_bose_kq)[:, None, :, None] / denom
-        weighted = (
-            g[:, :, :, :, None]
-            * weights[:, None, None, None, None]
-            * chi[:, :, :, None, :]
-        )  # (nk, m, n, nu, nw)
-        return np.einsum("kmnuw,kmnv->wu", weighted, np.conj(g), optimize=True)
-
-    prefac = 1.0 / (2.0 * omega_ph_ev**2)
-    dd_minus = -chi_of(omega - omega_ph_ev[None, :]) * prefac[None, :]
-    dd_plus = -chi_of(omega + omega_ph_ev[None, :]) * prefac[None, :]
-    return dd_minus, dd_plus, prefac
+    om = omega_ph_ev[None, None, None, :]  # (1, 1, 1, nu)
+    deps = eps_kq[:, :, None, None] - eps_k[:, None, :, None]  # (nk, m, n, 1)
+    if np.any(np.abs(deps**2 - om**2) == 0.0):
+        raise ValueError(
+            "one-shot Born hot-band kernel is undefined on resonance "
+            "(deps^2 == Omega_nu^2); detune the controlled model"
+        )
+    dn = n_bose_kq[:, :, None, None] - n_bose_k[:, None, :, None]  # (nk, m, n, 1)
+    s_ker = dn * deps / (om * (deps**2 - om**2))  # (nk, m, n, nu)
+    w_ker = 2.0 * om * (-dn) / (deps**2 - om**2) ** 2  # (nk, m, n, nu)
+    g2 = (g * np.conj(g))[:, :, :, :, None]  # (nk, m, n, nu, 1)
+    nw = omega.size
+    omega_c = omega.reshape(1, 1, 1, 1, nw)
+    deps5 = deps[:, :, :, None, :]  # (nk, m, n, 1, nu)
+    om5 = omega_ph_ev[None, None, :, None]  # (1, 1, nu, 1)
+    # bare +-Omega_nu double poles (branch-diagonal), shape (1,1,nu,nw)
+    d_pole = (
+        1.0 / (omega_c - om5 + 1j * eta) ** 2 + 1.0 / (omega_c + om5 + 1j * eta) ** 2
+    )  # (1, 1, nu, nw)
+    # one hot-band pole per channel at omega = deps_k: the reversed
+    # channel k' = k + q of a full momentum mesh carries deps_k' = -deps_k
+    # and supplies the -deps_k pole, so no second term is added here
+    h_pole = 1.0 / (omega_c - deps5 + 1j * eta)  # (nk, m, n, 1, nw)
+    weighted = (
+        g2
+        * weights[:, None, None, None, None]
+        * (s_ker[:, :, :, :, None] * d_pole + w_ker[:, :, :, :, None] * h_pole)
+    )  # (nk, m, n, nu, nw)
+    delta_d = np.einsum("kmnuw->wu", weighted, optimize=True)
+    return delta_d
 
 
 @dataclass(frozen=True)
@@ -371,9 +391,12 @@ class _ScatteringMixin:
             "phonon_mesh_weights": request.phonon_mesh_weights.copy(),
             "static_tadpole_excluded": True,
             "phonon_kernel_status": (
-                "hot-band structure (poles at +-Omega_nu -+ deps) identified "
-                "against exact Fock Lehmann; closed-form prefactor derivation "
-                "not yet certified - phonon certification test is xfail"
+                "certified: closed-form hot-band prefactor (S poles at "
+                "+-Omega_nu, W hot-band poles at +-deps, T=0 exact "
+                "vanishing, KMS-odd coordinate channel) asserted against "
+                "the truncated-Fock Lehmann intermediate-state sum in "
+                "docs/sympy/born_scattering_spectra and against the "
+                "ring-model reference with truncation convergence"
             ),
             "tadpole_note": (
                 "the thermal <a^dag a> contraction of the vertex is the "
@@ -479,7 +502,7 @@ class _ScatteringMixin:
             nb_k = bose_occupation(eps_k, request.temperature_K)
             nb_kq = bose_occupation(eps_kq, request.temperature_K)
             bare = thz_to_ev(np.asarray(phonon.frequencies_thz, dtype=float))
-            dd_m, dd_p, _ = phonon_hot_band_kernel(
+            delta_d = phonon_hot_band_kernel(
                 g,
                 eps_k,
                 eps_kq,
@@ -490,9 +513,9 @@ class _ScatteringMixin:
                 omega,
                 eta,
             )
-            pi = (dd_m + dd_p)[:, :, None] * np.eye(bare.size)[
-                None, None
-            ]  # additive coordinate-channel correction, branch-diagonal
+            pi = (
+                delta_d[:, :, None] * np.eye(bare.size)[None, None]
+            )  # additive coordinate-channel correction, branch-diagonal
             d0 = _oscillator_bare(bare[None], omega, eta)
             pi_g = d0.copy()
             for i_nu in range(pi.shape[-1]):

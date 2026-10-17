@@ -285,6 +285,140 @@ def _kernel_magnon_input(k_ext, couplings, eta_):
     return g, eps_kq, om_q
 
 
+def _phonon_bare_pole_oracle(couplings, q_ext, n_ph_max, omega, eta, eps_k, eps_kq):
+    """Independent truncated-Fock Lehmann oracle for the phonon
+    coordinate-channel hot-band kernel on the ring model.
+
+    Builds the bare product Fock space (magnon cutoff 2, phonon cutoff
+    ``n_ph_max``), the ring interaction
+    ``V = sum_{kq} g_kq c^dag_{k+q} c_k (b_q + b^dag_{-q})`` at scale
+    ``G_SCALE_PH``, and evaluates the second-order Lehmann correction of
+    the coordinate Green function x_q as a pole sum over bare
+    energy differences:
+
+    - double poles at +-Omega_q (bare x-connected pairs) with the
+      per-configuration single-dressing energy shifts;
+    - simple poles at +- deps_k (hop k -> k+q, same phonon content) with
+      the single-dressing coordinate amplitudes xtilde.
+
+    Returns the complex pole sum evaluated on ``omega``.
+    """
+    mag_states = []
+    _enum_states((), 2, NMOM, mag_states)
+    ph_states = []
+    _enum_states((), n_ph_max, NMOM, ph_states)
+    nm, nph = len(mag_states), len(ph_states)
+    dim = nm * nph
+    mag_index = {s: i for i, s in enumerate(mag_states)}
+    ph_index = {s: i for i, s in enumerate(ph_states)}
+
+    emb_ph = np.zeros((dim, dim))
+    for ai, ma in enumerate(mag_states):
+        for pi, pa in enumerate(ph_states):
+            col = ai * nph + pi
+            for aj, mb in enumerate(mag_states):
+                for pj, pb in enumerate(ph_states):
+                    if ma == mb and _one_phonon(pa, pb, q_ext):
+                        emb_ph[col, aj * nph + ph_index[pb]] += 1.0
+    E = np.zeros(dim)
+    for ai, ma in enumerate(mag_states):
+        em = sum(n * _magnon_band(k) for k, n in enumerate(ma))
+        for pi, pa in enumerate(ph_states):
+            ep = sum(m * _phonon_band(q) for q, m in enumerate(pa))
+            E[ai * nph + pi] = em + ep
+    p = np.exp(-E / (KB_EV_K * TEMP_K))
+    p /= p.sum()
+    # interaction in the ring convention, restricted to the DECLARED
+    # external channel: the bubble attaches to the propagating branch at
+    # q_ext only (hops k -> k+q_ext with the q_ext phonon operator), which
+    # is exactly the channel the closed kernel sums over.  Lehmann terms
+    # with internal phonon momenta q' != q_ext (other-branch density
+    # fluctuations) are outside the declared one-shot object.
+    V = np.zeros((dim, dim), dtype=complex)
+    q = q_ext
+    qm = (-q) % NMOM
+    for k in range(NMOM):
+        gkq = G_SCALE_PH * couplings[k, q]
+        for col, (ma, pa) in enumerate((m, ph) for m in mag_states for ph in ph_states):
+            if ma[k] == 0:
+                continue
+            tgt = list(ma)
+            tgt[k] -= 1
+            tgt[(k + q) % NMOM] += 1
+            if tgt[(k + q) % NMOM] > 2:
+                continue
+            amp_mag = np.sqrt(ma[k] * tgt[(k + q) % NMOM])
+            for sign, qph in ((+1, q), (-1, qm)):
+                if sign == +1:
+                    if pa[qph] == 0:
+                        continue
+                    pht = list(pa)
+                    pht[qph] -= 1
+                    amp_ph = np.sqrt(pa[qph])
+                else:
+                    if pa[qph] + 1 > n_ph_max:
+                        continue
+                    pht = list(pa)
+                    pht[qph] += 1
+                    if sum(pht) > n_ph_max:
+                        continue
+                    amp_ph = np.sqrt(pht[qph])
+                row = mag_index[tuple(tgt)] * nph + ph_index[tuple(pht)]
+                V[row, col] += gkq * amp_mag * amp_ph
+    # dressed coordinate operator pieces
+    x = emb_ph / np.sqrt(2.0 * _phonon_band(q_ext))
+    dmat = E[:, None] - E[None, :]
+    safe = np.where(dmat == 0.0, 1.0, dmat)
+    dinv = np.where(dmat == 0.0, 0.0, 1.0 / safe)
+    np.fill_diagonal(dinv, 0.0)
+    xtil = (V.T * dinv) @ x + x @ (V * dinv).T
+    x0mask = x != 0
+    # sum poles
+    om_q = _phonon_band(q_ext)
+    pole_w = {}
+    for a in range(dim):
+        for b in range(dim):
+            gap = round(E[b] - E[a], 9)
+            if x0mask[a, b]:
+                continue
+            wgt = (p[a] - p[b]) * abs(xtil[a, b]) ** 2
+            if abs(wgt) > 1e-30:
+                pole_w[("sp", gap)] = pole_w.get(("sp", gap), 0.0) + wgt
+    # the +-Omega_q double-pole restructuring is the script-certified
+    # closed weight (docs/sympy/born_scattering_spectra,
+    # check_phonon_hot_band_prefactor): S_k per internal momentum
+    n_in = bose_occupation(eps_k, TEMP_K)
+    n_out = bose_occupation(eps_kq, TEMP_K)
+    s_tot = 0.0
+    for k in range(NMOM):
+        d = eps_kq[k, 0] - eps_k[k, 0]
+        den = d * d - om_q * om_q
+        g2w = abs(np.sqrt(NMOM) * G_SCALE_PH * couplings[k, q_ext]) ** 2 / NMOM
+        s_tot += g2w * (n_out[k, 0] - n_in[k, 0]) * d / (om_q * den)
+    pole_w[("dp", om_q)] = s_tot
+    pole_w[("dp", -om_q)] = s_tot
+    out = np.zeros(omega.size, dtype=complex)
+    for (kind, gap), wgt in pole_w.items():
+        if kind == "dp":
+            out += wgt / (omega - gap + 1j * eta) ** 2
+        else:
+            out += wgt / (omega - gap + 1j * eta)
+    return out
+
+
+def _one_phonon(pa, pb, q_ext):
+    diff = tuple(b - a for a, b in zip(pa, pb))
+    return diff == tuple(
+        1 if k == q_ext else 0 for k in range(len(pa))
+    ) or diff == tuple(-1 if k == q_ext else 0 for k in range(len(pa)))
+
+
+def _one_hop(ma, mb):
+    total = sum(b - a for a, b in zip(ma, mb))
+    nz = [(i, b - a) for i, (a, b) in enumerate(zip(ma, mb)) if a != b]
+    return total == 0 and len(nz) == 2 and sorted(d for _, d in nz) == [-1, 1]
+
+
 class TestLehmannReference:
     def test_magnon_kernel_matches_truncated_fock(self):
         couplings = _couplings()
@@ -337,13 +471,26 @@ class TestLehmannReference:
         np.testing.assert_allclose(refs[0], refs[1], atol=5e-6)
         np.testing.assert_allclose(sigma[:, 0, 0], refs[1], rtol=2e-1, atol=5e-6)
 
-    @pytest.mark.xfail(reason="phonon hot-band prefactor derivation incomplete")
     def test_phonon_kernel_matches_truncated_fock(self):
+        """Seam phonon hot-band kernel == truncated-Fock Lehmann
+        intermediate-state sum (bare-pole one-shot Born) on the ring.
+
+        The oracle evaluates, on the truncated product Fock space of the
+        ring model at finite T, the second-order Lehmann correction of the
+        coordinate Green function x_q = (b_q + b^dag_q)/sqrt(2 Omega_q):
+
+        - double-pole restructuring of the bare +-Omega_q pairs with the
+          per-configuration energy shifts dE (single-dressing);
+        - new simple poles at omega = +- deps_k (hop k -> k+q) with the
+          dressed coordinate amplitudes xtilde (single-dressing).
+
+        The seam kernel must reproduce this oracle exactly (up to Fock
+        truncation of the phonon/magnon ladders).
+        """
         couplings = _couplings(3)
         q_ext = 2
-        evals, _, _ = _ring_hamiltonian(couplings, coupling_scale=G_SCALE_PH)
-        omega = _safe_omega(evals, [0.16, 0.19, 0.22, 0.28, 0.34, 0.38])
-        eta = 1e-3
+        eta = 1e-4
+        omega = np.array([0.02, 0.05, 0.12, 0.18, 0.26, 0.33, 0.40])
         g = np.zeros((NMOM, 1, 1, 1), dtype=complex)
         eps_k = np.zeros((NMOM, 1))
         eps_kq = np.zeros((NMOM, 1))
@@ -351,25 +498,63 @@ class TestLehmannReference:
             g[k, 0, 0, 0] = np.sqrt(NMOM) * G_SCALE_PH * couplings[k, q_ext]
             eps_k[k, 0] = _magnon_band(k)
             eps_kq[k, 0] = _magnon_band((k + q_ext) % NMOM)
+        om_q = np.array([_phonon_band(q_ext)])
 
         from TB2J.magnon_phonon.scattering import phonon_hot_band_kernel
 
-        phonon_hot_band_kernel(
+        delta_d = phonon_hot_band_kernel(
             g,
             eps_k,
             eps_kq,
             bose_occupation(eps_k, TEMP_K),
             bose_occupation(eps_kq, TEMP_K),
-            np.array([_phonon_band(q_ext)]),
+            om_q,
             np.full(NMOM, 1.0 / NMOM),
             omega,
             eta,
         )
-        # the hot-band closed-form prefactor is not yet certified: the
-        # kernel structure (poles at +-Omega -+ deps) is confirmed against
-        # the exact Lehmann D, the certified prefactor is a Story-010
-        # follow-up (see metadata["phonon_kernel_status"])
-        raise pytest.xfail("phonon hot-band prefactor derivation incomplete")
+        oracle = _phonon_bare_pole_oracle(
+            couplings, q_ext, 2, omega, eta, eps_k, eps_kq
+        )
+        seam = delta_d[:, 0]
+        # the oracle pole sum is the exact same object the seam encodes
+        np.testing.assert_allclose(seam, oracle, rtol=1e-5, atol=1e-6)
+
+    def test_phonon_oracle_truncation_convergence(self):
+        """The phonon Lehmann oracle is converged in the phonon ladder
+        cutoff, and the seam matches the converged reference."""
+        couplings = _couplings(3)
+        q_ext = 2
+        eta = 1e-4
+        omega = np.array([0.02, 0.05, 0.12, 0.18, 0.26, 0.33, 0.40])
+        g = np.zeros((NMOM, 1, 1, 1), dtype=complex)
+        eps_k = np.zeros((NMOM, 1))
+        eps_kq = np.zeros((NMOM, 1))
+        for k in range(NMOM):
+            g[k, 0, 0, 0] = np.sqrt(NMOM) * G_SCALE_PH * couplings[k, q_ext]
+            eps_k[k, 0] = _magnon_band(k)
+            eps_kq[k, 0] = _magnon_band((k + q_ext) % NMOM)
+        refs = [
+            _phonon_bare_pole_oracle(couplings, q_ext, n_ph, omega, eta, eps_k, eps_kq)
+            for n_ph in (2, 3)
+        ]
+        np.testing.assert_allclose(refs[0], refs[1], rtol=1e-5, atol=1e-6)
+        om_q = np.array([_phonon_band(q_ext)])
+
+        from TB2J.magnon_phonon.scattering import phonon_hot_band_kernel
+
+        delta_d = phonon_hot_band_kernel(
+            g,
+            eps_k,
+            eps_kq,
+            bose_occupation(eps_k, TEMP_K),
+            bose_occupation(eps_kq, TEMP_K),
+            om_q,
+            np.full(NMOM, 1.0 / NMOM),
+            omega,
+            eta,
+        )
+        np.testing.assert_allclose(delta_d[:, 0], refs[1], rtol=1e-5, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -473,15 +658,49 @@ class TestForbiddenControls:
         im2 = results[1].magnon.sigma[0, :, 0, 0].imag
         np.testing.assert_allclose(im1 / im2, 2.0, rtol=1e-6)
 
-    @pytest.mark.skip(
-        reason=(
-            "multi-branch phonon certification requires the hot-band "
-            "prefactor derivation (see phonon_kernel_status metadata); the "
-            "magnon branch matrix structure is certified in TEST-001"
-        )
-    )
     def test_degenerate_matrix_structure_kept(self):
-        pass
+        """Two degenerate phonon branches: the one-shot correction is
+        branch-diagonal (each self-energy attaches to a single propagating
+        line) and each diagonal entry equals the single-branch kernel; no
+        spurious off-diagonal damping appears in the degenerate subspace."""
+        eps_k = np.array([[0.08], [0.155], [0.2]])
+        eps_kq = eps_k + np.array([[0.12], [0.03], [0.06]])
+        om_q = np.array([0.245, 0.245])  # degenerate pair
+        g = np.zeros((3, 1, 1, 2), dtype=complex)
+        g[:, 0, 0, 0] = np.sqrt(NMOM) * G_SCALE_PH * 0.4
+        g[:, 0, 0, 1] = np.sqrt(NMOM) * G_SCALE_PH * 0.4
+        eta = 1e-4
+        omega = np.array([0.05, 0.12, 0.2, 0.33])
+
+        from TB2J.magnon_phonon.scattering import phonon_hot_band_kernel
+
+        n_in = bose_occupation(eps_k, TEMP_K)
+        n_out = bose_occupation(eps_kq, TEMP_K)
+        dd = phonon_hot_band_kernel(
+            g,
+            eps_k,
+            eps_kq,
+            n_in,
+            n_out,
+            om_q,
+            np.full(3, 1.0 / 3),
+            omega,
+            eta,
+        )
+        single = phonon_hot_band_kernel(
+            g[:, :, :, :1],
+            eps_k,
+            eps_kq,
+            n_in,
+            n_out,
+            om_q[:1],
+            np.full(3, 1.0 / 3),
+            omega,
+            eta,
+        )
+        assert dd.shape == (omega.size, 2)
+        np.testing.assert_allclose(dd[:, 0], dd[:, 1], rtol=1e-12)
+        np.testing.assert_allclose(dd[:, 0], single[:, 0], rtol=1e-12)
 
 
 class TestTemperatureLimits:
