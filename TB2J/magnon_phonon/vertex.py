@@ -341,22 +341,28 @@ class MagnonPhononModel:
             if provenance.get("mode") != bonds.mode:
                 raise ValueError("phonon mode identity does not match S002 report mode")
             cart, zpa = _projected_mode_zero_point(phonon, int(mode_index))
+            O = np.array(bonds.O_pattern, dtype=complex)
             if bonds.polarization is not None:
-                polarization = np.asarray(bonds.polarization, dtype=complex)
+                polarization = np.array(bonds.polarization, dtype=complex)
                 if polarization.shape != cart.shape:
                     raise ValueError(
                         "report polarization shape does not match phonon mode"
                     )
                 polarization /= np.linalg.norm(polarization)
-                if abs(np.vdot(polarization.reshape(-1), cart.reshape(-1))) < 1 - 1e-6:
+                overlap = np.vdot(polarization.reshape(-1), cart.reshape(-1))
+                if abs(overlap) < 1 - 1e-6:
                     raise ValueError(
                         f"report polarization does not match phonon mode {mode_index}"
                     )
+                # O_pattern is the derivative along the REPORT's polarization;
+                # the requested mode direction is cart = overlap * P_report
+                # (linear directional derivative), so rotate the pattern rows.
+                O = O * overlap
             return PatternBondDerivatives(
                 i=np.asarray(bonds.i, dtype=int),
                 j=np.asarray(bonds.j, dtype=int),
                 R=np.asarray(bonds.R, dtype=int),
-                dJ_pattern=(np.asarray(bonds.O_pattern, dtype=complex) * zpa)[:, None],
+                dJ_pattern=(O * zpa)[:, None],
                 q=q,
             )
         if bonds.convention == "pattern_projected":

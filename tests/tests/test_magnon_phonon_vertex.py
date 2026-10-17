@@ -14,12 +14,15 @@ import json
 import numpy as np
 import pytest
 
+from TB2J.magnon.eigenstates import SiteBosonDiagnostics, SiteBosonModes
 from TB2J.magnon.magnon3 import Magnon
 from TB2J.magnon_phonon.loaders import as_phonon_mode_input, load_matched_rows
 from TB2J.magnon_phonon.vertex import (
     MagnonPhononModel,
+    ModeProjectedDerivatives,
     OrientedBondDerivatives,
     PhononModeInput,
+    _projected_mode_zero_point,
     _zero_point_amplitudes,
 )
 
@@ -213,8 +216,7 @@ class MechanicalReference:
                 )
         return out / self.NCELL
 
-    def vertex(self, k, q, disp, h):
-        kp, mk, mkp = (k + q) % 1, (-k) % 1, (-(k + q)) % 1
+    def _delta_m1(self, q, disp, h):
         dcos = (
             self.modulated_M1(q, disp, +h, "cos")
             - self.modulated_M1(q, disp, -h, "cos")
@@ -223,7 +225,11 @@ class MechanicalReference:
             self.modulated_M1(q, disp, +h, "sin")
             - self.modulated_M1(q, disp, -h, "sin")
         ) / (2 * h)
-        dM1 = dcos + 1j * dsin
+        return dcos + 1j * dsin
+
+    def vertex(self, k, q, disp, h):
+        kp, mk, mkp = (k + q) % 1, (-k) % 1, (-(k + q)) % 1
+        dM1 = self._delta_m1(q, disp, h)
         M_kp_k = self.bloch2(dM1, kp, k)
         M_mk_mkp = self.bloch2(dM1, mk, mkp)
         T = {p: _colpa(self.static_hessian(p))[0] for p in (kp, k, mk, mkp)}
@@ -239,6 +245,27 @@ class MechanicalReference:
                         val += np.conj(w_mk[nu, ci]) * M_mk_mkp[ci, cj] * w_mkp[mu, cj]
                 g[mu, nu] = val
         return g
+
+    def mixed_blocks(self, k, q, disp, h):
+        """Independent projections of the modulated bilinear at (k+q, -(k+q)).
+
+        Returns ``(g_allowed, cross_uw, cross_wu)``: the number-conserving
+        ``gamma^dag_{k+q} gamma_k`` projection (identical to :meth:`vertex`)
+        and the u-w / w-u cross contractions at the conjugate pairing
+        ``(k+q, -(k+q))``, i.e. the would-be bilinear mixing block that the
+        scalar collinear coupling must not generate.
+        """
+        kp, mkp = (k + q) % 1, (-(k + q)) % 1
+        dM1 = self._delta_m1(q, disp, h)
+        M = self.bloch2(dM1, kp, mkp)
+        T_kp = _colpa(self.static_hessian(kp))[0]
+        T_mkp = _colpa(self.static_hessian(mkp))[0]
+        u_kp, w_kp = T_kp[:NSITES, :NSITES].T, T_kp[NSITES:, :NSITES].T
+        u_mkp, w_mkp = T_mkp[:NSITES, :NSITES].T, T_mkp[NSITES:, :NSITES].T
+        allowed = self.vertex(k, q, disp, h)
+        cross_uw = np.conj(u_kp) @ M @ np.conj(w_mkp).T
+        cross_wu = np.conj(w_kp) @ M @ np.conj(u_mkp).T
+        return allowed, cross_uw, cross_wu
 
 
 # --------------------------------------------------------------------------
@@ -317,24 +344,6 @@ def test_noncollinear_reference_is_rejected():
         model.vertex(
             (0.2, 0.0, 0.0), (0.0, 0.0, 0.0), phonon_modes=_phonon_input((0, 0, 0), vec)
         )
-
-
-def test_scalar_collinear_forbidden_block_is_zero_in_reference():
-    # the mechanical real-space reference contains no linear-in-boson piece:
-    # the modulated bilinear at (k+q, k) must be reproduced with no residual
-    # magnon-number-violating block, i.e. g is exactly the a^dag a projection.
-    magnon = _spring_magnon()
-    vec, masses, zpa = _pattern()
-    q = 1 / 3
-    rows = _pattern_rows(q, vec, zpa)
-    model = MagnonPhononModel(magnon, _bonds_container(q, rows))
-    result = model.vertex(
-        (1 / 6, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=_phonon_input((q, 0, 0), vec)
-    )
-    reference = MechanicalReference().vertex(1 / 6, q, vec * zpa, 1e-4)
-    # any forbidden mixing would appear as a component orthogonal to the
-    # mechanical a^dag a projection
-    np.testing.assert_allclose(result.g[:, :, 0], reference, atol=1e-8)
 
 
 # --------------------------------------------------------------------------
@@ -947,3 +956,288 @@ def test_injected_modes_must_match_queried_points():
             phonon_modes=_phonon_input((q, 0, 0), vec),
             site_boson_modes=modes,
         )
+
+
+# --------------------------------------------------------------------------
+# Round-1 review fixes
+# --------------------------------------------------------------------------
+def _unit_cartesian(phonon, mode_index=0):
+    masses = np.asarray(phonon.masses_amu, dtype=float)
+    cart = (
+        np.asarray(phonon.eigenvectors[:, mode_index], dtype=complex).reshape(
+            len(masses), 3
+        )
+        / np.sqrt(masses)[:, None]
+    )
+    return cart / np.linalg.norm(cart)
+
+
+def _mode_projected_container(q, phonon, phase=0.0):
+    """ModeProjectedDerivatives whose report polarization is e^{i phase} * cart."""
+    cart = _unit_cartesian(phonon)
+    polarization = np.exp(1j * phase) * cart
+    # O_pattern is the fully pattern-projected derivative (Bloch phase on the
+    # j endpoint) along the report polarization, per Angstrom; the zero-point
+    # factor is applied exactly once by the vertex module.
+    O = np.zeros(len(BONDS), dtype=complex)
+    for bi, (i, j, R, j0, beta) in enumerate(BONDS):
+        di, dj = _dJ_endpoint(bi)
+        O[bi] = (
+            (
+                di * polarization[i, 0]
+                + np.exp(2j * np.pi * q * R) * dj * polarization[j, 0]
+            )
+            * SPINS[i]
+            * SPINS[j]
+        )
+    return ModeProjectedDerivatives(
+        q=np.array([q, 0.0, 0.0]),
+        mode="m0",
+        mode_index=0,
+        polarization=polarization,
+        i=np.array([b[0] for b in BONDS], dtype=int),
+        j=np.array([b[1] for b in BONDS], dtype=int),
+        R=np.array([(b[2], 0, 0) for b in BONDS], dtype=int),
+        O_pattern=O,
+        FD_pattern=O,
+        mode_evidence_sha256="fixture-sha",
+    )
+
+
+def _provenanced_phonon(q, vec):
+    phonon = _phonon_input((q, 0.0, 0.0), vec)
+    return PhononModeInput(
+        q=phonon.q,
+        frequencies_thz=phonon.frequencies_thz,
+        masses_amu=phonon.masses_amu,
+        eigenvectors=phonon.eigenvectors,
+        provenance={"mode": "m0", "mode_evidence_sha256": "fixture-sha"},
+    )
+
+
+def test_mode_projected_join_applies_report_polarization_phase():
+    # STD-001: a report polarization that equals the phonon Cartesian mode up
+    # to a global phase must join with the measured relative phase applied to
+    # O_pattern; the vertex must equal the phase-free report's vertex.
+    magnon = _spring_magnon()
+    vec, masses, zpa = _pattern()
+    q = 1 / 3
+    k = 1 / 6
+    phonon = _provenanced_phonon(q, vec)
+    g_plain = (
+        MagnonPhononModel(magnon, _mode_projected_container(q, phonon, 0.0))
+        .vertex((k, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=phonon, mode_index=0)
+        .g
+    )
+    g_rotated = (
+        MagnonPhononModel(magnon, _mode_projected_container(q, phonon, phase=0.7))
+        .vertex((k, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=phonon, mode_index=0)
+        .g
+    )
+    np.testing.assert_allclose(g_rotated, g_plain, atol=1e-12)
+    # the joined rows are physically correct: the same springs contracted with
+    # the module's own Cartesian pattern (Bloch phase on the j endpoint)
+    # reproduce the joined vertex, and match the mechanical reference driven
+    # by the same displacement field
+    cart, zpa_eff = _projected_mode_zero_point(phonon, 0)
+    rows_expected = np.zeros(len(BONDS), dtype=complex)
+    for bi, (i, j, R, j0, beta) in enumerate(BONDS):
+        di, dj = _dJ_endpoint(bi)
+        rows_expected[bi] = (
+            zpa_eff
+            * (di * cart[i, 0] + np.exp(2j * np.pi * q * R) * dj * cart[j, 0])
+            * SPINS[i]
+            * SPINS[j]
+        )
+    g_expected = (
+        MagnonPhononModel(magnon, _bonds_container(q, rows_expected[:, None]))
+        .vertex((k, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=phonon)
+        .g
+    )
+    np.testing.assert_allclose(g_plain, g_expected, atol=1e-10)
+    reference = MechanicalReference().vertex(k, q, cart[:, 0] * zpa_eff, 1e-4)
+    np.testing.assert_allclose(g_expected[:, :, 0], reference, atol=1e-8)
+    assert np.max(np.abs(g_plain)) > 1e-9
+
+
+def test_scalar_collinear_forbidden_block_is_zero_in_reference():
+    # SPEC-001: independently assert the forbidden bilinear mixing block of the
+    # mechanical reference is zero — distinct from re-comparing the allowed
+    # a^dag a projection, which must itself be nonzero for the control to bite.
+    magnon = _spring_magnon()
+    vec, masses, zpa = _pattern()
+    q = 1 / 3
+    k = 1 / 6
+    rows = _pattern_rows(q, vec, zpa)
+    model = MagnonPhononModel(magnon, _bonds_container(q, rows))
+    result = model.vertex(
+        (k, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=_phonon_input((q, 0, 0), vec)
+    )
+    reference = MechanicalReference()
+    g_allowed, cross_uw, cross_wu = reference.mixed_blocks(k, q, vec * zpa, 1e-4)
+    np.testing.assert_allclose(result.g[:, :, 0], g_allowed, atol=1e-8)
+    # the allowed a^dag a projection is nonvanishing (nonvacuous control) ...
+    assert np.max(np.abs(g_allowed)) > 1e-9
+    # ... while the u-w / w-u cross contractions at the conjugate pairing
+    # (k+q, -(k+q)) — the would-be bilinear mixing block — vanish identically
+    # for the scalar collinear coupling.
+    np.testing.assert_allclose(cross_uw, 0.0, atol=1e-12)
+    np.testing.assert_allclose(cross_wu, 0.0, atol=1e-12)
+    # structurally: the collinear spring reference has no hole amplitudes
+    folded = np.array(
+        [[(k + q) % 1, 0, 0], [k % 1, 0, 0], [(q - k) % 1, 0, 0], [(-k) % 1, 0, 0]]
+    )
+    modes = magnon.get_site_boson_modes(folded)
+    assert np.max(np.abs(modes.v)) < 1e-12
+
+
+def _degenerate_anomalous_magnon():
+    """Two decoupled copies of the anisotropic two-site chain: degenerate
+    bands with nonzero hole (v) amplitudes."""
+    Rlist = np.array(
+        [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 0), (1, 0, 0), (-1, 0, 0)], dtype=int
+    )
+    JR = np.zeros((6, 4, 4, 3, 3))
+    for ir, off in ((0, 0), (3, 2)):
+        i, j = off, off + 1
+        JR[ir, i, i] = np.diag([-2.0, -1.0, 0.0]) * SPINS[0] ** 2
+        JR[ir, j, j] = np.diag([-2.0, -1.0, 0.0]) * SPINS[1] ** 2
+        JR[ir + 1, i, j] = np.eye(3) * 0.4 * SPINS[0] * SPINS[1]
+        JR[ir + 2, j, i] = np.eye(3) * 0.4 * SPINS[0] * SPINS[1]
+    mags = np.zeros((4, 3))
+    mags[0, 2] = mags[2, 2] = 2.0 * SPINS[0]
+    mags[1, 2] = mags[3, 2] = 2.0 * SPINS[1]
+    magnon = Magnon(
+        nspin=4,
+        magmom=mags,
+        Rlist=Rlist,
+        JR=JR,
+        cell=np.diag([2.4, 10, 10]),
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0.0, 1.0]]),
+        _n=np.array([0.0, 1.0, 0.0]),
+    )
+    magnon.set_reference(
+        np.zeros(3), np.array([[0.0, 0.0, 1.0]]), np.array([0.0, 1.0, 0.0])
+    )
+    return magnon
+
+
+@pytest.mark.parametrize("k,q", [(1 / 6, 1 / 3), (1 / 4, 1 / 4)])
+def test_degenerate_subspace_with_hole_amplitudes_rephasing(k, q):
+    # SPEC-002: degenerate-magnon-subspace covariance/invariance must also hold
+    # when the hole (v) amplitudes are nonzero.
+    magnon = _degenerate_anomalous_magnon()
+    vec, masses, zpa = _pattern()
+    rng = np.random.default_rng(5)
+    rows = _synthetic_rows(rng, 1)
+    model = MagnonPhononModel(magnon, _bonds_container(q, rows))
+    phonon = _phonon_input((q, 0, 0), vec)
+    folded = np.array(
+        [
+            [(k + q) % 1, 0, 0],
+            [k % 1, 0, 0],
+            [(-(k + q)) % 1, 0, 0],
+            [(-k) % 1, 0, 0],
+        ]
+    )
+    modes = magnon.get_site_boson_modes(folded)
+    sorted_e = np.sort(modes.energies, axis=1)
+    assert np.allclose(sorted_e[:, 0], sorted_e[:, 1])
+    assert np.allclose(sorted_e[:, 2], sorted_e[:, 3])
+    assert np.max(np.abs(modes.v)) > 0.05, "hole amplitudes must be nonzero"
+    g0 = model.vertex(
+        (k, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=phonon, site_boson_modes=modes
+    ).g[:, :, 0]
+
+    rng = np.random.default_rng(11)
+    thetas = []
+    for _ in range(4):
+        blocks = []
+        for _ in range(2):
+            raw = rng.normal(size=(2, 2)) + 1j * rng.normal(size=(2, 2))
+            qmat, _ = np.linalg.qr(raw)
+            blocks.append(qmat)
+        thetas.append(
+            np.block([[blocks[0], np.zeros((2, 2))], [np.zeros((2, 2)), blocks[1]]])
+        )
+    # rephase with the partner pairing matched to the folded order
+    # [k+q, k, -(k+q), -k]: v(p) -> Theta_{-p} v(p)
+    u = modes.u.copy()
+    v = modes.v.copy()
+    partner = {0: 2, 1: 3, 2: 0, 3: 1}
+    for ik in range(4):
+        u[ik] = thetas[ik].conj() @ u[ik]
+        v[ik] = thetas[partner[ik]] @ v[ik]
+    rephased = SiteBosonModes(
+        kpoints=modes.kpoints,
+        energies=modes.energies,
+        u=u,
+        v=v,
+        paraunitary=modes.paraunitary,
+        spin_lengths=modes.spin_lengths,
+        U=modes.U,
+        V=modes.V,
+        diagnostics=modes.diagnostics,
+        is_zero_mode=modes.is_zero_mode,
+    )
+    g1 = model.vertex(
+        (k, 0.0, 0.0),
+        (q, 0.0, 0.0),
+        phonon_modes=phonon,
+        site_boson_modes=rephased,
+    ).g[:, :, 0]
+    np.testing.assert_allclose(g1, thetas[0] @ g0 @ thetas[1].conj().T, atol=1e-10)
+    res0 = np.linalg.eigvalsh(g0 @ g0.conj().T)
+    res1 = np.linalg.eigvalsh(g1 @ g1.conj().T)
+    np.testing.assert_allclose(res1, res0, atol=1e-10)
+
+
+def test_records_and_vertex_do_not_mutate_caller_arrays():
+    # STD-002: read-only records must own their arrays; the finite-q join must
+    # normalize a copy of the report polarization.
+    magnon = _spring_magnon()
+    folded = np.array([[0.5, 0, 0], [1 / 6, 0, 0], [0.5, 0, 0], [1 / 6, 0, 0]])
+    base = magnon.get_site_boson_modes(folded)
+    kwargs = dict(
+        kpoints=base.kpoints.copy(),
+        energies=base.energies.copy(),
+        u=base.u.copy(),
+        v=base.v.copy(),
+        paraunitary=base.paraunitary.copy(),
+        spin_lengths=base.spin_lengths.copy(),
+        U=base.U.copy(),
+        V=base.V.copy(),
+        diagnostics=SiteBosonDiagnostics(
+            min_eig=np.ones(4),
+            stability_tol=np.ones(4) * 1e-8,
+            symmetry_residual=np.zeros(4),
+            shift=np.zeros(4),
+            cholesky_tier=np.zeros(4, dtype=int),
+        ),
+        is_zero_mode=base.is_zero_mode.copy(),
+    )
+    diag_kwargs = kwargs.pop("diagnostics")
+    sentinels = {name: val.copy() for name, val in kwargs.items()}
+    record = SiteBosonModes(diagnostics=diag_kwargs, **kwargs)
+    for name, arr in kwargs.items():
+        assert arr.flags.writeable, f"caller array {name} was made read-only"
+        np.testing.assert_array_equal(arr, sentinels[name])
+        assert not getattr(record, name).flags.writeable
+
+    diag = record.diagnostics
+    for name in ("min_eig", "stability_tol", "symmetry_residual", "shift"):
+        assert not getattr(diag, name).flags.writeable
+
+    # vertex join: complex report polarization must not be normalized in place
+    vec, masses, zpa = _pattern()
+    q = 1 / 3
+    phonon = _provenanced_phonon(q, vec)
+    container = _mode_projected_container(q, phonon, phase=0.4)
+    polarization_before = container.polarization.copy()
+    assert container.polarization.flags.writeable
+    MagnonPhononModel(magnon, container).vertex(
+        (1 / 6, 0.0, 0.0), (q, 0.0, 0.0), phonon_modes=phonon, mode_index=0
+    )
+    assert container.polarization.flags.writeable
+    np.testing.assert_array_equal(container.polarization, polarization_before)

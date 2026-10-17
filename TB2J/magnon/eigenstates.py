@@ -23,7 +23,9 @@ def _jsonable(value):
 
 
 def _readonly_array(value, dtype):
-    array = np.asarray(value, dtype=dtype)
+    # copy: the record must own its arrays; never flip the writeable flag on a
+    # caller-supplied buffer
+    array = np.array(value, dtype=dtype)
     array.setflags(write=False)
     return array
 
@@ -53,9 +55,11 @@ class SiteBosonDiagnostics:
 class SiteBosonModes:
     """Canonical site-boson modes in the local-frame Holstein--Primakoff basis.
 
-    Arrays are read-only. In particular, ``u`` and ``v`` are views into the
-    positive-norm columns of ``paraunitary``; protecting both prevents callers
-    from changing amplitudes without changing the corresponding matrix.
+    Arrays are read-only. In particular, ``u`` and ``v`` are owned read-only
+    copies of the two row blocks of the positive-norm columns of
+    ``paraunitary``; protecting both prevents callers from changing amplitudes
+    without changing the corresponding matrix (and prevents ``__post_init__``
+    from mutating caller-supplied buffers).
 
     ``paraunitary`` has columns ordered as positive-norm particles followed by
     their negative-norm hole partners; its row order is ``(b(k), b†(-k))``.
