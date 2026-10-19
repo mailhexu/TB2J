@@ -9,8 +9,13 @@ contains no new physics: every number flows through
 Declared coverage (Phase 1 research, story-013 Technical Notes):
 
 - exchange derivatives: Story-001 six directed Cr1-Cr2 nearest-neighbour
-  bonds; finite-q mode-projected S002 reports at Gamma, K and M with all
-  elementwise FD gates passed;
+  bonds; finite-q mode-projected S002 reports from the s013 closing
+  campaign (generated ON the qualified relaxed s012-h005-3x reference with
+  its mode eigenvectors) at Gamma (3 blocks) and K (4 blocks), all
+  elementwise FD gates passed (reports/loader-gates.json); M=(1/2,0,0) is
+  declared incommensurate with the 3x supercell and is NOT covered (the
+  M coupled channel is absent and the bare-phonon M panel stays
+  qualified-dataset-free);
 - the CrI3 magnon model is the declared first-neighbour ferromagnet
   (J0 = 1.5292416 meV, Cr3+ S = 3/2) built from the same bond set;
 - coupled scattering blocks exist ONLY at hash-joined (q, mode) pairs whose
@@ -54,7 +59,8 @@ FREQUENCY_FACTOR_THZ = 15.633304239856194
 IR_CUTOFF_EV_PER_ANG2_AMU = 1.0e-3
 #: magnetic reference: Cr3+ moment (mu_B) of the SIESTA collinear FM reference
 CRI3_MOMENT_MUB = 3.0
-#: first-neighbour J0 of the declared magnon model (Story-001 det2 reference)
+#: first-neighbour J0 of the declared magnon model (Story-001 reference
+#: constant, unchanged across the closing-campaign source swap)
 CRI3_J0_MEV = 1.529241586
 #: Story-001 directed Cr1-Cr2 nearest-neighbour bond set (i, j, R)
 CRI3_BONDS = (
@@ -204,6 +210,10 @@ def load_cri3_blocks(
     ir_cutoff=IR_CUTOFF_EV_PER_ANG2_AMU,
 ):
     """Load every gate-passed, hash-joined covered (q, mode) block.
+
+    ``s002_store_path`` is the closing campaign's matched finite-q rows
+    report; every block is hash-verified against its mode-evidence file and
+    the sha-pinned closing modes table before it is accepted.
 
     ``mode_tables`` maps a modes-table sha256 to its JSON path (the tables
     referenced by the evidence ``modes_hash``).  Blocks whose table
@@ -695,12 +705,18 @@ def provenance_manifest(
 def _manifest_hash_references(manifest: dict):
     """Declared (label, path, expected_sha256) triples referenced by a manifest.
 
-    Covers the S002 store and the s012 qualification report (``path`` +
-    ``sha256`` fields) and every block's mode-evidence file (``evidence_path``
-    + ``evidence_sha256``).  The fixture is validated separately (required).
+    Covers the matched finite-q rows report, the closing-campaign
+    manifest/store and the s012 qualification report (``path`` + ``sha256``
+    fields) and every block's mode-evidence file (``evidence_path`` +
+    ``evidence_sha256``).  The fixture is validated separately (required).
     """
     references = []
-    for key in ("s002_store", "s012_qualification_report"):
+    for key in (
+        "s002_store",
+        "s013_closing_manifest",
+        "s013_closing_store",
+        "s012_qualification_report",
+    ):
         reference = manifest.get(key)
         if (
             isinstance(reference, dict)
@@ -722,8 +738,9 @@ def _manifest_hash_references(manifest: dict):
 
 def validate_manifest(manifest: dict, fixture_path) -> dict:
     """TEST-002 gate: every field non-empty, the fixture hash matches, and
-    every referenced file (S002 store, s012 qualification report, block
-    evidence) hashes to its recorded value when the file is present.
+    every referenced file (matched rows report, closing-campaign manifest
+    and store, s012 qualification report, block evidence) hashes to its
+    recorded value when the file is present.
 
     Referenced files that are absent are recorded as ``"unresolved"`` in
     ``manifest["reference_validation"]`` (also the returned dict); a present

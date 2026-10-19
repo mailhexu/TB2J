@@ -54,22 +54,13 @@ from TB2J.magnon_phonon.material import (  # noqa: E402
 VAULT = Path(
     "/home/hexu/projects/memnotes/memnotes/Projects/non-orthogonal-spin-lattice"
 )
-S002_STORE = VAULT / "evidence/s002/matched-finite-q-rows.json"
-S002_EVIDENCE_DIR = VAULT / "evidence"
-MODE_TABLES = {
-    # Gamma (det2) tables
-    "b07dd0323c1f7daa609abef631b3ca33dbf5244c929683157a6e33f685a04b94": VAULT
-    / "evidence/quick-task-cri3g-modes.json",
-    # M (det2) table
-    "8e544140601964a010b4367d5b7f3e3b88fb6a1dfd75b61215f1133b70d56298": VAULT
-    / "evidence/quick-task-cri3m-modes.json",
-    # K (det3) table
-    "ef1181f2ce00fccfce883b2101885ee5aa3f140227e8fa03db936627b59751d6": Path(
-        "/home/hexu/projects/TB2J_dev/unfold-epc/.tmp/kosmic/runs/"
-        "20261011T030709Z-unfold-epc-implementatio-70f13fa83e95e2a0752b771d05d32453"
-        "/scratch/cri3_modes.json"
-    ),
-}
+#: s013 closing campaign (S002 reports generated ON the qualified relaxed
+#: s012-h005-3x reference with its mode eigenvectors)
+CLOSING_DIR = Path("/STORAGE1/hexu/projects_bak/magnon_phonon_spectra/s013-closing")
+S002_STORE = CLOSING_DIR / "reports/s013-closing-matched-finite-q-rows.json"
+CLOSING_MANIFEST = CLOSING_DIR / "reports/manifest.json"
+CLOSING_MODES_TABLE_SHAS = CLOSING_DIR / "modes/modes-table-sha256.json"
+S002_EVIDENCE_DIR = CLOSING_DIR / "evidence"
 S012_CAMPAIGN = Path(
     "/STORAGE1/hexu/projects_bak/magnon_phonon_spectra/s012/campaigns/s012-h005-3x"
 )
@@ -95,17 +86,20 @@ PHONON_LOOP_MESHES = {
 FIXTURE_LABEL = "K:acoustic-like"
 
 
-def _complete_mode_tables():
-    """Resolve the Gamma ligand-strong table path by its content hash."""
-    import hashlib
+def load_mode_tables(shas_path=CLOSING_MODES_TABLE_SHAS):
+    """Resolve the closing modes-table paths from their sha256 pins.
 
-    target_prefix = "910b8a14"
-    for candidate in sorted((VAULT / "evidence").glob("quick-task-cri3g-*.json")):
-        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
-        if digest.startswith(target_prefix):
-            MODE_TABLES[digest] = candidate
-            return
-    raise FileNotFoundError("Gamma ligand-strong modes table not found in vault")
+    ``modes/modes-table-sha256.json`` binds Gamma/K to the table content
+    hashes the block evidence references; each table must hash to its pin.
+    """
+    pins = json.loads(Path(shas_path).read_text())
+    tables = {}
+    for point, digest in pins.items():
+        table_path = Path(shas_path).parent / f"modes-{point.lower()}.json"
+        if sha256_file(table_path) != digest:
+            raise ValueError(f"modes table hash mismatch for {table_path}")
+        tables[digest] = table_path
+    return tables
 
 
 def git_revision():
@@ -673,12 +667,12 @@ def main(argv=None):
     outdir.mkdir(parents=True, exist_ok=True)
     evidence_dir = Path(args.evidence_dir)
 
-    _complete_mode_tables()
+    mode_tables = load_mode_tables()
     settings = MaterialSettings(
         temperature_K=DEFAULT_TEMPERATURE_K,
         broadening_eV=DEFAULT_BROADENING_EV,
     )
-    blocks, skipped = load_cri3_blocks(S002_STORE, S002_EVIDENCE_DIR, MODE_TABLES)
+    blocks, skipped = load_cri3_blocks(S002_STORE, S002_EVIDENCE_DIR, mode_tables)
     magnon = cri3_magnon_model()
 
     print(f"covered blocks: {len(blocks)}; skipped by IR cutoff: {len(skipped)}")
@@ -716,15 +710,26 @@ def main(argv=None):
     fixture_path.parent.mkdir(parents=True, exist_ok=True)
     fixture_path.write_text(json.dumps(fixture_record, indent=1, sort_keys=True) + "\n")
 
+    closing_manifest = json.loads(CLOSING_MANIFEST.read_text())
     manifest_extra = {
         "code_revision": git_revision(),
         "s002_store": {
             "path": str(S002_STORE),
             "sha256": sha256_file(S002_STORE),
         },
+        "s013_closing_manifest": {
+            "path": str(CLOSING_MANIFEST),
+            "sha256": sha256_file(CLOSING_MANIFEST),
+        },
+        "s013_closing_store": {
+            "path": str(CLOSING_DIR / "campaigns/local-3x.store.nc"),
+            "sha256": closing_manifest["dataset_hashes_in"]["local-3x-store.nc"],
+        },
         "s012_qualification_report": {
             "path": str(S012_QUALIFICATION),
-            "sha256": sha256_file(S012_QUALIFICATION),
+            "sha256": closing_manifest["dataset_hashes_in"][
+                "qualification-report.json"
+            ],
         },
         "s012_campaign": {
             "path": str(S012_CAMPAIGN),
@@ -739,7 +744,12 @@ def main(argv=None):
             "j0_meV": 1.529241586,
             "moment_mu_b": 3.0,
             "bonds": "Story-001 six directed Cr1-Cr2 nearest-neighbour bonds",
-            "declaration": "first-neighbour only; longer-range exchange absent from qualified stores",
+            "declaration": (
+                "first-neighbour only; the declared magnon-model J0 is the "
+                "Story-001 reference constant and is unchanged in this "
+                "source swap (bare magnons are expected unchanged); the "
+                "closing store carries its own per-row J0_eV provenance"
+            ),
         },
         "phonon_qualified": {
             name: {
@@ -748,14 +758,24 @@ def main(argv=None):
             }
             for name in ("gamma", "K")
         },
-        "declaration": (
-            "bare qualified phonon provenance (s012-h005-3x) and coupled "
-            "vertex provenance (hash-locked det2/det3 mode evidence) are "
-            "kept strictly separate; the det phonon side is NOT the "
-            "qualified dataset (Story-012 noise-floor characterization); "
-            "the named obtainable campaign that removes this gap is an "
-            "S002 re-projection on the relaxed s012-h005-3x reference"
-        ),
+        "qualified_source": {
+            "statement": (
+                "ALL coupled blocks come from the s013 closing campaign: "
+                "S002 reports generated ON the qualified relaxed "
+                "s012-h005-3x reference WITH its mode eigenvectors — the "
+                "exact qualification the round-1 blocker demanded. Coverage "
+                "is Gamma (3 blocks) + K (4 blocks); M=(1/2,0,0) is declared "
+                "incommensurate with the 3x supercell and excluded, so the "
+                "bare-phonon M panel stays qualified-dataset-free and the M "
+                "external phonon channel is magnon-side only. Every block "
+                "passed the writer loader gates (expected_bonds = Story-001 "
+                "CRI3_BONDS; reports/loader-gates.json, 7/7 loaded)."
+            ),
+            "gates_table": str(CLOSING_DIR / "reports/loader-gates.json"),
+            "caveats": closing_manifest["caveats"],
+            "scf_deviations": closing_manifest["scf_deviations"],
+            "campaign_date": closing_manifest["date"],
+        },
     }
     write_numeric_artifacts(
         outdir,

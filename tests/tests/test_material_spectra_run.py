@@ -31,6 +31,7 @@ from TB2J.magnon_phonon.material import (
     bare_magnon_dispersion,
     block_from_fixture,
     cri3_magnon_model,
+    load_cri3_blocks,
     provenance_manifest,
     run_coupled_spectra,
     sha256_file,
@@ -117,7 +118,71 @@ def test_fixture_schema():
     record = json.loads(FIXTURE.read_text())
     assert record["schema"] == FIXTURE_SCHEMA
     assert record["block"]["mode"] == "acoustic-like"
-    assert record["block"]["evidence_sha256"].startswith("0aa53788")
+    assert record["block"]["evidence_sha256"].startswith("7409fa10")
+
+
+CLOSING_REPORT = Path(
+    "/STORAGE1/hexu/projects_bak/magnon_phonon_spectra/s013-closing"
+    "/reports/s013-closing-matched-finite-q-rows.json"
+)
+
+
+@pytest.fixture(scope="module")
+def closing_blocks():
+    """load_cri3_blocks on the real s013 closing campaign (skipped when the
+    bulk storage is not mounted)."""
+    if not CLOSING_REPORT.exists():
+        pytest.skip("s013 closing campaign not mounted")
+    script = _script()
+    mode_tables = script.load_mode_tables()
+    blocks, skipped = load_cri3_blocks(
+        script.S002_STORE, script.S002_EVIDENCE_DIR, mode_tables
+    )
+    return blocks, skipped
+
+
+def test_loader_closes_on_real_closing_campaign(closing_blocks):
+    """The coverage path consumes ONLY the closing campaign: 7 hash-joined
+    blocks (Gamma 3 + K 4), each matching reports/loader-gates.json; M is
+    absent (declared incommensurate)."""
+    from TB2J.magnon_phonon.loaders import load_s002_report
+    from TB2J.magnon_phonon.material import CRI3_BONDS
+
+    blocks, skipped = closing_blocks
+    assert skipped == []
+    assert len(blocks) == 7
+    labels = {b.label for b in blocks}
+    assert sum(label.startswith("Gamma:") for label in labels) == 3
+    assert sum(label.startswith("K:") for label in labels) == 4
+    assert not any(":M" in label or label.startswith("M") for label in labels)
+    gates = json.loads((CLOSING_REPORT.parent / "loader-gates.json").read_text())
+    assert set(gates) == labels
+    for block in blocks:
+        gate = gates[block.label]
+        assert gate["loaded"] is True
+        assert gate["mode_index"] == block.mode_index
+        assert gate["q"] == block.q.tolist()
+        assert gate["max_fd_error_meV_per_Ang"] == pytest.approx(
+            block.max_fd_error_meV_per_Ang, rel=1e-12
+        )
+        # independent re-load through the raw loader with the real bond set
+        reloaded = load_s002_report(
+            CLOSING_REPORT,
+            campaign=block.campaign_key,
+            mode=block.mode,
+            expected_bonds=CRI3_BONDS,
+            mode_evidence_path=Path(block.evidence_path),
+        )
+        assert np.array_equal(reloaded.O_pattern, block.derivatives.O_pattern)
+        assert np.array_equal(reloaded.FD_pattern, block.derivatives.FD_pattern)
+    # modes-table sha pins bind every block to the closing tables
+    pins = json.loads(
+        Path(
+            "/STORAGE1/hexu/projects_bak/magnon_phonon_spectra/s013-closing"
+            "/modes/modes-table-sha256.json"
+        ).read_text()
+    )
+    assert {b.modes_table_sha256 for b in blocks} <= set(pins.values())
 
 
 def test_test001_rerun_numeric_reproducibility():
