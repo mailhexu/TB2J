@@ -189,6 +189,13 @@ Omitting the argument preserves the existing environment/metadata selection.
 The inherited inverse condition limit remains ``1e12``; this argument does
 not introduce regularization or a pseudoinverse fallback.
 
+The shared exchange output identifies its dataset instead of assuming a
+producer: ``gen_exchange_projector_netcdf`` and ``write_projector_exchange_out``
+derive descriptions from the validated ``source_code`` and ``operator_basis``.
+The NetCDF entry derives component-error source labels from ``source_code`` only.
+ABACUS NC-UPF datasets are reported as ABACUS, genuine GPAW datasets keep their
+GPAW attribution, and absent producer provenance uses neutral wording.
+
 For in-memory use (no NetCDF round-trip), ``gen_exchange_gpaw`` takes a converged
 GPAW calculator directly.  It defaults to ``delta_xc`` for no-U calculations
 and to ``delta_total`` for supported collinear GPAW +U calculations.

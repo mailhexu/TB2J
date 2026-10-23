@@ -926,6 +926,38 @@ def compute_projector_exchange_jdict(
     return exchange_Jdict
 
 
+def _projector_source_label(data):
+    """Error-source label derived from validated dataset producer metadata."""
+    producer = str((data.metadata or {}).get("source_code") or "").strip()
+    if producer:
+        return f"{producer.upper()} NetCDF"
+    return "projector NetCDF"
+
+
+def _projector_workflow_description(data, component_name=None):
+    """Producer/basis description derived from validated dataset metadata.
+
+    The producer comes from the dataset ``source_code`` provenance and the
+    basis from the validated ``operator_basis``; missing provenance yields
+    neutral wording instead of a fabricated producer or basis.
+    """
+    metadata = data.metadata or {}
+    producer = str(metadata.get("source_code") or "").strip()
+    basis = str(data.operator_basis or "").strip()
+    phrases = [f"{producer.upper()} projections" if producer else "dataset projectors"]
+    if component_name is not None:
+        phrases.append(f"operator component {component_name}")
+    else:
+        phrases.append("dataset operator")
+    phrases.append(f"operator basis {basis}" if basis else "dataset operator basis")
+    return (
+        "Projector Green workflow using "
+        + " and ".join(phrases)
+        + ". Values are from the controlled projector exchange-like trace, "
+        "not yet a production benchmark.\n"
+    )
+
+
 def write_projector_exchange_out(
     data,
     path="TB2J_results",
@@ -1004,11 +1036,7 @@ def write_projector_exchange_out(
     exchange_Jdict = filtered_exchange_Jdict
 
     if description is None:
-        description = (
-            "Projector Green workflow using GPAW PAW projections and native dH_asp "
-            "as H_ij. Values are from the controlled projector exchange-like trace, "
-            "not yet a production PAW MFT benchmark.\n"
-        )
+        description = _projector_workflow_description(data)
     output = SpinIO(
         atoms=atoms,
         charges=charges,
@@ -1067,14 +1095,9 @@ def gen_exchange_projector_netcdf(
             data,
             component_name,
             sites or list(range(len(data.site_nproj))),
-            "GPAW NetCDF",
+            _projector_source_label(data),
         )
-        description = (
-            "Projector Green workflow using GPAW PAW projections and operator "
-            f"component {component_name} in basis {data.operator_basis}. Values are "
-            "from the controlled projector exchange-like trace, not yet a "
-            "production PAW MFT benchmark.\n"
-        )
+        description = _projector_workflow_description(data, component_name)
     return write_projector_exchange_out(
         data,
         path=output_path,

@@ -5,6 +5,11 @@
 - The common collinear projector-NetCDF exchange interface accepts an explicit
   `overlap_mode`; explicit inverse selection takes precedence over
   `TB2J_GREEN_MODE`, while callers omitting the argument retain prior behavior.
+- Shared projector-NetCDF exchange descriptions now use validated producer and
+  operator-basis metadata (`source_code`, `operator_basis`); component-error
+  source labels use `source_code` only. ABACUS NC-UPF results no longer claim
+  GPAW PAW projections; genuine GPAW attribution is preserved and absent producer
+  provenance uses neutral wording. Exchange numerics are unchanged.
 - SIESTA spiral certified exports now bind AC-009 to the complete derivative
   records (`seam_payload_sha256` for dH/dR+dS/dR and
   `derivative_payload_sha256` for dV/dR), including geometry, units, gauges

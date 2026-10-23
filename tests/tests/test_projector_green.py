@@ -1812,3 +1812,209 @@ def test_real_abinit_nc_pao_fixture_exchange_smoke(tmp_path):
         raise
     assert exchange_out.is_file()
     assert jdict
+
+
+# ---------------------------------------------------------------------------
+# Story 007: producer/basis attribution of the shared projector NetCDF
+# exchange seam. The standard-output description and missing-component errors
+# must follow the validated dataset metadata: truthful for ABACUS NC-UPF and
+# genuine GPAW datasets, neutral when provenance is absent. Attribution may
+# not change exchange numerics, so every case compares the exchange against
+# the lower-level in-memory computation on the same dataset/settings. The
+# serialized SpinIO description is inspected (not the whole exchange.out,
+# whose Executed line embeds invocation paths).
+# ---------------------------------------------------------------------------
+
+
+def _projector_exchange_controls():
+    return dict(
+        Rpts=[(-1, 0, 0), (1, 0, 0)],
+        nz=12,
+        operator_component="delta_total",
+        overlap_mode="inverse",
+    )
+
+
+def make_abacus_nc_upf_exchange_data():
+    """Canonical fixture carrying ABACUS NC-UPF atomic-projector provenance.
+
+    The ``data.metadata`` mirror must stay consistent with the dataclass
+    fields: the common reader resolves these values from ``metadata_json``.
+    """
+    data = make_nc_pao_exchange_data()
+    data.occupations[1, 0] = [0.2, 0.0]
+    data.coefficient_source = "abacus.nc_upf_atomic"
+    data.coefficient_projector = "nc_upf_atomic"
+    data.channel_interpretation = "norm_conserving_pao"
+    data.operator_basis = "abacus_nc_upf_atomic"
+    for component_metadata in data.operator_component_metadata.values():
+        component_metadata["source"] = "abacus.nc_upf_atomic"
+        component_metadata["operator_basis"] = "abacus_nc_upf_atomic"
+    data.metadata["source_code"] = "abacus"
+    data.metadata["projector_basis_type"] = "nc_upf_atomic"
+    data.metadata["coefficient_source"] = data.coefficient_source
+    data.metadata["coefficient_projector"] = data.coefficient_projector
+    data.metadata["channel_interpretation"] = data.channel_interpretation
+    data.metadata["operator_basis"] = data.operator_basis
+    return data
+
+
+def make_gpaw_paw_netcdf_exchange_data():
+    """Canonical fixture with GPAW-model PAW provenance metadata.
+
+    The provenance mirrors a genuine ``save_gpaw_projector_netcdf`` export
+    (metadata only); the physical arrays stay the canonical synthetic fixture.
+    """
+    data = make_nc_pao_exchange_data()
+    data.occupations[1, 0] = [0.2, 0.0]
+    data.coefficient_source = "gpaw.P_ani"
+    data.coefficient_projector = "dual_paw_projector"
+    data.channel_interpretation = "paw_partial_wave_channel"
+    data.operator_basis = "native_paw_projector_hamiltonian"
+    for component_metadata in data.operator_component_metadata.values():
+        component_metadata["source"] = "GPAW hamiltonian.xc.calculate_paw_correction"
+        component_metadata["operator_basis"] = "native_paw_projector_hamiltonian"
+    data.metadata["source"] = "GPAW PAW projector workflow"
+    data.metadata["source_code"] = "gpaw"
+    data.metadata["projector_basis_type"] = "paw"
+    data.metadata["coefficient_source"] = data.coefficient_source
+    data.metadata["coefficient_projector"] = data.coefficient_projector
+    data.metadata["channel_interpretation"] = data.channel_interpretation
+    data.metadata["operator_basis"] = data.operator_basis
+    return data
+
+
+def make_unattributed_projector_exchange_data():
+    """Canonical fixture with all producer/basis provenance removed."""
+    data = make_nc_pao_exchange_data()
+    data.occupations[1, 0] = [0.2, 0.0]
+    data.coefficient_source = None
+    data.coefficient_projector = None
+    data.channel_interpretation = None
+    data.operator_basis = None
+    for component_metadata in data.operator_component_metadata.values():
+        component_metadata.pop("source", None)
+        component_metadata.pop("operator_basis", None)
+    for key in (
+        "source_code",
+        "coefficient_source",
+        "coefficient_projector",
+        "channel_interpretation",
+        "operator_basis",
+        "projector_basis_type",
+    ):
+        data.metadata.pop(key, None)
+    return data
+
+
+_PROJECTOR_PROVENANCE_FIXTURES = {
+    "abacus": make_abacus_nc_upf_exchange_data,
+    "gpaw": make_gpaw_paw_netcdf_exchange_data,
+    "unattributed": make_unattributed_projector_exchange_data,
+}
+
+_PROJECTOR_PROVENANCE_FORBIDDEN = {
+    "abacus": ("gpaw",),
+    "gpaw": ("abacus",),
+    "unattributed": ("gpaw", "abacus", "abinit"),
+}
+
+
+def _save_and_run_projector_exchange(data, tmp_path):
+    from TB2J.interfaces.gpaw_projector import gen_exchange_projector_netcdf
+
+    filename = tmp_path / "tb2j_projector.nc"
+    data.save_netcdf(filename)
+    controls = _projector_exchange_controls()
+    reference = compute_projector_exchange_jdict(data, **controls)
+    exchange_out, actual = gen_exchange_projector_netcdf(
+        filename, output_path=tmp_path / "TB2J_results", **controls
+    )
+    return exchange_out, actual, reference
+
+
+def _assert_exchange_matches_reference(actual, reference):
+    assert set(actual) == set(reference)
+    for pair, value in reference.items():
+        assert actual[pair] == pytest.approx(value, rel=1e-12)
+
+
+def _read_serialized_exchange_description(output_path):
+    """Read the SpinIO description serialized with the exchange output."""
+    from TB2J.io_exchange.io_exchange import SpinIO
+
+    return SpinIO.load_pickle(path=str(output_path)).description
+
+
+def _assert_dataset_attribution(text, data, fixture_name):
+    _assert_producer_attribution(text, data, fixture_name)
+    if fixture_name != "unattributed":
+        assert str(data.operator_basis) in text.lower()
+
+
+def _assert_producer_attribution(text, data, fixture_name):
+    """Producer-only attribution check for missing-component errors.
+
+    AC-02 requires the error to name the validated producer or stay neutral;
+    it does not require a basis claim in errors.
+    """
+    for producer in _PROJECTOR_PROVENANCE_FORBIDDEN[fixture_name]:
+        assert producer not in text.lower()
+    if fixture_name != "unattributed":
+        assert data.metadata["source_code"] in text.lower()
+
+
+@pytest.mark.parametrize("fixture_name", ["abacus", "gpaw", "unattributed"])
+def test_projector_exchange_output_attribution_follows_dataset_provenance(
+    tmp_path, fixture_name
+):
+    pytest.importorskip("netCDF4")
+    data = _PROJECTOR_PROVENANCE_FIXTURES[fixture_name]()
+    exchange_out, actual, reference = _save_and_run_projector_exchange(data, tmp_path)
+    _assert_exchange_matches_reference(actual, reference)
+    description = _read_serialized_exchange_description(exchange_out.parent)
+    _assert_dataset_attribution(description, data, fixture_name)
+
+
+@pytest.mark.parametrize("fixture_name", ["abacus", "gpaw", "unattributed"])
+def test_projector_missing_component_error_attribution_follows_provenance(
+    tmp_path, fixture_name
+):
+    from TB2J.interfaces.gpaw_projector import gen_exchange_projector_netcdf
+
+    pytest.importorskip("netCDF4")
+    data = _PROJECTOR_PROVENANCE_FIXTURES[fixture_name]()
+    filename = tmp_path / "tb2j_projector.nc"
+    data.save_netcdf(filename)
+    controls = {
+        key: value
+        for key, value in _projector_exchange_controls().items()
+        if key != "operator_component"
+    }
+    with pytest.raises(ValueError) as excinfo:
+        gen_exchange_projector_netcdf(
+            filename,
+            output_path=tmp_path / "TB2J_results_missing",
+            operator_component="delta_hubbard",
+            **controls,
+        )
+    message = str(excinfo.value)
+    assert "delta_hubbard" in message.lower()
+    _assert_producer_attribution(message, data, fixture_name)
+
+
+@pytest.mark.parametrize("fixture_name", ["abacus", "gpaw", "unattributed"])
+def test_projector_exchange_default_description_follows_dataset_provenance(
+    tmp_path, fixture_name
+):
+    from TB2J.interfaces.gpaw_projector import write_projector_exchange_out
+
+    data = _PROJECTOR_PROVENANCE_FIXTURES[fixture_name]()
+    exchange_out, jdict = write_projector_exchange_out(
+        data,
+        path=tmp_path / "TB2J_results_default",
+        **_projector_exchange_controls(),
+    )
+    description = _read_serialized_exchange_description(exchange_out.parent)
+    _assert_dataset_attribution(description, data, fixture_name)
+    assert jdict
