@@ -37,6 +37,7 @@ dependencies = [
     "HamiltonIO>=0.3.8",
     "pre-commit",
     "sympair>=0.1.4",
+    "spglib>=2.5",
     "supercellmap",
     "tomli>=2.0.0",
     "tomli-w>=1.0.0",

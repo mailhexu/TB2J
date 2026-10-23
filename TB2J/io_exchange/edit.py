@@ -815,10 +815,11 @@ def remove_sublattice(spinio, sublattice_name):
 
 def symmetrize_exchange(spinio, atoms, symprec=1e-3):
     """
-    Symmetrize isotropic exchange based on a provided atomic structure.
+    Symmetrize the exchange tensors based on a provided atomic structure.
 
     The symmetry is detected from the provided atomic structure using spglib.
-    Exchange parameters for symmetry-equivalent atom pairs are averaged.
+    The exchange tensors (isotropic exchange, DMI and anisotropic exchange)
+    of symmetry-equivalent atom pairs are averaged.
 
     Parameters
     ----------
@@ -832,8 +833,9 @@ def symmetrize_exchange(spinio, atoms, symprec=1e-3):
 
     Notes
     -----
-    - Only isotropic exchange (exchange_Jdict) is modified.
-    - DMI and anisotropic exchange are unchanged.
+    - The isotropic exchange (exchange_Jdict), the DMI and the anisotropic
+      exchange are symmetrized.
+    - The single-ion anisotropy and the spin structure are unchanged.
     - The spinio.atoms structure is NOT modified; only exchange values change.
     - Atoms are mapped between input and SpinIO structures by species and position.
 

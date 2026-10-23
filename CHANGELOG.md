@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The exchange symmetrizer now runs on one shared space-group /
+  magnetic-space-group engine (`TB2J/symmetry_core.py`), which detects the
+  symmetry operations with spglib (rotations *and* translations) and owns the
+  site maps, the bond images, the orbit finding and the pair-tensor algebra.
+  `TB2J/symmetrize_J.py` keeps the projection, the single-ion anisotropy
+  symmetrization and the command line interface. The projection now acts on
+  the full pair tensor, so the isotropic exchange, the DMI and the anisotropic
+  exchange are symmetrized consistently and the symmetry-forbidden components
+  are zero by construction. `--magnetic` symmetrizes with the magnetic space
+  group built from the stored magnetic moments, and `--zero-tol` sets the
+  tolerance below which the symmetrized components are snapped to exactly
+  zero. `spglib>=2.5` is now a dependency of TB2J.
+  `TB2J_edit.py symmetrize` now rejects non-integer bond images with
+  `ValueError` instead of silently skipping those images; check the stored
+  structure, reference structure and symmetry tolerance when this occurs.
+
 - SIESTA spiral certified exports now bind AC-009 to the complete derivative
   records (`seam_payload_sha256` for dH/dR+dS/dR and
   `derivative_payload_sha256` for dV/dR), including geometry, units, gauges
