@@ -178,6 +178,36 @@ The CLI reads the NetCDF file, reconstructs ``G(R,E)`` at the continued-fraction
 energy points, contracts the controlled projector trace, and writes the standard
 TB2J text output ``exchange.out``.
 
+ABACUS plane-wave atomic projectors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For canonical ABACUS PW UPF atomic-projector NetCDF data, use the dedicated
+consumer command, not the existing ABACUS LCAO command:
+
+.. code-block:: bash
+
+   abacus_projector2J.py --input abacus_projector_green.nc \
+       --output_path TB2J_results --elements Fe --Rcut 10.0 --nz 30 --smearing 0.05
+
+This command uses the unchanged common reader and exchange engine, with
+``delta_total`` and explicit ``overlap_mode="inverse"``. ``TB2J_GREEN_MODE``
+cannot override that choice; there is no command-line overlap or operator
+selector. The inherited inverse condition limit is ``1e12``, with no
+pseudoinverse fallback. ``--index_magnetic_atoms`` uses 1-based atom indices.
+Distances are in Angstrom and ``--smearing`` is in eV.
+
+The shared writer produces ``exchange.out``, ``TB2J.pickle``,
+``structure.vasp``, ``Multibinit/``, ``TomASD/``, ``Vampire/``, ``ESPInS/`` and
+``JvsR.pdf`` through ``SpinIO.write_all()``. The generic Python API returns
+``(exchange_out, exchange_Jdict)``. ``abacus2J.py`` remains the separate,
+unchanged LCAO workflow.
+
+The dedicated consumer has been exercised on a canonical model with a
+nonidentity Gram matrix and conflicting environment selection. That check
+establishes consumer behavior only; it does not establish a native ABACUS
+producer or ABACUS-versus-ABINIT material agreement.
+
+
 Python API
 ----------
 

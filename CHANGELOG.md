@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `abacus_projector2J.py` for canonical ABACUS PW UPF atomic-projector
+  NetCDF data. It uses the existing common engine with `delta_total` and
+  explicit inverse overlap, writes the standard TB2J output tree, and leaves
+  `abacus2J.py` LCAO behavior unchanged. Canonical consumer verification is
+  distinct from native-producer and cross-code material validation.
 - The common collinear projector-NetCDF exchange interface accepts an explicit
   `overlap_mode`; explicit inverse selection takes precedence over
   `TB2J_GREEN_MODE`, while callers omitting the argument retain prior behavior.

@@ -2018,3 +2018,60 @@ def test_projector_exchange_default_description_follows_dataset_provenance(
     description = _read_serialized_exchange_description(exchange_out.parent)
     _assert_dataset_attribution(description, data, fixture_name)
     assert jdict
+
+
+def test_abacus_projector_command_uses_inverse_metric(tmp_path, monkeypatch):
+    """The dedicated command must ignore a conflicting legacy metric mode."""
+    import subprocess
+
+    from TB2J.io_exchange import SpinIO
+
+    pytest.importorskip("netCDF4")
+    data = make_abacus_nc_upf_exchange_data()
+    data.kpoints = np.array([[-1 / 3, 0, 0], [0, 0, 0], [1 / 3, 0, 0]])
+    data.weights = np.full(3, 1 / 3)
+    data.eigenvalues = np.repeat(data.eigenvalues, 3, axis=1)
+    data.occupations = np.repeat(data.occupations, 3, axis=1)
+    data.coefficients = np.repeat(data.coefficients, 3, axis=1)
+    data.coefficients *= np.array([0.8, 1.0, 1.2])[None, :, None, None]
+    data.overlap_k = np.repeat(data.overlap_k, 3, axis=0)
+    filename = tmp_path / "abacus-model.nc"
+    data.save_netcdf(filename)
+    output = tmp_path / "exchange"
+    controls = dict(
+        Rpts=[(-1, 0, 0), (0, 0, 0), (1, 0, 0)],
+        nz=12,
+        smearing_eV=0.05,
+        operator_component="delta_total",
+    )
+    inverse = compute_projector_exchange_jdict(data, overlap_mode="inverse", **controls)
+    plain = compute_projector_exchange_jdict(data, overlap_mode="plain", **controls)
+    key = ((1, 0, 0), 0, 0)
+    assert not np.isclose(inverse[key], plain[key], rtol=1e-3, atol=1e-10)
+    monkeypatch.setenv("TB2J_GREEN_MODE", "plain")
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "TB2J.scripts.abacus_projector2J",
+            "--input",
+            str(filename),
+            "--output_path",
+            str(output),
+            "--Rcut",
+            "3.01",
+            "--nz",
+            "12",
+            "--smearing",
+            "0.05",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = SpinIO.load_pickle(output)
+    expected = inverse
+    assert result.exchange_Jdict.keys() == expected.keys()
+    for pair, value in expected.items():
+        assert result.exchange_Jdict[pair] == pytest.approx(value, rel=1e-12)
+    _assert_dataset_attribution(result.description, data, "abacus")
