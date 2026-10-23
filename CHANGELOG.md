@@ -294,6 +294,18 @@ Unreleased
   and `split_soc_provenance.json` (schema 2.0, raw_rank_nine
   diagnostics, per-leg O maps with `O e_z = SAXIS`).
 
+### Non-orthogonal SIESTA spin-lattice coupling
+- **Fixed invalid exchange values from the CFR contour in the spin-lattice path.** The full-spectrum Green's function required by the exact pencil derivative keeps unoccupied poles above E_F; the finite-temperature CFR pole contour is only valid for windowed spectra and diverges with them present (bcc Fe benchmark: J_1 = -298.8 meV under CFR versus 18.7 meV semicircle and 17.6-18.2 meV for the standard windowed two-channel path, matching the archived SIESTA tutorial). The spin-lattice exchange now defaults to and enforces the semicircle (or legendre) contour with quadrature nodes moved off the real axis (``endpoint=False``; the on-axis nodes sit inside the occupied d-band complex near E_F and corrupt J and dJ/dx), and pins the user's ``emin`` instead of the per-model auto-gap so the contour stays identical between displaced finite-difference runs. Earlier bccFe certification numbers produced under CFR are retracted.
+
+- Added the SIESTA FC spin-lattice entrypoint and executable finite-difference comparison. Raw FC derivatives and sisl Hamiltonians are aligned to the same fixed reference-Fermi gauge.
+- Added explicit periodic image-summed response alongside the localized home-cell convention. Full-spectrum pencil inverses retain the virtual states required by `G(dH-z dS)G`.
+- Fixed localized magnetic-vertex derivatives at translated bond endpoints and included internal Green-function support beyond the output pair radius. Replaced the old duplicated-endpoint FD oracle with independent displaced-supercell exchange checks.
+- The bccFe examples record finite-difference errors and numerical convergence settings; pickle units are eV and eV/Angstrom, not meV.
+- Fixed cached spin-lattice initialization by reopening the stored eigenvector and overlap arrays before preparing scalar-spin views.
+- Streamed collinear k-space contractions and scalar-spin Fourier vertices avoid full doubled zero-spin arrays. Finite-difference sweeps retain only serialized per-bond data between reference/plus/minus solves.
+- Fixed the dense-mesh cached preparation peak: collinear eigensystems and overlaps now go directly into compact disk-backed spin blocks instead of allocating full spinor H/S/eigenvector k-stacks before spilling.
+- Validated the bccFe development case with declared rough convergence (5% +0.5 meV/Ang), unchanged strict independent-FD checks (1% +0.1 meV/Ang), and serialized cubic-axis symmetry. Precision convergence is explicitly not claimed.
+
 ### Packaging
 
 - `pypao` is now optional. Install `TB2J[pypao]` to declare the pypao

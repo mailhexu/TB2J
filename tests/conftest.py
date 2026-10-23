@@ -13,9 +13,16 @@ installed). ``tests/`` is placed on ``sys.path`` via ``pythonpath`` in
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
+
+# A paired worktree must use its sibling HamiltonIO before test imports,
+# rather than a possibly older editable installation from another workspace.
+_HIO = Path(__file__).resolve().parents[2] / "HamiltonIO"
+if (_HIO / "HamiltonIO" / "siesta" / "dhsdr.py").is_file():
+    sys.path.insert(0, str(_HIO))
 
 #: Root of the governed test-data submodule (TB2J_test_data).
 TESTS_DATA = Path(__file__).resolve().parent / "data"
