@@ -162,7 +162,7 @@ the abinit.in file is also fine if no fancy feature is used, like use of
 \*, or units. POSCAR files are recommended because they are simple. Note that 
 the file extension are used to identify the format, for example, Quantum ESPRESSO
 input should be name with \*.pwi) The supported file format are can be found on the list in:
-https://wiki.fysik.dtu.dk/ase/ase/io/io.html
+https://docs.ase-lib.org/ase/io/io.html
 
 (From version 0.6.2 this file is no more necessary as TB2J can read the atomic structures from 
 the Wannier90 .win file). The --posfile option will still be used by default if it is specified.)

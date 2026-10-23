@@ -48,7 +48,7 @@ Improved merge method for anisotropic exchange and DMI. (thanks to Andres Tellez
 #### v0.8.2 March 4, 2024
 TB2J can now read the "tb.dat" file instead of the "hr.dat"+"centers.xyz" files. 
 
-(>=0.8.2.2) Allow atom symbols+number format (e.g. Fe1, Fe2) in Wannier .win file, and in the --magnetic\_elements option. ([issue46](https://github.com/mailhexu/TB2J/issues/46#issue-2167665710))
+(>=0.8.2.2) Allow atom symbols+number format (e.g. Fe1, Fe2) in Wannier .win file, and in the --magnetic\_elements option. ([issue46](https://github.com/mailhexu/TB2J/issues/46))
 Allow synthetic atom in siesta (>=0.8.2.4).
 Print actual emin in non-collinear mode.  (0.8.2.5)
 Reduce memory usage by not computing density matrix from Green's function. (0.8.2.6)

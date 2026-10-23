@@ -10,11 +10,9 @@ Interface with Multibinit
 ------------------------------------------
 Here we show how to use MULTIBINIT, a
 second principles code which can do spin dynamics. It is a part of the
-`ABINIT <ABINIT>`_ package since version 9.0. The tutorial of the spin dynamics can be found
-on `MULTIBINIT tutorial page <MULTIBINIT>`_.
+`ABINIT <https://www.abinit.org/>`_ package since version 9.0. The tutorial of the spin dynamics can be found
+on `MULTIBINIT tutorial page <https://docs.abinit.org/tutorial/spin_model/>`_.
 
-.. _ABINIT: https://www.abinit.org
-.. _MULTIBINIT: https://docs.abinit.org/tutorial/spin_model
 
 Here we briefly describe how to run spin dynamics with MULTIBINIT from the TB2J outputs to with an example of BiFeO3. The example files can be found from the examples/Siesta/BiFeO3 directory.
 
