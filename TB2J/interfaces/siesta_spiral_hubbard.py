@@ -1453,7 +1453,6 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
             "HSX Hamiltonian and overlap sparse patterns differ; refusing "
             "to pair blocks positionally"
         )
-    norb_pa = no_l // g.na
     cell = np.asarray(g.cell) / BOHR_TO_ANG
     pos = np.asarray(g.xyz) / BOHR_TO_ANG
     sc_off = np.asarray(g.sc_off, dtype=int)
@@ -1478,8 +1477,11 @@ def _bundle_from_hs_geometry(hsx_sile, stdout_name, proj_name):
             overlap[key] = s_val
     orb_pos = np.zeros((no_l, 3))
     for ia in range(g.na):
+        # per-atom orbital ranges: bases may mix orbital counts per species
+        # (CrI3 DZP: Cr 19 / I 13), so no_l // na would misassign positions
         first = int(g.firsto[ia])
-        orb_pos[first : first + norb_pa] = pos[ia]
+        last = int(g.lasto[ia])
+        orb_pos[first : last + 1] = pos[ia]
     bundle = SpiralBundle(
         version=BUNDLE_VERSION,
         norb=no_l,

@@ -437,29 +437,21 @@ def run_ac009_validation(
 
     plus_bundle = _bundle_from_hs_geometry(plus_sile_b, "displaced_plus", "")
     minus_bundle = _bundle_from_hs_geometry(minus_sile_b, "displaced_minus", "")
-    reference_keys = set(bundle.sparse)
+    from TB2J.interfaces.siesta_spiral_displacement import (
+        complete_displaced_pair,
+        complete_to_keys,
+        validate_reference_pattern_drift,
+    )
+
+    plus_bundle, minus_bundle = complete_displaced_pair(plus_bundle, minus_bundle)
     for label, displaced_bundle in (
         ("+h", plus_bundle),
         ("-h", minus_bundle),
     ):
-        displaced_keys = set(displaced_bundle.sparse)
-        extras = sorted(displaced_keys - reference_keys)
-        missing = sorted(reference_keys - displaced_keys)
-        if extras or missing:
-            raise SparsePatternMismatch(
-                f"route (b): the {label} displaced HSX export does not have "
-                "exactly the reference bundle's sparse pattern: "
-                f"extra keys {extras}, missing keys {missing}. "
-                "assemble_onto_bundle requires exact coverage, so a "
-                "displaced pair must carry the same keys and no others; "
-                "regenerate the displaced export with the sparse pattern "
-                "of the reference bundle."
-            )
-    if set(plus_bundle.sparse) != set(minus_bundle.sparse):
-        raise SparsePatternMismatch(
-            "route (b): the +h and -h displaced HSX exports carry different "
-            "sparse patterns; matched displaced references are required"
-        )
+        validate_reference_pattern_drift(bundle, displaced_bundle, label)
+    union_keys = set(bundle.sparse) | set(plus_bundle.sparse)
+    plus_bundle = complete_to_keys(plus_bundle, union_keys)
+    minus_bundle = complete_to_keys(minus_bundle, union_keys)
     plus_vertex = extract_magnetic_vertex(plus_bundle, operator=operator)
     minus_vertex = extract_magnetic_vertex(minus_bundle, operator=operator)
     route_b_gauge = "periodic-image-sum"  # loader semantics: periodic SCF,

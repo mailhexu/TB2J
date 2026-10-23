@@ -479,9 +479,9 @@ def _patterned_sile(z_atom1_bohr, *, extra_keys=(), missing_keys=()):
 
 
 def test_extra_displaced_sparse_key_refused(synthetic_bundle):
-    """A displaced pair carrying an EXTRA sparse key is refused: route (b)
-    must match the reference bundle's pattern exactly, both directions,
-    the same contract assemble_onto_bundle enforces."""
+    """A displaced pair carrying an EXTRA sparse key with a non-negligible
+    overlap is refused: route (b) completes only numerical-zero drift, so a
+    genuinely different stored pattern still refuses."""
     from TB2J.interfaces.siesta_spiral_displacement import SparsePatternMismatch
 
     extra = (1, 0, (1, 0, 0))
@@ -495,13 +495,13 @@ def test_extra_displaced_sparse_key_refused(synthetic_bundle):
             reference_fermi_ev=-4.5,
         )
     msg = str(exc.value)
-    assert "extra keys" in msg and "route (b)" in msg
+    assert "route (b)" in msg and "non-negligible" in msg
     assert str(extra) in msg
 
 
 def test_missing_displaced_sparse_key_refused(synthetic_bundle):
-    """A displaced pair MISSING a reference sparse key is refused with the
-    missing keys named."""
+    """A displaced pair MISSING a reference key that carries a
+    non-negligible value is refused with the key named."""
     from TB2J.interfaces.siesta_spiral_displacement import SparsePatternMismatch
 
     missing = (0, 0, (1, 0, 0))
@@ -515,8 +515,49 @@ def test_missing_displaced_sparse_key_refused(synthetic_bundle):
             reference_fermi_ev=-4.5,
         )
     msg = str(exc.value)
-    assert "missing keys" in msg and "route (b)" in msg
+    assert "route (b)" in msg and "missing" in msg
     assert str(missing) in msg
+
+
+def test_cutoff_edge_zero_drift_completed_and_validated(synthetic_bundle):
+    """Numerical-zero pattern drift between displaced SCFs is completed
+    with exact zeros instead of refused (CrI3 campaign: 198 one-sided keys
+    with |H| <= 2e-10 and S = 0 at a 77 eV scale)."""
+
+    def drifting_sile(z_atom1_bohr, drift_keys):
+        h, s = {}, {}
+        for key, base in _EXT_H.items():
+            a = _EXT_ALPHA[key]
+            h[key] = tuple(
+                -(base[i] + a[i] * z_atom1_bohr * BOHR_TO_ANG)
+                if i == 3
+                else (base[i] + a[i] * z_atom1_bohr * BOHR_TO_ANG)
+                for i in range(4)
+            )
+            s[key] = (_EXT_S[key][0], 0.0, 0.0, 0.0)
+        for key in drift_keys:
+            h[key] = (1e-12, 1e-12, 0.0, 0.0)
+            s[key] = (0.0, 0.0, 0.0, 0.0)
+        return _FakeHsxFourComponent(
+            CELL,
+            ((0.0, 0.0, z_atom1_bohr), (0.0, 0.0, 3.0)),
+            ((0, 0, 0), (1, 0, 0), (-1, 0, 0)),
+            h,
+            s,
+            0.0,
+        )
+
+    plus_only = ((0, 1, (-1, 0, 0)),)
+    minus_only = ((1, 0, (1, 0, 0)),)
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=STEP_BOHR)
+    verdict = run_ac009_validation(
+        synthetic_bundle,
+        pattern,
+        plus_sile=drifting_sile(+STEP_BOHR, plus_only),
+        minus_sile=drifting_sile(-STEP_BOHR, minus_only),
+        reference_fermi_ev=-4.5,
+    )
+    assert verdict["status"] == "pass", verdict["max_deviation_ev_per_ang"]
 
 
 CAMPAIGN = Path(

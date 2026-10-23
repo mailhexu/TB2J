@@ -1012,3 +1012,50 @@ def test_five_col_layout_overlap_at_col4_passes():
     )
     bundle = _bundle_from_hs_geometry(sile, "synthetic", "")
     assert bundle.norb == 2
+
+
+def test_bundle_from_hs_geometry_assigns_positions_for_mixed_orbital_counts(
+    tmp_path,
+):
+    """Regression (Story 022, 2026-10-17): the loader once assumed a uniform
+    orbital count per atom (no_l // na), so mixed-basis geometries like CrI3
+    DZP (Cr 19 / I 13) left trailing orbitals at the origin and shifted the
+    position grouping. Every orbital must sit at its own atom's position."""
+    sisl = pytest.importorskip("sisl")
+    bohr = sisl.unit.siesta.unit_convert("Bohr", "Ang")
+    triple = sisl.Atom(
+        "O",
+        R=1.0,
+        orbitals=[
+            sisl.AtomicOrbital("2s"),
+            sisl.AtomicOrbital("2pz"),
+            sisl.AtomicOrbital("2px"),
+        ],
+    )
+    single = sisl.Atom("H", R=1.0)
+    xyz = np.array([[0.5, 0.2, 0.1], [2.0, 0.0, 0.0]]) * bohr
+    geometry = sisl.Geometry(
+        xyz,
+        atoms=[triple, single],
+        lattice=sisl.Lattice(np.eye(3) * 8.0 * bohr, nsc=[1, 1, 1]),
+    )
+    assert geometry.no == 4 and geometry.na == 2
+    hamiltonian = sisl.Hamiltonian(
+        geometry, spin="non-collinear", orthogonal=False, dtype=np.float64
+    )
+    for orbital in range(geometry.no):
+        hamiltonian[orbital, orbital, hamiltonian.M11] = -1.0
+        hamiltonian[orbital, orbital, hamiltonian.M22] = 1.0
+        hamiltonian.S[orbital, orbital] = 1.0
+    endpoint = tmp_path / "mixed.HSX"
+    hamiltonian.write(str(endpoint), version=2, dtype=np.float64)
+    bundle = _bundle_from_hs_geometry(
+        sisl.get_sile(str(endpoint)), stdout_name="mixed", proj_name=""
+    )
+    positions = np.asarray(bundle.orbital_positions)
+    expected = np.repeat(xyz / bohr, [3, 1], axis=0)
+    np.testing.assert_allclose(positions, expected, atol=1e-8)
+    from TB2J.interfaces.siesta_spiral_displacement import _atom_orbital_group
+
+    assert _atom_orbital_group(bundle, 1) == [0, 1, 2]
+    assert _atom_orbital_group(bundle, 2) == [3]

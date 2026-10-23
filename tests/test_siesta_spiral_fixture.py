@@ -16,6 +16,13 @@ from TB2J.interfaces.siesta_spiral_io import (
     run_eigenvalue_oracle,
     run_electron_count_oracle,
 )
+from TB2J.interfaces.siesta_spiral_response import (
+    FrozenResponseProblem,
+    SpiralResponseError,
+    occupied_band_energy,
+    pencil_gradient,
+)
+from TB2J.interfaces.siesta_spiral_vertex import extract_magnetic_vertex
 
 DATA = Path(__file__).parent / "siesta_spiral_fixtures" / "siesta_spiral_fe3.npz"
 
@@ -56,6 +63,53 @@ def test_cri3_real_producer_uses_scale_aware_pencil_oracle():
     assert eigenvalues.max_dev <= EIGENVALUE_TOL_EV
     electron_count = run_electron_count_oracle(bundle, reference)
     assert electron_count.passed, electron_count.detail
+
+
+def test_cri3_response_pencil_accepts_producer_h_hermiticity_defect():
+    bundle, reference = load_fixture(DATA.with_name("siesta_spiral_cri3.npz"))
+    k = reference["kp"][0]
+    producer_h, producer_s = SpiralImporter().assemble_pencil(bundle, k)
+    h_defect = float(np.max(np.abs(producer_h - producer_h.conj().T)))
+    s_defect = float(np.max(np.abs(producer_s - producer_s.conj().T)))
+    assert HERMITICITY_TOL < h_defect < 1e-5
+    assert s_defect <= HERMITICITY_TOL
+
+    orbitals_by_site = {
+        "Cr1": range(0, 19),
+        "Cr2": range(19, 38),
+        "I1": range(38, 51),
+        "I2": range(51, 64),
+        "I3": range(64, 77),
+        "I4": range(77, 90),
+        "I5": range(90, 103),
+        "I6": range(103, 116),
+    }
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site=orbitals_by_site)
+    axes_by_site = {site: (("x", (1.0, 0.0, 0.0)),) for site in orbitals_by_site}
+    problem = FrozenResponseProblem(bundle, vertex, axes_by_site=axes_by_site)
+    response_h, response_s = problem.pencil(k)
+    occupied = int(reference["electron_count"])
+    assert np.isfinite(occupied_band_energy(response_h, response_s, occupied))
+    rotated_h, rotated_s = problem.rotated_pencil(k, {"Cr1": {"x": 0.1}})
+
+    rotated_h_defect = float(np.max(np.abs(rotated_h - rotated_h.conj().T)))
+    assert rotated_h_defect <= 1e-5
+
+    bad_h = response_h.copy()
+    bad_h[0, 0] += 2.0e-5j
+    with pytest.raises(SpiralResponseError, match="not Hermitian"):
+        occupied_band_energy(bad_h, response_s, occupied)
+    bad_s = response_s.copy()
+    bad_s[0, 0] += 2.0e-8j
+    with pytest.raises(SpiralResponseError, match="not Hermitian"):
+        occupied_band_energy(response_h, bad_s, occupied)
+    bad_vertex = problem.vertex_pencil(k, ("Cr1", "x"))
+    bad_vertex[0, 0] += 2.0e-8j
+    with pytest.raises(SpiralResponseError, match="not Hermitian"):
+        pencil_gradient(response_h, response_s, bad_vertex, occupied)
+    np.testing.assert_array_equal(response_h, producer_h)
+    np.testing.assert_array_equal(response_s, producer_s)
+    np.testing.assert_array_equal(rotated_s, producer_s)
 
 
 def test_occupation_count_matches_real_producer(producer):

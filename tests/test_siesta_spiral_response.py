@@ -288,6 +288,78 @@ def test_engine_contour_identity_within_approved_budget():
         assert abs(response - c_response) <= RESPONSE_IDENTITY_TOL_EV, pair
 
 
+def test_engine_identity_gate_bounds_asymmetric_hermitian_defect():
+    """User-approved 1e-6 eV identity budget (Story 022, 2026-10-16).
+
+    A pencil whose Hermiticity defect slightly exceeds the historical 1e-8
+    eV response-matrix tolerance but stays within the Story-022 producer-H
+    allowance (1e-5 eV) is accepted by evaluate_response_set, while the
+    same defect pushed above 1e-6 eV of contour/eigenbasis mismatch is
+    still refused. The gate separates representation-induced mismatch
+    (accepted below budget) from a genuinely inconsistent pencil.
+    """
+    bundle = _spinor_bundle()
+    vertex = extract_magnetic_vertex(bundle, orbitals_by_site={"A": [0], "B": [1]})
+    frames = {
+        "A": (("x", AXES["x"]), ("y", AXES["y"])),
+        "B": (("x", AXES["x"]), ("y", AXES["y"])),
+    }
+    problem = FrozenResponseProblem(bundle, vertex, axes_by_site=frames)
+    h, s = problem.pencil(0.0)
+    eig = eigh(h, s, eigvals_only=True)
+    ensemble = Ensemble(
+        ENSEMBLE_GAPPED_T0,
+        2,
+        2.0,
+        float(0.5 * (eig[1] + eig[2])),
+        0.0,
+        float(eig[2] - eig[1]),
+    )
+    contour = EnergyContour.declared(
+        z0=ensemble.fermi_energy_ev,
+        occupied_min=float(eig[0]),
+        gap_ev=ensemble.gap_ev,
+        margin_ev=0.4,
+        n_nodes=256,
+    )
+    coords = tuple((site, axis) for site in frames for axis in ("x", "y"))
+    original = problem._pencils
+
+    def _inject(perturbation):
+        broken = h.copy()
+        broken[0, 1] += perturbation
+        problem._pencils = {(0.0,): (broken, s, np.zeros_like(broken), {})}
+
+    try:
+        # small asymmetry: mismatch stays inside the 1e-6 eV budget
+        _inject(5.0e-8j)
+        response = evaluate_response_set(
+            problem,
+            ensemble=ensemble,
+            coords=coords,
+            kpoints=[0.0],
+            k_weights=[1.0],
+            contour=contour,
+            finite_steps=(),
+        )
+        assert 0.0 < response.contour_vs_band_max_abs <= RESPONSE_IDENTITY_TOL_EV
+
+        # gross asymmetry: mismatch exceeds the budget and the run refuses
+        _inject(1.0e-4j)
+        with pytest.raises(SpiralResponseError, match="identity mismatch"):
+            evaluate_response_set(
+                problem,
+                ensemble=ensemble,
+                coords=coords,
+                kpoints=[0.0],
+                k_weights=[1.0],
+                contour=contour,
+                finite_steps=(),
+            )
+    finally:
+        problem._pencils = original
+
+
 def test_engine_finite_rotation_convergence_orders():
     blocks, s_blocks, partition = _derivation_model()
     _, _, _, curvatures = _model_observables(blocks, s_blocks, partition)

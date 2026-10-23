@@ -70,6 +70,8 @@ from .siesta_spiral_vertex import (
     _source_bundle_digest,
 )
 
+# This absolute eV bound applies only to producer and rotated H(k) pencils.
+PRODUCER_H_PENCIL_HERMITICITY_TOL_EV = 1e-5
 RESPONSE_VERSION = "2.1"
 RESPONSE_CONVENTION = (
     "rotating_frame_frozen_response_operator_labeled: the vertex "
@@ -84,7 +86,7 @@ ENSEMBLE_GAPPED_T0 = "gapped_fixed_occupations"
 ENSEMBLE_METALLIC_FD = "metallic_fermi_dirac_fixed_n"
 TORQUE_BUDGET_EV_PER_RAD = 1e-3
 CURVATURE_BUDGET_EV_PER_RAD2 = 1e-3
-RESPONSE_IDENTITY_TOL_EV = 1e-8
+RESPONSE_IDENTITY_TOL_EV = 1e-6
 # Recorded producer band energies each carry the story-003 absolute budget.
 # A gap is a difference of two such energies.
 ENSEMBLE_GAP_TOL_EV = 2.0 * EIGENVALUE_TOL_EV
@@ -204,7 +206,7 @@ def _require_open_gap(eigenvalues, n_occupied):
 
 def occupied_band_energy(h, s, n_occupied):
     """Occupied band sum of the pencil, with the gapped-ensemble gate."""
-    h = _require_hermitian(h, "H")
+    h = _require_hermitian(h, "H", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV)
     s = _require_hermitian(s, "S")
     _checked_occupations(n_occupied, h.shape[0])
     eigenvalues = eigh(h, s, eigvals_only=True)
@@ -216,7 +218,10 @@ def pencil_gradient(h, s, v, n_occupied):
     """g = dE/dtheta = sum_n f_n Re[(C^dag V C)]_nn on the eigenbasis."""
     _require_hermitian(v, "V")
     _checked_occupations(n_occupied, h.shape[0])
-    eigenvalues, c = eigh(_require_hermitian(h, "H"), _require_hermitian(s, "S"))
+    eigenvalues, c = eigh(
+        _require_hermitian(h, "H", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV),
+        _require_hermitian(s, "S"),
+    )
     _require_open_gap(eigenvalues, n_occupied)
     f = _checked_occupations(n_occupied, h.shape[0])
     vx = c.conj().T @ v @ c
@@ -230,7 +235,10 @@ def pencil_curvature(h, s, w, v_a, v_b, n_occupied):
     _require_hermitian(v_b, "V_b")
     dim = h.shape[0]
     _checked_occupations(n_occupied, dim)
-    eigenvalues, c = eigh(_require_hermitian(h, "H"), _require_hermitian(s, "S"))
+    eigenvalues, c = eigh(
+        _require_hermitian(h, "H", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV),
+        _require_hermitian(s, "S"),
+    )
     _require_open_gap(eigenvalues, n_occupied)
     f = _checked_occupations(n_occupied, dim)
     wx = c.conj().T @ w @ c
@@ -244,7 +252,8 @@ def pencil_curvature(h, s, w, v_a, v_b, n_occupied):
 
 def contour_gradient(h, s, v, contour):
     """g as the occupied-pole residue of Tr[G(z) V], never diagonalizing."""
-    h, s = _require_hermitian(h, "H"), _require_hermitian(s, "S")
+    h = _require_hermitian(h, "H", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV)
+    s = _require_hermitian(s, "S")
     _require_hermitian(v, "V")
     total = 0.0 + 0.0j
     for z, weight in zip(contour.nodes, contour.weights):
@@ -255,7 +264,8 @@ def contour_gradient(h, s, v, contour):
 
 def contour_curvature(h, s, w, v_a, v_b, contour):
     """(K, onsite, response) from S-weighted resolvent traces at z nodes."""
-    h, s = _require_hermitian(h, "H"), _require_hermitian(s, "S")
+    h = _require_hermitian(h, "H", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV)
+    s = _require_hermitian(s, "S")
     _require_hermitian(w, "W")
     _require_hermitian(v_a, "V_a")
     _require_hermitian(v_b, "V_b")
@@ -619,7 +629,7 @@ class FrozenResponseProblem:
         cache_key = tuple(np.asarray(k, dtype=float).ravel())
         if cache_key not in self._pencils:
             h, s = self._importer.assemble_pencil(self._bundle, k)
-            _require_hermitian(h, "H(k)")
+            _require_hermitian(h, "H(k)", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV)
             _require_hermitian(s, "S(k)")
             n = self._bundle.norb
             scalar = np.zeros_like(h)
@@ -850,7 +860,9 @@ class FrozenResponseProblem:
                         rotated_block[1, 0],
                         rotated_block[1, 1],
                     )
-            return _require_hermitian(h_out, "rotated H(k)"), s
+            return _require_hermitian(
+                h_out, "rotated H(k)", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV
+            ), s
         # Start from the full frozen pencil: blocks not incident to any
         # rotating site (intersite magnetic blocks under onsite_delta) stay
         # bit-identical, exactly like the scalar part.
@@ -870,7 +882,9 @@ class FrozenResponseProblem:
             mu, nu = key
             indices = np.ix_([mu, mu + n], [nu, nu + n])
             h_out[indices] = scalar[indices] + total
-        return _require_hermitian(h_out, "rotated H(k)"), s
+        return _require_hermitian(
+            h_out, "rotated H(k)", tol=PRODUCER_H_PENCIL_HERMITICITY_TOL_EV
+        ), s
 
     def occupied_energy(self, kpoints, k_weights, thetas, ensemble):
         ensemble.validate()

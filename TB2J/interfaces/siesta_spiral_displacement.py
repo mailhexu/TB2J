@@ -41,6 +41,98 @@ BOHR_TO_ANG_ = BOHR_TO_ANG
 RY_TO_EV = 13.605693122994
 GEOMETRY_TOL_BOHR = 1e-6
 PATTERN_TOL = 1e-8
+# Borderline cutoff-edge entries: SIESTA stores a zero by OMITTING the CSR
+# entry, and two SCFs of slightly different geometries omit different
+# near-zero entries. Completing the missing side with an exact zero is
+# numerically exact and allowed only under this bound; larger one-sided
+# entries mean different setups (basis/cutoff/supercell) and refuse.
+SPARSITY_DRIFT_REL_TOL = 1e-11
+
+
+def _sparse_scale(bundle):
+    values = [abs(c) for comps in bundle.sparse.values() for c in comps]
+    return max(1.0, max(values) if values else 1.0)
+
+
+def _entry_within_drift(bundle, key):
+    scale = _sparse_scale(bundle)
+    comps = bundle.sparse[key]
+    return (
+        max(abs(c) for c in comps) <= SPARSITY_DRIFT_REL_TOL * scale
+        and abs(bundle.overlap[key]) <= SPARSITY_DRIFT_REL_TOL
+    )
+
+
+def _completed(bundle, keys):
+    sparse = dict(bundle.sparse)
+    overlap = dict(bundle.overlap)
+    for key in keys:
+        if key not in sparse:
+            sparse[key] = (0.0, 0.0, 0.0, 0.0)
+            overlap[key] = 0.0
+    return replace(bundle, sparse=sparse, overlap=overlap)
+
+
+def complete_displaced_pair(plus_bundle, minus_bundle):
+    """Union-complete a displaced pair, refusing non-negligible drift.
+
+    A key stored by only one side is a stored numerical zero of the other;
+    both sides are completed to the union with exact zeros after every
+    one-sided entry is verified within ``SPARSITY_DRIFT_REL_TOL`` of its
+    own bundle's scale. A one-sided entry above the bound keeps the
+    historical :class:`SparsePatternMismatch` refusal.
+    """
+    drift = set(plus_bundle.sparse) ^ set(minus_bundle.sparse)
+    if not drift:
+        return plus_bundle, minus_bundle
+    for label, bundle in (("+h", plus_bundle), ("-h", minus_bundle)):
+        for key in sorted(drift & set(bundle.sparse)):
+            if not _entry_within_drift(bundle, key):
+                raise SparsePatternMismatch(
+                    f"the +h and -h displaced HSX exports carry different "
+                    f"sparse patterns with a non-negligible one-sided entry "
+                    f"({label} key {key}); central differences require "
+                    "matched displaced references (same cutoff, same basis, "
+                    "same supercell)"
+                )
+    return _completed(plus_bundle, drift), _completed(minus_bundle, drift)
+
+
+def validate_reference_pattern_drift(reference_bundle, displaced_bundle, label):
+    """Refuse endpoint/reference pattern drift beyond numerical zeros.
+
+    Keys the endpoint stores but the reference does not must be numerical
+    zeros of the endpoint; keys the reference stores but the endpoint does
+    not must be numerical zeros of the reference. Everything else is a
+    genuinely different setup and refuses.
+    """
+    reference_keys = set(reference_bundle.sparse)
+    displaced_keys = set(displaced_bundle.sparse)
+    for key in sorted(displaced_keys - reference_keys):
+        if not _entry_within_drift(displaced_bundle, key):
+            raise SparsePatternMismatch(
+                f"route (b): the {label} displaced HSX export stores key "
+                f"{key} outside the reference bundle's H/S pattern with a "
+                "non-negligible value; the pair is not the reference's "
+                "displacement"
+            )
+    for key in sorted(reference_keys - displaced_keys):
+        if not _entry_within_drift(reference_bundle, key):
+            raise SparsePatternMismatch(
+                f"route (b): the {label} displaced HSX export is missing "
+                f"reference key {key}, which carries a non-negligible "
+                "value; the displaced export does not cover the reference"
+            )
+
+
+def complete_to_keys(bundle, keys):
+    """Return a copy of ``bundle`` whose sparse pattern covers ``keys``.
+
+    Keys absent from the bundle are completed with exact-zero components,
+    after the caller has validated that the drift is numerical zeros only.
+    """
+    return _completed(bundle, set(keys) - set(bundle.sparse))
+
 
 GAUGE_LABELS = frozenset({"periodic-image-sum", "localized"})
 SUPPORTED_BRANCHES = frozenset({"central"})
@@ -437,12 +529,7 @@ class DisplacedReferenceFDProvider:
                 "geometry anchor"
             )
         self._check_signed_displacements(plus_bundle, minus_bundle)
-        if set(plus_bundle.sparse) != set(minus_bundle.sparse):
-            raise SparsePatternMismatch(
-                "the +h and -h displaced HSX exports carry different sparse "
-                "patterns; central differences require matched displaced "
-                "references (same cutoff, same basis, same supercell)"
-            )
+        plus_bundle, minus_bundle = complete_displaced_pair(plus_bundle, minus_bundle)
         h_step_ang = self.pattern.step_bohr * BOHR_TO_ANG_
         dH = {
             key: tuple(
@@ -753,33 +840,38 @@ def assemble_onto_bundle(bundle, derivatives, pattern):
         )
     _check_cell(bundle.cell, geom.cell)
     _check_positions(bundle, derivatives, geom)
-    # sparse pattern: exact coverage, no union
+    # sparse pattern: exact coverage up to numerical-zero drift. Endpoint
+    # pairs differing only in cutoff-edge stored zeros are union-completed
+    # by the provider; records may therefore carry tiny extra keys (their
+    # FD values are bounded by the same drift) and may lack reference keys
+    # whose own stored values are numerical zeros.
     bundle_keys = set(bundle.sparse)
     record_keys = set(derivatives.dH)
-    if record_keys - bundle_keys:
-        extra = sorted(record_keys - bundle_keys)[:5]
-        raise SparsePatternMismatch(
-            "the displaced data carry sparse keys outside the bundle's H/S "
-            f"pattern (e.g. {extra}); refusing the union of mismatched "
-            "patterns"
-        )
-    missing = bundle_keys - record_keys
-    if missing:
-        example = sorted(missing)[:5]
-        raise SparsePatternMismatch(
-            "the derivative record does not cover the bundle's sparse "
-            f"pattern ({len(missing)} keys missing, e.g. {example}); "
-            "displacement derivatives must span the same pattern as H/S"
-        )
-    if set(derivatives.dS) != bundle_keys:
+    for key in sorted(record_keys - bundle_keys):
+        if max(abs(c) for c in derivatives.dH[key]) > SPARSITY_DRIFT_REL_TOL * 100.0:
+            raise SparsePatternMismatch(
+                "the displaced data carry sparse keys outside the bundle's "
+                f"H/S pattern (e.g. {key}) with non-negligible derivative "
+                "values; refusing the union of mismatched patterns"
+            )
+    for key in sorted(bundle_keys - record_keys):
+        if not _entry_within_drift(bundle, key):
+            raise SparsePatternMismatch(
+                "the derivative record does not cover the bundle's sparse "
+                f"pattern and reference key {key} is not a numerical zero; "
+                "displacement derivatives must span the reference pattern"
+            )
+    if set(derivatives.dS) - record_keys or record_keys - set(derivatives.dS):
         raise SparsePatternMismatch(
             "dS keys differ from dH keys; the overlap derivative must span "
             "the same pattern"
         )
     restricted = replace(
         derivatives,
-        dH={key: derivatives.dH[key] for key in bundle.sparse},
-        dS={key: derivatives.dS[key] for key in bundle.sparse},
+        dH={
+            key: derivatives.dH.get(key, (0.0, 0.0, 0.0, 0.0)) for key in bundle.sparse
+        },
+        dS={key: derivatives.dS.get(key, 0.0) for key in bundle.sparse},
     )
     provenance = dict(bundle.metadata)
     provenance["displacement"] = {
