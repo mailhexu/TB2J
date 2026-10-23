@@ -340,10 +340,8 @@ def make_supercell(spinio, sc_matrix, center=False, map_optional=True):
     # band plotting) can recover the primitive BZ and fold the k-path.
     sc_spinio.primitive_cell = spinio.atoms.copy()
     # Build Rlist/ispin_list/nspin (normally done by load_pickle).
-    # Only call if exchange_Jdict is available; without it _build_Rlist
-    # cannot populate ispin_list and nspin.
-    if sc_spinio.exchange_Jdict is not None:
-        sc_spinio._build_Rlist()
+    # Spin membership is declared independently of which channels carry pairs.
+    sc_spinio._build_Rlist()
 
     if getattr(spinio, "k1", None) is not None:
         sc_spinio.k1 = _repeat_spin_sequence(
