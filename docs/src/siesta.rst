@@ -9,6 +9,16 @@ For the separate certified finite-pitch spiral workflow, see
 required response/mapping gates and writes a validated SpinIO pickle to a
 new directory; it does not replace the collinear tutorial below.
 
+For a CrI3 material-response campaign with independent basis, grid, k-mesh,
+contour-integration and derivative evidence, see
+:doc:`siesta_spiral_material_campaign`.
+
+.. toctree::
+   :maxdepth: 1
+
+   siesta_spiral_material_campaign.md
+
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 

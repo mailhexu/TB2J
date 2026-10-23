@@ -415,10 +415,22 @@ No later successful report can override a failed verdict.
    electron count/Fermi energy to match the producer reference. Execute the
    EIG/eigenvalue oracle, then the electron count oracle; do not repair a
    corrupt pencil or change the producer mesh.
+
+   The response core's producer and rotated H(k) pencil checks accept
+   defects up to the H-only absolute tolerance `1e-5 eV`. Overlap S(k)
+   retains an absolute `1e-8` dimensionless limit; response vertices/matrices
+   retain absolute `1e-8 eV` limits. Separately, the independent fixture
+   eigenvalue-oracle pencil gate (`PENCIL_HERMITICITY_REL_TOL`) remains
+   scale-aware at `1e-8 * max(1, max(abs(matrix)))`; it does not govern the
+   response-core checks. No matrix is symmetrized; a violation is refused.
 5. **Response/AC-005:** extract the declared vertex, check structure/spin
    identity, then evaluate the gapped contour or metallic fixed-N response.
    Record finite-rotation agreement plus adjacent finite-step convergence.
    Missing or failed agreement is not a pass, even if later stages complete.
+   The contour/eigenbasis identity gate is absolute `1e-6 eV`: on a raw
+   producer pencil whose accepted H(k) asymmetry splits the eigenbasis and
+   resolvent paths, the measured `contour_vs_band_max_abs` is recorded and
+   only mismatch above `1e-6 eV` refuses; no matrix is symmetrized.
 6. **AC-007 mapping:** construct the mapping with the declared reference
    directions, preserving compatibility, residuals and identifiability.
 7. **Optional displacement/AC-009:** compute and validate the matching central

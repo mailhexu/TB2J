@@ -30,7 +30,7 @@ author = "Xu He"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "recommonmark",
+    "myst_parser",
     "sphinx_rtd_theme",
     "sphinx.ext.mathjax",
     "sphinx.ext.autodoc",
@@ -44,6 +44,18 @@ templates_path = ["_templates"]
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+
+
+# -- MyST markdown options --------------------------------------------------
+
+# myst-parser 5 does not enable dollar math by default; the docs use
+# both inline ``$...$`` and display ``$$...$$`` LaTeX in .md sources.
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "tasklist",
+]
 
 
 master_doc = "index"
@@ -60,7 +72,7 @@ html_theme = "sphinx_rtd_theme"
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_logo = "_static/TB2J_logo_horizon.png"
+html_logo = "_static/logo_TB2J_horizon.png"
 html_theme_options = {
     "logo_only": True,
     "display_version": False,
