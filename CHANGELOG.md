@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The common collinear projector-NetCDF exchange interface accepts an explicit
+  `overlap_mode`; explicit inverse selection takes precedence over
+  `TB2J_GREEN_MODE`, while callers omitting the argument retain prior behavior.
 - SIESTA spiral certified exports now bind AC-009 to the complete derivative
   records (`seam_payload_sha256` for dH/dR+dS/dR and
   `derivative_payload_sha256` for dV/dR), including geometry, units, gauges

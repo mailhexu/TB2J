@@ -181,6 +181,14 @@ TB2J text output ``exchange.out``.
 Python API
 ----------
 
+For common collinear NetCDF datasets,
+``TB2J.interfaces.gpaw_projector.gen_exchange_projector_netcdf`` accepts an
+optional ``overlap_mode``. Passing ``overlap_mode="inverse"`` selects exact
+inverse-metric exchange even when ``TB2J_GREEN_MODE`` selects another mode.
+Omitting the argument preserves the existing environment/metadata selection.
+The inherited inverse condition limit remains ``1e12``; this argument does
+not introduce regularization or a pseudoinverse fallback.
+
 For in-memory use (no NetCDF round-trip), ``gen_exchange_gpaw`` takes a converged
 GPAW calculator directly.  It defaults to ``delta_xc`` for no-U calculations
 and to ``delta_total`` for supported collinear GPAW +U calculations.

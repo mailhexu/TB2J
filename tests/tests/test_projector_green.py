@@ -188,6 +188,40 @@ def make_nc_pao_exchange_data():
     )
 
 
+@pytest.mark.parametrize(
+    "explicit_mode,environment_mode,reference_mode",
+    [("inverse", "plain", "inverse"), (None, "plain", "plain"), (None, "inverse", "inverse")],
+)
+def test_netcdf_exchange_metric_precedence(
+    tmp_path, monkeypatch, explicit_mode, environment_mode, reference_mode
+):
+    from TB2J.interfaces.gpaw_projector import gen_exchange_projector_netcdf
+
+    pytest.importorskip("netCDF4")
+    data = make_nc_pao_exchange_data()
+    data.occupations[1, 0] = [0.2, 0.0]
+    filename = tmp_path / "atomic.nc"
+    data.save_netcdf(filename)
+    controls = dict(Rpts=[(-1, 0, 0), (1, 0, 0)], nz=12, operator_component="delta_total")
+    references = {
+        mode: compute_projector_exchange_jdict(data, overlap_mode=mode, **controls)
+        for mode in ("inverse", "plain")
+    }
+    key = ((1, 0, 0), 0, 0)
+    assert not np.isclose(
+        references["inverse"][key], references["plain"][key], rtol=1e-3, atol=1e-10
+    )
+    monkeypatch.setenv("TB2J_GREEN_MODE", environment_mode)
+    mode_option = {} if explicit_mode is None else {"overlap_mode": explicit_mode}
+    exchange_out, actual = gen_exchange_projector_netcdf(
+        filename, output_path=tmp_path / "exchange", **controls, **mode_option
+    )
+    assert set(actual) == {((-1, 0, 0), 0, 0), key}
+    for pair, value in references[reference_mode].items():
+        assert actual[pair] == pytest.approx(value, rel=1e-12)
+    assert exchange_out.is_file()
+
+
 def write_abinit_nc_pao_fixture(filename, data, overlap_definition=True):
     netcdf4 = pytest.importorskip("netCDF4")
     with netcdf4.Dataset(filename, "w") as nc:

@@ -1033,6 +1033,7 @@ def gen_exchange_projector_netcdf(
     magnetic_elements=None,
     index_magnetic_atoms=None,
     operator_component=None,
+    overlap_mode=None,
 ):
     """Python interface for projector-NetCDF exchange calculation."""
     data = ProjectorGreenData.load_netcdf(filename)
@@ -1085,6 +1086,7 @@ def gen_exchange_projector_netcdf(
         Rcut=Rcut,
         local_operators=local_operators if operator_component is not None else None,
         description=description if operator_component is not None else None,
+        overlap_mode=overlap_mode,
     )
 
 
