@@ -453,3 +453,90 @@ def test_python_tensor_edit_cannot_coerce_mixed_booleans_into_exchange(tmp_path)
     invalid = ((True, 0.0, 0.0), (0.0, 0.001, 0.0), (0.0, 0.0, 0.001))
     with pytest.raises(ValueError, match="shell 1:2:0,0,0.tensor.*boolean"):
         replace(document, shells=(replace(document.shells[0], tensor=invalid),))
+
+
+def test_isotropic_tensor_preserves_exactly_absent_anisotropy(tmp_path):
+    from dataclasses import replace
+
+    source = tmp_path / "isotropic-tensor.shells.toml"
+    source.write_text(
+        HEADER.replace('exchange_mode = "isotropic"', 'exchange_mode = "tensor"')
+        + '\n[[shell]]\nid = "1:2:0,0,0"\nrepresentative = [1, 2, 0, 0, 0]\n'
+        "tensor = [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]]\n"
+        "DMI_members = []\nJani_members = []\n"
+    )
+    document = read_shells(source)
+    tensor = ((0.1, 0.0, 0.0), (0.0, 0.1, 0.0), (0.0, 0.0, 0.1))
+    edited = replace(document, shells=(replace(document.shells[0], tensor=tensor),))
+    output = tmp_path / "saved.shells.toml"
+    write_shells(edited, output)
+    assert read_shells(output) == edited
+    assert edited.shells[0].DMI_members == edited.shells[0].Jani_members == ()
+    nonzero = ((0.1, 0.0, 0.0), (0.0, 0.1, 0.0), (0.0, 0.0, 0.10000000000000002))
+    with pytest.raises(ValueError, match="Jani_members.*nonzero"):
+        replace(document, shells=(replace(document.shells[0], tensor=nonzero),))
+
+
+def test_boolean_symprec_is_not_a_numeric_tolerance(tmp_path):
+    from dataclasses import replace
+
+    source = tmp_path / "tolerance.shells.toml"
+    source.write_text(one_atom_header())
+    document = read_shells(source)
+    with pytest.raises(ValueError, match="symmetry.symprec"):
+        replace(document, symprec=True)
+    source.write_text(one_atom_header().replace("symprec = 1.0e-5", "symprec = true"))
+    with pytest.raises(ValueError, match="symmetry.symprec"):
+        read_shells(source)
+
+
+@pytest.mark.parametrize(
+    "field", ["symprec", "magnetic_tol", "value_atol", "value_rtol", "zero_tol"]
+)
+def test_validated_scalar_tolerances_do_not_retain_mutable_aliases(tmp_path, field):
+    from dataclasses import replace
+
+    import numpy as np
+
+    source = tmp_path / "scalar.shells.toml"
+    source.write_text(one_atom_header())
+    document = read_shells(source)
+    alias = np.array(1.0e-5)
+    edited = replace(document, **{field: alias})
+    alias[...] = -1
+    assert getattr(edited, field) == 1.0e-5
+    scalar = replace(edited, **{field: np.float64(1.0e-5)})
+    output = tmp_path / "saved.shells.toml"
+    write_shells(scalar, output)
+    assert read_shells(output) == scalar
+
+
+@pytest.mark.parametrize("with_shell", [False, True])
+def test_primed_snapshot_requires_msg_context(tmp_path, with_shell):
+    source = tmp_path / "primed-sg.shells.toml"
+    header = centered_header().replace(
+        "translation = [0.5, 0.0, 0.0]\ntime_reversal = false",
+        "translation = [0.5, 0.0, 0.0]\ntime_reversal = true",
+    )
+    entry = '\n[[shell]]\nid = "1:2:0,0,0"\nJiso = 1.0\n' if with_shell else ""
+    source.write_text(header + entry)
+    with pytest.raises(ValueError, match=r"symmetry.operations.*sg.*msg"):
+        read_shells(source)
+
+
+def test_explicit_representative_must_be_in_sparse_support(tmp_path):
+    source = tmp_path / "sparse-tensor.shells.toml"
+    header = centered_header().replace(
+        'exchange_mode = "isotropic"', 'exchange_mode = "tensor"'
+    )
+    entry = (
+        '\n[[shell]]\nid = "1:2:0,0,0"\nrepresentative = [1, 2, 0, 0, 0]\n'
+        'tensor = "unfilled"\nsupport_members = [1]\n'
+    )
+    source.write_text(header + entry)
+    with pytest.raises(ValueError, match="representative.*support"):
+        read_shells(source)
+    source.write_text(header + entry.replace("[1, 2, 0, 0, 0]", "[2, 1, 1, 0, 0]"))
+    document = read_shells(source)
+    assert document.shells[0].id == "1:2:0,0,0"
+    assert document.shells[0].representative == (2, 1, 1, 0, 0)

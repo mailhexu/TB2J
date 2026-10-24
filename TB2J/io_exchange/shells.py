@@ -6,6 +6,7 @@ Python are eV. The TOML codec alone converts the declared wire energy unit.
 
 import re
 from dataclasses import dataclass
+from fractions import Fraction
 
 import numpy as np
 
@@ -94,6 +95,11 @@ class ShellDocument:
             "shells",
             "moments",
             "required_base_fields",
+            "symprec",
+            "magnetic_tol",
+            "value_atol",
+            "value_rtol",
+            "zero_tol",
         ):
             object.__setattr__(self, name, _freeze(getattr(self, name)))
         validate_shells(self)
@@ -179,7 +185,8 @@ def _operation_key(rotation, primed):
 # MathDoc: tb2j/spacegroup-exchange-symmetrization#bond_map_image_shift
 def _validated_operations(document, cell, positions):
     """Validate the finite stored group before using the core's site maps."""
-    if not np.isfinite(document.symprec) or document.symprec <= 0:
+    symprec = _numbers(document.symprec, (), "symmetry.symprec")
+    if symprec <= 0:
         raise ValueError("symmetry.symprec: expected a positive finite tolerance")
     rotations, translations, primes, buckets = [], [], [], {}
     column_basis = cell.T
@@ -208,6 +215,11 @@ def _validated_operations(document, cell, positions):
             )
         if not isinstance(operation.time_reversal, bool):
             raise ValueError(f"{prefix}.time_reversal: expected a boolean")
+        if operation.time_reversal and document.symmetry_mode == "sg":
+            raise ValueError(
+                f"{prefix}: primed operation is invalid in sg mode; "
+                "declare msg with reference_spins.moments and magnetic_tol"
+            )
         cartesian = column_basis @ rotation @ inverse_basis
         if not np.allclose(
             cartesian.T @ cartesian, np.eye(3), rtol=0, atol=metric_atol
@@ -375,6 +387,25 @@ def _channel_masks(shell, size):
     return masks
 
 
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_dmi_axial_vector
+def _nonzero_tensor_channels(tensor):
+    """Exact authored-subspace predicates, without decomposition roundoff.
+
+    Rational trace summation also avoids overflow and catastrophic cancellation.
+    No tolerance may turn a genuinely authored component into an absent channel.
+    """
+    return {
+        "Jiso": sum(Fraction(float(tensor[i, i])) for i in range(3)) != 0,
+        "DMI": any(tensor[i, j] != tensor[j, i] for i, j in ((0, 1), (0, 2), (1, 2))),
+        "Jani": not (
+            tensor[0, 0] == tensor[1, 1] == tensor[2, 2]
+            and all(tensor[i, j] == -tensor[j, i] for i, j in ((0, 1), (0, 2), (1, 2)))
+        ),
+    }
+
+
 def _validate_context(document):
     from ase.data import atomic_numbers
 
@@ -488,6 +519,17 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
                 f"shell {shell.id}: computed canonical minimum is {canonical}"
             )
         masks = _channel_masks(shell, len(orbit))
+        if shell.representative is not None:
+            support = _mask(
+                shell.support_members,
+                tuple(range(len(orbit))),
+                len(orbit),
+                f"shell {shell.id}.support_members",
+            )
+            if orbit.index(shell.representative) not in support:
+                raise ValueError(
+                    f"shell {shell.id}.representative: must belong to support_members"
+                )
         if document.exchange_mode == "isotropic":
             if (
                 shell.tensor is not None
@@ -499,7 +541,9 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
                 )
             value = shell.Jiso
             if value != "unfilled":
-                channels = {"Jiso": _numbers(value, (), f"shell {shell.id}.Jiso")}
+                channels = {
+                    "Jiso": bool(_numbers(value, (), f"shell {shell.id}.Jiso") != 0)
+                }
         else:
             if shell.Jiso is not None:
                 raise ValueError(
@@ -512,20 +556,15 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
             value = shell.tensor
             if value != "unfilled":
                 tensor = _numbers(value, (3, 3), f"shell {shell.id}.tensor")
-                # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
-                # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
-                # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_dmi_axial_vector
-                channels = dict(
-                    zip(("Jiso", "DMI", "Jani"), symmetry_core.decompose_tensor(tensor))
-                )
+                channels = _nonzero_tensor_channels(tensor)
         if for_export and value == "unfilled":
             field = "Jiso" if document.exchange_mode == "isotropic" else "tensor"
             raise ValueError(
                 f"shell {shell.id}.{field}: unfilled exchange value cannot be exported"
             )
         if value != "unfilled":
-            for channel, subspace in channels.items():
-                if not masks[channel] and np.any(np.asarray(subspace) != 0):
+            for channel, nonzero in channels.items():
+                if not masks[channel] and nonzero:
                     raise ValueError(
                         f"shell {shell.id}.{channel}_members: empty mask would discard a nonzero subspace"
                     )
