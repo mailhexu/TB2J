@@ -6,6 +6,11 @@
   channel masks and atom-to-spin indexing, default rejection of inconsistent
   values, and explicit projection and zero-snapping reports. Internal replay
   checks bond constraints and reports every opt-in orbit-completion key.
+- Added `TB2J.io_exchange.shells.template` to generate editable, unfilled
+  symmetry-shell documents from periodic structures and magnetic-site selections.
+  SG/MSG modes, scalar or axial reference moments, unit-explicit cutoffs,
+  skew-cell image enumeration, and deterministic full-orbit representatives
+  are supported; templates never calculate exchange values.
 
 - Added immutable `ShellDocument` / `ShellEntry` models and the
   `read_shells`, `write_shells`, `validate_shells`, and `check_producer_ops`

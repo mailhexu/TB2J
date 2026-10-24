@@ -4,9 +4,11 @@ Cell vectors are rows, atom selectors are one-based, and exchange values in
 Python are eV. The TOML codec alone converts the declared wire energy unit.
 """
 
+import math
 import re
 from dataclasses import dataclass
 from fractions import Fraction
+from itertools import product
 
 import numpy as np
 
@@ -1619,4 +1621,310 @@ def _expand_core(document, *, complete_orbits=False):
             created_channel_keys=tuple(sorted(created_channel_keys)),
             absent_channel_keys=absent_channel_keys,
         ),
+    )
+
+
+def _template_number(value, field, *, positive=False, nonnegative=False):
+    number = float(_numbers(value, (), field).item())
+    if positive and number <= 0:
+        raise ValueError(f"{field}: expected a positive finite value")
+    if nonnegative and number < 0:
+        raise ValueError(f"{field}: expected a nonnegative finite value")
+    return number
+
+
+def _template_moments(reference_spins, natom, symmetry):
+    if reference_spins is None:
+        if symmetry == "msg":
+            raise ValueError(
+                "reference_spins.moments: required for msg symmetry; "
+                "supply complete moments in atom order"
+            )
+        return None
+    try:
+        raw = np.asarray(reference_spins)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "reference_spins.moments: expected one scalar or Cartesian vector per atom"
+        ) from error
+    if raw.shape not in {(natom,), (natom, 3)}:
+        raise ValueError(
+            "reference_spins.moments: expected shape "
+            f"({natom},) or ({natom}, 3), got {raw.shape}"
+        )
+    return _numbers(reference_spins, raw.shape, "reference_spins.moments")
+
+
+def _template_structure(atoms):
+    from ase import Atoms
+
+    if not isinstance(atoms, Atoms):
+        raise TypeError("atoms: expected an ASE Atoms structure")
+    if len(atoms) == 0:
+        raise ValueError("structure.species: expected at least one atom")
+    if not np.all(np.asarray(atoms.pbc, dtype=bool)):
+        raise ValueError("atoms.pbc: template generation requires a periodic 3D cell")
+    cell = _numbers(atoms.get_cell().array, (3, 3), "structure.cell_angstrom")
+    determinant = float(np.linalg.det(cell))
+    if not np.isfinite(determinant) or abs(determinant) < np.finfo(float).tiny:
+        raise ValueError("structure.cell_angstrom: expected a finite nonsingular cell")
+    try:
+        inverse = np.linalg.inv(cell)
+    except np.linalg.LinAlgError as error:
+        raise ValueError(
+            "structure.cell_angstrom: expected a finite nonsingular cell"
+        ) from error
+    if not np.isfinite(inverse).all():
+        raise ValueError(
+            "structure.cell_angstrom: reciprocal cell is nonfinite; "
+            "supply a well-conditioned cell"
+        )
+    positions = _numbers(
+        atoms.get_scaled_positions(wrap=True),
+        (len(atoms), 3),
+        "structure.positions_frac",
+    )
+    species = tuple(atoms.get_chemical_symbols())
+    return cell, inverse, positions, species
+
+
+def _template_selection(magnetic_atoms, natom):
+    try:
+        selection = tuple(magnetic_atoms)
+    except TypeError as error:
+        raise ValueError(
+            "structure.magnetic_atoms: expected one-based integer atom indices"
+        ) from error
+    if any(
+        isinstance(atom, (bool, np.bool_)) or not isinstance(atom, (int, np.integer))
+        for atom in selection
+    ):
+        raise ValueError(
+            "structure.magnetic_atoms: expected one-based integer atom indices "
+            "without boolean or float coercion"
+        )
+    selection = tuple(int(atom) for atom in selection)
+    if any(atom < 1 or atom > natom for atom in selection):
+        raise ValueError(
+            "structure.magnetic_atoms: indices must be between 1 and the atom count"
+        )
+    if len(set(selection)) != len(selection):
+        raise ValueError("structure.magnetic_atoms: duplicate atom indices")
+    return tuple(sorted(selection))
+
+
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#primed_bilinear_energy_difference
+def _template_operations(
+    atoms,
+    positions,
+    cell,
+    magnetic_atoms,
+    symmetry,
+    moments,
+    symprec,
+    magnetic_tol,
+):
+    if symmetry == "sg":
+        detected = symmetry_core.crystal_symmetry_ops(atoms, symprec=symprec)
+    else:
+        detected = symmetry_core.magnetic_symmetry_ops(
+            atoms,
+            moments,
+            symprec=symprec,
+            magnetic_tol=magnetic_tol,
+        )
+    site_maps = symmetry_core._build_site_maps(positions, cell, detected, symprec)
+    selected = np.zeros(len(positions), dtype=bool)
+    selected[np.asarray(magnetic_atoms, dtype=int) - 1] = True
+    # The stabilizer of the selected-site set remains a closed subgroup.
+    preserving = [
+        number
+        for number, mapping in enumerate(site_maps)
+        if np.array_equal(selected[np.asarray(mapping, dtype=int)], selected)
+    ]
+    if not preserving:
+        raise ValueError(
+            "symmetry.operations: no detected operation preserves "
+            "the magnetic-atom selection"
+        )
+    primes = (
+        np.zeros(len(detected), dtype=bool)
+        if detected.time_reversals is None
+        else np.asarray(detected.time_reversals, dtype=bool)
+    )
+    operations = symmetry_core.SymmetryOperations(
+        np.asarray(detected.rotations)[preserving],
+        np.asarray(detected.translations)[preserving],
+        primes[preserving],
+        detected.description,
+    )
+    maps = [site_maps[number] for number in preserving]
+    return operations, maps, detected.description
+
+
+def _template_candidates(cell, inverse_cell, positions, selection, cutoff):
+    """Enumerate all lattice images inside the radius via reciprocal bounds."""
+    with np.errstate(over="ignore", invalid="ignore"):
+        reciprocal_bounds = cutoff * np.linalg.norm(inverse_cell, axis=0)
+    if not np.isfinite(reciprocal_bounds).all():
+        raise ValueError(
+            "cutoff: reciprocal-bound image range is nonfinite for this cell"
+        )
+    keys = []
+    zero = (0, 0, 0)
+    for ia in selection:
+        for ja in selection:
+            displacement = positions[ja] - positions[ia]
+            ranges = []
+            for axis, bound in enumerate(reciprocal_bounds):
+                lower = math.floor(-displacement[axis] - bound) - 1
+                upper = math.ceil(-displacement[axis] + bound) + 1
+                ranges.append(range(lower, upper + 1))
+            for translation in product(*ranges):
+                translation = tuple(int(value) for value in translation)
+                if ia == ja and translation == zero:
+                    continue
+                vector = (displacement + translation) @ cell
+                if math.hypot(*(float(component) for component in vector)) <= cutoff:
+                    keys.append((ia, ja, translation))
+    return tuple(sorted(set(keys)))
+
+
+def _template_distance(pair, positions, cell):
+    ia, ja, translation = _core_key(pair)
+    displacement = positions[ja] - positions[ia] + np.asarray(translation, dtype=float)
+    vector = displacement @ cell
+    return math.hypot(*(float(component) for component in vector))
+
+
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#bond_map_image_shift
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#hexagonal_cartesian_rotation
+def template(
+    atoms,
+    magnetic_atoms,
+    cutoff,
+    *,
+    symmetry="sg",
+    reference_spins=None,
+    mode="isotropic",
+    symprec=1e-5,
+    magnetic_tol=1e-5,
+    energy_unit="meV",
+    zero_tol=1e-10,
+    value_atol=1e-8,
+    value_rtol=1e-6,
+):
+    """Build an unfilled full-orbit template; cutoff is always in Angstrom."""
+    if not isinstance(symmetry, str) or symmetry not in {"sg", "msg"}:
+        raise ValueError("symmetry: expected sg or msg")
+    if not isinstance(mode, str) or mode not in {"isotropic", "tensor"}:
+        raise ValueError("mode: expected isotropic or tensor")
+    if not isinstance(energy_unit, str) or energy_unit not in {"meV", "eV"}:
+        raise ValueError("energy_unit: expected meV or eV")
+    cutoff = _template_number(cutoff, "cutoff", positive=True)
+    symprec = _template_number(symprec, "symmetry.symprec", positive=True)
+    if magnetic_tol is None:
+        if symmetry == "msg":
+            raise ValueError("symmetry.magnetic_tol: required for msg symmetry")
+    else:
+        magnetic_tol = _template_number(
+            magnetic_tol, "symmetry.magnetic_tol", positive=True
+        )
+    zero_tol = _template_number(zero_tol, "tolerances.zero_tol", nonnegative=True)
+    value_atol = _template_number(value_atol, "tolerances.value_atol", nonnegative=True)
+    value_rtol = _template_number(value_rtol, "tolerances.value_rtol", nonnegative=True)
+
+    cell, inverse_cell, positions, species = _template_structure(atoms)
+    selection = _template_selection(magnetic_atoms, len(species))
+    moments = _template_moments(reference_spins, len(species), symmetry)
+
+    operations, site_maps, description = _template_operations(
+        atoms,
+        positions,
+        cell,
+        selection,
+        symmetry,
+        moments,
+        symprec,
+        magnetic_tol,
+    )
+    candidates = _template_candidates(
+        cell, inverse_cell, positions, tuple(atom - 1 for atom in selection), cutoff
+    )
+    if candidates:
+        # ASE and the shell document store row lattice vectors; pair_images
+        # uses the column-basis convention fixed by the shared MathDoc.
+        image_maps, _ = symmetry_core.pair_images(
+            candidates, operations, site_maps, positions, cell.T
+        )
+    else:
+        image_maps = []
+    # The cutoff selects orbits; each emitted shell retains the full orbit.
+    candidate_wire = {_wire_key(key) for key in candidates}
+    remaining = set(candidates)
+    orbits = {}
+    while remaining:
+        key = min(remaining)
+        full_orbit = tuple(
+            sorted({_wire_key(image_map[key]) for image_map in image_maps})
+        )
+        supported = candidate_wire.intersection(full_orbit)
+        identifier = _pair_id(full_orbit[0])
+        orbits[identifier] = full_orbit
+        remaining.difference_update(_core_key(member) for member in supported)
+
+    entries = []
+    for identifier, full_orbit in sorted(orbits.items()):
+        # The shortest member remains supported as the cutoff only grows.
+        representative = min(
+            full_orbit,
+            key=lambda member: (_template_distance(member, positions, cell), member),
+        )
+        fields = {"Jiso": "unfilled"} if mode == "isotropic" else {"tensor": "unfilled"}
+        entries.append(
+            ShellEntry(
+                id=identifier,
+                representative=representative,
+                orbit_size=len(full_orbit),
+                **fields,
+            )
+        )
+    document_operations = tuple(
+        ShellOperation(
+            rotation=rotation,
+            translation=translation,
+            time_reversal=bool(primed),
+        )
+        for rotation, translation, primed in zip(
+            operations.rotations, operations.translations, operations.time_reversals
+        )
+    )
+    magnetic_atoms = selection
+    index_by_atom = {atom: spin_index for spin_index, atom in enumerate(magnetic_atoms)}
+    index_spin = tuple(
+        index_by_atom.get(atom, -1) for atom in range(1, len(species) + 1)
+    )
+    producer = (
+        f"{description}; {len(document_operations)} operations preserve magnetic_atoms"
+    )
+    return ShellDocument(
+        cell_angstrom=cell,
+        species=species,
+        positions_frac=positions,
+        magnetic_atoms=magnetic_atoms,
+        index_spin=index_spin,
+        operations=document_operations,
+        shells=tuple(entries),
+        exchange_mode=mode,
+        energy_unit=energy_unit,
+        symmetry_mode=symmetry,
+        symprec=symprec,
+        magnetic_tol=magnetic_tol,
+        moments=moments,
+        moment_source="explicit",
+        producer=producer,
+        value_atol=value_atol,
+        value_rtol=value_rtol,
+        zero_tol=zero_tol,
+        source_format="template",
     )
