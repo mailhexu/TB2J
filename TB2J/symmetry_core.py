@@ -171,11 +171,13 @@ def crystal_symmetry_ops(atoms, symprec=1e-5):
 
 
 # MathDoc: tb2j/spacegroup-exchange-symmetrization#primed_bilinear_energy_difference
-def magnetic_symmetry_ops(atoms, magmoms, symprec=1e-5):
+def magnetic_symmetry_ops(atoms, magmoms, symprec=1e-5, *, magnetic_tol=None):
     """Detect the magnetic space group of an ASE atoms object with moments.
 
     magmoms: (natom,) for collinear moments (taken along z) or (natom, 3)
         for non-collinear moments, aligned with the atoms order.
+    magnetic_tol: optional magnetic-moment tolerance in Bohr magnetons.
+        None preserves spglib's default (the structural symprec value).
     """
     spglib = _get_spglib()
     cell = (
@@ -184,7 +186,11 @@ def magnetic_symmetry_ops(atoms, magmoms, symprec=1e-5):
         np.asarray(atoms.get_atomic_numbers(), dtype=int),
         np.asarray(magmoms, dtype=float),
     )
-    dataset = spglib.get_magnetic_symmetry_dataset(cell, symprec=symprec)
+    dataset = spglib.get_magnetic_symmetry_dataset(
+        cell,
+        symprec=symprec,
+        mag_symprec=-1.0 if magnetic_tol is None else magnetic_tol,
+    )
     if dataset is None:
         raise ValueError(
             "spglib could not detect the magnetic space group of the structure. "

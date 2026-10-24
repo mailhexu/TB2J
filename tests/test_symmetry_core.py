@@ -89,3 +89,26 @@ def test_transferred_structure_rejects_inconsistent_bond_images():
     )
     with pytest.raises(ValueError, match="non-integer image cell"):
         symmetrize_exchange(model, reference, symprec=0.3)
+
+
+@pytest.mark.parametrize(
+    "moments",
+    [[1.0, -1.0001], [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0001]]],
+)
+def test_magnetic_tolerance_controls_primed_half_translation(moments):
+    atoms = Atoms(
+        "Fe2",
+        cell=np.eye(3) * 3,
+        scaled_positions=[[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]],
+        pbc=True,
+    )
+    strict = magnetic_symmetry_ops(atoms, moments, magnetic_tol=1e-5)
+    loose = magnetic_symmetry_ops(atoms, moments, magnetic_tol=1e-3)
+
+    def primed_half_translation(operations):
+        identity = np.all(operations.rotations == np.eye(3, dtype=int), axis=(1, 2))
+        half = np.all(np.isclose(operations.translations, 0.5), axis=1)
+        return np.any(identity & half & operations.time_reversals)
+
+    assert not primed_half_translation(strict)
+    assert primed_half_translation(loose)

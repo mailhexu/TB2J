@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added immutable `ShellDocument` / `ShellEntry` models and the
+  `read_shells`, `write_shells`, `validate_shells`, and `check_producer_ops`
+  Python interfaces. The versioned TOML format carries isotropic or full
+  Cartesian tensors, authoritative SG/MSG operations, sparse orbit masks,
+  explicit tensor representatives, and removable equivalent-pair comments.
+  Values use eV in Python and an explicitly declared wire unit (meV by default).
+  The shared magnetic-symmetry detector now accepts an optional
+  `magnetic_tol` keyword without changing existing callers' default behavior.
+
 - The exchange symmetrizer now runs on one shared space-group /
   magnetic-space-group engine (`TB2J/symmetry_core.py`), which detects the
   symmetry operations with spglib (rotations *and* translations) and owns the
