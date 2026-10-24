@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Document and validate the native ABACUS PW UPF atomic-wavefunction route
+  through the installed canonical consumer, including all source channels,
+  full Gram/inverse semantics, truthful NC-UPF provenance and standard outputs.
+  Matched unmasked bccFe passes separate ABINIT-replay, cross-code and strict
+  same-binary MPI shell budgets for the first three mesh-safe shells only.
+  Real blocked-peer failures and disabled/default PW/LCAO behavior are covered;
+  partial-file, high-unoccupied-spectrum, exterior-alias and unvalidated-GPU
+  limits remain explicit. The existing LCAO command is unchanged.
+  The secondary unmasked FM FeO comparison is descriptive, without a new
+  tolerance; displayed projector populations use the generic partition,
+  distinct from the ABINIT-specific dual-basis Mulliken metadata convention.
+
 - Added `abacus_projector2J.py` for canonical ABACUS PW UPF atomic-projector
   NetCDF data. It uses the existing common engine with `delta_total` and
   explicit inverse overlap, writes the standard TB2J output tree, and leaves

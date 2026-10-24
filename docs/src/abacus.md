@@ -1,9 +1,30 @@
 ### Use TB2J with ABACUS
 
-In this tutorial we will learn how to use TB2J with ABACUS.  The TB2J-ABACUS interface is available since TB2J version 0.8.0. There are three types of basis set in ABACUS, the plane-wave (PW), the linear-combinatio of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. For the other type of basis set, the Wannier90 interace can be used instead.  In this tutorial we will use LCAO. 
+ABACUS has separate TB2J interfaces for LCAO Hamiltonian/overlap output and supported plane-wave UPF atomic-projector output. The existing LCAO interface is available since TB2J 0.8.0. The PW route below uses a native optional exporter and the common projector exchange engine; Wannier90 remains an alternative workflow, not a prerequisite for this atomic-projector route.
+
+#### Plane-wave scalar-NC UPF atomic projectors
+
+Build ABACUS with `ENABLE_TB2J_PROJECTOR_NETCDF=ON`, NetCDF C with NetCDF-4 groups and the native nlohmann-json backend. The optional backend does not require `ENABLE_JSON`; ordinary builds and `out_tb2j` default off. The tested native target is `abacus_basic_para`; see the native `docs/advanced/install.md` for build requirements.
+
+Use a converged native PW Kohn–Sham calculation with `nspin 2`, `symmetry -1`, `out_tb2j 1`, no U/SOC/noncollinearity, and original scalar norm-conserving UPFs containing atomic wavefunctions. Only a certified generated full-BZ Gamma/MP recipe is supported. An explicit or pre-reduced list is not certified by setting `symmetry -1`. PAW/USPP and meta-GGA/hybrid XC are not supported here. Projectors are **all UPF atomic-wavefunction channels**, not beta projectors, Wannier functions, or the filtered native initial guess.
+
+After native convergence and complete publication, run the installed dedicated command:
+
+```bash
+abacus_projector2J.py --input OUT.ABACUS/tb2j_projector.nc \
+    --output_path TB2J_results --elements Fe --Rcut 10 --nz 30 --smearing 0.05
+```
+
+Adjust the output suffix and magnetic elements for the material. `--Rcut` is Angstrom; `--smearing` is contour broadening in eV, not the native SCF Gaussian width. The command fixes complete `delta_total`, projector populations and explicit inverse metric even under `TB2J_GREEN_MODE=plain`; it has no operator/overlap selector or pseudoinverse fallback. The full-Gram condition limit is `1e12`.
+
+The common reader/engine writes the full standard output tree with truthful ABACUS NC-UPF provenance. `SpinIO.load_pickle(path=OUTPUT_DIRECTORY)` provides full-precision exchange values; rounded `exchange.out` values cannot resolve strict MPI differences. The existing `abacus2J.py` command below remains the LCAO interface and is unchanged.
+
+Only `tb2j_projector.nc` is the final native dataset. A failed run may leave an older final or an unpublished `.partial.*` sibling after abrupt MPI abort; never pass partial files to the consumer or rename them into a final. Native streaming failures abort the world rather than silently falling back.
+
+See {ref}`canonical consumer semantics and measured validation boundaries <abacus-plane-wave-atomic-projectors>`. The matched bccFe comparison accepts only the first three shells through 4.056 Angstrom: replay 0.01 meV/shell, cross-code 0.10 meV/shell and same-binary serial/MPI 0.000001 meV/shell are distinct budgets. Requested `Rcut=10` is not a convergence window: the common consumer also truncates to its k-mesh supercell and warns about aliased exterior images. No extended-range, uniformly converged unoccupied-spectrum or GPU runtime claim follows.
 
 
-#### Collinear calculation without SOC
+#### LCAO collinear calculation without SOC
 
 Let's start from the example of Fe. The example files can be found here: https://github.com/mailhexu/TB2J_examples/tree/master/Abacus/Fe_no_SOC . 
 
