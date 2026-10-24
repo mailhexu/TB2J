@@ -4,7 +4,9 @@ ABACUS has separate TB2J interfaces for LCAO Hamiltonian/overlap output and supp
 
 #### Plane-wave scalar-NC UPF atomic projectors
 
-Build ABACUS with `ENABLE_TB2J_PROJECTOR_NETCDF=ON`, NetCDF C with NetCDF-4 groups and the native nlohmann-json backend. The optional backend does not require `ENABLE_JSON`; ordinary builds and `out_tb2j` default off. The tested native target is `abacus_basic_para`; see the native `docs/advanced/install.md` for build requirements.
+The optional native exporter is detected automatically when NetCDF C with NetCDF-4 group support and `nlohmann-json` are available; otherwise it is unavailable. `ENABLE_JSON` remains independent, and the native `source/CMakeLists.txt` build layer performs detection. There is no exporter build switch. See the native `docs/advanced/install.md` for dependency-location hints and details.
+
+`out_tb2j` is a runtime opt-in and requires CPU complex-double PW wavefunctions. GPU and single-precision export are unsupported. The tested native target in the earlier campaign was `abacus_basic_para`.
 
 Use a converged native PW Kohn–Sham calculation with `nspin 2`, `symmetry -1`, `out_tb2j 1`, no U/SOC/noncollinearity, and original scalar norm-conserving UPFs containing atomic wavefunctions. Only a certified generated full-BZ Gamma/MP recipe is supported. An explicit or pre-reduced list is not certified by setting `symmetry -1`. PAW/USPP and meta-GGA/hybrid XC are not supported here. Projectors are **all UPF atomic-wavefunction channels**, not beta projectors, Wannier functions, or the filtered native initial guess.
 
@@ -21,7 +23,7 @@ The common reader/engine writes the full standard output tree with truthful ABAC
 
 Only `tb2j_projector.nc` is the final native dataset. A failed run may leave an older final or an unpublished `.partial.*` sibling after abrupt MPI abort; never pass partial files to the consumer or rename them into a final. Native streaming failures abort the world rather than silently falling back.
 
-See {ref}`canonical consumer semantics and measured validation boundaries <abacus-plane-wave-atomic-projectors>`. The matched bccFe comparison accepts only the first three shells through 4.056 Angstrom: replay 0.01 meV/shell, cross-code 0.10 meV/shell and same-binary serial/MPI 0.000001 meV/shell are distinct budgets. Requested `Rcut=10` is not a convergence window: the common consumer also truncates to its k-mesh supercell and warns about aliased exterior images. No extended-range, uniformly converged unoccupied-spectrum or GPU runtime claim follows.
+See {ref}`canonical consumer semantics and measured validation boundaries <abacus-plane-wave-atomic-projectors>`. The shell budgets and bccFe values describe the retained earlier fixed-build campaign; they are not new verification results for the simplified native exporter. That campaign accepts only the first three shells through 4.056 Angstrom, with distinct replay 0.01 meV/shell, cross-code 0.10 meV/shell and same-binary serial/MPI 0.000001 meV/shell budgets. Requested `Rcut=10` is not a convergence window: the common consumer also truncates to its k-mesh supercell and warns about aliased exterior images. No extended-range or uniformly converged unoccupied-spectrum claim follows.
 
 
 #### LCAO collinear calculation without SOC

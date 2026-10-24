@@ -2,17 +2,26 @@
 
 ## Unreleased
 
-- Document and validate the native ABACUS PW UPF atomic-wavefunction route
-  through the installed canonical consumer, including all source channels,
-  full Gram/inverse semantics, truthful NC-UPF provenance and standard outputs.
-  Matched unmasked bccFe passes separate ABINIT-replay, cross-code and strict
-  same-binary MPI shell budgets for the first three mesh-safe shells only.
-  Real blocked-peer failures and disabled/default PW/LCAO behavior are covered;
-  partial-file, high-unoccupied-spectrum, exterior-alias and unvalidated-GPU
-  limits remain explicit. The existing LCAO command is unchanged.
-  The secondary unmasked FM FeO comparison is descriptive, without a new
-  tolerance; displayed projector populations use the generic partition,
-  distinct from the ABINIT-specific dual-basis Mulliken metadata convention.
+- Document the simplified ABACUS PW UPF exporter contract: automatic optional
+  NetCDF-4/JSON dependency detection, runtime `out_tb2j` opt-in, and CPU
+  complex-double/full-BZ constraints. The dedicated `abacus_projector2J.py`
+  consumer and unchanged `abacus2J.py` LCAO workflow are distinguished; prior
+  scientific campaign measurements are identified as historical, not new
+  native-build verification.
+
+- Earlier fixed-build campaign record for the native ABACUS PW UPF
+  atomic-wavefunction route: it exercised the installed canonical consumer,
+  all source channels, full Gram/inverse semantics, truthful NC-UPF provenance
+  and standard outputs. Its matched unmasked bccFe results met the distinct
+  ABINIT-replay, cross-code and strict same-binary MPI shell budgets for the
+  first three mesh-safe shells. Blocked-peer failures and disabled/default
+  PW/LCAO behavior were also covered. Partial-file, high-unoccupied-spectrum
+  and exterior-alias limitations remain; GPU and single-precision export are
+  unsupported. The existing LCAO command is unchanged. The secondary
+  unmasked FM FeO comparison is descriptive, without a new tolerance;
+  displayed projector populations use the generic partition, distinct from
+  the ABINIT-specific dual-basis Mulliken metadata convention. These are
+  historical observations, not verification of the simplified native build.
 
 - Added `abacus_projector2J.py` for canonical ABACUS PW UPF atomic-projector
   NetCDF data. It uses the existing common engine with `delta_total` and

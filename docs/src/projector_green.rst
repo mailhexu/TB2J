@@ -204,42 +204,48 @@ The shared writer produces ``exchange.out``, ``TB2J.pickle``,
 ``(exchange_out, exchange_Jdict)``. ``abacus2J.py`` remains the separate,
 unchanged LCAO workflow.
 
-The optional native exporter requires NetCDF C with NetCDF-4 groups and the
-native nlohmann-json backend, independently of ordinary ``ENABLE_JSON``
-output. Build with ``ENABLE_TB2J_PROJECTOR_NETCDF=ON`` and request
-``out_tb2j 1`` in a converged PW calculation. Both opt-ins default off.
-Supported physics is two-spin collinear Kohn--Sham DFT with original scalar-NC
-UPF atomic wavefunctions, semilocal LDA/GGA XC and no U/SOC/noncollinearity.
-All atomic-wavefunction channels are kept, not nonlocal beta projectors or
-the filtered native initialization basis. The native generated full-BZ
-Gamma/MP recipe must be certified with ``symmetry -1``; explicit/reduced
-lists, including pre-reduced lists with symmetry disabled, are refused.
+The native exporter is detected automatically when NetCDF C has NetCDF-4
+group support and ``nlohmann-json`` is available; otherwise it is unavailable.
+Ordinary ``ENABLE_JSON`` output is independent, and there is no exporter build
+switch. Request ``out_tb2j 1`` after a converged PW calculation. The exporter
+supports CPU complex-double wavefunctions only; GPU and single-precision
+wavefunctions are unsupported. Supported physics is two-spin collinear
+Kohn--Sham DFT with original scalar-NC UPF atomic wavefunctions, semilocal
+LDA/GGA XC and no U/SOC/noncollinearity. All atomic-wavefunction channels are
+kept, not nonlocal beta projectors or the filtered native initialization
+basis. A generated full-BZ Gamma/MP recipe with ``symmetry -1`` is required;
+explicit or reduced lists are refused.
 
-Actual committed native output has been exercised through this installed
-command and the unchanged common reader/engine. The native nonidentity Gram
-case under conflicting ``TB2J_GREEN_MODE=plain`` gives the same complete
-serialized J dictionary as explicit-inverse API consumption; an explicit
-plain-mode diagnostic differs and is not a material-comparison policy.
-Truthful source/basis metadata identify ABACUS NC-UPF, not GPAW PAW.
+The consumer semantics below are current; native-output and material
+measurements belong to the retained earlier fixed-build campaign, not new
+verification of the simplified exporter. Truthful source/basis metadata
+identify ABACUS NC-UPF, not GPAW PAW.
 
-Matched unmasked bccFe validation uses distinct frozen shell budgets:
+The earlier matched unmasked bccFe campaign used distinct frozen shell budgets:
 0.01 meV for ABINIT baseline replay, 0.10 meV for ABACUS versus ABINIT and
 0.000001 meV for same-binary serial/PW-rank/k-pool/distributed-band comparison.
-All passed for the complete first three shells (8/6/12 pairs) through
-4.056 Angstrom. Printed reference values have 0.0001 meV resolution;
-strict MPI comparisons use ``SpinIO.load_pickle(path=OUTPUT_DIRECTORY)``
-full-precision exchange values, not rounded text. ``Rcut=10`` is a requested
+It passed for the complete first three shells (8/6/12 pairs) through
+4.056 Angstrom. Printed reference values have 0.0001 meV resolution; strict
+MPI comparisons used ``SpinIO.load_pickle(path=OUTPUT_DIRECTORY)`` full-
+precision exchange values, not rounded text. ``Rcut=10`` is a requested
 distance ceiling, additionally bounded by the k-mesh supercell; the alias
 warning and frozen reference's extra exterior images prevent an extended
 table-agreement or long-range-convergence claim.
 
-Converged SCF and reproducible exchange do not certify every unoccupied
-eigenvalue: the finite-iteration BPCG campaign retains and discloses high,
-zero-occupation spectral differences across layouts. Dataset geometry,
-occupations, complete band/channel ownership, full Gram/operator and
-phase-invariant projected-resolvent diagnostics are separate from shell means.
-GPU runtime behavior has not been validated here. The companion TB2J_dev
-Project's
+In that campaign, the frozen reference and current outer bccFe tables had
+339 and 241 rows respectively, with 98 reference-only exterior/aliased
+images. The finite-iteration BPCG layouts differed by up to 0.114 eV for
+high zero-occupation eigenvalues; occupied eigenvalues agreed within about
+1.02e-9 eV, while full projected-resolvent relative differences reached
+3.07e-7. These are retained historical diagnostics, not simplified-build
+verification.
+
+The earlier finite-iteration BPCG campaign does not certify every unoccupied
+eigenvalue: it retains and discloses high, zero-occupation spectral
+differences across layouts. Dataset geometry, occupations, complete
+band/channel ownership, full Gram/operator and phase-invariant
+projected-resolvent diagnostics are separate from shell means. The companion
+TB2J_dev Project's
 ``subprojects/abacus-plane-wave-upf-atomic-wavefunction-projector-exchange/validation/README.md``
 indexes the reproducible native, reference, MPI/failure/default and secondary
 evidence, including actual commands, raw files, hashes and acceptance receipts.
@@ -247,26 +253,14 @@ evidence, including actual commands, raw files, hashes and acceptance receipts.
 Only a closed complete native ``tb2j_projector.nc`` is published. An abrupt
 peer/world abort can leave unpublished ``.partial.*`` siblings and an older
 final may survive a failed run; never rename a partial into place or treat
-an old final as this run's success. Default PW/LCAO behavior was exercised
-with the exporter absent/disabled; entry watches observed no exporter calls.
-See :doc:`abacus` for the separate PW and unchanged LCAO command workflows.
-
-The same-policy secondary FM FeO comparison retains all 12 nearest Fe--Fe
-pairs: mean 7.72032253 meV versus the pinned unmasked ABINIT 7.7202 meV,
-not the differently masked ecosystem 7.5753 meV. No FeO acceptance tolerance
-is assigned and the secondary result cannot waive a failed bccFe gate.
-
-Population side metadata must be interpreted separately. The generic
-``projector`` population mode uses raw local density traces when no
-population/constant-overlap metric is supplied; the ABINIT NC PAO adapter's
-same-named mode uses a dual-basis Mulliken partition with ``overlap_k``.
-Inverse **exchange** selection does not switch this generic population
-convention. The actual FeO displayed charges/moments differ; a retained
-diagnostic applying the existing ABINIT dual helper to the same native
-data reproduces the printed reference populations, without changing the
-actual installed output, exchange policy, masks or acceptance tolerance.
-Conserve native electrons from occupations and k weights, not summed raw
-projector charges. No cross-interface population-equivalence claim is made.
+an old final as this run's success. See :doc:`abacus` for the separate PW and
+unchanged LCAO command workflows. In the earlier campaign, the secondary FM
+FeO comparison retained 12 nearest Fe--Fe pairs, with mean 7.72032253 meV
+versus pinned unmasked ABINIT 7.7202 meV (not the differently masked 7.5753
+meV ecosystem value); no FeO acceptance tolerance was assigned. Projector
+population metadata follows the generic raw-trace convention here, distinct
+from the ABINIT NC PAO dual-basis Mulliken convention; electron conservation
+is checked from occupations and k weights, not summed raw projector charges.
 
 
 Python API
