@@ -650,7 +650,7 @@ def write_shells(document, path, *, equivalent_comments=True):
 
 @dataclass(frozen=True)
 class ConversionReport:
-    """Immutable, bounded evidence from one in-memory shell conversion."""
+    """Immutable evidence from one shell or native exchange conversion."""
 
     residuals: tuple = ()
     created_pair_keys: tuple = ()
@@ -658,6 +658,10 @@ class ConversionReport:
     absent_channel_keys: tuple = ()
     snapped_values: tuple = ()
     encoding_changes: tuple = ()
+    precision_profile: str | None = None
+    quanta: tuple = ()
+    losses: tuple = ()
+    messages: tuple = ()
 
     def __post_init__(self):
         for name in (
@@ -667,6 +671,10 @@ class ConversionReport:
             "absent_channel_keys",
             "snapped_values",
             "encoding_changes",
+            "precision_profile",
+            "quanta",
+            "losses",
+            "messages",
         ):
             object.__setattr__(self, name, _freeze(getattr(self, name)))
 
@@ -679,6 +687,34 @@ class ShellResult:
 
 @dataclass(frozen=True)
 class ExpansionResult:
+    spinio: object
+    report: ConversionReport
+
+
+@dataclass(frozen=True)
+class NativeContext:
+    """Explicit identity and physical context missing from a native file."""
+
+    atoms: object = None
+    species: object = None
+    index_spin: object = None
+    magnetic_atoms: object = None
+    reference_spins: object = None
+    charges: object = None
+
+    def __post_init__(self):
+        for name in (
+            "species",
+            "index_spin",
+            "magnetic_atoms",
+            "reference_spins",
+            "charges",
+        ):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True)
+class NativeReadResult:
     spinio: object
     report: ConversionReport
 
@@ -1928,3 +1964,14 @@ def template(
         zero_tol=zero_tol,
         source_format="template",
     )
+
+
+def read_exchange(path, format, context=None, allow_loss=()):
+    """Read explicit native pickle/text/XML with missing-context and loss guards.
+
+    Pickle must be selected explicitly and must come from a trusted source.
+    Text/XML precision profiles describe printed-source bounds, not symmetry tolerances.
+    """
+    from .native_readers import _read_exchange
+
+    return _read_exchange(path, format, context=context, allow_loss=allow_loss)

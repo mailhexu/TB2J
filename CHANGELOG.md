@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `read_exchange` for explicitly trusted native pickle, `exchange.out`,
+  and Multibinit XML inputs. Imports retain sparse channel support and exact
+  atom-to-spin maps, require missing identity or magnetic context explicitly,
+  report printed precision, and reject unsupported blocks unless their loss
+  is named. Combined text tensors are checked, never substituted for channels.
 - Added `compress` for symmetry-orbit exchange editing, with exact sparse
   channel masks and atom-to-spin indexing, default rejection of inconsistent
   values, and explicit projection and zero-snapping reports. Internal replay
