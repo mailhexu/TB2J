@@ -697,7 +697,7 @@ def _transform_max_deviation(left, right):
 
 # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
 # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
-# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_dmi_axial_vector
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_dmi_axial_vector
 def _transform_channel_value(channel, value, cartesian, *, inverse=False):
     """Transport one authored channel without filling another channel's zeros."""
     if channel == "Jiso":
