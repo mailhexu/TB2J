@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+- Added guarded native `write_exchange` for pickle, `exchange.out`, XML,
+  and the native-only `tb2j` preset. Every preset member is preflighted
+  before IO; populated unsupported fields require named loss opt-ins.
+  Reports include emitted precision, annotation omissions and explicit
+  context defaults. Raw site images, native pair keys and source objects
+  are preserved. Solver exports remain outside this shell-format interface.
+- Replaced the shell text grammar with hand-first schema v2: multiline
+  lattice/site rows, element-based labels, labeled reference moments,
+  `exchange`/`J`, optional display names and nested user metadata.
+  `distance` (Angstrom) and `n_equivalent_pairs` are optional input summaries
+  and always computed on output. The old `orbit_size` field and v1 grammar
+  are not aliases. Snapshot-free complete files construct symmetry once;
+  canonical rewrites pin operations after the editable shell blocks.
+  Template/compression preserve raw site images and native pair translations;
+  base updates reject a different image frame. Labels and user metadata
+  survive shell rewrites and native pickle roundtrips.
+- Added public shell `expand` with compatible-base context validation,
+  exact native key identities, ancillary keep/drop/differ reports, legacy SIA
+  normalization, and named conflicts for stale orbital/derivative data.
+  `compress` now persists native precision provenance and required-base fields;
+  standalone expansion never silently discards source-present physical context.
+- Added `read_exchange` for explicitly trusted native pickle, `exchange.out`,
+  and Multibinit XML inputs. Imports retain sparse channel support and exact
+  atom-to-spin maps, require missing identity or magnetic context explicitly,
+  report printed precision, and reject unsupported blocks unless their loss
+  is named. Combined text tensors are checked, never substituted for channels.
+- Added `compress` for symmetry-orbit exchange editing, with exact sparse
+  channel masks and atom-to-spin indexing, default rejection of inconsistent
+  values, and explicit projection and zero-snapping reports. Internal replay
+  checks bond constraints and reports every opt-in orbit-completion key.
+- Added `TB2J.io_exchange.shells.template` to generate editable, unfilled
+  symmetry-shell documents from periodic structures and magnetic-site selections.
+  SG/MSG modes, scalar or axial reference moments, Angstrom cutoffs,
+  skew-cell image enumeration, and deterministic full-orbit representatives
+  are supported; templates never calculate exchange values.
+
+- Added immutable `ShellDocument` / `ShellEntry` models and the
+  `read_shells`, `write_shells`, `validate_shells`, and `check_producer_ops`
+  Python interfaces. The versioned TOML format carries isotropic or full
+  Cartesian tensors, authoritative SG/MSG operations, sparse orbit masks,
+  explicit tensor representatives, and removable equivalent-pair comments.
+  Values use eV in Python and an explicitly declared wire unit (meV by default).
+  The shared magnetic-symmetry detector now accepts an optional
+  `magnetic_tol` keyword without changing existing callers' default behavior.
+
+- The exchange symmetrizer now runs on one shared space-group /
+  magnetic-space-group engine (`TB2J/symmetry_core.py`), which detects the
+  symmetry operations with spglib (rotations *and* translations) and owns the
+  site maps, the bond images, the orbit finding and the pair-tensor algebra.
+  `TB2J/symmetrize_J.py` keeps the projection, the single-ion anisotropy
+  symmetrization and the command line interface. The projection now acts on
+  the full pair tensor, so the isotropic exchange, the DMI and the anisotropic
+  exchange are symmetrized consistently and the symmetry-forbidden components
+  are zero by construction. `--magnetic` symmetrizes with the magnetic space
+  group built from the stored magnetic moments, and `--zero-tol` sets the
+  tolerance below which the symmetrized components are snapped to exactly
+  zero. `spglib>=2.5` is now a dependency of TB2J.
+  `TB2J_edit.py symmetrize` now rejects non-integer bond images with
+  `ValueError` instead of silently skipping those images; check the stored
+  structure, reference structure and symmetry tolerance when this occurs.
+
 - SIESTA spiral certified exports now bind AC-009 to the complete derivative
   records (`seam_payload_sha256` for dH/dR+dS/dR and
   `derivative_payload_sha256` for dV/dR), including geometry, units, gauges

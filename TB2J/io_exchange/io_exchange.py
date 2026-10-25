@@ -225,17 +225,29 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return self.Jani_dict is not None
 
     def _build_Rlist(self):
-        Rset = set()
-        ispin_set = set()
-        Rset.add((0, 0, 0))  # always add the zero vector
-        for R, i, j in self.exchange_Jdict:
-            Rset.add(R)
-            ispin_set.add(i)
-            ispin_set.add(j)
-        self.Rlist = list(Rset)
-        self.ispin_list = list(ispin_set)
+        """Rebuild sparse pair translations and all declared magnetic spins."""
+        Rset = {(0, 0, 0)}  # retain the onsite image even for empty models
+        ispin_set = {i for i in self.index_spin if i >= 0}
+        for channel in ("exchange_Jdict", "dmi_ddict", "Jani_dict"):
+            pairs = getattr(self, channel, None)
+            if pairs is None:
+                continue
+            for key in pairs:
+                R, i, j = key
+                for endpoint in (i, j):
+                    if endpoint not in ispin_set:
+                        raise ValueError(
+                            f"{channel} key {key!r}: spin index {endpoint!r} "
+                            "is not declared by index_spin"
+                        )
+                Rset.add(R)
+        self.Rlist = sorted(Rset)
+        self.ispin_list = sorted(ispin_set)
         self.nspin = len(self.ispin_list)
-        assert self.nspin == max(self.ispin_list) + 1
+        if self.ispin_list and self.ispin_list[-1] != self.nspin - 1:
+            raise ValueError(
+                "index_spin must declare contiguous spin indices from zero"
+            )
 
     def _build_ind_atoms(self):
         self._ind_atoms = {}  #: The index of atom for each spin.
