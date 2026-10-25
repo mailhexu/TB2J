@@ -48,6 +48,7 @@ Welcome to TB2J's documentation!
    src/Contributors.rst
    src/references
    src/development.md
+   src/exchange_shells.md
    src/ReleaseNotes.md
 
 
