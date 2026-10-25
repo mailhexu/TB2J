@@ -190,7 +190,11 @@ def make_nc_pao_exchange_data():
 
 @pytest.mark.parametrize(
     "explicit_mode,environment_mode,reference_mode",
-    [("inverse", "plain", "inverse"), (None, "plain", "plain"), (None, "inverse", "inverse")],
+    [
+        ("inverse", "plain", "inverse"),
+        (None, "plain", "plain"),
+        (None, "inverse", "inverse"),
+    ],
 )
 def test_netcdf_exchange_metric_precedence(
     tmp_path, monkeypatch, explicit_mode, environment_mode, reference_mode
@@ -202,7 +206,9 @@ def test_netcdf_exchange_metric_precedence(
     data.occupations[1, 0] = [0.2, 0.0]
     filename = tmp_path / "atomic.nc"
     data.save_netcdf(filename)
-    controls = dict(Rpts=[(-1, 0, 0), (1, 0, 0)], nz=12, operator_component="delta_total")
+    controls = dict(
+        Rpts=[(-1, 0, 0), (1, 0, 0)], nz=12, operator_component="delta_total"
+    )
     references = {
         mode: compute_projector_exchange_jdict(data, overlap_mode=mode, **controls)
         for mode in ("inverse", "plain")
@@ -2075,3 +2081,180 @@ def test_abacus_projector_command_uses_inverse_metric(tmp_path, monkeypatch):
     for pair, value in expected.items():
         assert result.exchange_Jdict[pair] == pytest.approx(value, rel=1e-12)
     _assert_dataset_attribution(result.description, data, "abacus")
+
+
+@pytest.mark.parametrize(
+    "functional_ids",
+    [
+        np.array([], dtype=np.int32),
+        np.array([101], dtype=np.int32),
+        np.array([101, 202, 303], dtype=np.int32),
+    ],
+    ids=["empty-functional-ids", "singleton-functional-id", "multiple-functional-ids"],
+)
+def test_projector_green_loads_native_abacus_metadata(tmp_path, functional_ids):
+    netcdf4 = pytest.importorskip("netCDF4")
+    data = make_bcc_fe_projector_data()
+    data.metadata = {}
+    data.operator_basis = "norm_conserving_pao"
+    filename = tmp_path / "native_abacus_metadata.nc"
+    data.save_netcdf(filename)
+
+    text = 'ABACUS "native" path \\ Δ'
+    expected_metadata = {
+        "source_code": "abacus",
+        "producer": "ABACUS plane-wave UPF atomic-wavefunction projector exporter",
+        "source_version": text,
+        "operator_basis": "norm_conserving_pao",
+        "storage_level": "spectral",
+        "nspin": 2,
+        "units": {"cell": "angstrom", "efermi": "eV"},
+        "cutoff": {"ecutwfc_ry": 80.5, "ecutrho_ry": 320.0},
+        "smearing": {"method": "gaussian", "sigma_ry": 0.01},
+        "scf_controls": {"nmax": 100, "thr": 1.0e-10, "thr_type": 2},
+        "occupations": {
+            "custom": True,
+            "definition": "Fermi-Dirac",
+            "native_electrons": [8.0, 8.0],
+        },
+        "grid_recipe": {
+            "generated": True,
+            "convention": "Gamma-centered Monkhorst-Pack",
+            "symmetry": -1,
+            "dimensions": [8, 8, 8],
+        },
+        "functional": {
+            "requested": "PBE",
+            "actual_func_type_meaning": "ABACUS functional enum",
+            "actual_func_type": 3,
+            "libxc_func_ids": functional_ids.tolist(),
+        },
+        "spin_channels": ["up", "down"],
+        "species": [
+            {
+                "label": "Fe",
+                "pseudo_file": "Fe.UPF",
+                "natoms": 1,
+                "mesh": 1024,
+                "channels": [
+                    {"label": "3d", "radial_channel": 0, "l": 2, "occupation": 6.0},
+                    {"label": "4s", "radial_channel": 1, "l": 0, "occupation": 2.0},
+                ],
+            },
+            {
+                "label": "O",
+                "pseudo_file": "O.UPF",
+                "natoms": 2,
+                "mesh": 512,
+                "channels": [
+                    {"label": "2p", "radial_channel": 0, "l": 1, "occupation": 4.0}
+                ],
+            },
+        ],
+    }
+
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.delncattr("metadata_json")
+        nc.delncattr("complex_component")
+        nc.setncattr_string("complex_component", ["real", "imag"])
+        metadata = nc.createGroup("metadata")
+        metadata.setncattr("source_code", "abacus")
+        metadata.setncattr(
+            "producer",
+            "ABACUS plane-wave UPF atomic-wavefunction projector exporter",
+        )
+        metadata.setncattr("source_version", text)
+        metadata.setncattr("operator_basis", "norm_conserving_pao")
+        metadata.setncattr("storage_level", "spectral")
+        metadata.setncattr("nspin", np.int32(2))
+        units = metadata.createGroup("units")
+        units.setncattr("cell", "angstrom")
+        units.setncattr("efermi", "eV")
+        cutoff = metadata.createGroup("cutoff")
+        cutoff.setncattr("ecutwfc_ry", np.float64(80.5))
+        cutoff.setncattr("ecutrho_ry", np.float64(320.0))
+        smearing = metadata.createGroup("smearing")
+        smearing.setncattr("method", "gaussian")
+        smearing.setncattr("sigma_ry", np.float64(0.01))
+        scf_controls = metadata.createGroup("scf_controls")
+        scf_controls.setncattr("nmax", np.int32(100))
+        scf_controls.setncattr("thr", np.float64(1.0e-10))
+        scf_controls.setncattr("thr_type", np.int32(2))
+        occupations = metadata.createGroup("occupations")
+        occupations.setncattr("custom", np.int8(1))
+        occupations.setncattr("definition", "Fermi-Dirac")
+        occupations.setncattr("native_electrons", np.array([8.0, 8.0]))
+        grid_recipe = metadata.createGroup("grid_recipe")
+        grid_recipe.setncattr("generated", np.int8(1))
+        grid_recipe.setncattr("convention", "Gamma-centered Monkhorst-Pack")
+        grid_recipe.setncattr("symmetry", np.int32(-1))
+        grid_recipe.setncattr("dimensions", np.array([8, 8, 8], dtype=np.int32))
+        functional = metadata.createGroup("functional")
+        functional.setncattr("requested", "PBE")
+        functional.setncattr("actual_func_type_meaning", "ABACUS functional enum")
+        functional.setncattr("actual_func_type", np.int32(3))
+        functional.setncattr("libxc_func_ids", functional_ids)
+        metadata.setncattr_string("spin_channels", ["up", "down"])
+        species = metadata.createGroup("species")
+        fe = species.createGroup("species_0")
+        fe.setncattr("label", "Fe")
+        fe.setncattr("pseudo_file", "Fe.UPF")
+        fe.setncattr("natoms", np.int32(1))
+        fe.setncattr("mesh", np.int32(1024))
+        fe_channels = fe.createGroup("channels")
+        channel = fe_channels.createGroup("channel_0")
+        channel.setncattr("label", "3d")
+        channel.setncattr("radial_channel", np.int32(0))
+        channel.setncattr("l", np.int32(2))
+        channel.setncattr("occupation", np.float64(6.0))
+        channel = fe_channels.createGroup("channel_1")
+        channel.setncattr("label", "4s")
+        channel.setncattr("radial_channel", np.int32(1))
+        channel.setncattr("l", np.int32(0))
+        channel.setncattr("occupation", np.float64(2.0))
+        oxygen = species.createGroup("species_1")
+        oxygen.setncattr("label", "O")
+        oxygen.setncattr("pseudo_file", "O.UPF")
+        oxygen.setncattr("natoms", np.int32(2))
+        oxygen.setncattr("mesh", np.int32(512))
+        oxygen_channels = oxygen.createGroup("channels")
+        channel = oxygen_channels.createGroup("channel_0")
+        channel.setncattr("label", "2p")
+        channel.setncattr("radial_channel", np.int32(0))
+        channel.setncattr("l", np.int32(1))
+        channel.setncattr("occupation", np.float64(4.0))
+
+    loaded = ProjectorGreenData.load_netcdf(filename)
+
+    for key, value in expected_metadata.items():
+        assert loaded.metadata[key] == value
+    np.testing.assert_array_equal(loaded.kpoints, data.kpoints)
+    np.testing.assert_array_equal(loaded.weights, data.weights)
+    np.testing.assert_array_equal(loaded.eigenvalues, data.eigenvalues)
+    np.testing.assert_array_equal(loaded.coefficients, data.coefficients)
+
+
+def test_projector_green_native_metadata_takes_precedence_over_json(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    data = make_bcc_fe_projector_data()
+    data.metadata = {
+        "source_code": "gpaw",
+        "producer": "legacy JSON attribution",
+        "legacy_only": "must not survive native precedence",
+    }
+    data.operator_basis = "norm_conserving_pao"
+    filename = tmp_path / "native_metadata_precedence.nc"
+    data.save_netcdf(filename)
+
+    with netcdf4.Dataset(filename, "a") as nc:
+        metadata = nc.createGroup("metadata")
+        metadata.setncattr("source_code", "abacus")
+        metadata.setncattr("producer", "ABACUS plane-wave UPF exporter")
+        metadata.setncattr("operator_basis", "norm_conserving_pao")
+
+    loaded = ProjectorGreenData.load_netcdf(filename)
+
+    assert loaded.metadata["source_code"] == "abacus"
+    assert loaded.metadata["producer"] == "ABACUS plane-wave UPF exporter"
+    assert loaded.metadata["operator_basis"] == "norm_conserving_pao"
+    assert "legacy_only" not in loaded.metadata

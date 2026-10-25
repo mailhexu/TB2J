@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- Document the simplified ABACUS PW UPF exporter contract: reuse existing
-  `ENABLE_JSON=ON` metadata support, a simple optional NetCDF header/library
-  check, runtime `out_tb2j` opt-in, and CPU complex-double/full-BZ constraints.
-  The dedicated `abacus_projector2J.py`
+- Document the JSON-free ABACUS PW UPF exporter contract: native NetCDF
+  metadata groups and attributes alongside the numeric payload, a simple
+  optional NetCDF header/library check, runtime `out_tb2j` opt-in, and CPU
+  complex-double/full-BZ constraints. The dedicated `abacus_projector2J.py`
   consumer and unchanged `abacus2J.py` LCAO workflow are distinguished; prior
   scientific campaign measurements are identified as historical, not new
   native-build verification.

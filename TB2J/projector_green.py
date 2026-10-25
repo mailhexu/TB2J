@@ -65,6 +65,42 @@ def _jsonable(value):
     return value
 
 
+def _native_metadata_value(name, value):
+    """Convert NetCDF metadata attributes to their Python scalar/list values."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if isinstance(value, np.ndarray):
+        return [_native_metadata_value(name, item) for item in value.tolist()]
+    if name in {"custom", "generated"}:
+        return bool(value)
+    if isinstance(value, np.generic):
+        return _native_metadata_value(name, value.item())
+    if isinstance(value, (list, tuple)):
+        return [_native_metadata_value(name, item) for item in value]
+    return value
+
+
+def _native_metadata_group(group):
+    """Decode the ABACUS native metadata group and its ordered collections."""
+    result = {}
+    for name in group.ncattrs():
+        value = _native_metadata_value(name, group.getncattr(name))
+        if name == "libxc_func_ids" and not isinstance(value, list):
+            value = [value]
+        result[name] = value
+    for name, subgroup in group.groups.items():
+        if name in {"species", "channels"}:
+            result[name] = [
+                _native_metadata_group(subgroup.groups[key])
+                for key in sorted(
+                    subgroup.groups, key=lambda item: int(item.rsplit("_", 1)[1])
+                )
+            ]
+        else:
+            result[name] = _native_metadata_group(subgroup)
+    return result
+
+
 def encode_complex(array):
     """Encode a complex array with final real/imag dimension."""
     array = np.asarray(array, dtype=complex)
@@ -881,7 +917,11 @@ class ProjectorGreenData:
                 raise ValueError("unsupported projector Green schema")
             if "greens_k" in nc.groups or "greens_R" in nc.groups:
                 raise ValueError("v1 projector Green files must not store Green arrays")
-            metadata = json.loads(getattr(nc, "metadata_json", "{}"))
+            metadata_group = nc.groups.get("metadata")
+            if metadata_group is not None:
+                metadata = _native_metadata_group(metadata_group)
+            else:
+                metadata = json.loads(getattr(nc, "metadata_json", "{}"))
             structure = nc.groups.get("structure")
             cell = positions = atomic_numbers = None
             if structure is not None:

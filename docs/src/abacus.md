@@ -4,7 +4,7 @@ ABACUS has separate TB2J interfaces for LCAO Hamiltonian/overlap output and supp
 
 #### Plane-wave scalar-NC UPF atomic projectors
 
-Build the native exporter with ABACUS's existing `-DENABLE_JSON=ON` option and the NetCDF C library. JSON only serializes metadata; numerical arrays are NetCDF. The native source build performs a simple NetCDF header/library check, without separate JSON discovery or a capability probe. NetCDF-4 group support is required at write time; creation failures are reported. Without JSON enabled or NetCDF found, the exporter is unavailable. There is no exporter build switch. See native `docs/advanced/install.md` for dependency-location hints.
+Build the native exporter with ABACUS's NetCDF C library; metadata and numeric payload are both stored in NetCDF. The exporter has no JSON dependency or `ENABLE_JSON` requirement. The native source build performs a simple NetCDF header/library check, without a separate capability probe. NetCDF-4 group support is required at write time; creation failures are reported. Without NetCDF the exporter is unavailable. There is no exporter build switch. See native `docs/advanced/install.md` for dependency-location hints.
 
 `out_tb2j` is a runtime opt-in and requires CPU complex-double PW wavefunctions. GPU and single-precision export are unsupported. The tested native target in the earlier campaign was `abacus_basic_para`.
 

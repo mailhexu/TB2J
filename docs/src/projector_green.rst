@@ -79,11 +79,10 @@ metadata, and local-operator basis metadata.
 
 NetCDF Layout
 -------------
-
-NetCDF export is optional and requires ``netCDF4``.  Complex arrays are encoded
-with a final dimension ``complex=2`` where index 0 is real and index 1 is
-imaginary.
-
+NetCDF export uses the Python ``netCDF4`` package for the common reader and
+writer. Complex numeric arrays are encoded with a final dimension
+``complex=2`` where index 0 is real and index 1 is imaginary. ABACUS stores
+root complex-component labels as an ``NC_STRING`` array.
 Version 1 files use these groups:
 
 * ``/structure``: optional cell, positions, and atomic numbers;
@@ -93,6 +92,19 @@ Version 1 files use these groups:
 * ``/projectors``: coefficients, projector metadata, and optional
   ``overlap_metric``;
 * ``/operators``: optional site-local operators such as ``hij``.
+
+The optional ``/metadata`` group stores producer metadata in native NetCDF
+attributes and groups; it is not JSON. Scalar text, integer, and floating-point
+attributes retain their native types, numeric vector attributes remain arrays,
+and ABACUS Boolean flags use ``NC_BYTE`` values 0 or 1. Nested metadata groups
+include ``units``, ``cutoff``, ``smearing``, ``scf_controls``, ``occupations``,
+``grid_recipe``, and ``functional``. Functional ``libxc_func_ids`` always
+decodes as a Python list, including empty and singleton arrays. Species are
+stored as ordered ``species_0``, ``species_1``, ... groups, with ordered
+``channel_0``, ``channel_1``, ... groups under each species' ``channels``
+group. A reader uses this native group in preference to legacy
+``metadata_json`` when both are present; other producers' JSON metadata files
+remain readable.
 
 Version 1 files must not contain stored ``/greens_k`` or ``/greens_R`` groups.
 
@@ -204,13 +216,13 @@ The shared writer produces ``exchange.out``, ``TB2J.pickle``,
 ``(exchange_out, exchange_Jdict)``. ``abacus2J.py`` remains the separate,
 unchanged LCAO workflow.
 
-Build the native exporter with ABACUS's existing ``-DENABLE_JSON=ON`` option
-and the NetCDF C library. JSON only encodes metadata. The source build uses
-a simple NetCDF header/library check, with no separate JSON lookup or
-capability probe. NetCDF-4 group support is required at write time, and
-creation failures are reported. Without JSON enabled or NetCDF found, export
-is unavailable. There is no exporter build switch. Request ``out_tb2j 1``
-after a converged PW calculation. The exporter
+Build the native exporter with ABACUS's NetCDF C library. Metadata and
+numerical arrays are stored in NetCDF; no JSON dependency or
+``ENABLE_JSON=ON`` option is required. The source build uses a simple NetCDF
+header/library check, with no separate capability probe. NetCDF-4 group
+support is required at write time, and creation failures are reported. Without
+NetCDF the exporter is unavailable. There is no exporter build switch. Request
+``out_tb2j 1`` after a converged PW calculation. The exporter
 supports CPU complex-double wavefunctions only; GPU and single-precision
 wavefunctions are unsupported. Supported physics is two-spin collinear
 Kohn--Sham DFT with original scalar-NC UPF atomic wavefunctions, semilocal
