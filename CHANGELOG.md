@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `compress` for symmetry-orbit exchange editing, with exact sparse
+  channel masks and atom-to-spin indexing, default rejection of inconsistent
+  values, and explicit projection and zero-snapping reports. Internal replay
+  checks bond constraints and reports every opt-in orbit-completion key.
+
 - Added immutable `ShellDocument` / `ShellEntry` models and the
   `read_shells`, `write_shells`, `validate_shells`, and `check_producer_ops`
   Python interfaces. The versioned TOML format carries isotropic or full

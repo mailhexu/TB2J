@@ -644,3 +644,953 @@ def write_shells(document, path, *, equivalent_comments=True):
 
     validate_shells(document)
     dump(document, path, equivalent_comments=equivalent_comments)
+
+
+@dataclass(frozen=True)
+class ConversionReport:
+    """Immutable, bounded evidence from one in-memory shell conversion."""
+
+    residuals: tuple = ()
+    created_pair_keys: tuple = ()
+    created_channel_keys: tuple = ()
+    absent_channel_keys: tuple = ()
+    snapped_values: tuple = ()
+    encoding_changes: tuple = ()
+
+    def __post_init__(self):
+        for name in (
+            "residuals",
+            "created_pair_keys",
+            "created_channel_keys",
+            "absent_channel_keys",
+            "snapped_values",
+            "encoding_changes",
+        ):
+            object.__setattr__(self, name, _freeze(getattr(self, name)))
+
+
+@dataclass(frozen=True)
+class ShellResult:
+    document: ShellDocument
+    report: ConversionReport
+
+
+@dataclass(frozen=True)
+class ExpansionResult:
+    spinio: object
+    report: ConversionReport
+
+
+def _transform_public_value(value):
+    if isinstance(value, np.ndarray):
+        return _freeze(value)
+    return float(value) if np.ndim(value) == 0 else _freeze(value)
+
+
+def _transform_close(left, right, atol, rtol):
+    return bool(np.allclose(left, right, atol=atol, rtol=rtol))
+
+
+def _transform_max_deviation(left, right):
+    return float(np.max(np.abs(np.asarray(left) - np.asarray(right))))
+
+
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_dmi_axial_vector
+def _transform_channel_value(channel, value, cartesian, *, inverse=False):
+    """Transport one authored channel without filling another channel's zeros."""
+    if channel == "Jiso":
+        return float(value)
+    rotation = cartesian.T if inverse else cartesian
+    if channel == "DMI":
+        return float(np.linalg.det(cartesian)) * (rotation @ np.asarray(value))
+    return rotation @ np.asarray(value) @ rotation.T
+
+
+def _transform_reverse_value(channel, value):
+    if channel == "Jiso":
+        return float(value)
+    if channel == "DMI":
+        return -np.asarray(value, dtype=float)
+    return np.asarray(value, dtype=float).T
+
+
+def _transform_native_key(channel, key, spin_to_atom):
+    if not isinstance(key, tuple) or len(key) != 3:
+        raise ValueError(f"{channel} key {key!r}: expected (R, i, j)")
+    R, i, j = key
+    if (
+        not isinstance(R, (tuple, list))
+        or len(R) != 3
+        or any(
+            not isinstance(value, (int, np.integer))
+            or isinstance(value, (bool, np.bool_))
+            for value in R
+        )
+        or any(
+            not isinstance(value, (int, np.integer))
+            or isinstance(value, (bool, np.bool_))
+            for value in (i, j)
+        )
+    ):
+        raise ValueError(
+            f"{channel} key {key!r}: expected integer translation and spin indices"
+        )
+    R = tuple(int(value) for value in R)
+    i, j = int(i), int(j)
+    if i not in spin_to_atom or j not in spin_to_atom:
+        raise ValueError(
+            f"{channel} key {key!r}: spin endpoint is absent from index_spin"
+        )
+    return (R, i, j), (spin_to_atom[i] + 1, spin_to_atom[j] + 1, *R)
+
+
+def _transform_moments(spinio, reference_spins, natom):
+    if reference_spins is not None:
+        raw = reference_spins
+        source = "explicit"
+    else:
+        raw = getattr(spinio, "spinat", None)
+        source = "native:spinat" if raw is not None else "explicit"
+        if raw is None:
+            return None, source
+        values = np.asarray(raw)
+        if values.shape == (natom, 3) and bool(getattr(spinio, "colinear", False)):
+            values = _numbers(values, (natom, 3), "SpinIO.spinat")
+            if np.any(values[:, :2] != 0):
+                raise ValueError(
+                    "SpinIO.spinat: collinear moments must be z-aligned before "
+                    "scalar symmetry handling"
+                )
+            raw = values[:, 2]
+    values = np.asarray(raw)
+    if values.shape not in {(natom,), (natom, 3)}:
+        raise ValueError(
+            "reference_spins.moments: expected one scalar or Cartesian vector per atom"
+        )
+    values = _numbers(raw, values.shape, "reference_spins.moments")
+    return values, source
+
+
+def _transform_tolerance(value, name, *, positive=False):
+    result = float(_numbers(value, (), f"tolerances.{name}"))
+    if result < 0 or (positive and result <= 0):
+        qualifier = "positive" if positive else "nonnegative"
+        raise ValueError(f"tolerances.{name}: expected a {qualifier} tolerance")
+    return result
+
+
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
+def _transform_traceless_symmetric(value):
+    """Retain the channel's symmetry and exact zero trace in binary floats."""
+    result = 0.5 * np.asarray(value) + 0.5 * np.asarray(value).T
+    smallest = int(np.argmin(np.abs(np.diag(result))))
+    others = [index for index in range(3) if index != smallest]
+    # For a traceless diagonal the two largest magnitudes have opposite
+    # signs. Their difference is exactly representable (Sterbenz), avoiding
+    # a rounded trace that would falsely create an absent isotropic channel.
+    result[smallest, smallest] = -(
+        result[others[0], others[0]] + result[others[1], others[1]]
+    )
+    return result
+
+
+def _transform_source_values(channel, source, spin_to_atom, zero_tol, snap_zero):
+    if source is None:
+        return {}, (), {}
+    if not hasattr(source, "items"):
+        raise ValueError(f"SpinIO {channel} channel must be a mapping or None")
+    shape = {"Jiso": (), "DMI": (3,), "Jani": (3, 3)}[channel]
+    values = {}
+    wires = {}
+    snapped = []
+    for key, raw in source.items():
+        native_key, wire = _transform_native_key(channel, key, spin_to_atom)
+        try:
+            raw_array = np.asarray(raw)
+        except Exception as error:
+            raise ValueError(
+                f"{channel} key {native_key!r}: invalid numeric value"
+            ) from error
+        if raw_array.shape != shape:
+            raise ValueError(
+                f"{channel} key {native_key!r}: underdetermined value shape "
+                f"{raw_array.shape}; expected {shape}"
+            )
+        value = _numbers(raw, shape, f"{channel} key {native_key!r}")
+        if snap_zero:
+            updated = np.where(np.abs(value) < zero_tol, 0.0, value)
+            if not np.array_equal(updated, value):
+                snapped.append(
+                    (
+                        channel,
+                        native_key,
+                        _transform_public_value(value),
+                        _transform_public_value(updated),
+                    )
+                )
+            value = updated
+        values[native_key] = float(value) if shape == () else value
+        wires[native_key] = wire
+    return values, tuple(snapped), wires
+
+
+def _transform_operation_snapshot(spinio, symmetry, moments, symprec, magnetic_tol):
+    atoms = getattr(spinio, "atoms", None)
+    if atoms is None:
+        raise ValueError("SpinIO.atoms: full structure context is required")
+    if symmetry == "sg":
+        detected = symmetry_core.crystal_symmetry_ops(atoms, symprec=symprec)
+    else:
+        if moments is None:
+            raise ValueError(
+                "reference_spins.moments: required for msg symmetry; supply "
+                "reference_spins or SpinIO.spinat"
+            )
+        detected = symmetry_core.magnetic_symmetry_ops(
+            atoms, moments, symprec=symprec, magnetic_tol=magnetic_tol
+        )
+    primes = detected.time_reversals
+    if primes is None:
+        primes = [False] * len(detected)
+    operations = tuple(
+        ShellOperation(
+            rotation=rotation,
+            translation=translation,
+            time_reversal=bool(primed),
+        )
+        for rotation, translation, primed in zip(
+            detected.rotations, detected.translations, primes
+        )
+    )
+    return atoms, operations, detected.description
+
+
+def _transform_compose(after, before):
+    return after[0] @ before[0], after[1] ^ before[1]
+
+
+def _transform_inverse(transform):
+    return transform[0].T, transform[1]
+
+
+def _transform_apply(channel, value, transform):
+    matrix, reversed_bond = transform
+    if reversed_bond:
+        value = _transform_reverse_value(channel, value)
+    return _transform_channel_value(channel, value, matrix)
+
+
+def _transform_operator_matrix(channel, transform):
+    matrix, reversed_bond = transform
+    if channel == "Jiso":
+        return np.ones((1, 1))
+    if channel == "DMI":
+        sign = -1.0 if reversed_bond else 1.0
+        return sign * float(np.linalg.det(matrix)) * matrix
+    result = np.empty((9, 9))
+    for column in range(9):
+        basis = np.zeros((3, 3))
+        basis.flat[column] = 1.0
+        result[:, column] = _transform_apply(channel, basis, transform).reshape(-1)
+    return result
+
+
+def _transform_project_fixed(channel, value, cycles):
+    if not cycles:
+        return value
+    dimension = 1 if channel == "Jiso" else 3 if channel == "DMI" else 9
+    identity = np.eye(dimension)
+    constraints = np.concatenate(
+        [_transform_operator_matrix(channel, cycle) - identity for cycle in cycles],
+        axis=0,
+    )
+    _, singular_values, right_vectors = np.linalg.svd(constraints, full_matrices=True)
+    largest = singular_values[0] if singular_values.size else 0.0
+    threshold = np.finfo(float).eps * max(constraints.shape) * largest
+    rank = int(np.count_nonzero(singular_values > threshold))
+    basis = right_vectors[rank:].T
+    vector = np.asarray(value, dtype=float).reshape(-1)
+    projected = (
+        basis @ (basis.T @ vector)
+        if basis.shape[1]
+        else np.zeros(dimension, dtype=float)
+    )
+    return (
+        float(projected[0])
+        if channel == "Jiso"
+        else projected.reshape((3,) if channel == "DMI" else (3, 3))
+    )
+
+
+def _transform_project_observations(
+    channel,
+    values,
+    wires,
+    native_to_core,
+    image_maps,
+    cartesian_rotations,
+    shell_by_wire,
+    group_records,
+    value_atol,
+    value_rtol,
+):
+    """Project only observed values onto symmetry and present-reversal constraints."""
+    means = {record[0]: None for record in group_records}
+    if not values:
+        return means, (), []
+    core_to_native = {native_to_core[key]: key for key in values}
+    adjacency = {key: [] for key in values}
+    for key in sorted(values):
+        source_core = native_to_core[key]
+        for op_index, image_map in enumerate(image_maps):
+            target = core_to_native.get(image_map[source_core])
+            if target is not None:
+                adjacency[key].append(
+                    (
+                        target,
+                        (cartesian_rotations[op_index], False),
+                    )
+                )
+    identity_rotation = np.eye(3)
+    for key in sorted(values):
+        R, i, j = key
+        reverse = (tuple(-component for component in R), j, i)
+        if reverse in values and key <= reverse:
+            edge = (identity_rotation, True)
+            adjacency[key].append((reverse, edge))
+            if reverse != key:
+                adjacency[reverse].append((key, edge))
+
+    transforms = {}
+    component_roots = {}
+    projected_roots = {}
+    rows = []
+    failures = []
+    for root in sorted(values):
+        if root in transforms:
+            continue
+        transforms[root] = (identity_rotation, False)
+        component_roots[root] = root
+        pending = [root]
+        vertices = []
+        cycles = []
+        while pending:
+            source = pending.pop()
+            vertices.append(source)
+            for target, edge in adjacency[source]:
+                candidate = _transform_compose(edge, transforms[source])
+                if target not in transforms:
+                    transforms[target] = candidate
+                    component_roots[target] = root
+                    pending.append(target)
+                else:
+                    cycle = _transform_compose(
+                        _transform_inverse(transforms[target]), candidate
+                    )
+                    cycles.append(cycle)
+        component_vertices = set(vertices)
+        component_reciprocity = any(
+            (
+                tuple(-component for component in key[0]),
+                key[2],
+                key[1],
+            )
+            in component_vertices
+            for key in vertices
+        )
+        observations = [
+            _transform_apply(channel, values[key], _transform_inverse(transforms[key]))
+            for key in vertices
+        ]
+        mean = np.mean(observations, axis=0)
+        mean = float(mean) if channel == "Jiso" else mean
+        projected_root = _transform_project_fixed(channel, mean, cycles)
+        projected_roots[root] = projected_root
+        for key in vertices:
+            projected = _transform_apply(channel, projected_root, transforms[key])
+            residual = np.asarray(values[key]) - np.asarray(projected)
+            identifier = shell_by_wire[wires[key]]
+            rows.append(
+                (
+                    identifier,
+                    channel,
+                    key,
+                    _transform_public_value(projected),
+                    _transform_public_value(residual),
+                )
+            )
+            if not _transform_close(values[key], projected, value_atol, value_rtol):
+                failures.append(
+                    f"shell {identifier}"
+                    f"{' reciprocity' if component_reciprocity else ''} "
+                    f"{channel} key {key!r} "
+                    f"deviation={_transform_max_deviation(values[key], projected):.8g}"
+                )
+
+    for identifier, orbit, observed_core, observed_wire in group_records:
+        representative_core = _core_key(min(observed_wire))
+        source_keys = sorted(key for key in values if wires[key] in observed_wire)
+        if not source_keys:
+            continue
+        native_key = source_keys[0]
+        root = component_roots[native_key]
+        paths = [
+            (op_index, cartesian_rotations[op_index])
+            for op_index, image_map in enumerate(image_maps)
+            if image_map[native_to_core[native_key]] == representative_core
+        ]
+        if not paths:
+            raise ValueError(
+                f"shell {identifier}: no stored operation reaches its representative"
+            )
+        rotation = paths[0][1]
+        root_to_representative = _transform_compose(
+            (rotation, False), transforms[native_key]
+        )
+        means[identifier] = _transform_apply(
+            channel, projected_roots[root], root_to_representative
+        )
+    return means, tuple(rows), failures
+
+
+def compress(
+    spinio,
+    *,
+    symmetry="sg",
+    reference_spins=None,
+    mode="tensor",
+    on_inconsistent="error",
+    snap_zero=False,
+    energy_unit="meV",
+    symprec=1e-5,
+    magnetic_tol=1e-5,
+    zero_tol=1e-10,
+    value_atol=1e-8,
+    value_rtol=1e-6,
+):
+    """Compress observed SpinIO channels over exact directed symmetry orbits."""
+    from TB2J.Jtensor import combine_J_tensor, decompose_J_tensor
+
+    if symmetry not in {"sg", "msg"}:
+        raise ValueError("symmetry: expected sg or msg")
+    if mode not in {"isotropic", "tensor"}:
+        raise ValueError("mode: expected isotropic or tensor")
+    if on_inconsistent not in {"error", "project"}:
+        raise ValueError("on_inconsistent: expected error or project")
+    if not isinstance(snap_zero, bool):
+        raise ValueError("snap_zero: expected a boolean")
+    if energy_unit not in {"meV", "eV"}:
+        raise ValueError("energy_unit: expected meV or eV")
+    symprec = _transform_tolerance(symprec, "symprec", positive=True)
+    magnetic_tol = _transform_tolerance(magnetic_tol, "magnetic_tol", positive=True)
+    zero_tol = _transform_tolerance(zero_tol, "zero_tol")
+    value_atol = _transform_tolerance(value_atol, "value_atol")
+    value_rtol = _transform_tolerance(value_rtol, "value_rtol")
+
+    index_spin = getattr(spinio, "index_spin", None)
+    if index_spin is None:
+        raise ValueError("SpinIO.index_spin: full atom-to-spin mapping is required")
+    normalized_indices = []
+    for atom, index in enumerate(index_spin):
+        if not isinstance(index, (int, np.integer)) or isinstance(
+            index, (bool, np.bool_)
+        ):
+            raise ValueError(f"SpinIO.index_spin[{atom}]: expected an integer")
+        normalized_indices.append(int(index))
+    index_spin = tuple(normalized_indices)
+    spin_to_atom = {spin: atom for atom, spin in enumerate(index_spin) if spin >= 0}
+    atoms = getattr(spinio, "atoms", None)
+    if atoms is None:
+        raise ValueError("SpinIO.atoms: full structure context is required")
+    if len(atoms) != len(index_spin):
+        raise ValueError("SpinIO.index_spin: length does not match SpinIO.atoms")
+    moments, moment_source = _transform_moments(
+        spinio, reference_spins, len(index_spin)
+    )
+    if mode == "isotropic" and (
+        getattr(spinio, "dmi_ddict", None) or getattr(spinio, "Jani_dict", None)
+    ):
+        raise ValueError(
+            "mode isotropic cannot discard observed DMI or Jani channels; "
+            "use mode tensor"
+        )
+
+    atoms, operation_snapshot, producer = _transform_operation_snapshot(
+        spinio, symmetry, moments, symprec, magnetic_tol
+    )
+    cell = _numbers(atoms.get_cell().array, (3, 3), "structure.cell_angstrom")
+    if abs(np.linalg.det(cell)) < np.finfo(float).tiny:
+        raise ValueError("structure.cell_angstrom: singular cell")
+    positions = _numbers(
+        atoms.get_scaled_positions(),
+        (len(index_spin), 3),
+        "structure.positions_frac",
+    )
+    species = tuple(atoms.get_chemical_symbols())
+    magnetic_atoms = tuple(
+        atom + 1 for atom, index in enumerate(index_spin) if index >= 0
+    )
+    source_channels = {
+        "Jiso": getattr(spinio, "exchange_Jdict", None),
+        "DMI": getattr(spinio, "dmi_ddict", None) if mode == "tensor" else None,
+        "Jani": getattr(spinio, "Jani_dict", None) if mode == "tensor" else None,
+    }
+    values = {}
+    wires = {}
+    snapped = []
+    for channel, source in source_channels.items():
+        channel_values, channel_snapped, channel_wires = _transform_source_values(
+            channel, source, spin_to_atom, zero_tol, snap_zero
+        )
+        values[channel] = channel_values
+        wires.update(channel_wires)
+        snapped.extend(channel_snapped)
+
+    # Normalize each OBSERVED native tensor before comparing channels.
+    # Decomposing an orbit mean and adding its trace afterward would sum
+    # disjoint observations rather than compare them, changing pair tensors.
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
+    normalized_encodings = []
+    for key, raw in values["Jani"].items():
+        nonzero = _nonzero_tensor_channels(raw)
+        raw_iso, raw_dmi, raw_ani = decompose_J_tensor(raw)
+        raw_iso = float(sum(Fraction(float(raw[i, i])) for i in range(3)) / 3)
+        if nonzero["Jiso"]:
+            values["Jiso"][key] = values["Jiso"].get(key, 0.0) + raw_iso
+        if nonzero["DMI"]:
+            values["DMI"][key] = values["DMI"].get(key, np.zeros(3)) + raw_dmi
+        raw_ani = (
+            _transform_traceless_symmetric(raw_ani)
+            if nonzero["Jani"]
+            else np.zeros((3, 3))
+        )
+        values["Jani"][key] = raw_ani
+        if nonzero["Jiso"] or nonzero["DMI"]:
+            normalized_encodings.append(
+                (
+                    key,
+                    "Jani",
+                    _transform_public_value(raw),
+                    raw_iso,
+                    _transform_public_value(raw_dmi),
+                    _transform_public_value(raw_ani),
+                )
+            )
+
+    from types import SimpleNamespace
+
+    operations_context = SimpleNamespace(
+        species=species,
+        positions_frac=positions,
+        magnetic_atoms=magnetic_atoms,
+        index_spin=index_spin,
+        operations=operation_snapshot,
+        symmetry_mode=symmetry,
+        symprec=symprec,
+        magnetic_tol=magnetic_tol,
+        moments=moments,
+        moment_source=moment_source,
+        source_format=None,
+        precision_profile=None,
+        required_base_fields=(),
+        value_atol=value_atol,
+        value_rtol=value_rtol,
+        zero_tol=zero_tol,
+    )
+    _validate_context(operations_context)
+    core_operations, site_maps = _validated_operations(
+        operations_context, cell, positions
+    )
+    native_to_core = {native: _core_key(wire) for native, wire in wires.items()}
+    seeds = sorted(set(native_to_core.values()))
+    if seeds:
+        image_maps, cartesian_rotations = symmetry_core.pair_images(
+            seeds, core_operations, site_maps, positions, cell.T
+        )
+    else:
+        image_maps, cartesian_rotations = [], []
+
+    orbit_groups = {}
+    for seed in seeds:
+        orbit = tuple(sorted({_wire_key(image_map[seed]) for image_map in image_maps}))
+        orbit_groups.setdefault(orbit, set()).add(seed)
+    ordered_groups = sorted(orbit_groups.items(), key=lambda item: min(item[0]))
+    shell_by_wire = {}
+    group_records = []
+    for orbit, observed_core in ordered_groups:
+        identifier = _pair_id(min(orbit))
+        observed_wire = {_wire_key(key) for key in observed_core}
+        for wire in observed_wire:
+            shell_by_wire[wire] = identifier
+        group_records.append((identifier, orbit, observed_core, observed_wire))
+
+    means_by_channel = {}
+    residuals = []
+    failures = []
+    for channel in ("Jiso", "DMI", "Jani"):
+        channel_means, channel_residuals, channel_failures = (
+            _transform_project_observations(
+                channel,
+                values[channel],
+                wires,
+                native_to_core,
+                image_maps,
+                cartesian_rotations,
+                shell_by_wire,
+                group_records,
+                value_atol,
+                value_rtol,
+            )
+        )
+        means_by_channel[channel] = channel_means
+        residuals.extend(channel_residuals)
+        failures.extend(channel_failures)
+
+    entries = []
+    encoding_changes = [
+        (shell_by_wire[wires[row[0]]], *row) for row in normalized_encodings
+    ]
+    for identifier, orbit, observed_core, observed_wire in group_records:
+        representative = min(observed_wire)
+        orbit_index = {pair: index for index, pair in enumerate(orbit)}
+        support_members = tuple(sorted(orbit_index[pair] for pair in observed_wire))
+        channel_means = {}
+        channel_members = {}
+        for channel in ("Jiso", "DMI", "Jani"):
+            source_keys = sorted(
+                key
+                for key, wire in wires.items()
+                if wire in observed_wire and key in values[channel]
+            )
+            channel_members[channel] = tuple(
+                sorted(orbit_index[wires[key]] for key in source_keys)
+            )
+            channel_means[channel] = means_by_channel[channel][identifier]
+        if mode == "isotropic":
+            value = channel_means.get("Jiso")
+            if value is None:
+                raise ValueError(f"shell {identifier}: no observed Jiso channel")
+            entries.append(
+                ShellEntry(
+                    id=identifier,
+                    Jiso=value,
+                    representative=representative,
+                    orbit_size=len(orbit),
+                    support_members=support_members,
+                    Jiso_members=channel_members["Jiso"],
+                )
+            )
+            continue
+
+        jiso = channel_means["Jiso"]
+        dmi = channel_means["DMI"]
+        jani = channel_means["Jani"]
+        if jani is not None:
+            jani = _transform_traceless_symmetric(jani)
+        total_jiso = 0.0 if jiso is None else jiso
+        total_dmi = np.zeros(3) if dmi is None else np.asarray(dmi)
+        tensor = combine_J_tensor(
+            Jiso=total_jiso,
+            D=total_dmi,
+            Jani=jani,
+        )
+        jiso_members = set(channel_members.get("Jiso", ()))
+        dmi_members = set(channel_members.get("DMI", ()))
+        jani_members = set(channel_members.get("Jani", ()))
+        entries.append(
+            ShellEntry(
+                id=identifier,
+                tensor=tuple(map(tuple, tensor)),
+                representative=representative,
+                orbit_size=len(orbit),
+                support_members=support_members,
+                Jiso_members=tuple(sorted(jiso_members)),
+                DMI_members=tuple(sorted(dmi_members)),
+                Jani_members=tuple(sorted(jani_members)),
+            )
+        )
+
+    if failures and on_inconsistent == "error":
+        raise ValueError("inconsistent exchange data: " + "; ".join(failures))
+
+    document = ShellDocument(
+        cell_angstrom=cell,
+        species=species,
+        positions_frac=positions,
+        magnetic_atoms=magnetic_atoms,
+        index_spin=index_spin,
+        operations=operation_snapshot,
+        shells=tuple(entries),
+        exchange_mode=mode,
+        energy_unit=energy_unit,
+        symmetry_mode=symmetry,
+        symprec=symprec,
+        magnetic_tol=magnetic_tol,
+        moments=moments,
+        moment_source=moment_source,
+        producer=producer,
+        value_atol=value_atol,
+        value_rtol=value_rtol,
+        zero_tol=zero_tol,
+    )
+    present_channels = {
+        channel: set(values[channel]) for channel in ("Jiso", "DMI", "Jani")
+    }
+    present_pairs = set(wires.values())
+    native_by_wire = {wire: native for native, wire in wires.items()}
+    absent_channel_keys = tuple(
+        (channel, native_by_wire[wire])
+        for wire in sorted(present_pairs)
+        for channel in ("Jiso", "DMI", "Jani")
+        if native_by_wire[wire] not in present_channels[channel]
+    )
+    report = ConversionReport(
+        residuals=tuple(residuals),
+        absent_channel_keys=absent_channel_keys,
+        snapped_values=tuple(snapped),
+        encoding_changes=tuple(encoding_changes),
+    )
+    return ShellResult(document=document, report=report)
+
+
+def _expand_core(document, *, complete_orbits=False):
+    """Expand a validated shell model to an in-memory SpinIO without base data."""
+    from ase import Atoms
+    from TB2J.Jtensor import combine_J_tensor, decompose_J_tensor
+
+    if not isinstance(complete_orbits, bool):
+        raise ValueError("complete_orbits: expected a boolean")
+    validate_shells(document, for_export=True)
+    cell = _numbers(document.cell_angstrom, (3, 3), "structure.cell_angstrom")
+    positions = _numbers(
+        document.positions_frac,
+        (len(document.species), 3),
+        "structure.positions_frac",
+    )
+    operations, site_maps = _validated_operations(document, cell, positions)
+    representative_keys = [
+        _core_key(
+            shell.representative
+            if shell.representative is not None
+            else _pair_from_id(shell.id)
+        )
+        for shell in document.shells
+    ]
+    if representative_keys:
+        image_maps, cartesian_rotations = symmetry_core.pair_images(
+            representative_keys, operations, site_maps, positions, cell.T
+        )
+    else:
+        image_maps, cartesian_rotations = [], []
+
+    channel_values = {"Jiso": {}, "DMI": {}, "Jani": {}}
+    created_pair_keys = set()
+    created_channel_keys = set()
+    potential_pairs = set()
+    failure_messages = []
+    for shell_index, shell in enumerate(document.shells):
+        representative_core = representative_keys[shell_index]
+        orbit = tuple(
+            sorted(
+                {_wire_key(image_map[representative_core]) for image_map in image_maps}
+            )
+        )
+        masks = _channel_masks(shell, len(orbit))
+        support = _mask(
+            shell.support_members,
+            tuple(range(len(orbit))),
+            len(orbit),
+            f"shell {shell.id}.support_members",
+        )
+        selected_members = tuple(range(len(orbit))) if complete_orbits else support
+        for member_index in selected_members:
+            potential_pairs.add(orbit[member_index])
+
+        if document.exchange_mode == "isotropic":
+            jiso = float(_numbers(shell.Jiso, (), f"shell {shell.id}.Jiso"))
+            D = None
+            Jani = None
+            tensor = combine_J_tensor(Jiso=jiso)
+            active_channels = ("Jiso",)
+        else:
+            tensor = _numbers(shell.tensor, (3, 3), f"shell {shell.id}.tensor")
+            jiso, D, Jani = decompose_J_tensor(tensor)
+            if tensor[0, 0] == tensor[1, 1] == tensor[2, 2]:
+                jiso = float(tensor[0, 0])
+            active_channels = ("Jiso", "DMI", "Jani")
+
+        for member in orbit:
+            target_core = _core_key(member)
+            paths = [
+                (op_index, cartesian_rotations[op_index])
+                for op_index, image_map in enumerate(image_maps)
+                if image_map[representative_core] == target_core
+            ]
+            candidates = [
+                (op_index, rotation @ tensor @ rotation.T)
+                for op_index, rotation in paths
+            ]
+            if not candidates:
+                raise ValueError(
+                    f"shell {shell.id}: no stored operation reaches image {_pair_id(member)}"
+                )
+            reference = candidates[0][1]
+            for op_index, candidate in candidates:
+                if not _transform_close(
+                    candidate, reference, document.value_atol, document.value_rtol
+                ):
+                    residual = _transform_max_deviation(candidate, reference)
+                    if target_core == representative_core:
+                        reason = "bond fixpoint"
+                    else:
+                        reason = "paths"
+                    failure_messages.append(
+                        f"shell {shell.id}: {reason} to image {_pair_id(member)} "
+                        f"disagree at operation {op_index}, deviation={residual:.8g}"
+                    )
+            if target_core == representative_core and not _transform_close(
+                reference, tensor, document.value_atol, document.value_rtol
+            ):
+                failure_messages.append(
+                    f"shell {shell.id}: bond fixpoint changes image {_pair_id(member)}"
+                )
+
+        if document.exchange_mode == "tensor":
+            representative_channels = {
+                "Jiso": jiso,
+                "DMI": D,
+                "Jani": Jani,
+            }
+        else:
+            representative_channels = {"Jiso": jiso}
+        for channel in active_channels:
+            channel_members = masks[channel]
+            active_members = (
+                tuple(range(len(orbit)))
+                if complete_orbits and channel_members
+                else channel_members
+            )
+
+            for member_index in active_members:
+                member = orbit[member_index]
+                native_key = (
+                    tuple(member[2:]),
+                    document.index_spin[member[0] - 1],
+                    document.index_spin[member[1] - 1],
+                )
+                if native_key[1] < 0 or native_key[2] < 0:
+                    raise ValueError(
+                        f"shell {shell.id}: image {_pair_id(member)} has a nonmagnetic endpoint"
+                    )
+                target_core = _core_key(member)
+                paths = [
+                    (op_index, cartesian_rotations[op_index])
+                    for op_index, image_map in enumerate(image_maps)
+                    if image_map[representative_core] == target_core
+                ]
+                rotation = paths[0][1]
+                value = _transform_channel_value(
+                    channel,
+                    representative_channels[channel],
+                    rotation,
+                )
+                channel_values[channel][native_key] = value
+                if member_index not in channel_members:
+                    created_channel_keys.add((channel, native_key))
+                if member_index not in support:
+                    created_pair_keys.add(native_key)
+
+    if failure_messages:
+        raise ValueError("; ".join(failure_messages))
+
+    for channel in ("Jiso", "DMI", "Jani"):
+        values = channel_values[channel]
+        for key in sorted(values):
+            R, i, j = key
+            reverse = (tuple(-component for component in R), j, i)
+            if reverse not in values or key > reverse:
+                continue
+            expected = _transform_reverse_value(channel, values[key])
+            if not _transform_close(
+                values[reverse],
+                expected,
+                document.value_atol,
+                document.value_rtol,
+            ):
+                raise ValueError(
+                    f"shell expansion violates present-pair reciprocity for "
+                    f"{channel} keys {key!r}/{reverse!r}"
+                )
+
+    spinio_channels = {
+        "exchange_Jdict": channel_values["Jiso"] or None,
+        "dmi_ddict": channel_values["DMI"] or None,
+        "Jani_dict": channel_values["Jani"] or None,
+    }
+    atoms = Atoms(
+        symbols=document.species,
+        cell=document.cell_angstrom,
+        scaled_positions=document.positions_frac,
+        pbc=True,
+    )
+    moments = (
+        None if document.moments is None else np.asarray(document.moments, dtype=float)
+    )
+    if moments is None:
+        spinat = None
+        colinear = False
+    elif moments.ndim == 1:
+        spinat = np.zeros((len(document.species), 3), dtype=float)
+        spinat[:, 2] = moments
+        colinear = True
+    else:
+        spinat = moments.copy()
+        colinear = False
+
+    from .io_exchange import SpinIO
+
+    spinio = SpinIO(
+        atoms=atoms,
+        spinat=spinat,
+        charges=None,
+        index_spin=list(document.index_spin),
+        colinear=colinear,
+        **spinio_channels,
+    )
+    # SpinIO's constructor supplies numeric defaults for omitted physical
+    # fields; core expansion has no authority to invent those values.
+    spinio.damping = None
+    spinio.gyro_ratio = None
+
+    all_channels = ("Jiso", "DMI", "Jani")
+    absent_channel_keys = tuple(
+        (
+            channel,
+            (
+                tuple(pair[2:]),
+                document.index_spin[pair[0] - 1],
+                document.index_spin[pair[1] - 1],
+            ),
+        )
+        for pair in sorted(potential_pairs)
+        for channel in all_channels
+        if (
+            (
+                tuple(pair[2:]),
+                document.index_spin[pair[0] - 1],
+                document.index_spin[pair[1] - 1],
+            )
+            not in channel_values[channel]
+        )
+    )
+    return ExpansionResult(
+        spinio=spinio,
+        report=ConversionReport(
+            created_pair_keys=tuple(sorted(created_pair_keys)),
+            created_channel_keys=tuple(sorted(created_channel_keys)),
+            absent_channel_keys=absent_channel_keys,
+        ),
+    )
