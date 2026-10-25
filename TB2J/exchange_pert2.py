@@ -737,24 +737,9 @@ class ExchangePert2(ExchangeNCL):
             # Direct calculation from eigenvectors (like ExchangeCL2)
             self.rho = self.G.get_density_matrix()
         else:  # greens_function
-            # Contour integration of Green's functions
-            res = self.contour.integrate_values(rhoRs)
-            if (
-                hasattr(self, "integration_method")
-                and self.integration_method.lower() == "cfr"
-            ):
-                # The CFR method approximates f(z) - 1/2.
-                # To match TB2J's get_rho_atom which takes traces.imag, we shift by 0.5j
-                # such that Im(res + 0.5j) = (f - 0.5) + 0.5 = f.
-                self.rho = res + 0.5j * np.eye(self.nbasis)
-            elif (
-                hasattr(self, "integration_method")
-                and self.integration_method.lower() == "cfr2"
-            ):
-                # CFR2 already includes the mu0/2 (shift) term.
-                self.rho = res
-            else:
-                self.rho = res
+            # MathDoc: tb2j/cfr2-integration-contract; retain the metric-dressed
+            # complex intermediate, with no additional half-occupation shift.
+            self.rho = self.contour.integrate_values(rhoRs)
 
         for iR in self.R_ijatom_dict:
             R = self.short_Rlist[iR]

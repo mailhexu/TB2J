@@ -9,7 +9,7 @@ from ase import Atoms
 from ase.units import Ha, kB
 
 from TB2J.io_exchange import SpinIO
-from TB2J.mycfr import CFR
+from TB2J.mycfr import CFR2
 from TB2J.projector_green import (
     ProjectorGreen,
     ProjectorGreenData,
@@ -535,7 +535,9 @@ def compute_projector_exchange_jdict(
         )
     site_to_spin = {site: ispin for ispin, site in enumerate(sites)}
     green = ProjectorGreen(data)
-    contour = CFR(nz=nz, T=smearing_eV / kB)
+    # MathDoc: tb2j/cfr2-integration-contract. The contour is normalized; the
+    # physical 1/(4*pi) exchange kernel remains in projector_exchange_trace.
+    contour = CFR2(nz=nz, T=smearing_eV / kB)
     values = {
         (tuple(int(x) for x in R), i, j): [] for R in Rpts for i in sites for j in sites
     }

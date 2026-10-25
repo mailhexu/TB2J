@@ -32,6 +32,9 @@ class MAEGreen(ExchangeNCL):
         """
         angles are defined as theta, phi pairs, where theta is the angle between the z-axis and the magnetization direction, and phi is the angle between the x-axis and the projection of the magnetization direction on the x-y plane.
         """
+        # MathDoc: tb2j/cfr2-integration-contract. The energy extraction below
+        # owns -Im/(2*pi); CFR2 supplies normalized integration, not that factor.
+        kwargs.setdefault("integration_method", "cfr2")
         super().__init__(**kwargs)
         self.natoms = len(self.atoms)
         if angles is None or angles == "xyz":
@@ -291,9 +294,17 @@ class MAEGreen(ExchangeNCL):
                     f.write(f"{theta:.5f} {phi:.5f} {e*1e3:.8f}\n")
 
         with open(fname, "w") as f:
-            f.write("# theta (rad), phi(rad), MAE(total) Unit: meV\n")
+            f.write("# theta (rad), phi(rad), second-order energy correction (meV)\n")
+            f.write(
+                "# MAE(direction; reference) = E(direction) - E(reference); positive is harder.\n"
+            )
             for i, (theta, phi, e) in enumerate(zip(self.thetas, self.phis, self.es)):
                 f.write(f"{theta%np.pi:.5f} {phi%(2*np.pi):.5f} {e*1e3:.8f}\n")
+
+        # Decomposition generation is disabled. Do not publish zero-filled
+        # matrix/orbital placeholders as computed observables.
+        if not self.es_atom_orb:
+            return
 
         # Write matrix data to MAE_matrix.dat
         with open(fname_matrix, "w") as fmat:
