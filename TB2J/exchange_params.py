@@ -194,7 +194,7 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     parser.add_argument("--efermi", help="Fermi energy in eV", default=None, type=float)
     parser.add_argument(
         "--smearing",
-        help="Fermi smearing width for density computation and CFR. Units: K (default) or eV. Example: '600K', '0.2eV'. Default: 600K.",
+        help="Fermi smearing width for density computation and CFR2. Units: K (default) or eV. Example: '600K', '0.2eV'. Default: 600K.",
         default="600K",
         type=str,
     )
@@ -223,7 +223,7 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "--nz",
-        help="number of steps for semicircle contour, default: 100",
+        help="Contour steps or CFR2 pole depth (even integer >= 2 for CFR2); default: 100",
         default=100,
         type=int,
     )

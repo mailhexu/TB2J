@@ -4,6 +4,20 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- CFR2 is the sole continued-fraction engine and default. The legacy `CFR`
+  Python symbol and `"cfr"` selector are removed without aliases. Use `CFR2`
+  / `"cfr2"` with an even integer pole depth of at least2.
+- Streaming CPU/GPU exchange and q-space J/K/X use complete normalized CFR2
+  weights directly. Observable-specific physical prefactors remain separate;
+  dynamical Matsubara and geometric contours retain their own definitions.
+- Static DMFT populations use the generalized Hermitian problem, configured
+  Fermi width and correct collinear/spinor rank. Redundant legacy population
+  half shifts are removed without reinterpreting metric-dressed intermediates.
+- Modern MAEGreen retains `-Im/(2*pi)` and the finite-temperature fixed-mu
+  grand-potential convention. Directional corrections are written in meV;
+  anisotropy is a directional difference. Disabled decomposition no longer
+  publishes placeholder files. Historical material results are not rescaled.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

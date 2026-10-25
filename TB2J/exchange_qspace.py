@@ -1,9 +1,12 @@
-import numpy as np
-from TB2J.utils import kmesh_to_R
 from functools import lru_cache
-from .utils import simpson_nonuniform, trapezoidal_nonuniform
+
+import numpy as np
 from ase.dft.kpoints import monkhorst_pack
+
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.utils import kmesh_to_R
+
+from .utils import simpson_nonuniform, trapezoidal_nonuniform
 
 
 def find_index_k(kpts, q):
@@ -129,6 +132,12 @@ class ExchangeCLQspace(ExchangeCL2):
         self.Kq = np.zeros_like(self.Jq)
         self.Xq = np.zeros_like(self.Jq)
         self.Jnorm_q = np.zeros_like(self.Jq)
+        if self.integration_method == "cfr2":
+            # MathDoc: tb2j/cfr2-integration-contract; sample axis is leading.
+            self.Jq = self.contour.integrate_values(self.Jqe_list).imag
+            self.Kq = self.contour.integrate_values(self.Kqe_list).imag
+            self.Xq = self.contour.integrate_values(self.Xqe_list).imag
+            return self.Jq
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
         elif method == "simpson":

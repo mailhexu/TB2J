@@ -3,7 +3,11 @@
 :warning: This feature is currently under development and internal test. Do not use it for production yet.
 :warning: This feature is only available with the ABACUS and SIESTA code.
 
-The MAE calculation is implemented in `TB2J/MAEGreen.py` using the magnetic force theorem with Green's function perturbation theory. The implementation provides both efficient perturbative and exact eigenvalue approaches for computing magnetocrystalline anisotropy energies. 
+`TB2J/MAEGreen.py` evaluates the second-order SOC response with normalized CFR2 weights and the separate physical `-Im/(2*pi)` factor. At finite temperature and fixed chemical potential this is a grand-potential coefficient, not a general fixed-particle-number internal-energy difference. The optional eigenvalue calculation uses its own occupation prescription and is not an identical ensemble by construction.
+
+The ABACUS LCAO basis is non-orthogonal. Generalized eigenvectors and the overlap matrix must remain consistent when forming the Green function and operator traces; an identity-metric replacement is not valid. A full-space inverse-overlap moment and a retained/projected spectral moment are distinct. Pole convergence alone does not establish retained-state or k-mesh convergence.
+
+Use an even integer `nz >= 2` and converge the pole depth at the selected temperature and spectral range. CLI temperatures in K are converted to an internal width in eV with the Boltzmann constant; no implicit spin-degeneracy factor is supplied by the contour. The implementation follows the continued-fraction representation of Ozaki, *Phys. Rev. B* **75**, 035123 (2007).
 
 
 To compute the magnetocrystalline anisotropy energy (MAE) of a magnetic system with the magnetic force theorem, two steps of DFT calculations are needed.
@@ -89,10 +93,10 @@ dft_functional                          PBE
 ```
 
 
-After the two steps of calculations, we can use the `abacus_get_MAE` function from `TB2J.MAEGreen` to compute the MAE. The function reads the Hamiltonian from the two steps of calculations and uses the magnetic force theorem to compute the band energy differences for different magnetization directions. 
+After the two calculations, `abacus_get_MAE` reads the paired Hamiltonians and overlap matrices. The reader separates the charge and spin parts of their difference: the charge part enters the reference Hamiltonian, and the spin part is the SOC perturbation. Use a compatible frozen-density reference and record the chemical potential and temperature when interpreting the force-theorem response.
 
 
-The non-SOC Hamiltonian is rotated along different magnetization directions (defined by theta, phi in spherical coordinates), and the energy differences are computed using second-order perturbation theory.
+The reference spin direction is rotated relative to the SOC perturbation. `MAE.dat` stores raw directional second-order corrections in meV, obtained by multiplying the internal eV values by1000. Form the anisotropy as `E(direction) - E(reference)`; positive means the direction is harder. Disabled matrix/orbital decomposition does not publish new placeholder files; use a fresh output directory because existing files are not deleted.
 
 Here is an example of the usage of the function.
 
