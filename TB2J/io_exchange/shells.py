@@ -6,23 +6,63 @@ Python are eV. The TOML codec alone converts the declared wire energy unit.
 
 import math
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import date, datetime, time
 from fractions import Fraction
 from itertools import product
+from types import MappingProxyType
 
 import numpy as np
 
 from TB2J import symmetry_core
 
 _ID = re.compile(r"([1-9][0-9]*):([1-9][0-9]*):(-?[0-9]+),(-?[0-9]+),(-?[0-9]+)\Z")
+_BASE_FIELDS = {
+    "biquadratic": ("biquadratic_Jdict",),
+    "charges": ("charges",),
+    "damping": ("damping",),
+    "djdx": ("dJdx", "dJdx2", "dJdx_orb"),
+    "gyromag": ("gyro_ratio",),
+    "njt": ("NJT_Jdict", "NJT_ddict"),
+    "orbital": ("Jiso_orb", "DMI_orb", "Jani_orb"),
+    "sia": ("sia_tensor", "k1", "k1dir"),
+}
 
 
 def _freeze(value):
     if isinstance(value, np.ndarray):
         value = value.tolist()
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
     return value.item() if isinstance(value, np.generic) else value
+
+
+def _thaw(value):
+    """Restore ordinary TOML containers for serialization and native pickles."""
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    return value
+
+
+def _validate_metadata(value, path="metadata"):
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path}: TOML table keys must be strings")
+            _validate_metadata(item, f"{path}.{key}")
+    elif isinstance(value, tuple):
+        for index, item in enumerate(value):
+            _validate_metadata(item, f"{path}[{index}]")
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path}: metadata numbers must be finite")
+    elif not isinstance(value, (str, bool, int, date, datetime, time)):
+        raise ValueError(f"{path}: expected finite TOML data")
 
 
 @dataclass(frozen=True)
@@ -42,11 +82,13 @@ class ShellEntry:
     Jiso: float | str | None = None
     tensor: tuple | str | None = None
     representative: tuple | None = None
-    orbit_size: int | None = None
+    n_equivalent_pairs: int | None = None
     support_members: tuple | None = None
     Jiso_members: tuple | None = None
     DMI_members: tuple | None = None
     Jani_members: tuple | None = None
+    name: str | None = None
+    distance: float | None = None
 
     def __post_init__(self):
         for name in (
@@ -57,6 +99,8 @@ class ShellEntry:
             "Jiso_members",
             "DMI_members",
             "Jani_members",
+            "distance",
+            "n_equivalent_pairs",
         ):
             object.__setattr__(self, name, _freeze(getattr(self, name)))
 
@@ -84,7 +128,10 @@ class ShellDocument:
     source_format: str | None = None
     precision_profile: str | None = None
     required_base_fields: tuple = ()
-    schema_version: int = 1
+    schema_version: int = 2
+    site_labels: tuple | None = None
+    metadata: Mapping = field(default_factory=dict)
+    cutoff: float | None = None
 
     def __post_init__(self):
         for name in (
@@ -102,8 +149,15 @@ class ShellDocument:
             "value_atol",
             "value_rtol",
             "zero_tol",
+            "site_labels",
+            "metadata",
+            "cutoff",
         ):
             object.__setattr__(self, name, _freeze(getattr(self, name)))
+        if self.site_labels is None:
+            from TB2J.utils import symbol_number_list
+
+            object.__setattr__(self, "site_labels", symbol_number_list(self.species))
         validate_shells(self)
         object.__setattr__(
             self,
@@ -365,11 +419,11 @@ def _mask(value, default, size, field):
 
 
 def _channel_masks(shell, size):
-    if shell.orbit_size is not None and (
-        not _integer(shell.orbit_size) or shell.orbit_size != size
+    if shell.n_equivalent_pairs is not None and (
+        not _integer(shell.n_equivalent_pairs) or shell.n_equivalent_pairs != size
     ):
         raise ValueError(
-            f"shell {shell.id}.orbit_size: stored {shell.orbit_size}, computed {size}"
+            f"shell {shell.id}.n_equivalent_pairs: stored {shell.n_equivalent_pairs}, computed {size}"
         )
     support = _mask(
         shell.support_members,
@@ -436,13 +490,29 @@ def _validate_context(document):
         raise ValueError(
             "structure.index_spin: selected atoms must map uniquely onto contiguous spin indices"
         )
-    positions = _numbers(
-        document.positions_frac, (count, 3), "structure.positions_frac"
-    )
-    if np.any(positions < 0) or np.any(positions >= 1):
-        raise ValueError(
-            "structure.positions_frac: expected positions inside the fractional cell [0, 1)"
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#site_frame_fixed_translation_bond_error
+    # Native R refers to these raw site representatives, never wrapped images.
+    _numbers(document.positions_frac, (count, 3), "structure.positions_frac")
+    if (
+        not isinstance(document.site_labels, tuple)
+        or len(document.site_labels) != count
+        or any(
+            not isinstance(label, str)
+            or re.fullmatch(re.escape(symbol) + r"[1-9][0-9]*", label) is None
+            for label, symbol in zip(document.site_labels, document.species)
         )
+        or len(set(document.site_labels)) != count
+    ):
+        raise ValueError(
+            "structure.site_labels: expected unique element-number labels in atom order"
+        )
+    if not isinstance(document.metadata, Mapping):
+        raise ValueError("metadata: expected a TOML table")
+    _validate_metadata(document.metadata)
+    if document.cutoff is not None:
+        cutoff = _numbers(document.cutoff, (), "cutoff")
+        if cutoff <= 0:
+            raise ValueError("cutoff: expected a positive radius in Angstrom")
     for name in ("value_atol", "value_rtol", "zero_tol"):
         value = _numbers(getattr(document, name), (), f"tolerances.{name}")
         if value < 0:
@@ -477,16 +547,7 @@ def _validate_context(document):
         or not document.precision_profile
     ):
         raise ValueError("source.precision_profile: expected a nonempty profile name")
-    allowed = {
-        "sia",
-        "njt",
-        "biquadratic",
-        "orbital",
-        "djdx",
-        "damping",
-        "gyromag",
-        "charges",
-    }
+    allowed = _BASE_FIELDS
     if any(
         not isinstance(name, str) or name not in allowed
         for name in document.required_base_fields
@@ -498,7 +559,7 @@ def _validate_context(document):
 
 def validate_shells(document, *, for_export=False, check_producer_ops=False):
     """Validate the authored document without replacing its operation snapshot."""
-    if not _integer(document.schema_version) or document.schema_version != 1:
+    if not _integer(document.schema_version) or document.schema_version != 2:
         raise ValueError(
             f"schema_version: unsupported version {document.schema_version!r}"
         )
@@ -521,6 +582,20 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
                 f"shell {shell.id}: computed canonical minimum is {canonical}"
             )
         masks = _channel_masks(shell, len(orbit))
+        if shell.name is not None and not isinstance(shell.name, str):
+            raise ValueError(f"shell {shell.id}.name: expected a display string")
+        if shell.distance is not None:
+            distance = _numbers(shell.distance, (), f"shell {shell.id}.distance")
+            representative = shell.representative or _pair_from_id(shell.id)
+            computed = _template_distance(
+                representative,
+                np.asarray(document.positions_frac),
+                np.asarray(document.cell_angstrom),
+            )
+            if distance < 0 or abs(float(distance) - computed) > document.symprec:
+                raise ValueError(
+                    f"shell {shell.id}.distance: stored {shell.distance}, computed {computed}"
+                )
         if shell.representative is not None:
             support = _mask(
                 shell.support_members,
@@ -662,6 +737,7 @@ class ConversionReport:
     quanta: tuple = ()
     losses: tuple = ()
     messages: tuple = ()
+    metadata_actions: tuple = ()
 
     def __post_init__(self):
         for name in (
@@ -671,6 +747,7 @@ class ConversionReport:
             "absent_channel_keys",
             "snapped_values",
             "encoding_changes",
+            "metadata_actions",
             "precision_profile",
             "quanta",
             "losses",
@@ -1103,6 +1180,24 @@ def _transform_project_observations(
     return means, tuple(rows), failures
 
 
+def _base_field_present(value):
+    if value is None:
+        return False
+    if isinstance(value, np.ndarray):
+        return value.size != 0
+    if isinstance(value, (dict, list, tuple)):
+        return len(value) != 0
+    return True
+
+
+def _required_base_fields(spinio):
+    return tuple(
+        group
+        for group, fields in _BASE_FIELDS.items()
+        if any(_base_field_present(getattr(spinio, field, None)) for field in fields)
+    )
+
+
 def compress(
     spinio,
     *,
@@ -1171,8 +1266,9 @@ def compress(
     cell = _numbers(atoms.get_cell().array, (3, 3), "structure.cell_angstrom")
     if abs(np.linalg.det(cell)) < np.finfo(float).tiny:
         raise ValueError("structure.cell_angstrom: singular cell")
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#site_frame_cartesian_bond_residual
     positions = _numbers(
-        atoms.get_scaled_positions(),
+        atoms.get_scaled_positions(wrap=False),
         (len(index_spin), 3),
         "structure.positions_frac",
     )
@@ -1228,7 +1324,18 @@ def compress(
                 )
             )
 
+    source_format = getattr(spinio, "_shell_source_format", None)
+    precision_profile = getattr(spinio, "_shell_precision_profile", None)
+    required_base_fields = _required_base_fields(spinio)
+
     from types import SimpleNamespace
+
+    from TB2J.utils import symbol_number_list
+
+    labels = getattr(spinio, "_shell_site_labels", symbol_number_list(species))
+    if labels is None:
+        raise ValueError("structure.site_labels: invalid native shell annotation")
+    metadata = _freeze(getattr(spinio, "_shell_user_metadata", {}))
 
     operations_context = SimpleNamespace(
         species=species,
@@ -1241,12 +1348,15 @@ def compress(
         magnetic_tol=magnetic_tol,
         moments=moments,
         moment_source=moment_source,
-        source_format=None,
-        precision_profile=None,
-        required_base_fields=(),
+        source_format=source_format,
+        precision_profile=precision_profile,
+        required_base_fields=required_base_fields,
         value_atol=value_atol,
         value_rtol=value_rtol,
         zero_tol=zero_tol,
+        site_labels=_freeze(labels),
+        metadata=metadata,
+        cutoff=None,
     )
     _validate_context(operations_context)
     core_operations, site_maps = _validated_operations(
@@ -1326,7 +1436,8 @@ def compress(
                     id=identifier,
                     Jiso=value,
                     representative=representative,
-                    orbit_size=len(orbit),
+                    n_equivalent_pairs=len(orbit),
+                    distance=_template_distance(representative, positions, cell),
                     support_members=support_members,
                     Jiso_members=channel_members["Jiso"],
                 )
@@ -1353,7 +1464,8 @@ def compress(
                 id=identifier,
                 tensor=tuple(map(tuple, tensor)),
                 representative=representative,
-                orbit_size=len(orbit),
+                n_equivalent_pairs=len(orbit),
+                distance=_template_distance(representative, positions, cell),
                 support_members=support_members,
                 Jiso_members=tuple(sorted(jiso_members)),
                 DMI_members=tuple(sorted(dmi_members)),
@@ -1380,6 +1492,11 @@ def compress(
         moments=moments,
         moment_source=moment_source,
         producer=producer,
+        source_format=source_format,
+        precision_profile=precision_profile,
+        required_base_fields=required_base_fields,
+        site_labels=labels,
+        metadata=metadata,
         value_atol=value_atol,
         value_rtol=value_rtol,
         zero_tol=zero_tol,
@@ -1400,6 +1517,11 @@ def compress(
         absent_channel_keys=absent_channel_keys,
         snapped_values=tuple(snapped),
         encoding_changes=tuple(encoding_changes),
+        precision_profile=precision_profile,
+        metadata_actions=tuple(
+            (group, "require_base", "source-present content is not encoded in shells")
+            for group in required_base_fields
+        ),
     )
     return ShellResult(document=document, report=report)
 
@@ -1660,6 +1782,258 @@ def _expand_core(document, *, complete_orbits=False):
     )
 
 
+def _validate_compatible_base(document, base):
+    from .io_exchange import SpinIO
+
+    if not isinstance(base, SpinIO):
+        raise TypeError("base: expected SpinIO")
+    if tuple(base.atoms.get_chemical_symbols()) != document.species:
+        raise ValueError("base species/order does not match the shell document")
+    indices = tuple(base.index_spin)
+    if (
+        any(
+            not isinstance(index, (int, np.integer))
+            or isinstance(index, (bool, np.bool_))
+            for index in indices
+        )
+        or indices != document.index_spin
+    ):
+        raise ValueError("base index_spin does not match the exact document mapping")
+    cell = _numbers(base.atoms.cell.array, (3, 3), "base cell")
+    stored_cell = np.asarray(document.cell_angstrom)
+    if np.any(np.linalg.norm(cell - stored_cell, axis=1) > document.symprec):
+        raise ValueError("base cell differs beyond symmetry.symprec")
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#site_frame_fixed_translation_bond_error
+    # Equal periodic sites are not equal native fixed-R frames.
+    positions = _numbers(
+        base.atoms.positions, (len(document.species), 3), "base positions"
+    )
+    delta = positions - np.asarray(document.positions_frac) @ stored_cell
+    if np.any(np.linalg.norm(delta, axis=1) > document.symprec):
+        raise ValueError("base positions differ beyond symmetry.symprec")
+    native = getattr(base, "spinat", None)
+    if document.moments is None:
+        if native is not None:
+            raise ValueError("base moments are present but absent in the document")
+    else:
+        if native is None:
+            raise ValueError("base moments are missing")
+        expected = np.asarray(document.moments)
+        if expected.ndim == 1:
+            expected = np.column_stack((np.zeros((len(expected), 2)), expected))
+        actual = _numbers(native, expected.shape, "base moments")
+        if np.ndim(document.moments) == 1 and np.any(actual[:, :2] != 0):
+            raise ValueError(
+                "base moments: a scalar reference requires exactly z-aligned native moments"
+            )
+        # Never invent a magnetic tolerance for a header that declares none.
+        tolerance = document.magnetic_tol if document.magnetic_tol is not None else 0.0
+        if np.any(np.linalg.norm(actual - expected, axis=1) > tolerance):
+            raise ValueError(
+                "base moments differ beyond the declared magnetic tolerance"
+            )
+
+
+def _base_exchange_equal(document, left, right):
+    from TB2J.Jtensor import combine_J_tensor
+
+    channels = ("exchange_Jdict", "dmi_ddict", "Jani_dict")
+    left_keys = set().union(*(getattr(left, name, None) or {} for name in channels))
+    right_keys = set().union(*(getattr(right, name, None) or {} for name in channels))
+    if left_keys != right_keys:
+        return False
+
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_anisotropic
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_dmi_axial_vector
+    def total(spinio, key):
+        return combine_J_tensor(
+            Jiso=(getattr(spinio, "exchange_Jdict", None) or {}).get(key),
+            D=(getattr(spinio, "dmi_ddict", None) or {}).get(key),
+            Jani=(getattr(spinio, "Jani_dict", None) or {}).get(key),
+        )
+
+    return all(
+        _transform_close(
+            total(left, key),
+            total(right, key),
+            document.value_atol,
+            document.value_rtol,
+        )
+        for key in left_keys
+    )
+
+
+def _normalize_base_sia(output):
+    from .io_exchange import SpinIO
+
+    k1, directions = getattr(output, "k1", None), getattr(output, "k1dir", None)
+    if k1 is None and directions is None:
+        return False
+    if k1 is None or directions is None:
+        raise ValueError("base SIA: legacy k1 and k1dir must be supplied together")
+    # Reuse the native normalization authority on the isolated copy, including
+    # existing tensors; never duplicate its axis/threshold convention here.
+    normalized = SpinIO(
+        output.atoms,
+        spinat=output.spinat,
+        charges=output.charges,
+        index_spin=output.index_spin,
+        colinear=output.colinear,
+        k1=k1,
+        k1dir=directions,
+        sia_tensor=getattr(output, "sia_tensor", None),
+    )
+    for name in (
+        "sia_tensor",
+        "has_sia_tensor",
+        "k1",
+        "k1dir",
+        "has_uniaxial_anistropy",
+    ):
+        setattr(output, name, getattr(normalized, name))
+    return True
+
+
+def expand(document, *, base=None, complete_orbits=False, allow_loss=()):
+    """Expand shell values, preserving compatible ancillary context explicitly."""
+    from copy import copy, deepcopy
+    from dataclasses import replace
+
+    from .io_exchange import gen_distance_dict
+
+    validate_shells(document, for_export=True)
+    if isinstance(allow_loss, str):
+        allow_loss = (allow_loss,)
+    try:
+        allow_loss = tuple(allow_loss)
+    except TypeError as error:
+        raise ValueError("allow_loss: expected named ancillary loss groups") from error
+    if any(
+        not isinstance(name, str) or name not in _BASE_FIELDS for name in allow_loss
+    ):
+        raise ValueError("allow_loss: unknown expansion loss group")
+    allowed = set(allow_loss)
+    if base is not None:
+        _validate_compatible_base(document, base)
+    available = set(_required_base_fields(base)) if base is not None else set()
+    missing = set(document.required_base_fields) - available
+    denied = sorted(missing - allowed)
+    if denied:
+        raise ValueError(
+            "required base fields missing; supply a compatible base or named allow_loss: "
+            + ", ".join(denied)
+        )
+    losses = [
+        (name, "required source content omitted without a compatible value")
+        for name in sorted(missing)
+    ]
+    actions = [
+        (name, "drop", "explicitly allowed missing source content")
+        for name in sorted(missing)
+    ]
+    core = _expand_core(document, complete_orbits=complete_orbits)
+    if base is None:
+        output = core.spinio
+    else:
+        stale = set(available) & {"orbital", "djdx"}
+        if stale and not _base_exchange_equal(document, base, core.spinio):
+            denied = sorted(stale - allowed)
+            if denied:
+                raise ValueError(
+                    "edited exchange conflicts with stale derived data; name allow_loss: "
+                    + ", ".join(denied)
+                )
+        else:
+            stale = set()
+        # Replaced pair dictionaries and explicitly dropped arrays can be large.
+        # Copy only retained context, preserving its internal aliases/cycles.
+        overwritten = {
+            "exchange_Jdict",
+            "dmi_ddict",
+            "Jani_dict",
+            "Rlist",
+            "distance_dict",
+            "_ind_atoms",
+            "magmoms",
+        }
+        overwritten.update(field for group in stale for field in _BASE_FIELDS[group])
+        output = copy(base)
+        output.__dict__ = deepcopy(
+            {
+                name: value
+                for name, value in vars(base).items()
+                if name not in overwritten
+            },
+            {id(base): output},
+        )
+        for name in ("exchange_Jdict", "dmi_ddict", "Jani_dict"):
+            setattr(output, name, getattr(core.spinio, name))
+            actions.append(
+                (name, "differ", "shell values and support replace native exchange")
+            )
+        for group in sorted(stale):
+            for name in _BASE_FIELDS[group]:
+                setattr(output, name, None)
+            losses.append((group, "exchange edit invalidates derived content"))
+            actions.append((group, "drop", "explicitly allowed stale derived content"))
+        for group in sorted(available - stale):
+            actions.append((group, "keep", "compatible base content preserved"))
+        for name in (
+            "cell",
+            "positions",
+            "species",
+            "index_spin",
+            "spinat",
+            "mass",
+            "description",
+            "TB2J_version",
+        ):
+            actions.append((name, "keep", "compatible base context preserved"))
+        output.colinear = core.spinio.colinear
+        if output.colinear:
+            output.magmoms = np.asarray(output.spinat)[:, 2].copy()
+        elif hasattr(output, "magmoms"):
+            del output.magmoms
+        actions.append(
+            ("colinear", "differ", "explicit scalar versus Cartesian reference shape")
+        )
+        if _normalize_base_sia(output):
+            actions.append(("sia", "differ", "legacy fields normalized once by SpinIO"))
+    output._build_Rlist()
+    output._build_ind_atoms()
+    magnetic_atoms = [output.ind_atoms[spin] for spin in output.ispin_list]
+    output.distance_dict = gen_distance_dict(magnetic_atoms, output.atoms, output.Rlist)
+    actions.extend(
+        (name, "differ", "derived data rebuilt") for name in ("Rlist", "distance_dict")
+    )
+    output._shell_source_format = document.source_format
+    output._shell_precision_profile = document.precision_profile
+    output._shell_site_labels = list(document.site_labels)
+    output._shell_user_metadata = _thaw(document.metadata)
+    messages = []
+    if output.charges is None:
+        messages.append(
+            "Charges are absent; charge-indexing targets require real context."
+        )
+    if output.spinat is None:
+        messages.append(
+            "Reference moments are absent; no dynamics-readiness is claimed."
+        )
+    if core.report.created_channel_keys:
+        messages.append("Completed model channel keys are not calculated entries.")
+    return ExpansionResult(
+        spinio=output,
+        report=replace(
+            core.report,
+            precision_profile=document.precision_profile,
+            metadata_actions=tuple(actions),
+            losses=tuple(losses),
+            messages=tuple(messages),
+        ),
+    )
+
+
 def _template_number(value, field, *, positive=False, nonnegative=False):
     number = float(_numbers(value, (), field).item())
     if positive and number <= 0:
@@ -1715,8 +2089,9 @@ def _template_structure(atoms):
             "structure.cell_angstrom: reciprocal cell is nonfinite; "
             "supply a well-conditioned cell"
         )
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#site_frame_cartesian_bond_residual
     positions = _numbers(
-        atoms.get_scaled_positions(wrap=True),
+        atoms.get_scaled_positions(wrap=False),
         (len(atoms), 3),
         "structure.positions_frac",
     )
@@ -1921,7 +2296,8 @@ def template(
             ShellEntry(
                 id=identifier,
                 representative=representative,
-                orbit_size=len(full_orbit),
+                n_equivalent_pairs=len(full_orbit),
+                distance=_template_distance(representative, positions, cell),
                 **fields,
             )
         )
@@ -1963,6 +2339,7 @@ def template(
         value_rtol=value_rtol,
         zero_tol=zero_tol,
         source_format="template",
+        cutoff=cutoff,
     )
 
 

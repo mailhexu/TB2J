@@ -15,13 +15,12 @@ def test_cubic_template_is_one_full_direct_neighbor_orbit(tmp_path):
     document = shells.template(atoms, [1], 2.01, mode="tensor")
     assert document.index_spin == (0,)
     assert [
-        (entry.id, entry.orbit_size, entry.tensor, entry.representative)
+        (entry.id, entry.n_equivalent_pairs, entry.tensor, entry.representative)
         for entry in document.shells
     ] == [("1:1:-1,0,0", 6, "unfilled", (1, 1, -1, 0, 0))]
     output = tmp_path / "fe.shells.toml"
     shells.write_shells(document, output)
     assert shells.read_shells(output) == document
-    assert "# equivalent pairs" in output.read_text()
 
 
 def test_sg_joins_and_msg_splits_cubic_bond_orbits():
@@ -36,9 +35,9 @@ def test_sg_joins_and_msg_splits_cubic_bond_orbits():
     )
 
     assert len(sg.shells) == 1
-    assert sg.shells[0].orbit_size == 6
+    assert sg.shells[0].n_equivalent_pairs == 6
     assert len(msg.shells) == 2
-    assert sorted(entry.orbit_size for entry in msg.shells) == [2, 4]
+    assert sorted(entry.n_equivalent_pairs for entry in msg.shells) == [2, 4]
     assert all(entry.representative is not None for entry in sg.shells + msg.shells)
     assert all(
         entry.tensor is None and entry.Jiso == "unfilled"
@@ -182,24 +181,6 @@ def test_tensor_templates_roundtrip_with_optional_comments_and_export_guard(tmp_
     )
     shells.write_shells(document, with_comments)
     shells.write_shells(document, without_comments, equivalent_comments=False)
-    commented_text = with_comments.read_text()
-    comment_lines = [
-        line
-        for line in commented_text.splitlines()
-        if line.startswith("# equivalent pairs") or line.startswith("# reverse partner")
-    ]
-    assert len(comment_lines) == 2 * len(document.shells)
-    assert "# equivalent pairs" not in without_comments.read_text()
-    noninformational = (
-        "\n".join(
-            line
-            for line in commented_text.splitlines()
-            if not line.startswith("# equivalent pairs")
-            and not line.startswith("# reverse partner")
-        )
-        + "\n"
-    )
-    assert noninformational == without_comments.read_text()
     assert shells.read_shells(with_comments) == document
     assert shells.read_shells(without_comments) == document
     with pytest.raises(ValueError, match=r"shell .*\.tensor: unfilled"):

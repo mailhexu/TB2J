@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Replaced the shell text grammar with hand-first schema v2: multiline
+  lattice/site rows, element-based labels, labeled reference moments,
+  `exchange`/`J`, optional display names and nested user metadata.
+  `distance` (Angstrom) and `n_equivalent_pairs` are optional input summaries
+  and always computed on output. The old `orbit_size` field and v1 grammar
+  are not aliases. Snapshot-free complete files construct symmetry once;
+  canonical rewrites pin operations after the editable shell blocks.
+  Template/compression preserve raw site images and native pair translations;
+  base updates reject a different image frame. Labels and user metadata
+  survive shell rewrites and native pickle roundtrips.
+- Added public shell `expand` with compatible-base context validation,
+  exact native key identities, ancillary keep/drop/differ reports, legacy SIA
+  normalization, and named conflicts for stale orbital/derivative data.
+  `compress` now persists native precision provenance and required-base fields;
+  standalone expansion never silently discards source-present physical context.
 - Added `read_exchange` for explicitly trusted native pickle, `exchange.out`,
   and Multibinit XML inputs. Imports retain sparse channel support and exact
   atom-to-spin maps, require missing identity or magnetic context explicitly,

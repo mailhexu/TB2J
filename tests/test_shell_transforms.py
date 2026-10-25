@@ -22,7 +22,7 @@ def test_isotropic_sparse_support_roundtrip_preserves_absent_channels():
     assert [
         (
             entry.id,
-            entry.orbit_size,
+            entry.n_equivalent_pairs,
             entry.support_members,
             entry.Jiso_members,
             entry.DMI_members,
@@ -30,7 +30,7 @@ def test_isotropic_sparse_support_roundtrip_preserves_absent_channels():
         )
         for entry in result.document.shells
     ] == [("1:1:-1,0,0", 6, (5,), (5,), (), ())]
-    replay = shells._expand_core(result.document)
+    replay = shells.expand(result.document, base=source)
     assert replay.spinio.exchange_Jdict == source.exchange_Jdict
     assert not replay.spinio.dmi_ddict
     assert not replay.spinio.Jani_dict
@@ -92,7 +92,7 @@ def test_tensor_transport_matches_independent_cubic_orbit_oracle():
 
     entry = result.document.shells[0]
     assert entry.id == "1:1:-1,0,0"
-    assert entry.orbit_size == 6
+    assert entry.n_equivalent_pairs == 6
     assert entry.support_members == tuple(range(6))
     np.testing.assert_allclose(entry.tensor, np.diag([1.0, -0.5, -0.5]), atol=1e-12)
     replay = shells._expand_core(result.document)
@@ -493,7 +493,7 @@ def test_hexagonal_tensor_transport_uses_cartesian_not_fractional_rotation():
         Jani_dict=values,
     )
     document = shells.compress(source).document
-    assert document.shells[0].orbit_size == 6
+    assert document.shells[0].n_equivalent_pairs == 6
     assert document.shells[0].Jiso_members == ()
     assert document.shells[0].DMI_members == ()
     replay = shells._expand_core(document).spinio
@@ -521,7 +521,7 @@ def test_sparse_inversion_bond_requires_endpoint_transpose():
                 id="1:1:-1,0,0",
                 tensor=((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
                 representative=(1, 1, 1, 0, 0),
-                orbit_size=2,
+                n_equivalent_pairs=2,
                 support_members=(1,),
                 Jiso_members=(),
                 DMI_members=(1,),
