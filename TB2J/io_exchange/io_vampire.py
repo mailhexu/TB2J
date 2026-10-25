@@ -19,7 +19,7 @@ def write_vampire_unitcell_file(cls, fname):
         myfile.write("# Unit cell size (Angstrom):\n")
         np.savetxt(myfile, [lattice_parameters], fmt="%f")
         myfile.write("# Unit cell lattice vectors:\n")
-        np.savetxt(myfile, cell / lattice_parameters, fmt="%f")
+        np.savetxt(myfile, cell / lattice_parameters[:, None], fmt="%f")
 
         myfile.write("# Atoms\n")
         nspins = sum([1 if i > -1 else 0 for i in cls.index_spin])
