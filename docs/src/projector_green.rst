@@ -204,10 +204,13 @@ The shared writer produces ``exchange.out``, ``TB2J.pickle``,
 ``(exchange_out, exchange_Jdict)``. ``abacus2J.py`` remains the separate,
 unchanged LCAO workflow.
 
-The native exporter is detected automatically when NetCDF C has NetCDF-4
-group support and ``nlohmann-json`` is available; otherwise it is unavailable.
-Ordinary ``ENABLE_JSON`` output is independent, and there is no exporter build
-switch. Request ``out_tb2j 1`` after a converged PW calculation. The exporter
+Build the native exporter with ABACUS's existing ``-DENABLE_JSON=ON`` option
+and the NetCDF C library. JSON only encodes metadata. The source build uses
+a simple NetCDF header/library check, with no separate JSON lookup or
+capability probe. NetCDF-4 group support is required at write time, and
+creation failures are reported. Without JSON enabled or NetCDF found, export
+is unavailable. There is no exporter build switch. Request ``out_tb2j 1``
+after a converged PW calculation. The exporter
 supports CPU complex-double wavefunctions only; GPU and single-precision
 wavefunctions are unsupported. Supported physics is two-spin collinear
 Kohn--Sham DFT with original scalar-NC UPF atomic wavefunctions, semilocal
