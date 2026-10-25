@@ -314,6 +314,22 @@ _XML_COMMENT = re.compile(rb"<!--.*?-->", re.DOTALL)
 _XML_START_TAG = re.compile(rb"<([A-Za-z_][A-Za-z0-9_.:-]*)\b([^<>]*)>")
 _XML_ROOT_CLOSE = re.compile(rb"</System_definition\s*>")
 _XML_EXCHANGE_START = re.compile(rb"<\s*spin_exchange_list\b")
+_XML_CHANNEL_LISTS = frozenset(
+    {
+        "spin_exchange_list",
+        "spin_DMI_list",
+        "spin_bilinear_list",
+        "spin_sia_tensor_list",
+    }
+)
+# Bound raw precision inspection to the lists consumed by SpinXmlParser.
+# This selects token locations only; it does not decode physical channels.
+_XML_CHANNEL_CONTENT = re.compile(
+    rb"<("
+    + b"|".join(tag.encode("ascii") for tag in sorted(_XML_CHANNEL_LISTS))
+    + rb")\b[^>]*>(.*?)</\1\s*>",
+    re.DOTALL,
+)
 _XML_EXPECTED_UNITS = {
     "unit_cell": "bohrradius",
     "position": "bohrradius",
@@ -464,9 +480,7 @@ def _xml_precision_rows(source, natom, atom_metadata):
     bounds = {}
 
     def add_row(field, tokens, unit, scale=1.0, shape=None):
-        values = [
-            _xml_decimal_bound(token, scale, energy=unit == "eV") for token in tokens
-        ]
+        values = [_xml_decimal_bound(token, scale) for token in tokens]
         if not values:
             return None
         result = np.asarray(values, dtype=float)
@@ -523,6 +537,10 @@ def _xml_precision_rows(source, natom, atom_metadata):
         for token in group
     ]
     add_row("energy_data", data_tokens, "eV")
+    for match in _XML_CHANNEL_CONTENT.finditer(_xml_without_comments(source)):
+        for tokens in _xml_leaf_tokens(match.group(2), "data", "retained energy data"):
+            for token in tokens:
+                _xml_decimal_bound(token, energy=True)
     for tag, field, unit in (
         ("amplitude", "uniaxial_sia_amplitude", "eV"),
         ("direction", "uniaxial_sia_direction", "dimensionless"),
@@ -547,19 +565,13 @@ def _xml_metadata(source):
     records = _xml_start_records(source)
     tag_names = {tag for tag, _ in records}
     losses = []
-    singleton_lists = {
-        "spin_exchange_list",
-        "spin_DMI_list",
-        "spin_bilinear_list",
-        "spin_sia_tensor_list",
-    }
     seen_lists = set()
     uniaxial_tags = {"spin_uniaxial_SIA_list", "spin_uniaxial_SIA_term"}
     if tag_names & uniaxial_tags:
         losses.append(("sia", "XML uniaxial SIA block"))
 
     for tag, attributes in records:
-        if tag in singleton_lists:
+        if tag in _XML_CHANNEL_LISTS:
             if tag in seen_lists:
                 raise ValueError(
                     f"XML repeated channel list <{tag}> is not consumed by the shared parser"

@@ -522,3 +522,32 @@ def test_empty_optional_writer_sections_do_not_invent_losses(tmp_path, section):
     assert {row[0] for row in result.report.losses} == set(allowed)
     assert result.spinio.sia_tensor is None and result.spinio.Jiso_orb is None
     assert result.spinio.exchange_Jdict[key] == 0.0012346
+
+
+@pytest.mark.parametrize("loss", ["sia", "biquadratic"])
+def test_xml_named_discard_does_not_require_unused_joule_conversion(tmp_path, loss):
+    path, key = _current_xml(tmp_path)
+    if loss == "sia":
+        block = (
+            '<spin_uniaxial_SIA_list units="eV"><nterms>1</nterms>'
+            "<spin_uniaxial_SIA_term><i>1</i>"
+            "<amplitude>1.00000e-310</amplitude><direction>0 0 1</direction>"
+            "</spin_uniaxial_SIA_term></spin_uniaxial_SIA_list>"
+        )
+    else:
+        block = (
+            '<spin_biquadratic_list units="eV"><nterms>1</nterms>'
+            "<spin_biquadratic_term><ijR>1 1 1 0 0</ijR>"
+            "<data>1.00000e-310</data>"
+            "</spin_biquadratic_term></spin_biquadratic_list>"
+        )
+    path.write_text(
+        path.read_text().replace("</System_definition>", block + "</System_definition>")
+    )
+    context = shells.NativeContext(species=["Fe"])
+    with pytest.raises(ValueError, match="allow_loss"):
+        shells.read_exchange(path, "xml", context=context)
+    result = shells.read_exchange(path, "xml", context=context, allow_loss=(loss,))
+    assert {row[0] for row in result.report.losses} == {loss}
+    assert result.spinio.exchange_Jdict == {key: 0.002}
+    assert result.spinio.sia_tensor is None and result.spinio.biquadratic_Jdict is None
