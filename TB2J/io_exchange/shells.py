@@ -906,9 +906,13 @@ def _transform_project_fixed(channel, value, cycles):
         [_transform_operator_matrix(channel, cycle) - identity for cycle in cycles],
         axis=0,
     )
-    _, singular_values, right_vectors = np.linalg.svd(constraints, full_matrices=True)
+    # There are only 1, 3 or 9 unknown components. A full left basis would
+    # allocate a quadratic matrix in the number of operation paths.
+    _, singular_values, right_vectors = np.linalg.svd(constraints, full_matrices=False)
     largest = singular_values[0] if singular_values.size else 0.0
-    threshold = np.finfo(float).eps * max(constraints.shape) * largest
+    # Cartesian identity/composed cycles contain inversion roundoff. Rank
+    # belongs to unit-scale transformation operators, not to that residual.
+    threshold = np.finfo(float).eps * max(constraints.shape) * max(1.0, largest)
     rank = int(np.count_nonzero(singular_values > threshold))
     basis = right_vectors[rank:].T
     vector = np.asarray(value, dtype=float).reshape(-1)
@@ -944,15 +948,21 @@ def _transform_project_observations(
     adjacency = {key: [] for key in values}
     for key in sorted(values):
         source_core = native_to_core[key]
+        reverse_core = (
+            source_core[1],
+            source_core[0],
+            tuple(-r for r in source_core[2]),
+        )
         for op_index, image_map in enumerate(image_maps):
-            target = core_to_native.get(image_map[source_core])
+            image = image_map[source_core]
+            target = core_to_native.get(image)
+            rotation = cartesian_rotations[op_index]
             if target is not None:
-                adjacency[key].append(
-                    (
-                        target,
-                        (cartesian_rotations[op_index], False),
-                    )
-                )
+                adjacency[key].append((target, (rotation, False)))
+            # This is a constraint on an existing observation, not a
+            # calculated entry for the possibly absent reverse bond.
+            if image == reverse_core:
+                adjacency[key].append((key, (rotation, True)))
     identity_rotation = np.eye(3)
     for key in sorted(values):
         R, i, j = key
@@ -1359,6 +1369,7 @@ def compress(
 def _expand_core(document, *, complete_orbits=False):
     """Expand a validated shell model to an in-memory SpinIO without base data."""
     from ase import Atoms
+
     from TB2J.Jtensor import combine_J_tensor, decompose_J_tensor
 
     if not isinstance(complete_orbits, bool):
@@ -1457,6 +1468,21 @@ def _expand_core(document, *, complete_orbits=False):
                 failure_messages.append(
                     f"shell {shell.id}: bond fixpoint changes image {_pair_id(member)}"
                 )
+            reverse_core = (
+                representative_core[1],
+                representative_core[0],
+                tuple(-r for r in representative_core[2]),
+            )
+            if target_core == reverse_core:
+                for op_index, candidate in candidates:
+                    if not _transform_close(
+                        candidate, tensor.T, document.value_atol, document.value_rtol
+                    ):
+                        failure_messages.append(
+                            f"shell {shell.id}: endpoint exchange violates transpose "
+                            f"at operation {op_index}, "
+                            f"deviation={_transform_max_deviation(candidate, tensor.T):.8g}"
+                        )
 
         if document.exchange_mode == "tensor":
             representative_channels = {

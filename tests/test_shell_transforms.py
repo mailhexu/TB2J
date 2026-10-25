@@ -501,3 +501,88 @@ def test_hexagonal_tensor_transport_uses_cartesian_not_fractional_rotation():
     assert replay.exchange_Jdict is None and replay.dmi_ddict is None
     for key, expected in values.items():
         np.testing.assert_allclose(replay.Jani_dict[key], expected, atol=1e-15, rtol=0)
+
+
+def test_sparse_inversion_bond_requires_endpoint_transpose():
+    document = shells.ShellDocument(
+        cell_angstrom=tuple(map(tuple, 3.0 * np.eye(3))),
+        species=("Fe",),
+        positions_frac=((0.0, 0.0, 0.0),),
+        magnetic_atoms=(1,),
+        index_spin=(0,),
+        operations=tuple(
+            shells.ShellOperation(
+                tuple(map(tuple, sign * np.eye(3, dtype=int))), (0.0, 0.0, 0.0)
+            )
+            for sign in (1, -1)
+        ),
+        shells=(
+            shells.ShellEntry(
+                id="1:1:-1,0,0",
+                tensor=((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
+                representative=(1, 1, 1, 0, 0),
+                orbit_size=2,
+                support_members=(1,),
+                Jiso_members=(),
+                DMI_members=(1,),
+                Jani_members=(),
+            ),
+        ),
+        exchange_mode="tensor",
+    )
+    with pytest.raises(ValueError, match="endpoint.*transpose"):
+        shells._expand_core(document)
+
+
+@pytest.mark.parametrize("project", [False, True])
+def test_identity_roundoff_preserves_p1_dmi(project):
+    atoms = Atoms(
+        ["Fe", "Co", "Ni"],
+        cell=49.0 * np.eye(3),
+        pbc=True,
+        scaled_positions=[(0.11, 0.23, 0.37), (0.31, 0.16, 0.28), (0.43, 0.19, 0.61)],
+    )
+    key = ((0, 0, 0), 0, 1)
+    source = SpinIO(
+        atoms,
+        spinat=None,
+        charges=None,
+        colinear=False,
+        index_spin=[0, 1, 2],
+        dmi_ddict={key: np.array([0.001, 0.0, 0.0])},
+    )
+    result = shells.compress(source, on_inconsistent="project" if project else "error")
+    assert len(result.document.operations) == 1
+    replay = shells._expand_core(result.document)
+    assert set(replay.spinio.dmi_ddict) == {key}
+    np.testing.assert_allclose(
+        replay.spinio.dmi_ddict[key], [0.001, 0.0, 0.0], atol=1e-15, rtol=1e-12
+    )
+    assert not replay.spinio.exchange_Jdict and not replay.spinio.Jani_dict
+
+
+def test_compress_sparse_endpoint_constraint_projects_without_reverse_creation():
+    atoms = Atoms(
+        "Fe",
+        cell=[[3, 0, 0], [0.6, 3.7, 0], [0.4, 0.8, 4.1]],
+        scaled_positions=[(0, 0, 0)],
+        pbc=True,
+    )
+    key = ((1, 0, 0), 0, 0)
+    source = SpinIO(
+        atoms,
+        spinat=None,
+        charges=None,
+        colinear=False,
+        index_spin=[0],
+        dmi_ddict={key: np.array([0.001, 0.0, 0.0])},
+    )
+    with pytest.raises(ValueError, match="shell .*DMI.*deviation"):
+        shells.compress(source)
+    result = shells.compress(source, on_inconsistent="project")
+    assert len(result.document.operations) == 2
+    assert result.document.shells[0].DMI_members == (1,)
+    replay = shells._expand_core(result.document)
+    assert set(replay.spinio.dmi_ddict) == {key}
+    np.testing.assert_array_equal(replay.spinio.dmi_ddict[key], [0.0, 0.0, 0.0])
+    assert result.report.created_pair_keys == ()
