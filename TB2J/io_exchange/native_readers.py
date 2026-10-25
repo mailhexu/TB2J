@@ -22,6 +22,7 @@ _LOSS_NAMES = frozenset(
     {
         "njt",
         "sia",
+        "sia_tensor",
         "biquadratic",
         "orbital",
         "djdx",
@@ -413,7 +414,7 @@ def _xml_leaf_tokens(source, tag, field):
     return groups
 
 
-def _xml_decimal_bound(token, scale=1.0):
+def _xml_decimal_bound(token, scale=1.0, *, energy=False):
     try:
         value = Decimal(token)
     except InvalidOperation as error:
@@ -426,6 +427,18 @@ def _xml_decimal_bound(token, scale=1.0):
     bound = float(quantum) * scale / 2.0
     if not np.isfinite(bound) or bound == 0.0:
         raise ValueError(f"XML precision quantum for {token!r} is outside float range")
+    if energy:
+        # Validate the sole parser's eV -> Joule -> eV precision path without
+        # replacing its physical values or decoding another channel grammar.
+        restored = (float(value) * eV / J) * (J / eV)
+        if (
+            not np.isfinite(restored)
+            or abs(Decimal.from_float(restored) - value) > quantum / 2
+        ):
+            raise ValueError(
+                f"XML energy token {token!r}: shared parser conversion cannot "
+                "preserve the declared precision within float range"
+            )
     return bound
 
 
@@ -451,7 +464,9 @@ def _xml_precision_rows(source, natom, atom_metadata):
     bounds = {}
 
     def add_row(field, tokens, unit, scale=1.0, shape=None):
-        values = [_xml_decimal_bound(token, scale) for token in tokens]
+        values = [
+            _xml_decimal_bound(token, scale, energy=unit == "eV") for token in tokens
+        ]
         if not values:
             return None
         result = np.asarray(values, dtype=float)
@@ -532,11 +547,24 @@ def _xml_metadata(source):
     records = _xml_start_records(source)
     tag_names = {tag for tag, _ in records}
     losses = []
+    singleton_lists = {
+        "spin_exchange_list",
+        "spin_DMI_list",
+        "spin_bilinear_list",
+        "spin_sia_tensor_list",
+    }
+    seen_lists = set()
     uniaxial_tags = {"spin_uniaxial_SIA_list", "spin_uniaxial_SIA_term"}
     if tag_names & uniaxial_tags:
         losses.append(("sia", "XML uniaxial SIA block"))
 
     for tag, attributes in records:
+        if tag in singleton_lists:
+            if tag in seen_lists:
+                raise ValueError(
+                    f"XML repeated channel list <{tag}> is not consumed by the shared parser"
+                )
+            seen_lists.add(tag)
         if tag == "atom" and _xml_attribute(attributes, "charge") is not None:
             losses.append(("charges", "XML atom charge attribute"))
         units = _xml_attribute(attributes, "units")
@@ -569,7 +597,7 @@ def _xml_parser_source(path):
     normalized, count = _XML_ROOT_CLOSE.subn(
         b'<spin_exchange_list units="eV"><nterms>0</nterms></spin_exchange_list>\n'
         b"\\g<0>",
-        source,
+        scan_source,
         count=1,
     )
     return normalized, count == 1
@@ -1230,10 +1258,6 @@ def _text_parse_orbital_names(lines, index, stop, atom_labels, losses):
             ("orbital", f"orbital names for {match.group(1)}: {match.group(2)}")
         )
         cursor += 1
-    if not rows:
-        _text_error(
-            "Orbitals used in decomposition", "section contains no orbital assignments"
-        )
     losses.extend(rows)
     return cursor
 
@@ -1314,9 +1338,7 @@ def _text_parse_sia_tensor(lines, index, stop, atom_labels, losses, quanta):
             )
         cursor += 1
     if first_data is None:
-        _text_error(
-            "Single Ion Anisotropy", "SIA tensor section contains no tensor rows"
-        )
+        return cursor
     cursor = first_data
     seen = set()
     while cursor < stop:
@@ -1365,13 +1387,9 @@ def _text_parse_sia_tensor(lines, index, stop, atom_labels, losses, quanta):
             f"exchange.out SIA tensor {label}",
         )
         seen.add(label)
-        losses.append(("sia", f"sia_tensor for {label}"))
+        losses.append(("sia_tensor", f"sia_tensor for {label}"))
         quanta.append(
             (f"unsupported.sia_tensor[{label}]", Decimal("0.000000005"), "meV")
-        )
-    if not seen:
-        _text_error(
-            "Single Ion Anisotropy", "SIA tensor section contains no tensor values"
         )
     return cursor
 
@@ -1448,6 +1466,10 @@ def _text_validate_orbital_array(lines, index, field):
     if not tokens:
         _text_error(field, "empty orbital-contribution array")
     for token in tokens:
+        if token == "...":
+            # NumPy summarizes large unsupported arrays. Named loss drops the
+            # block; no physical orbital values are reconstructed from it.
+            continue
         if not _TEXT_ARRAY_TOKEN.fullmatch(token):
             _text_error(
                 field, f"invalid/truncated orbital-contribution value {token!r}"
@@ -1456,25 +1478,26 @@ def _text_validate_orbital_array(lines, index, field):
     return cursor
 
 
+_TEXT_ORBITAL_HEADERS = {
+    "isotropic J:",
+    "DMI x:",
+    "DMI y:",
+    "DMI z:",
+    "Jani xx:",
+    "Jani xy:",
+    "Jani xz:",
+    "Jani yx:",
+    "Jani yy:",
+    "Jani yz:",
+    "Jani zx:",
+    "Jani zy:",
+    "Jani zz:",
+    "Orbital contributions to dJ/dx (meV/displacement unit):",
+}
+
+
 def _text_parse_orbital_contributions(lines, index, losses, record_key):
-    losses.append(("orbital", f"orbital contributions for pair {record_key}"))
-    cursor = index + 1
-    component_headers = {
-        "isotropic J:",
-        "DMI x:",
-        "DMI y:",
-        "DMI z:",
-        "Jani xx:",
-        "Jani xy:",
-        "Jani xz:",
-        "Jani yx:",
-        "Jani yy:",
-        "Jani yz:",
-        "Jani zx:",
-        "Jani zy:",
-        "Jani zz:",
-        "Orbital contributions to dJ/dx (meV/displacement unit):",
-    }
+    cursor = index + (lines[index].strip() == "Orbital contributions:")
     seen_headers = set()
     while cursor < len(lines):
         stripped = lines[cursor].strip()
@@ -1483,7 +1506,7 @@ def _text_parse_orbital_contributions(lines, index, losses, record_key):
         if not stripped or _text_skip_separators(stripped):
             cursor += 1
             continue
-        if stripped in component_headers:
+        if stripped in _TEXT_ORBITAL_HEADERS:
             if stripped in seen_headers:
                 _text_error(
                     "Orbital contributions", f"duplicate component block {stripped!r}"
@@ -1491,6 +1514,10 @@ def _text_parse_orbital_contributions(lines, index, losses, record_key):
             seen_headers.add(stripped)
             if stripped.startswith("Orbital contributions to dJ/dx"):
                 losses.append(("djdx", f"orbital dJ/dx for pair {record_key}"))
+            elif not any(token == "orbital" for token, _ in losses):
+                losses.append(
+                    ("orbital", f"orbital contributions for pair {record_key}")
+                )
             cursor = _text_validate_orbital_array(
                 lines, cursor + 1, f"orbital {stripped}"
             )
@@ -1738,7 +1765,7 @@ def _text_parse_exchange(lines, marker, label_to_atom):
         if stripped.startswith("[Debug!] DMI2 not available:"):
             cursor += 1
             continue
-        if stripped == "Orbital contributions:":
+        if stripped == "Orbital contributions:" or stripped in _TEXT_ORBITAL_HEADERS:
             mark_extra("orbital contributions")
             cursor = _text_parse_orbital_contributions(
                 lines, cursor, losses, pair_description

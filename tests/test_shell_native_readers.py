@@ -383,3 +383,142 @@ def test_combined_check_excludes_isotropic_uncertainty_off_diagonal(tmp_path):
     path.write_text(head + "Combined J tensor" + combined)
     with pytest.raises(ValueError, match="(?i)combined"):
         shells.read_exchange(path, "text")
+
+
+def test_tensor_sia_loss_uses_its_documented_name(tmp_path):
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    source.sia_tensor = {0: np.diag([0.001, 0.002, 0.003])}
+    source.has_sia_tensor = True
+    _write_native_text(source, tmp_path)
+    with pytest.raises(ValueError, match="sia_tensor"):
+        shells.read_exchange(path, "text")
+    result = shells.read_exchange(path, "text", allow_loss=("sia_tensor",))
+    assert result.spinio.sia_tensor is None
+    assert {row[0] for row in result.report.losses} == {"sia_tensor"}
+    assert result.spinio.exchange_Jdict[key] == 0.0012346
+
+
+def test_repeated_xml_channel_list_does_not_silently_discard_pairs(tmp_path):
+    path, key = _current_xml(tmp_path, dmi_only=True)
+    text = path.read_text()
+    block = re.search(r"<spin_DMI_list\b.*?</spin_DMI_list>", text, re.DOTALL).group()
+    second = block.replace("1 1 1 0 0", "1 1 2 0 0")
+    path.write_text(
+        text.replace("</System_definition>", second + "</System_definition>")
+    )
+    with pytest.raises(ValueError, match="(?i)duplicate|repeated"):
+        shells.read_exchange(path, "xml", context=shells.NativeContext(species=["Fe"]))
+
+
+@pytest.mark.parametrize(
+    "channel,width", [("exchange", 3), ("DMI", 3), ("bilinear", 9), ("sia_tensor", 9)]
+)
+def test_xml_intermediate_underflow_cannot_claim_source_precision(
+    tmp_path, channel, width
+):
+    path, key = _current_xml(tmp_path)
+    text = path.read_text()
+    text = re.sub(
+        r"<spin_exchange_list\b.*?</spin_exchange_list>",
+        '<spin_exchange_list units="eV"><nterms>0</nterms></spin_exchange_list>',
+        text,
+        flags=re.DOTALL,
+    )
+    identity = "<i>1</i>" if channel == "sia_tensor" else "<ijR>1 1 1 0 0</ijR>"
+    values = " ".join(["1.00000e-310"] * width)
+    block = f'<spin_{channel}_list units="eV"><nterms>1</nterms><spin_{channel}_term>{identity}<data>{values}</data></spin_{channel}_term></spin_{channel}_list>'
+    if channel == "exchange":
+        text = re.sub(
+            r"<spin_exchange_list\b.*?</spin_exchange_list>",
+            block,
+            text,
+            flags=re.DOTALL,
+        )
+    else:
+        text = text.replace("</System_definition>", block + "</System_definition>")
+    path.write_text(text)
+    with pytest.raises(ValueError, match="(?i)precision|underflow|range"):
+        shells.read_exchange(path, "xml", context=shells.NativeContext(species=["Fe"]))
+
+
+def test_channel_only_xml_comment_cannot_hide_normalization(tmp_path):
+    path, key = _current_xml(tmp_path, dmi_only=True)
+    path.write_text(
+        path.read_text().replace(
+            "</System_definition>",
+            "<!-- closing tag: </System_definition> -->\n</System_definition>",
+        )
+    )
+    result = shells.read_exchange(
+        path, "xml", context=shells.NativeContext(species=["Fe"])
+    )
+    assert result.spinio.exchange_Jdict is None
+    assert set(result.spinio.dmi_ddict) == {key}
+    np.testing.assert_allclose(
+        result.spinio.dmi_ddict[key], [0.001, 0.002, 0.003], atol=1e-15, rtol=0
+    )
+
+
+@pytest.mark.parametrize(
+    "field,shape,loss",
+    [
+        ("DMI_orb", (3, 1, 1), "orbital"),
+        ("Jani_orb", (3, 3, 1, 1), "orbital"),
+        ("dJdx_orb", (1, 1), "djdx"),
+    ],
+)
+def test_standalone_orbital_blocks_obey_named_loss(tmp_path, field, shape, loss):
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    setattr(source, field, {key: np.ones(shape) * 0.001})
+    source.write_txt(path=tmp_path, write_orb_decomposition=True)
+    with pytest.raises(ValueError, match="allow_loss"):
+        shells.read_exchange(path, "text")
+    result = shells.read_exchange(path, "text", allow_loss=(loss,))
+    assert {row[0] for row in result.report.losses} == {loss}
+    assert getattr(result.spinio, field) is None
+    assert result.spinio.exchange_Jdict[key] == 0.0012346
+
+
+def test_summarized_orbital_arrays_can_be_dropped_explicitly(tmp_path):
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    source.orbital_names = {0: ["d"]}
+    source.Jiso_orb = {key: np.arange(1600).reshape(40, 40) * 0.001}
+    with np.printoptions(threshold=1000):
+        source.write_txt(path=tmp_path, write_orb_decomposition=True)
+    with pytest.raises(ValueError, match="allow_loss"):
+        shells.read_exchange(path, "text")
+    result = shells.read_exchange(path, "text", allow_loss=("orbital",))
+    assert {row[0] for row in result.report.losses} == {"orbital"}
+    assert result.spinio.Jiso_orb is None
+    assert result.spinio.exchange_Jdict[key] == 0.0012346
+
+
+@pytest.mark.parametrize("section", ["sia", "zero-k1", "orbital-names"])
+def test_empty_optional_writer_sections_do_not_invent_losses(tmp_path, section):
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    options = {}
+    if section == "zero-k1":
+        source = type(source)(
+            source.atoms,
+            spinat=source.spinat,
+            charges=source.charges,
+            index_spin=source.index_spin,
+            colinear=source.colinear,
+            exchange_Jdict=source.exchange_Jdict,
+            k1=[0.0],
+            k1dir=[[0, 0, 1]],
+        )
+    elif section == "sia":
+        source.sia_tensor = {}
+        source.has_sia_tensor = True
+    else:
+        source.Jiso_orb = {key: np.ones((1, 1)) * 0.001}
+        options["write_orb_decomposition"] = True
+    _write_native_text(source, tmp_path)
+    if options:
+        source.write_txt(path=tmp_path, **options)
+    allowed = ("orbital",) if section == "orbital-names" else ()
+    result = shells.read_exchange(path, "text", allow_loss=allowed)
+    assert {row[0] for row in result.report.losses} == set(allowed)
+    assert result.spinio.sia_tensor is None and result.spinio.Jiso_orb is None
+    assert result.spinio.exchange_Jdict[key] == 0.0012346
