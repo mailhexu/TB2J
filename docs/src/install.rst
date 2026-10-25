@@ -19,7 +19,7 @@ The `--user` option will help if there are permission problems.
 It is suggested that it being installed within a virtual environment
 using e.g. pyenv, uv or conda.
 
-You can install optional dependencies for specific interfaces or all of them:
+You can install optional dependencies for specific interfaces:
 
 - For the Siesta interface:
 
@@ -33,12 +33,20 @@ You can install optional dependencies for specific interfaces or all of them:
 
     pip install TB2J[lawaf]
 
-- To install all optional dependencies:
+- To install the combined Siesta and lawaf dependencies:
 
 
 ::
 
     pip install TB2J[all]
+
+``pypao`` is not required by a base TB2J installation or the ``all`` extra.
+Install it explicitly when needed, from an environment or package source
+where pypao is available:
+
+::
+
+    pip install "TB2J[pypao]"
 
 
 
@@ -71,6 +79,7 @@ There are some optional dependencies, which you need to install if needed.
 -  netcdf4 (optional) for Siesta interface
 -  lawaf==0.2.3 (optional) for lawaf interface
 -  GPAW (optional) For gpaw interface (not yet fully operational).
+-  pypao>=0.1.0 (optional), selected only by the ``pypao`` extra.
 
 
 By default, TB2J only forces the non-optional dependencies to be

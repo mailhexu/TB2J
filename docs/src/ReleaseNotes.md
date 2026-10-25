@@ -4,6 +4,10 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- `pypao` is optional again: base TB2J installations do not require it.
+  Use `TB2J[pypao]` when needed; the existing `all` extra is unchanged and
+  does not include `pypao`.
+
 - CFR2 is the sole continued-fraction engine and default. The legacy `CFR`
   Python symbol and `"cfr"` selector are removed without aliases. Use `CFR2`
   / `"cfr2"` with an even integer pole depth of at least2.

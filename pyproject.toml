@@ -39,7 +39,6 @@ dependencies = [
     "sympair>=0.1.4",
     "supercellmap",
     "tomli>=2.0.0",
-    "pypao>=0.1.0",
     "tomli-w>=1.0.0",
     "typing_extensions",
     "sisl>=0.16.2",
@@ -49,6 +48,7 @@ dependencies = [
 [project.optional-dependencies]
 siesta = ["sisl>=0.9.0", "netcdf4"]
 lawaf = ["lawaf>=0.2.3"]
+pypao = ["pypao>=0.1.0"]
 all = ["sisl>=0.9.0", "netcdf4", "lawaf>=0.2.3"]
 
 [project.urls]
