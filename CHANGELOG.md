@@ -8,7 +8,7 @@
   checks bond constraints and reports every opt-in orbit-completion key.
 - Added `TB2J.io_exchange.shells.template` to generate editable, unfilled
   symmetry-shell documents from periodic structures and magnetic-site selections.
-  SG/MSG modes, scalar or axial reference moments, unit-explicit cutoffs,
+  SG/MSG modes, scalar or axial reference moments, Angstrom cutoffs,
   skew-cell image enumeration, and deterministic full-orbit representatives
   are supported; templates never calculate exchange values.
 

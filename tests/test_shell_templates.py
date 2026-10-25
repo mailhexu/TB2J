@@ -6,7 +6,6 @@ from itertools import product
 import numpy as np
 import pytest
 from ase import Atoms
-from ase.units import Bohr
 
 from TB2J.io_exchange import shells
 
@@ -105,18 +104,16 @@ def test_scalar_primed_msg_and_axial_vector_moments():
         np.testing.assert_allclose(transformed, moment, atol=vector.magnetic_tol)
 
 
-def test_cutoff_is_monotone_and_bohr_cutoff_matches_angstrom():
+def test_cutoff_in_angstrom_is_monotone():
     atoms = Atoms("Fe", cell=np.eye(3) * 2.0, scaled_positions=[(0, 0, 0)], pbc=True)
     small = shells.template(atoms, [1], 2.1)
     larger = shells.template(atoms, [1], 2.9)
-    bohr = shells.template(atoms, [1], 2.1 / Bohr, cutoff_unit="bohr")
 
     small_by_id = {entry.id: entry for entry in small.shells}
     larger_by_id = {entry.id: entry for entry in larger.shells}
     assert set(small_by_id) < set(larger_by_id)
     for identifier, entry in small_by_id.items():
         assert larger_by_id[identifier] == entry
-    assert bohr == small
 
 
 def test_skew_cell_images_match_independent_brute_force_oracle():
@@ -259,7 +256,6 @@ def test_magnetic_selection_rejects_implicit_integer_or_range_coercion(selection
         ({"symprec": 0.0}, "symmetry.symprec"),
         ({"value_atol": np.nan}, "tolerances.value_atol"),
         ({"mode": "tensor-vector"}, "mode"),
-        ({"cutoff_unit": "nm"}, "cutoff_unit"),
     ],
 )
 def test_template_rejects_invalid_numbers_and_modes(options, field):
