@@ -1,7 +1,7 @@
 # 04 — Space-group symmetrization of exchange tensors: exact orbit projection
 
 Companion script: [`04_spacegroup_symmetrization.py`](04_spacegroup_symmetrization.py)
-(all assertions in this report are executed there; 88 `PASS` lines).
+(all assertions in this report are executed there; 94 `PASS` lines).
 
 This note is the hand-written report of that script: it states the identities
 and names the check ids, the script executes them.  There is no second formula
@@ -316,7 +316,7 @@ source /home/hexu/projects/myenvs/mydev/bin/activate
 python docs/sympy/04_spacegroup_symmetrization.py --kosmic-json
 ```
 
-With `--kosmic-json` the script executes **every** assertion of §1–§7 first,
+With `--kosmic-json` the script executes **every** assertion of §1–§8 first,
 sends the diagnostics (the `PASS` lines and the final count) to **stderr**, and
 prints one JSON object on **stdout**:
 
@@ -335,7 +335,7 @@ checks above, it derives nothing new and adds no identity that is not asserted
 there.  Without `--kosmic-json` the script keeps its human assertion mode
 unchanged (the `PASS` lines on stdout).
 
-The 40 published result ids, in the order the payload lists them:
+The 44 published result ids, in the order the payload lists them:
 
 | result id | published content |
 |---|---|
@@ -376,6 +376,57 @@ The 40 published result ids, in the order the payload lists them:
 | `reversal_dmi_axial_vector_negated` | $\mathbf D(\Gamma^T) = -\mathbf D(\Gamma)$ (§1, check 1.8) |
 | `reversal_transpose_tensor` | $\Gamma_{ji}(-R) = \Gamma_{ij}(R)^T$ (§1, checks 1.6–1.8) |
 | `single_site_tensor_transform` | $K' = W K W^T$ for the single-site rank-2 term (§4, check 4.3a) |
+| `site_frame_cartesian_bond_residual` | Exact zero Cartesian bond difference after the solved site-frame translation adjustment (§8, check 8.3) |
+| `site_frame_fixed_translation_bond_error` | Cartesian bond error if sites are wrapped but native R is left unchanged (§8, check 8.5) |
+| `site_frame_operation_translation_offset` | Frame covariance of the existing symmetry bond-map translation (§8, check 8.6) |
+| `site_frame_wrapped_translation` | Unique integer translation preserving the same physical bond after site-image changes (§8, checks 8.1–8.2) |
 | `tensor_transform_inversion` | $\Gamma' = W\Gamma W^T$ for the inversion (§2, check 2.4) |
 | `tensor_transform_mirror` | $\Gamma' = W\Gamma W^T$ for the $xz$ mirror (§2, check 2.3) |
 | `tensor_transform_rotation` | $\Gamma' = W\Gamma W^T$ for the generic rotation $R_z(\theta)$ (§2, check 2.2) |
+
+## 10. Raw site-image frames and native translations
+
+The executable §8 extends the existing authority without changing its tensor
+or spin conventions. Its six checks pass before the four new named results
+are published. The 40 previously approved symbolic result expressions remain
+exactly unchanged.
+
+Let $C$ contain the lattice vectors as rows, as in ASE. The physical lattice
+must be nonsingular. Fractional site representatives $x_i,x_j$ are real and
+need not lie in the reference cell. Native $R$ translates the second site.
+The vectors $n_i,n_j$ are integer site-image offsets. Writing the same sites
+in another image frame means $y_i=x_i-n_i$ and $y_j=x_j-n_j$.
+
+SymPy solves equality of the fractional bonds for the target translation.
+Checks 8.1–8.2 establish its unique solution; check 8.4 verifies the inverse:
+
+<!-- MathDoc-Exposition: tb2j/spacegroup-exchange-symmetrization -->
+$$
+R_{\mathrm{target}}=R+n_j-n_i.
+$$
+
+The result `site_frame_cartesian_bond_residual` verifies zero Cartesian
+difference for a generic row-cell matrix. The nonzero result
+`site_frame_fixed_translation_bond_error` shows why independent site wrapping
+at unchanged R is not a compatible native-base transformation:
+
+<!-- MathDoc-Exposition: tb2j/spacegroup-exchange-symmetrization -->
+$$
+\Delta b=C^{T}(n_i-n_j).
+$$
+
+Check 8.6 verifies compatibility with the already established symmetry bond
+map: re-expressing a mapped bond changes its translation by the image-offset
+difference at the mapped endpoints. This result is geometric and independent
+of magnetic time-reversal flags; it introduces no new tensor transport law.
+
+An actual native-geometry smoke used the solved expression on 32 seeded skew
+cells/configurations with Fe/O/Co sites, independent integer site offsets and
+permuted magnetic spin order. All 128 Cartesian bond vectors and distances
+matched `gen_distance_dict`; maximum vector difference was
+$7.105427357601002\times10^{-15}$ Angstrom. This validates the native sign and
+row-cell convention, not the pending v2 codec or solver-target adapters.
+
+Human review of these added assumptions and frame conventions is pending.
+The existing raw-native design keeps positions and R unchanged; only a
+target-scoped wrapped-coordinate export adapter uses the re-expression.

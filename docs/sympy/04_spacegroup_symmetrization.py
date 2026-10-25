@@ -27,6 +27,8 @@ Sympy-verified derivation (part 4 of the TB2J documentation series):
          2-fold axis perpendicular to bond, primed half-translation AFM,
          C3 about the bond, pure translation.
       7. Numerical validation with seeded numpy RNG.
+      8. Site-image frame changes: solve the required pair translation,
+         preserve Cartesian bonds, and verify covariance with the bond map.
 
 Source convention (docs/src/convention.rst):
     E = - sum_i S_i^T K_i S_i
@@ -1062,6 +1064,71 @@ def section7():
     )
 
 
+def section8():
+    """Derive raw/wrapped site-frame covariance, with ASE row-cell vectors."""
+    print("\n=== Section 8: site-image frames and native pair translations ===")
+    xi = Matrix(sp.symbols("x_i0:3", real=True))
+    xj = Matrix(sp.symbols("x_j0:3", real=True))
+    R = Matrix(sp.symbols("R0:3", integer=True))
+    ni = Matrix(sp.symbols("n_i0:3", integer=True))
+    nj = Matrix(sp.symbols("n_j0:3", integer=True))
+    rho = Matrix(sp.symbols("rho0:3", integer=True))
+    wrapped_xi, wrapped_xj = xi - ni, xj - nj
+    raw_bond = xj + R - xi
+    solutions = sp.solve(wrapped_xj + rho - wrapped_xi - raw_bond, list(rho), dict=True)
+    ok(
+        "8.1",
+        "bond equality uniquely determines the wrapped-frame R",
+        len(solutions) == 1,
+    )
+    wrapped_R = rho.subs(solutions[0])
+    ok(
+        "8.2",
+        "integer site-image shifts preserve the fractional bond after R adjustment",
+        mat_zero(wrapped_xj + wrapped_R - wrapped_xi - raw_bond),
+    )
+    record("site_frame_wrapped_translation", wrapped_R)
+
+    cell_rows = Matrix(3, 3, sp.symbols("c0:9", real=True))
+    cartesian_residual = cell_rows.T * (wrapped_xj + wrapped_R - wrapped_xi - raw_bond)
+    ok(
+        "8.3",
+        "ASE row-cell convention preserves the Cartesian bond vector",
+        mat_zero(cartesian_residual),
+    )
+    record("site_frame_cartesian_bond_residual", cartesian_residual.applyfunc(simp))
+    ok(
+        "8.4",
+        "the translation adjustment has an exact inverse",
+        mat_zero(wrapped_R + ni - nj - R),
+    )
+
+    fixed_R_error = cell_rows.T * (wrapped_xj + R - wrapped_xi - raw_bond)
+    ok(
+        "8.5",
+        "wrapping sites at unchanged R changes the Cartesian bond by C^T(n_i-n_j)",
+        mat_zero(fixed_R_error - cell_rows.T * (ni - nj)),
+    )
+    record("site_frame_fixed_translation_bond_error", fixed_R_error.applyfunc(simp))
+
+    W = Matrix(3, 3, sp.symbols("w0:9", integer=True))
+    li = Matrix(sp.symbols("l_i0:3", integer=True))
+    lj = Matrix(sp.symbols("l_j0:3", integer=True))
+    image_ni = Matrix(sp.symbols("m_i0:3", integer=True))
+    image_nj = Matrix(sp.symbols("m_j0:3", integer=True))
+    wrapped_li = li - W * ni + image_ni
+    wrapped_lj = lj - W * nj + image_nj
+    raw_image_R = W * R + lj - li
+    wrapped_image_R = W * wrapped_R + wrapped_lj - wrapped_li
+    image_offset = (wrapped_image_R - raw_image_R).applyfunc(simp)
+    ok(
+        "8.6",
+        "site-frame adjustment commutes with the existing symmetry bond map",
+        mat_zero(image_offset - (image_nj - image_ni)),
+    )
+    record("site_frame_operation_translation_offset", image_offset)
+
+
 def main():
     """Run every assertion in human mode; return the verified results.
 
@@ -1078,6 +1145,7 @@ def main():
     section5()
     section6()
     section7()
+    section8()
     print(f"\nALL {NPASS[0]} CHECKS PASSED")
     return RESULTS
 
