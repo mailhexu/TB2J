@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added guarded native `write_exchange` for pickle, `exchange.out`, XML,
+  and the native-only `tb2j` preset. Every preset member is preflighted
+  before IO; populated unsupported fields require named loss opt-ins.
+  Reports include emitted precision, annotation omissions and explicit
+  context defaults. Raw site images, native pair keys and source objects
+  are preserved. Solver exports remain outside this shell-format interface.
 - Replaced the shell text grammar with hand-first schema v2: multiline
   lattice/site rows, element-based labels, labeled reference moments,
   `exchange`/`J`, optional display names and nested user metadata.

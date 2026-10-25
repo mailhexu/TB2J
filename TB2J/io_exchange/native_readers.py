@@ -1795,8 +1795,8 @@ def _text_parse_exchange(lines, marker, label_to_atom):
             "Exchange", f"unknown meaningful exchange block or row {stripped!r}"
         )
 
-    if not header_seen or not records:
-        _text_error("Exchange", "missing writer exchange table or pair records")
+    if not header_seen:
+        _text_error("Exchange", "missing writer exchange table")
     for record in records:
         if record["jiso"] is None:
             _text_error(
