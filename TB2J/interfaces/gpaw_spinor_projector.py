@@ -207,6 +207,7 @@ def save_gpaw_spinor_projector_netcdf(calc, filename, metadata=None):
     return data
 
 
+# MathDoc: tb2j/qe-hubbard-native-contract
 def compute_spinor_projector_exchange(
     data,
     Rpts=None,
@@ -227,6 +228,7 @@ def compute_spinor_projector_exchange(
     from TB2J.projector_green import (
         ProjectorGreen,
         magnetic_tangent_vertices,
+        spinor_dense_block,
         spinor_tangent_trace,
     )
 
@@ -235,26 +237,48 @@ def compute_spinor_projector_exchange(
     if Rpts is None:
         Rpts = _R_grid(nmax=1)
     Rpts = np.asarray(Rpts, dtype=int)
-    sites = (
-        list(range(len(data.site_nproj))) if sites is None else [int(s) for s in sites]
-    )
+    qe_directions = data.qe_source_directions()
+    if qe_directions is None:
+        sites = (
+            list(range(len(data.site_nproj)))
+            if sites is None
+            else [int(s) for s in sites]
+        )
+    else:
+        sites = list(qe_directions) if sites is None else [int(s) for s in sites]
+        unmapped_sites = [site for site in sites if site not in qe_directions]
+        if unmapped_sites:
+            raise ValueError(
+                "selected spinor exchange sites are absent from qe_source_frame: "
+                f"{unmapped_sites}"
+            )
     if not sites:
         raise ValueError("at least one magnetic site is required")
     green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
-    operators = green.get_local_operators_spinor(sites=sites)
-    vert_info = {site: magnetic_tangent_vertices(op) for site, op in operators.items()}
-    vertices = {site: entry["vertices"] for site, entry in vert_info.items()}
-    if data.spinor_tangent_vertices is not None:
-        # Explicit frozen-source tangents (QE NC1.1): densify once per site
-        # and bypass the commutator entirely. No silent fallback.
-        from TB2J.projector_green import spinor_dense_block
-
+    if qe_directions is None:
+        operators = green.get_local_operators_spinor(sites=sites)
+        vert_info = {
+            site: magnetic_tangent_vertices(op) for site, op in operators.items()
+        }
+        vertices = {site: entry["vertices"] for site, entry in vert_info.items()}
+        if data.spinor_tangent_vertices is not None:
+            # Preserve the legacy QE NC1.1 path: explicit vertices replace the
+            # commutator result, but operator-trace direction inference is kept.
+            for site in sites:
+                stack = data.spinor_tangent_vertices[int(site)]
+                vertices[site] = np.stack(
+                    [spinor_dense_block(stack[axis]) for axis in range(3)]
+                )
+        directions = {site: entry["n"] for site, entry in vert_info.items()}
+    else:
+        vertices = {}
         for site in sites:
-            stack = data.spinor_tangent_vertices[int(site)]
+            count = int(data.site_nproj[site])
+            stack = data.spinor_tangent_vertices[site, :, :count, :count]
             vertices[site] = np.stack(
                 [spinor_dense_block(stack[axis]) for axis in range(3)]
             )
-    directions = {site: entry["n"] for site, entry in vert_info.items()}
+        directions = {site: qe_directions[site] for site in sites}
     n0 = directions[sites[0]]
     axis = int(np.argmax(np.abs(n0)))
     axis_aligned = abs(abs(n0[axis]) - 1.0) < 1e-6 and all(

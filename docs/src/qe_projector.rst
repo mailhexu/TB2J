@@ -534,15 +534,45 @@ evidence, unsupported branches, or failed source/tangent validation. New
 explicitly absent records need no assertion and are labeled
 ``hubbard_state="absent"``.
 
-Active records are retained and validated by the raw readers, but normalized
-exchange reads refuse them with ``normalization_pending``: joint XC+U
-coefficient/source handling belongs to Story 005 and is not implemented by
-this reader contract. No CLI source-selection option is added here. This
-reader work does not certify exchange tensors, add production +U exchange,
-or change existing gates: fully relativistic NC conditioning and mixed
-NC/augmented production restrictions remain as described above. U=0 native
-controls omit the ``HUBBARD`` card. See the executable
-``docs/sympy/qe_hubbard_native_contract.py`` and
-``docs/sympy/qe_hubbard_joint_frame.py`` derivations and their paired reports
-for the symbolic native and joint-frame contracts; these are algebraic
-checks, not production exchange certification.
+Validated active records normalize to one joint separable XC+U frame. Native
+``wfcU`` contractions are already S-applied and natively orthogonalized where
+requested; neither S nor a second spin expansion is applied. KB coefficients
+stay unfiltered. For active UPF-atomic input, ``read_qe_atomic_dump`` accepts
+``overlap_mode`` and ``overlap_rcond`` and applies the existing full per-k
+atomic filter exactly once to the original XC rows before appending U rows.
+The resulting ``overlap_k`` is ``None``: the retained ``original_overlap_k``
+is provenance only, not a metric used by the runtime. Effective overlap
+settings and the source inventory remain in metadata.
+
+``operator_components`` contains complete ``delta_total`` plus the
+``delta_xc`` and ``delta_u`` source blocks for diagnostics. Site-local matrices
+use ``site_projector_indices`` to address global coefficient columns, including
+noncontiguous appended Hubbard channels. ``qe_channel_groups`` identifies the
+original XC and native U global columns. The single spectral Green function
+retains all XC--U cross blocks; total exchange is not the sum of independently
+computed XC-only and U-only exchanges. No joint Gram is inverted or truncated,
+even when source channels are redundant.
+
+New spinor records retain version1 ``qe_source_frame`` metadata with definition
+``qe_original_xc_or_mapped_native_u_v1``. Its ``site_map`` contains magnetic
+data-site indices; unit ``directions`` and ``direction_provenance`` align with
+that map. Nonmagnetic origin0 sites have no invented direction. Original XC
+fixes the signed reference; only zero XC may use the validated mapped native
+Hubbard-occupation fallback. Total and diagnostic sources share that frame,
+including oppositely signed or canceled traces. The matching explicit
+``qe_native_xc_u_frozen_source_tangent_v1`` vertices are physical frozen-source
+Hamiltonian derivatives in eV. Their consumer bypasses operator-trace
+direction inference and commutator construction. Unrelated older producer
+contracts retain their existing path. Missing or unresolved frames fail before
+exchange output. Frame metadata and the original atomic Gram round-trip in
+the existing projector-Green NetCDF container.
+
+This source-normalization contract does not certify +U exchange tensors,
+physical/material convergence or atomic-wavefunction J accuracy. Existing
+fully relativistic NC and mixed NC/augmented production restrictions remain.
+CLI source-selection integration and the independent scientific campaigns are
+separate gates. U=0 native controls omit the ``HUBBARD`` card. Executable
+``docs/sympy/qe_hubbard_native_contract.py``,
+``docs/sympy/qe_hubbard_joint_frame.py`` and
+``docs/sympy/qe_hubbard_cartesian_tangents.py`` have paired reports; symbolic
+checks do not replace native action, rotation or production certification.

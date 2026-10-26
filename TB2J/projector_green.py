@@ -34,6 +34,10 @@ SPINOR_OPERATOR_DEFINITION = "spinor 2x2 local operator (j-averaged basis)"
 #: Exact definition marker for explicit frozen-source tangent vertices
 #: (QE NC1.1 native source response); ``dH_mag/dtheta`` in eV.
 SPINOR_TANGENT_DEFINITION = "qe_nc11_frozen_source_tangent"
+#: Exact definition marker for QE XC+U frozen-source spinor tangents.
+QE_SPINOR_TANGENT_DEFINITION = "qe_native_xc_u_frozen_source_tangent_v1"
+#: Exact definition marker for the frame from which QE spinor tangents are derived.
+QE_SOURCE_FRAME_DEFINITION = "qe_original_xc_or_mapped_native_u_v1"
 PAULI_IDENTITY_AND_MATRICES = (
     np.eye(2, dtype=complex),
     np.array([[0, 1], [1, 0]], dtype=complex),
@@ -239,6 +243,8 @@ class ProjectorGreenData:
     spinor_operator_definition: str | None = None
     spinor_tangent_vertices: np.ndarray | None = None
     spinor_tangent_definition: str | None = None
+    # Original pre-concatenation Gram, retained only as provenance; never dressed.
+    original_overlap_k: np.ndarray | None = None
 
     def __post_init__(self):
         self.kpoints = np.asarray(self.kpoints, dtype=float)
@@ -284,6 +290,8 @@ class ProjectorGreenData:
             self.overlap_metric = np.asarray(self.overlap_metric, dtype=complex)
         if self.overlap_k is not None:
             self.overlap_k = np.asarray(self.overlap_k, dtype=complex)
+        if self.original_overlap_k is not None:
+            self.original_overlap_k = np.asarray(self.original_overlap_k, dtype=complex)
         if self.population_metric_matrix is not None:
             self.population_metric_matrix = np.asarray(
                 self.population_metric_matrix, dtype=complex
@@ -435,6 +443,20 @@ class ProjectorGreenData:
             nproj,
         ):
             raise ValueError("overlap_k must have shape (nkpt, nproj, nproj)")
+        if self.original_overlap_k is not None:
+            shape = self.original_overlap_k.shape
+            if (
+                len(shape) != 3
+                or shape[0] != nkpt
+                or shape[1] != shape[2]
+                or not 0 < shape[1] <= nproj
+            ):
+                raise ValueError(
+                    "original_overlap_k must have shape "
+                    "(nkpt, noriginal, noriginal) with 0 < noriginal <= nproj"
+                )
+            if not np.all(np.isfinite(self.original_overlap_k)):
+                raise ValueError("original_overlap_k contains nonfinite values")
         if self.population_metric_matrix is not None and (
             self.population_metric_matrix.shape != (nproj, nproj)
         ):
@@ -448,6 +470,11 @@ class ProjectorGreenData:
             self._validate_spinor_operator()
         if self.spinor_tangent_vertices is not None:
             self._validate_spinor_tangent_vertices()
+        if (
+            "qe_source_frame" in self.metadata
+            or self.spinor_tangent_definition == QE_SPINOR_TANGENT_DEFINITION
+        ):
+            self._validate_qe_source_frame_contract()
         if (
             str(self.metadata.get("qe_magic", "")).startswith("TB2JQEDUMPNC1.1")
             and self.spinor_tangent_vertices is None
@@ -534,12 +561,17 @@ class ProjectorGreenData:
     def _validate_spinor_tangent_vertices(self):
         if self.nspinor != 2:
             raise ValueError("spinor_tangent_vertices requires nspinor=2")
-        if self.spinor_tangent_definition != SPINOR_TANGENT_DEFINITION:
+        if self.spinor_tangent_definition not in (
+            SPINOR_TANGENT_DEFINITION,
+            QE_SPINOR_TANGENT_DEFINITION,
+        ):
             raise ValueError(
                 "unsupported spinor_tangent_definition: "
                 f"{self.spinor_tangent_definition!r}"
             )
         if self.spinor_operator is None:
+            if self.spinor_tangent_definition == QE_SPINOR_TANGENT_DEFINITION:
+                raise ValueError("QE spinor tangents require spinor_operator data")
             raise ValueError(
                 "spinor_tangent_vertices requires spinor_operator for the "
                 "local Pauli-trace direction"
@@ -565,6 +597,107 @@ class ProjectorGreenData:
             )
         if not np.all(np.isfinite(self.spinor_tangent_vertices)):
             raise ValueError("spinor_tangent_vertices contains nonfinite values")
+
+    def _validate_qe_source_frame_contract(self):
+        if self.spinor_tangent_definition != QE_SPINOR_TANGENT_DEFINITION:
+            raise ValueError(
+                "qe_source_frame requires the matching QE spinor tangent definition"
+            )
+        if self.spinor_tangent_vertices is None:
+            raise ValueError(
+                "QE source-frame data requires explicit spinor_tangent_vertices"
+            )
+        if self.nspinor != 2 or self.spinor_operator is None:
+            raise ValueError(
+                "QE source-frame data requires spinor operators and nspinor=2"
+            )
+        if self.site_nproj is None or self.site_projector_indices is None:
+            raise ValueError("QE source-frame data requires site projector indices")
+
+        frame = self.metadata.get("qe_source_frame")
+        if not isinstance(frame, dict):
+            raise ValueError("QE spinor tangent definition requires qe_source_frame")
+        version = frame.get("version")
+        if (
+            isinstance(version, (bool, np.bool_))
+            or not isinstance(version, (int, np.integer))
+            or int(version) != 1
+        ):
+            raise ValueError("qe_source_frame version must be 1")
+        if frame.get("definition") != QE_SOURCE_FRAME_DEFINITION:
+            raise ValueError(
+                "unsupported qe_source_frame definition: "
+                f"{frame.get('definition')!r}"
+            )
+
+        try:
+            site_map = np.asarray(frame.get("site_map"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "qe_source_frame site_map must be a 1D integer array"
+            ) from exc
+        if site_map.ndim != 1 or site_map.size == 0 or site_map.dtype.kind not in "iu":
+            raise ValueError(
+                "qe_source_frame site_map must be a nonempty 1D integer array"
+            )
+        nsite = len(self.site_nproj)
+        if np.any(site_map < 0) or np.any(site_map >= nsite):
+            raise ValueError("qe_source_frame site_map contains site out of range")
+        if np.unique(site_map).size != site_map.size:
+            raise ValueError("qe_source_frame site_map must contain unique sites")
+
+        try:
+            directions = np.asarray(frame.get("directions"), dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "qe_source_frame directions must have shape (nsite, 3)"
+            ) from exc
+        if directions.shape != (site_map.size, 3):
+            raise ValueError(
+                "qe_source_frame directions must have shape (len(site_map), 3)"
+            )
+        if not np.all(np.isfinite(directions)):
+            raise ValueError("qe_source_frame directions contain nonfinite values")
+        if not np.allclose(
+            np.linalg.norm(directions, axis=1), 1.0, rtol=1e-8, atol=1e-8
+        ):
+            raise ValueError("qe_source_frame directions must be unit vectors")
+
+        provenance = np.asarray(frame.get("direction_provenance"), dtype=object)
+        if provenance.shape != (site_map.size,):
+            raise ValueError("qe_source_frame direction_provenance must match site_map")
+        allowed_provenance = {
+            "original_xc_pauli_trace",
+            "mapped_native_hubbard_occupation",
+        }
+        if any(
+            not isinstance(source, str) or source not in allowed_provenance
+            for source in provenance
+        ):
+            raise ValueError("qe_source_frame has unsupported direction provenance")
+
+        nproj_site_max = self.spinor_operator.shape[1]
+        if np.any(self.site_nproj < 0) or np.any(self.site_nproj > nproj_site_max):
+            raise ValueError("site_nproj is invalid for qe_source_frame data")
+        if np.any(self.site_nproj[site_map] <= 0):
+            raise ValueError(
+                "qe_source_frame site_map includes a site without projectors"
+            )
+        mapped_sites = set(int(site) for site in site_map)
+        for site in range(nsite):
+            if site in mapped_sites:
+                continue
+            nproj_site = int(self.site_nproj[site])
+            if np.any(self.spinor_operator[site, :nproj_site, :nproj_site] != 0):
+                raise ValueError(
+                    f"nonzero spinor source at unmapped QE frame site {site}"
+                )
+            if np.any(
+                self.spinor_tangent_vertices[site, :, :nproj_site, :nproj_site] != 0
+            ):
+                raise ValueError(
+                    f"nonzero spinor tangent at unmapped QE frame site {site}"
+                )
 
     def _validate_operator_components(self):
         if self.site_nproj is None or self.site_projector_indices is None:
@@ -622,6 +755,28 @@ class ProjectorGreenData:
         if site is None:
             return diff
         return diff[int(site)]
+
+    # MathDoc: tb2j/qe-hubbard-native-contract
+    def qe_source_directions(self):
+        """Return QE frame directions keyed by data-site index, or ``None``.
+
+        Older producer contracts retain their operator-trace direction
+        inference path. A declared QE source frame is validated before its
+        directions are exposed to consumers.
+        """
+        if (
+            "qe_source_frame" not in self.metadata
+            and self.spinor_tangent_definition != QE_SPINOR_TANGENT_DEFINITION
+        ):
+            return None
+        self.validate()
+        frame = self.metadata["qe_source_frame"]
+        site_map = np.asarray(frame["site_map"], dtype=int)
+        directions = np.asarray(frame["directions"], dtype=float)
+        return {
+            int(site): np.array(directions[index], dtype=float, copy=True)
+            for index, site in enumerate(site_map)
+        }
 
     def save_netcdf(self, filename):
         """Save spectral projector data to NetCDF4."""
@@ -732,6 +887,21 @@ class ProjectorGreenData:
                 overlap_k.definition = (
                     self.overlap_metric_definition or "k-dependent projector overlap"
                 )
+            if self.original_overlap_k is not None:
+                projectors.createDimension(
+                    "nproj_original_overlap", self.original_overlap_k.shape[1]
+                )
+                original_overlap = projectors.createVariable(
+                    "original_overlap_k",
+                    "f8",
+                    (
+                        "nkpt",
+                        "nproj_original_overlap",
+                        "nproj_original_overlap",
+                        "complex",
+                    ),
+                )
+                original_overlap[:] = encode_complex(self.original_overlap_k)
             if self.population_metric_matrix is not None:
                 metric = projectors.createVariable(
                     "population_metric_matrix", "f8", ("nproj", "nproj", "complex")
@@ -935,6 +1105,11 @@ class ProjectorGreenData:
                 overlap_metric_definition = getattr(
                     overlap_k_var, "definition", overlap_metric_definition
                 )
+            original_overlap_k = None
+            if "original_overlap_k" in projectors.variables:
+                original_overlap_k = decode_complex(
+                    projectors.variables["original_overlap_k"][:]
+                )
             if "population_metric_matrix" in projectors.variables:
                 population_metric_matrix = decode_complex(
                     projectors.variables["population_metric_matrix"][:]
@@ -1001,6 +1176,7 @@ class ProjectorGreenData:
                 projector_radial=projector_radial,
                 overlap_metric=overlap_metric,
                 overlap_k=overlap_k,
+                original_overlap_k=original_overlap_k,
                 population_metric_matrix=population_metric_matrix,
                 site_nproj=site_nproj,
                 site_projector_indices=site_projector_indices,
@@ -1169,6 +1345,20 @@ class ProjectorGreen:
         if self.efermi_spin is not None:
             return float(self.efermi_spin[int(ispin)])
         return self.efermi
+
+    # MathDoc: tb2j/qe-hubbard-joint-frame#row_filter_transpose
+    def get_filtered_coefficients(self, ik, ispin=0):
+        """Return raw coefficient rows transformed by the active k filter.
+
+        The filter acts on the final projector axis, preserving any leading
+        band and spin axes. With no runtime filter, the original coefficient
+        row view is returned unchanged.
+        """
+        coeff = self.data.coefficients[int(ispin), int(ik)]
+        filt = self._channel_filter(int(ik))
+        if filt is None:
+            return coeff
+        return np.einsum("...p,pq->...q", coeff, filt.T, optimize=True)
 
     def get_Gk(self, ik, energy, ispin=0):
         evals = self.data.eigenvalues[ispin, ik]
