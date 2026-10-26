@@ -1,6 +1,25 @@
 # Changelog
 
 ## Unreleased
+- Added complete-source QE API/CLI selection: `delta_total` by default,
+  explicit `delta_xc`/`delta_u` diagnostics with matched spinor tangents and
+  unchanged reference frames, and `--legacy_no_u` for explicit historical
+  no-U attestation. Standard outputs retain truthful source/filter/Hubbard
+  provenance; inconsistent x/y/z definitions, UPF identities, column maps or
+  frame conventions fail before output. Scientific family/tensor gates and
+  convergence requirements are unchanged; interface support alone is not
+  +U production certification.
+  Native derivative metrics are checked against their retained arrays;
+  independently reconstructed and retained derivatives must both meet the
+  unchanged physical budgets, avoiding false residual-identity failures
+  caused by independently rounded central differences.
+  NC1.2 scalar-relativistic tangent parity uses the declared reference frame
+  rather than inferring a second direction; inherited NC1.1 behavior and
+  all parity tolerances remain unchanged.
+  Default collinear trace consumers honor the reader's declared source;
+  unresolved native UPF digests refuse production reference comparison.
+  Output moments follow occupation-derived fallback axes and oppose XC
+  splitting axes, including mixed-origin frames and zero diagnostics.
 - Added native QE XC+U joint-frame normalization: unchanged native Hubbard
   contractions, one-time XC-only full per-k atomic filtering, direct mixed
   Green blocks without a joint inverse, and explicit versioned spinor
