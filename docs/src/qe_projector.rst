@@ -567,11 +567,86 @@ contracts retain their existing path. Missing or unresolved frames fail before
 exchange output. Frame metadata and the original atomic Gram round-trip in
 the existing projector-Green NetCDF container.
 
+Complete sources and explicit diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The existing readers and ``gen_exchange_qe`` accept
+``operator_component=None`` or ``"delta_total"`` for complete exchange.
+For an active-U record, ``"delta_xc"`` and ``"delta_u"`` select diagnostic
+sources, not complete XC+U results. Reader selection changes the default
+collinear ``hij`` spin difference or the spinor operator and matching
+explicit tangent; it does not filter the joint coefficients again or change
+``qe_source_frame``. Unavailable components are refused rather than replaced
+with a fabricated zero source.
+The default ``ProjectorGreen`` collinear trace and exchange consumers honor
+this declared selection while retaining the full component inventory.
+Older data without a declared selection keeps its historical XC-first default.
+
+.. code-block:: python
+
+   from TB2J.interfaces.qe_projector import gen_exchange_qe, read_qe_spinor_dump
+
+   gen_exchange_qe("native-u.bin")   # complete delta_total
+   gen_exchange_qe("native-u.bin", operator_component="delta_xc",
+                   output_path="xc_diagnostic")
+   u_leg_data = read_qe_spinor_dump("native-u-z.bin",
+                                  operator_component="delta_u")
+
+The same options extend the existing CLI; no separate U-only runtime or
+command is needed:
+
+.. code-block:: bash
+
+   qe2J.py --input native-u.bin --operator_component delta_u \
+           --output_path u_diagnostic
+   qe2J.py --input_x native-u-x.bin --input_y native-u-y.bin \
+           --input_z native-u-z.bin --operator_component delta_total
+   qe2J.py --input historical-no-u.bin --legacy_no_u
+
+``legacy_no_u=True`` / ``--legacy_no_u`` is only a user assertion for a
+legacy Hubbard-unknown input. Passing it on native active-U input does not
+remove U or relabel the input as absent; malformed/incomplete source,
+unsupported family and tangent failures remain refusals.
+
+Before standard tensor files are written, x/y/z inputs must agree in
+functional, U/DC/projector parameters, shell and native-column maps, UPF
+digest/family identity, selected component and coefficient/frame/tangent
+conventions. Byte-identical UPFs may reside at different paths. New-format
+references with an unresolved ``NOT SET`` UPF digest remain inspectable but
+cannot establish production reference identity. Independently
+converged SOC occupations and actual x/y/z direction vectors are not required
+to be identical. A valid declared frame, not the selected operator trace,
+controls magnetic-site selection and output moment signs, including zero or
+canceling diagnostics. Existing family, rank-nine, conditioning, repeated-row
+and pair-reversal gates remain in force.
+Output moments oppose ``original_xc_pauli_trace`` directions but follow
+``mapped_native_hubbard_occupation`` directions, which already represent
+physical occupation moments. This per-site rule also applies to mixed-origin
+frames and zero diagnostic sources.
+For NC1.2 scalar-relativistic inputs, the explicit-versus-commutator
+parity check also uses that declared frame, not a second inferred direction.
+The inherited NC1.1 frame behavior and all parity tolerances are unchanged.
+
+Native finite-difference metrics describe the retained native arrays. The
+reader verifies those metrics against those arrays and independently
+reconstructs the derivative. Both retained and reconstructed derivatives
+must meet the existing relative or analytic-zero absolute budgets; native
+roundoff is not permission to bypass a failed physical tangent gate.
+
+The standard output description includes source provenance:
+``operator_component``, ``source_completeness``, native Hubbard state and
+definition versus user attestation, coefficient groups, explicit spinor frame
+and effective original-atomic overlap controls. Per-component validity is
+distinct from physical completeness: a valid U-only block is still labeled
+``diagnostic_u_only``. Active atomic output identifies the one-time XC filter
+and unchanged native U rows even though the final runtime overlap is absent.
+
+
 This source-normalization contract does not certify +U exchange tensors,
 physical/material convergence or atomic-wavefunction J accuracy. Existing
 fully relativistic NC and mixed NC/augmented production restrictions remain.
-CLI source-selection integration and the independent scientific campaigns are
-separate gates. U=0 native controls omit the ``HUBBARD`` card. Executable
+API/CLI source integration does not waive independent scientific validation
+or any tensor gate. U=0 native controls omit the ``HUBBARD`` card. Executable
 ``docs/sympy/qe_hubbard_native_contract.py``,
 ``docs/sympy/qe_hubbard_joint_frame.py`` and
 ``docs/sympy/qe_hubbard_cartesian_tangents.py`` have paired reports; symbolic

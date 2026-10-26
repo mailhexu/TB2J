@@ -16,8 +16,9 @@ def run_qe2J():
             "Calculate TB2J-style exchange parameters from a Quantum "
             "ESPRESSO projector dump file (QE fork branch TB2J). Supports "
             "KB/beta becp dumps (TB2JQEDUMPV1*) and atomic-wavefunction "
-            "dumps (TB2JQEATWFC1.0, TB2J_PROJECTORS=atomic). KB spinor "
-            "dumps (TB2JQEDUMPNC1.0/NC1.1) require independent x/y/z dumps."
+            "dumps (TB2JQEATWFC1.0/1.1, TB2J_PROJECTORS=atomic). KB spinor "
+            "dumps (TB2JQEDUMPNC1.0/1.1/1.2) require independent x/y/z dumps. "
+            "Complete XC+U is the default source; XC-only/U-only are diagnostics."
         )
     )
     parser.add_argument("--input", help="collinear KB or atomic QE projector dump")
@@ -76,6 +77,23 @@ def run_qe2J():
         ),
     )
     parser.add_argument(
+        "--operator_component",
+        choices=["delta_total", "delta_xc", "delta_u"],
+        default=None,
+        help=(
+            "magnetic source: complete delta_total by default; delta_xc and "
+            "delta_u are active-U diagnostics, with matching spinor tangents"
+        ),
+    )
+    parser.add_argument(
+        "--legacy_no_u",
+        action="store_true",
+        help=(
+            "explicitly attest that a legacy Hubbard-unknown dump has no U; "
+            "cannot override declared U or failed source/family/tangent gates"
+        ),
+    )
+    parser.add_argument(
         "--leg_consistency_atol_eV",
         type=float,
         default=5e-8,
@@ -116,6 +134,8 @@ def run_qe2J():
         leg_consistency_atol_eV=(
             args.leg_consistency_atol_eV if any(spinor_inputs.values()) else None
         ),
+        operator_component=args.operator_component,
+        legacy_no_u=args.legacy_no_u,
     )
     print(f"Wrote {exchange_out}")
 

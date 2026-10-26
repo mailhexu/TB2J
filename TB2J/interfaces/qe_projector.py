@@ -44,9 +44,12 @@ KB1.3, atomic1.1 and NC1.2 append the strictly validated
 ``TB2JHUBBARD1.0`` native extension. Raw ``.hubbard`` records distinguish
 active, explicitly absent and legacy unknown state. Legacy normalization
 requires ``legacy_no_u=True`` (user attestation, not measured absence).
-Explicit new-format absence needs no assertion. Active records are retained
-but normalization refuses until the joint XC+U source is constructed; the
-legacy assertion never bypasses a declared or failed source gate.
+Explicit new-format absence needs no assertion. Validated active records
+normalize to the joint XC+U source; the legacy assertion never bypasses a
+declared or failed source gate. Readers and the generator accept
+``operator_component=None`` (complete ``delta_total``) or explicit
+``delta_xc``/``delta_u`` diagnostics, retaining the same spinor frame and
+matching source tangent.
 
 Pinned physics contract (research memo ``2026-10-08-qe-export-surface-and-
 operators``, SymPy pin ``docs/sympy/qe_separable_beta_trace.py`` and the
@@ -82,14 +85,14 @@ Public API
     dumped units).
 ``parse_qe_atomic_dump(path)``
     Raw parse into a :class:`QEAtomicDump`.
-``read_qe_dump(path, *, legacy_no_u=False)``
+``read_qe_dump(path, *, legacy_no_u=False, operator_component=None)``
     Normalized KB :class:`~TB2J.projector_green.ProjectorGreenData`
     (eV / Angstrom / fractional k-points, spin-degenerate dense mesh).
-``read_qe_atomic_dump(path, *, legacy_no_u=False, overlap_mode=None, overlap_rcond=None)``
+``read_qe_atomic_dump(path, *, legacy_no_u=False, overlap_mode=None, overlap_rcond=None, operator_component=None)``
     Normalized atomic :class:`~TB2J.projector_green.ProjectorGreenData`.
     No-U retains primal rows/``overlap_k``; active-U canonicalizes original
     XC rows once and retains the full Gram in ``original_overlap_k``.
-``parse_qe_spinor_dump(path)`` / ``read_qe_spinor_dump(path, *, legacy_no_u=False)``
+``parse_qe_spinor_dump(path)`` / ``read_qe_spinor_dump(path, *, legacy_no_u=False, operator_component=None)``
     Strict non-collinear spinor parse (NC1.0 / NC1.1 / NC1.2) and normalized
     :class:`~TB2J.projector_green.ProjectorGreenData` with dual spinor
     coefficients and the magnetic-only ``spinor_operator``. NC1.1 adds the
@@ -102,6 +105,7 @@ Public API
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import struct
@@ -1804,22 +1808,29 @@ def _validate_hubbard_rotations(data):
                     rtol=1e-9,
                 )
                 absolute, relative = _hub_residual(analytic, finite)
+                # Reported residuals describe the retained native arrays, not
+                # a second finite difference with independent roundoff. Check
+                # both reconstructions at the unchanged physical budgets.
+                recorded_absolute, recorded_relative = _hub_residual(
+                    rotation.analytic[:, :, :, tangent],
+                    rotation.central_difference[:, :, :, tangent, step],
+                )
                 _hub_close(
                     rotation.tangent_absolute_error[tangent, step],
-                    absolute,
+                    recorded_absolute,
                     "measured derivative absolute error",
                     rtol=1e-8,
                 )
                 _hub_close(
                     rotation.tangent_relative_error[tangent, step],
-                    relative,
+                    recorded_relative,
                     "measured derivative relative error",
                     rtol=1e-8,
                 )
                 _hub_require(
-                    absolute <= 1e-12
+                    max(absolute, recorded_absolute) <= 1e-12
                     if np.abs(analytic).max(initial=0) <= 1e-12
-                    else relative <= 1e-6,
+                    else max(relative, recorded_relative) <= 1e-6,
                     "validation",
                     "central-difference derivative gate",
                 )
@@ -2043,6 +2054,7 @@ def _qe_hubbard_admission(dump, legacy_no_u):
     return {
         "hubbard_state": state,
         "legacy_no_u": False,
+        "hubbard_definition": _qe_hubbard_identity(dump.hubbard),
         "hubbard_provenance": {
             "origin": "native_extension",
             "native_state": state,
@@ -2074,6 +2086,142 @@ def _qe_hubbard_identity(hubbard):
         "columns": hubbard.columns.tolist(),
         "spin_columns": hubbard.spin_columns.tolist(),
         "upfs": [asdict(species) for species in hubbard.species],
+    }
+
+
+def _qe_select_operator_component(data, operator_component):
+    """Select a source without changing its coefficient or rotation frame."""
+    component = "delta_total" if operator_component is None else operator_component
+    if component not in {"delta_total", "delta_xc", "delta_u"}:
+        raise ValueError(f"unknown QE operator component: {component!r}")
+    active = data.metadata["hubbard_state"] == "active"
+    if component != "delta_total" and not data.has_operator_component(component):
+        raise ValueError(f"QE operator component is unavailable: {component}")
+    data.metadata["operator_component"] = component
+    if active:
+        data.metadata["source_completeness"] = (
+            "complete_xc_u"
+            if component == "delta_total"
+            else f"diagnostic_{component[6:]}_only"
+        )
+    else:
+        validity = (data.operator_component_metadata or {}).get("delta_total", {})
+        data.metadata["source_completeness"] = (
+            validity.get("completeness")
+            if validity.get("completeness", "complete") != "complete"
+            else f"complete_xc_{data.metadata['hubbard_state']}"
+        )
+    if component == "delta_total":
+        return data
+    selected = data.get_operator_component(component)
+    if data.nspinor == 2:
+        # The source groups are global columns; each site's local ordering may
+        # be noncontiguous. Select the same rows of the physical tangent.
+        data.qe_source_directions()
+        groups = data.metadata["qe_channel_groups"][component[6:]]
+        vertices = np.zeros_like(data.spinor_tangent_vertices)
+        for site, count in enumerate(data.site_nproj):
+            indices = data.site_projector_indices[site, :count]
+            rows = np.flatnonzero(np.isin(indices, groups))
+            for axis in range(3):
+                vertices[site, axis][np.ix_(rows, rows)] = data.spinor_tangent_vertices[
+                    site, axis
+                ][np.ix_(rows, rows)]
+        data.spinor_operator = selected
+        data.spinor_tangent_vertices = vertices
+    else:
+        data.hij = np.stack((selected / 2, -selected / 2))
+        data.hij_definition = f"qe_selected_{component}_spin_difference"
+    data.validate(exchange_ready=True)
+    return data
+
+
+def _qe_exchange_provenance(data):
+    """Describe selected source validity separately from physical completeness."""
+    return {
+        **{
+            key: data.metadata.get(key)
+            for key in (
+                "operator_component",
+                "source_completeness",
+                "hubbard_state",
+                "hubbard_provenance",
+                "hubbard_definition",
+                "coefficient_convention",
+                "qe_channel_groups",
+                "qe_source_frame",
+                "effective_overlap_mode",
+                "effective_overlap_rcond",
+            )
+        },
+        "spinor_tangent_definition": data.spinor_tangent_definition,
+    }
+
+
+def _qe_reference_identity(data):
+    """Compare physical definitions/maps, not SOC state values or file paths."""
+    data.validate(exchange_ready=True)
+    if (
+        data.metadata.get("qe_magic") == "TB2JQEDUMPNC1.2"
+        and data.qe_source_directions() is None
+    ):
+        raise ValueError("QE NC1.2 production requires its explicit source frame")
+    definition = data.metadata.get("hubbard_definition")
+    if definition is not None:
+        if any(
+            re.fullmatch(r"[0-9a-fA-F]{32}", upf["md5"]) is None
+            for upf in definition["upfs"]
+        ):
+            raise ValueError(
+                "QE production reference identity requires resolved UPF checksums; "
+                "unresolved identities remain available for raw inspection only"
+            )
+        definition = {
+            **definition,
+            "upfs": [
+                {
+                    key: value
+                    for key, value in upf.items()
+                    if key not in {"path", "filename"}
+                }
+                for upf in definition["upfs"]
+            ],
+        }
+    frame = data.metadata.get("qe_source_frame")
+    frame_identity = (
+        None
+        if frame is None
+        else {
+            "version": frame["version"],
+            "definition": frame["definition"],
+            "site_provenance": sorted(
+                zip(frame["site_map"], frame["direction_provenance"], strict=True)
+            ),
+        }
+    )
+    return {
+        **{
+            key: data.metadata.get(key)
+            for key in (
+                "hubbard_state",
+                "hubbard_provenance",
+                "operator_component",
+                "source_completeness",
+                "coefficient_convention",
+                "native_spinor_order",
+                "qe_channel_groups",
+            )
+        },
+        "hubbard_definition": definition,
+        "frame": frame_identity,
+        "tangent_definition": data.spinor_tangent_definition,
+        "operator_definition": data.spinor_operator_definition,
+        "coefficient_source": data.coefficient_source,
+        "coefficient_projector": data.coefficient_projector,
+        "operator_basis": data.operator_basis,
+        "site_nproj": data.site_nproj.tolist(),
+        "site_projector_indices": data.site_projector_indices.tolist(),
+        "projector_site": data.projector_site.tolist(),
     }
 
 
@@ -3116,7 +3264,9 @@ def _fermi_pair(dump) -> tuple:
     return dump.ef * RYTOEV, efermi_spin, efermi_source
 
 
-def read_qe_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
+def read_qe_dump(
+    path, *, legacy_no_u=False, operator_component=None
+) -> ProjectorGreenData:
     """Read a QE ``becp_dump`` file into exchange-ready projector Green data.
 
     Normalizes dumped units (Ry -> eV, alat/Bohr -> Angstrom, cartesian k in
@@ -3308,14 +3458,19 @@ def read_qe_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     if dump.hubbard.state == "active":
         data = _qe_joint_collinear(dump, data, (up, dn[perm]))
     data.validate(exchange_ready=True)
-    return data
+    return _qe_select_operator_component(data, operator_component)
 
 
 # ---------------------------------------------------------------------------
 # read_qe_atomic_dump: ProjectorGreenData normalization (atomic family)
 # ---------------------------------------------------------------------------
 def read_qe_atomic_dump(
-    path, *, legacy_no_u=False, overlap_mode=None, overlap_rcond=None
+    path,
+    *,
+    legacy_no_u=False,
+    overlap_mode=None,
+    overlap_rcond=None,
+    operator_component=None,
 ) -> ProjectorGreenData:
     """Read a QE atomic-wavefunction dump into projector Green data.
 
@@ -3496,7 +3651,7 @@ def read_qe_atomic_dump(
             dump, data, (up, dn[perm]), overlap_mode, overlap_rcond
         )
     data.validate(exchange_ready=True)
-    return data
+    return _qe_select_operator_component(data, operator_component)
 
 
 @dataclass
@@ -4040,7 +4195,9 @@ def _spinor_tangent_vertices_from_response(dump, operator, path, directions=None
     return vertices
 
 
-def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
+def read_qe_spinor_dump(
+    path, *, legacy_no_u=False, operator_component=None
+) -> ProjectorGreenData:
     """Map NC spinor coefficients to a spinor operator and tangent vertices.
 
     NC1.0 stays scalar-relativistic only (SO-bearing rejected fail-closed);
@@ -4133,7 +4290,28 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
                 if dump.has_so[dump.ityp[site] - 1]:
                     continue
                 try:
-                    commutator = magnetic_tangent_vertices(operator[site])["vertices"]
+                    if source_frame is None:
+                        commutator = magnetic_tangent_vertices(operator[site])[
+                            "vertices"
+                        ]
+                    elif site not in directions:
+                        continue
+                    else:
+                        # MathDoc: tb2j/qe-hubbard-native-contract
+                        # The NC1.2 oracle must use the same declared frame as
+                        # the explicit response, including longitudinal axes.
+                        dense = spinor_dense_block(operator[site])
+                        identity = np.eye(operator.shape[1])
+                        commutator = np.empty((3, *dense.shape), dtype=complex)
+                        for axis in range(3):
+                            rotation_axis = np.cross(directions[site], np.eye(3)[axis])
+                            sigma = np.einsum(
+                                "a,ast->st", rotation_axis, PAULI_MATRICES
+                            )
+                            generator = np.kron(sigma, identity)
+                            commutator[axis] = -0.25j * (
+                                generator @ dense - dense @ generator
+                            )
                 except ValueError as exc:
                     if "no magnetic splitting" not in str(exc):
                         raise
@@ -4297,7 +4475,7 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
             stacklevel=2,
         )
     data.validate(exchange_ready=True)
-    return data
+    return _qe_select_operator_component(data, operator_component)
 
 
 # ---------------------------------------------------------------------------
@@ -4317,24 +4495,27 @@ def gen_exchange_qe(
     leg_consistency_atol_eV=None,
     *,
     legacy_no_u=False,
+    operator_component=None,
 ):
     """Generate projector exchange output from a QE projector dump file.
 
-    The dump family is detected from the file magic.  KB/beta dumps
-    (``TB2JQEDUMPV1*``) carry already-dual ``becp`` coefficients whose only
-    exchange component is the covariant separable-operator spin splitting
-    ``deeq(up) - deeq(down)`` (v1.2: plus the metric-transformed projected
-    xc vertex) in the beta-dual channel; ``overlap_mode`` /
-    ``overlap_rcond`` are rejected there because the coefficients are dual
-    and no inverse exists to control.  Atomic dumps
-    (``TB2JQEATWFC1.0``) carry primal atomic-wavefunction coefficients with
-    the full per-k overlap ``M(k)``; there the controls select how the
-    shared runtime dresses with ``M(k)^-1`` (default ``inverse``).
+    File magic selects the existing KB/beta or UPF-atomic path. KB coefficients
+    are already dual and reject overlap controls. Atomic controls dress the
+    full per-k original XC frame (default ``inverse``); active U is appended
+    after that one-time filter with direct coefficients and no joint inverse.
 
-    A mapping ``{x: dump_x, y: dump_y, z: dump_z}`` selects spinor
-    full-tensor output through the existing rank-nine writer; NC1.1 sets
-    carry the native source-response tangent, NC1.0 sets remain the
-    scalar-relativistic-only legacy family and the two may not be mixed.
+    ``operator_component=None`` or ``"delta_total"`` means complete XC+U for
+    active input. ``"delta_xc"`` and ``"delta_u"`` are explicit diagnostics,
+    with matching spinor tangents in the unchanged native source frame.
+    ``legacy_no_u=True`` attests unknown historical inputs only, never removes
+    declared U or bypasses a failed source gate.
+
+    A mapping ``{x: dump_x, y: dump_y, z: dump_z}`` selects the existing
+    rank-nine writer. Physical definitions, UPF identities, column maps,
+    selected component and frame/tangent conventions must agree; SOC
+    occupations and actual x/y/z direction vectors need not be identical.
+    NC1.2 requires its explicit frame/tangents; NC1.1 keeps native response
+    tangents and attested legacy NC1.0 remains scalar-relativistic only.
     ``leg_consistency_atol_eV`` (spinor three-leg only) bounds the
     repeated-row gate of the merger; it must be finite, positive and
     at most 1e-7 eV, and the measured worst repeated-row spread is
@@ -4374,10 +4555,15 @@ def gen_exchange_qe(
         )
 
         references = {
-            axis: read_qe_spinor_dump(filename[axis], legacy_no_u=legacy_no_u)
+            axis: read_qe_spinor_dump(
+                filename[axis],
+                legacy_no_u=legacy_no_u,
+                operator_component=operator_component,
+            )
             for axis in ("x", "y", "z")
         }
         baseline = references["z"].metadata
+        baseline_identity = _qe_reference_identity(references["z"])
         for axis, reference in references.items():
             if any(
                 reference.metadata[key] != baseline[key]
@@ -4394,6 +4580,15 @@ def gen_exchange_qe(
             ):
                 raise ValueError(
                     f"QE spinor reference {axis!r} differs in UPF/projector family"
+                )
+            if (
+                reference.metadata["operator_component"]
+                != ("delta_total" if operator_component is None else operator_component)
+                or _qe_reference_identity(reference) != baseline_identity
+            ):
+                raise ValueError(
+                    f"QE spinor reference {axis!r} differs in Hubbard definition, "
+                    "UPF identity, source/component, column map or frame convention"
                 )
         augmented = [bool(t or p) for t, p in zip(baseline["tvanp"], baseline["tpawp"])]
         if any(augmented) and not all(augmented):
@@ -4428,12 +4623,18 @@ def gen_exchange_qe(
             index_magnetic_atoms=index_magnetic_atoms,
         )
         automatic_sites = magnetic_elements is None and index_magnetic_atoms is None
+        declared_frames = {
+            axis: reference.qe_source_directions()
+            for axis, reference in references.items()
+        }
         active_sites = []
         for site in selected_sites:
             if site < 0 or site >= len(references["z"].site_nproj):
                 raise ValueError(f"QE spinor magnetic site index {site} is invalid")
             present = [
-                bool(np.any(references[axis].spinor_operator[site] != 0))
+                site in declared_frames[axis]
+                if declared_frames[axis] is not None
+                else bool(np.any(references[axis].spinor_operator[site] != 0))
                 for axis in ("x", "y", "z")
             ]
             if not any(present):
@@ -4451,6 +4652,26 @@ def gen_exchange_qe(
             active_sites.append(site)
         if not active_sites:
             raise ValueError("QE spinor references contain no magnetic site")
+        spinat = None
+        if declared_frames["z"] is not None:
+            spinat = np.zeros((len(references["z"].site_nproj), 3))
+            frame = references["z"].metadata["qe_source_frame"]
+            origins = dict(
+                zip(frame["site_map"], frame["direction_provenance"], strict=True)
+            )
+            for site in active_sites:
+                sign = (
+                    1.0 if origins[site] == "mapped_native_hubbard_occupation" else -1.0
+                )
+                spinat[site] = sign * declared_frames["z"][site]
+        provenance = {
+            **_qe_exchange_provenance(references["z"]),
+            "reference_frames": {
+                axis: reference.metadata.get("qe_source_frame")
+                for axis, reference in references.items()
+            },
+            "reference_inputs": {axis: str(path) for axis, path in filename.items()},
+        }
         return write_spinor_projector_exchange_out(
             references,
             path=output_path,
@@ -4461,13 +4682,15 @@ def gen_exchange_qe(
             magnetic_elements=magnetic_elements,
             index_magnetic_atoms=active_sites,
             leg_consistency_atol_eV=leg_consistency_atol_eV,
+            spinat=spinat,
             description=(
                 f"QE {baseline['qe_magic']} KB spinor full rank-nine exchange "
-                "from independent x/y/z "
-                "references; NC1.1 uses native frozen magnetic-source response "
-                "tangents and NC1.0 uses scalar-relativistic commutator tangents. "
-                "Native total deeq_nc (including fixed SOC) is diagnostic only; "
-                "coefficients are dual and overlap_k=None."
+                "from independent x/y/z references. Native explicit magnetic "
+                "source tangents and NC1.2 source frames are retained; only "
+                "legacy NC1.0 uses scalar-relativistic commutator tangents. "
+                "Native total deeq_nc (including fixed SOC) is diagnostic only. "
+                "Direct coefficients, overlap_k=None.\nQE source provenance: "
+                + json.dumps(provenance, sort_keys=True)
             ),
         )
 
@@ -4490,6 +4713,7 @@ def gen_exchange_qe(
             legacy_no_u=legacy_no_u,
             overlap_mode=overlap_mode,
             overlap_rcond=overlap_rcond,
+            operator_component=operator_component,
         )
     elif magic.rstrip(b" ") in _MAGIC_VERSIONS:
         if overlap_mode is not None or overlap_rcond is not None:
@@ -4501,7 +4725,9 @@ def gen_exchange_qe(
                 "coefficients are already dual, so there is no inverse to "
                 "control"
             )
-        data = read_qe_dump(filename, legacy_no_u=legacy_no_u)
+        data = read_qe_dump(
+            filename, legacy_no_u=legacy_no_u, operator_component=operator_component
+        )
     else:
         raise ValueError(f"QE dump {filename}: unknown magic/version {magic!r}")
 
@@ -4513,17 +4739,31 @@ def gen_exchange_qe(
     if Rpts is None:
         Rpts = _R_grid_for_cutoff(data, sites, Rcut)
     local_operators = component_local_operators(
-        data, "delta_total", sites, "QE becp_dump"
+        data, operator_component or "delta_total", sites, "QE becp_dump"
     )
-    if data.overlap_k is None:
+    if data.original_overlap_k is not None:
+        description = (
+            "QE collinear atomic-wavefunction XC frame filtered once at each k, "
+            "with unchanged native Hubbard contractions appended. Direct "
+            "separable XC+U coefficients; overlap_k=None and original_overlap_k "
+            "is provenance only, never a joint metric. "
+            f"Selected source: {data.metadata['operator_component']}. "
+            "Atomic-wavefunction exchange accuracy is not certified by this "
+            "source/normalization contract."
+        )
+    elif data.overlap_k is None:
         description = (
             "Projector Green workflow using QE KB beta projections "
-            f"({data.coefficient_source}; coefficients already dual, "
+            f"({data.coefficient_source}; original coefficients already dual, "
             "overlap_k=None) and the projected smooth-XC plus separable "
-            "deeq spin vertex in basis "
-            f"{data.operator_basis}. QE dump {data.metadata.get('qe_magic', 'unknown')}; "
-            "collinear only; npool=1. "
-            f"{data.population_metric}."
+            "deeq source"
+            + (
+                " with unchanged native Hubbard contractions in one joint frame"
+                if data.metadata["hubbard_state"] == "active"
+                else ""
+            )
+            + f". Selected source: {data.metadata['operator_component']}; "
+            f"operator basis {data.operator_basis}; collinear only; npool=1."
         )
     else:
         # Mirror the ProjectorGreen fallback chain so the description states
@@ -4554,6 +4794,9 @@ def gen_exchange_qe(
             "collinear only; npool=1. Atomic basis unvalidated quantitatively "
             "on bccFe (matched NC/US/PAW UPFs disagree with KB)."
         )
+    description += "\nQE source provenance: " + json.dumps(
+        _qe_exchange_provenance(data), sort_keys=True
+    )
     return write_projector_exchange_out(
         data,
         path=output_path,
