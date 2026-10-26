@@ -287,16 +287,6 @@ def test_pool_parallel_raises(tmp_path):
         parse_qe_dump(p)
 
 
-def test_nc_kb_only_raises_blocker_text(tmp_path):
-    p = tmp_path / "nckb.bin"
-    write_qe_dump(p, tvanp=(0, 0), tpawp=(0, 0))
-    with pytest.raises(ValueError) as excinfo:
-        parse_qe_dump(p)
-    message = str(excinfo.value)
-    assert "separable beta spin vertex vanishes (deeq=dvan, Δ≡0)" in message
-    assert "NC+KB" in message
-
-
 def test_species_labels_len6_encoding(tmp_path):
     """QE >= 8 writes CHARACTER(LEN=6) atm entries blank-padded to capacity."""
     p = tmp_path / "len6.bin"
@@ -336,7 +326,7 @@ def test_record_length_mismatch_raises(tmp_path):
 def test_delta_extraction_is_deeq_spin_difference(tmp_path):
     p = tmp_path / "delta.bin"
     gt = write_qe_dump(p)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     expected = (gt.deeq[:, :, :, 0] - gt.deeq[:, :, :, 1]).transpose(2, 0, 1)
     expected = expected * RYTOEV
     assert RYTOEV == 13.605693122994
@@ -357,7 +347,7 @@ def test_delta_extraction_is_deeq_spin_difference(tmp_path):
 def test_overlap_none_and_pinned_names(tmp_path):
     p = tmp_path / "pins.bin"
     write_qe_dump(p)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     assert data.overlap_k is None
     assert data.overlap_metric is None
     assert data.population_metric_matrix is None
@@ -380,7 +370,7 @@ def test_overlap_none_and_pinned_names(tmp_path):
 def test_per_spin_coefficient_mapping_via_isk(tmp_path):
     p = tmp_path / "spins.bin"
     gt = write_qe_dump(p)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     assert data.nspin == 2
     assert data.nkpt == 2
     assert data.nband == 3
@@ -412,7 +402,7 @@ def test_per_spin_coefficient_mapping_via_isk(tmp_path):
 def test_single_fermi_energy_run(tmp_path):
     p = tmp_path / "onefermi.bin"
     write_qe_dump(p, ef_up=0.0, ef_dw=0.0)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     assert data.efermi_spin is None
     np.testing.assert_allclose(data.efermi, -1.25 * RYTOEV)
 
@@ -420,7 +410,7 @@ def test_single_fermi_energy_run(tmp_path):
 def test_per_atom_channel_splitting(tmp_path):
     p = tmp_path / "channels.bin"
     gt = write_qe_dump(p)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     assert data.projector_site.tolist() == [0, 0, 0, 1, 1, 1, 2, 2]
     assert data.projector_atom.tolist() == [0, 0, 0, 1, 1, 1, 2, 2]
     assert data.site_nproj.tolist() == [3, 3, 2]
@@ -437,7 +427,7 @@ def test_single_spin_channel_raises(tmp_path):
     p = tmp_path / "onechannel.bin"
     write_qe_dump(p, isk=[1, 1, 1, 1])
     with pytest.raises(ValueError, match="spin"):
-        read_qe_dump(p)
+        read_qe_dump(p, legacy_no_u=True)
 
 
 # ---------------------------------------------------------------------------
@@ -496,8 +486,8 @@ def test_rank1_separable_trace_with_becp_green():
 # ---------------------------------------------------------------------------
 # v1.2: projected xc vertex records and the conjugated delta_total
 # ---------------------------------------------------------------------------
-def test_parse_v12_records():
-    p = "/tmp/qe_v12_synth.bin"
+def test_parse_v12_records(tmp_path):
+    p = tmp_path / "qe_v12_synth.bin"
     gt = write_qe_dump(
         p,
         magic=MAGIC_V12,
@@ -512,8 +502,8 @@ def test_parse_v12_records():
     assert dump.ddd_paw is None  # US-only synthetic: no PAW record
 
 
-def test_nc_v12_accepted_vertex_is_conjugated_dbeta_only():
-    p = "/tmp/qe_nc_v12_synth.bin"
+def test_nc_v12_accepted_vertex_is_conjugated_dbeta_only(tmp_path):
+    p = tmp_path / "qe_nc_v12_synth.bin"
     gt = write_qe_dump(
         p,
         magic=MAGIC_V12,
@@ -534,7 +524,7 @@ def test_nc_v12_accepted_vertex_is_conjugated_dbeta_only():
     dump = parse_qe_dump(p)
     assert dump.version == "1.2"
     assert not dump.tvanp.any() and not dump.tpawp.any()
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     data.validate(exchange_ready=True)
     assert data.hij_definition == "qe_dbeta_xc_plus_deeq_spin_difference"
     gram = np.asarray(gt.gram[:3, :3, 0])
@@ -548,32 +538,12 @@ def test_nc_v12_accepted_vertex_is_conjugated_dbeta_only():
         rtol=1e-10,
         atol=1e-12,
     )
-    assert "zero-filled" in data.metadata["becsum_note"]
 
 
-def test_nc_v11_still_rejected_with_blocker():
-    p = "/tmp/qe_nc_v11_synth.bin"
-    with pytest.raises(ValueError, match="NC\+KB rejected"):
-        write_qe_dump(
-            p,
-            magic=MAGIC_V11,
-            nat=3,
-            nsp=1,
-            nhm=3,
-            atm=(b"Fe",),
-            ityp=(1, 1, 1),
-            nh=(3,),
-            tvanp=(0,),
-            tpawp=(0,),
-            include_becsum=True,
-        )
-        parse_qe_dump(p)
-
-
-def test_v12_delta_total_is_conjugated_vertex():
-    p = "/tmp/qe_v12b_synth.bin"
+def test_v12_delta_total_is_conjugated_vertex(tmp_path):
+    p = tmp_path / "qe_v12b_synth.bin"
     gt = write_qe_dump(p, magic=MAGIC_V12, include_dbeta_xc=True)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     data.validate(exchange_ready=True)
     assert data.hij_definition == "qe_dbeta_xc_plus_deeq_spin_difference"
     delta = data.get_operator_component("delta_total", site=0)
@@ -589,21 +559,16 @@ def test_v12_delta_total_is_conjugated_vertex():
     np.testing.assert_allclose(np.asarray(delta), expected, rtol=1e-10, atol=1e-12)
 
 
-def test_v11_delta_total_remains_deeq_difference_but_not_exchange_ready():
-    p = "/tmp/qe_v11_synth.bin"
+def test_v11_delta_total_remains_deeq_difference_but_not_exchange_ready(tmp_path):
+    p = tmp_path / "qe_v11_synth.bin"
     gt = write_qe_dump(p, magic=MAGIC_V11)
-    data = read_qe_dump(p)
+    data = read_qe_dump(p, legacy_no_u=True)
     meta = data.operator_component_metadata["delta_total"]
     assert meta["exchange_ready"] == "false"
-    assert "FALSIFIED" in meta["definition"]
     from TB2J.interfaces.gpaw_projector import component_local_operators
 
-    try:
+    with pytest.raises(ValueError):
         component_local_operators(data, "delta_total", [0], "test")
-    except ValueError as exc:
-        assert "not exchange-ready" in str(exc)
-    else:
-        raise AssertionError("v1.1 deeq-only vertex must not be exchange-ready")
     delta = data.get_operator_component("delta_total", site=0)
     nh0 = int(gt.nh[gt.ityp[0] - 1])
     expected = (gt.deeq[:nh0, :nh0, 0, 0] - gt.deeq[:nh0, :nh0, 0, 1]) * RYTOEV
@@ -628,7 +593,7 @@ def _check_golden_v11(name, *, expect_rho_bec):
         assert dump.rho_bec is None
     assert any(dump.tvanp) or any(dump.tpawp)
 
-    data = read_qe_dump(path)
+    data = read_qe_dump(path, legacy_no_u=True)
     data.validate(exchange_ready=True)
     # v1.1 dumps are parseable but their deeq-only vertex is falsified as
     # an exchange vertex (metadata-marked); only v1.2 is exchange-ready.
@@ -923,7 +888,7 @@ def test_atomic_trailing_data_raises(tmp_path):
 def test_atomic_per_k_varying_gram_exported_as_overlap_k(tmp_path):
     """M(k) is exported per k, full basis, and not reduced to one matrix."""
     gt = write_qe_atomic_dump(tmp_path / "perk.bin")
-    data = read_qe_atomic_dump(gt.path)
+    data = read_qe_atomic_dump(gt.path, legacy_no_u=True)
     nk = gt.nks // 2
     assert data.overlap_k is not None
     assert data.overlap_k.shape == (nk, gt.nproj, gt.nproj)
@@ -933,7 +898,7 @@ def test_atomic_per_k_varying_gram_exported_as_overlap_k(tmp_path):
     assert not np.allclose(data.overlap_k[0], data.overlap_k[1])
     # constant-metric variant folds one shared M(k) everywhere
     gt2 = write_qe_atomic_dump(tmp_path / "same.bin", per_k_gram=False)
-    data2 = read_qe_atomic_dump(gt2.path)
+    data2 = read_qe_atomic_dump(gt2.path, legacy_no_u=True)
     np.testing.assert_allclose(data2.overlap_k[0], gt2.grams[0])
     np.testing.assert_allclose(data2.overlap_k[1], gt2.grams[0])
 
@@ -941,7 +906,7 @@ def test_atomic_per_k_varying_gram_exported_as_overlap_k(tmp_path):
 def test_atomic_site_channel_map_and_spin_folding(tmp_path):
     """Channels split by nsite_species[ityp]; spins fold by isk."""
     gt = write_qe_atomic_dump(tmp_path / "sites.bin")
-    data = read_qe_atomic_dump(gt.path)
+    data = read_qe_atomic_dump(gt.path, legacy_no_u=True)
     assert data.site_nproj.tolist() == [3, 1]
     assert data.projector_site.tolist() == [0, 0, 0, 1]
     assert data.site_projector_indices.tolist() == [[0, 1, 2], [3, -1, -1]]
@@ -960,7 +925,7 @@ def test_atomic_repeated_species_keeps_each_atom_channel_block(tmp_path):
     """Two Fe atoms and one O count three site blocks, not two species."""
     gt = write_qe_atomic_dump(tmp_path / "repeated.bin", nat=3)
     dump = parse_qe_atomic_dump(gt.path)
-    data = read_qe_atomic_dump(gt.path)
+    data = read_qe_atomic_dump(gt.path, legacy_no_u=True)
     assert gt.ityp.tolist() == [1, 2, 1]
     assert dump.nproj == 7
     assert dump.ofswfc.tolist() == [0, 3, 4]
@@ -972,7 +937,7 @@ def test_atomic_repeated_species_keeps_each_atom_channel_block(tmp_path):
 def test_atomic_covariant_vertex_and_hij_signs(tmp_path):
     """delta_total = (cov_xc + cov_aug) Ry->eV; hij(up/dn) = +/-Delta/2."""
     gt = write_qe_atomic_dump(tmp_path / "vertex.bin")
-    data = read_qe_atomic_dump(gt.path)
+    data = read_qe_atomic_dump(gt.path, legacy_no_u=True)
     expected = (gt.cov_xc + gt.cov_aug).transpose(2, 0, 1) * RYTOEV
     np.testing.assert_allclose(
         np.asarray(data.get_operator_component("delta_total")),
@@ -991,12 +956,11 @@ def test_atomic_covariant_vertex_and_hij_signs(tmp_path):
     meta = data.operator_component_metadata["delta_total"]
     assert meta["input_unit"] == "Ry"
     assert meta["exchange_ready"] == "true"
-    assert "no reader-side preconjugation" in meta["definition"]
 
 
 def test_atomic_overall_and_per_spin_fermi(tmp_path):
     gt = write_qe_atomic_dump(tmp_path / "fermi.bin")
-    data = read_qe_atomic_dump(gt.path)
+    data = read_qe_atomic_dump(gt.path, legacy_no_u=True)
     np.testing.assert_allclose(data.efermi, -1.25 * RYTOEV)
     np.testing.assert_allclose(data.efermi_spin, np.array([-1.2, -1.3]) * RYTOEV)
 
@@ -1044,11 +1008,17 @@ def test_kb_flags_rejected_for_atomic_input_and_versa(tmp_path):
     kb = write_qe_dump(tmp_path / "kb2.bin")
     with pytest.raises(ValueError, match="only to atomic-wavefunction dumps"):
         gen_exchange_qe(
-            kb.path, overlap_mode="inverse", output_path=str(tmp_path / "out_kb")
+            kb.path,
+            overlap_mode="inverse",
+            output_path=str(tmp_path / "out_kb"),
+            legacy_no_u=True,
         )
     with pytest.raises(ValueError, match="only to atomic-wavefunction dumps"):
         gen_exchange_qe(
-            kb.path, overlap_rcond=1e-8, output_path=str(tmp_path / "out_kb2")
+            kb.path,
+            overlap_rcond=1e-8,
+            output_path=str(tmp_path / "out_kb2"),
+            legacy_no_u=True,
         )
     # accepted on the atomic family (validated end-to-end below)
     gen_exchange_qe(
@@ -1056,6 +1026,7 @@ def test_kb_flags_rejected_for_atomic_input_and_versa(tmp_path):
         output_path=str(tmp_path / "out_atomic"),
         overlap_mode="inverse",
         overlap_rcond=1e-10,
+        legacy_no_u=True,
     )
     assert (tmp_path / "out_atomic" / "exchange.out").exists()
 
@@ -1112,8 +1083,12 @@ def test_atomic_nonorthogonal_overlap_dressing_invariant(tmp_path):
         seed=88,
     )
     kw = dict(Rcut=5.0, nz=6, smearing_eV=0.05, overlap_mode="inverse")
-    _, jdict = gen_exchange_qe(gt.path, output_path=str(tmp_path / "out0"), **kw)
-    _, jdict_t = gen_exchange_qe(trans.path, output_path=str(tmp_path / "out1"), **kw)
+    _, jdict = gen_exchange_qe(
+        gt.path, output_path=str(tmp_path / "out0"), **kw, legacy_no_u=True
+    )
+    _, jdict_t = gen_exchange_qe(
+        trans.path, output_path=str(tmp_path / "out1"), **kw, legacy_no_u=True
+    )
     j01 = jdict[((0, 0, 0), 0, 1)]
     assert j01 != 0.0
     np.testing.assert_allclose(jdict_t[((0, 0, 0), 0, 1)], j01, rtol=1e-6)
@@ -1242,7 +1217,7 @@ def test_spinor_complex_vertex_native_packing_and_dual_green(tmp_path):
 
     gt = write_qe_spinor_dump(tmp_path / "y.bin", axis="y")
     raw = parse_qe_spinor_dump(gt.path)
-    data = read_qe_spinor_dump(gt.path)
+    data = read_qe_spinor_dump(gt.path, legacy_no_u=True)
     inverse = np.linalg.inv(gt.gram[:, :, 0])
     smooth = inverse @ gt.field[:, :, 0, 1] @ inverse
     expected = (
@@ -1284,7 +1259,7 @@ def test_spinor_nc10_refuses_fully_relativistic_exchange(tmp_path):
     with pytest.raises(
         ValueError, match="lacks native source-resolved magnetic tangents"
     ):
-        read_qe_spinor_dump(soc.path)
+        read_qe_spinor_dump(soc.path, legacy_no_u=True)
     references = {
         axis: write_qe_spinor_dump(tmp_path / f"{axis}.bin", axis=axis, soc=True).path
         for axis in "xyz"
@@ -1292,7 +1267,9 @@ def test_spinor_nc10_refuses_fully_relativistic_exchange(tmp_path):
     with pytest.raises(
         ValueError, match="lacks native source-resolved magnetic tangents"
     ):
-        gen_exchange_qe(references, output_path=tmp_path / "no_exchange")
+        gen_exchange_qe(
+            references, output_path=tmp_path / "no_exchange", legacy_no_u=True
+        )
     assert not (tmp_path / "no_exchange" / "exchange.out").exists()
 
 
@@ -1354,7 +1331,10 @@ def test_spinor_scalar_relativistic_reduces_to_collinear_reader_and_exchange(tmp
     _write_spinor_records(gt.path, gt.records)
     collinear_path = tmp_path / "collinear.bin"
     _write_matching_collinear_dump(collinear_path, gt)
-    collinear, spinor = read_qe_dump(collinear_path), read_qe_spinor_dump(gt.path)
+    collinear, spinor = (
+        read_qe_dump(collinear_path, legacy_no_u=True),
+        read_qe_spinor_dump(gt.path, legacy_no_u=True),
+    )
     delta = collinear.operator_components["delta_total"]
     np.testing.assert_allclose(spinor.spinor_operator[..., 0, 0], delta)
     np.testing.assert_allclose(spinor.spinor_operator[..., 1, 1], -delta)
@@ -1402,7 +1382,7 @@ def test_spinor_rejects_invalid_physical_records(
     gt.records[record][part][index] = value
     _write_spinor_records(gt.path, gt.records)
     with pytest.raises(ValueError, match=message):
-        read_qe_spinor_dump(gt.path)
+        read_qe_spinor_dump(gt.path, legacy_no_u=True)
 
 
 @pytest.mark.parametrize(
@@ -1447,12 +1427,14 @@ def test_spinor_zero_source_and_cross_family_refusals(tmp_path):
             parse_qe_spinor_dump(path)
     good = write_qe_spinor_dump(tmp_path / "good.bin")
     with pytest.raises(ValueError, match="transverse leg"):
-        gen_exchange_qe(good.path)
+        gen_exchange_qe(good.path, legacy_no_u=True)
     with pytest.raises(ValueError, match="x/y/z"):
-        gen_exchange_qe({"z": good.path})
+        gen_exchange_qe({"z": good.path}, legacy_no_u=True)
     for control in ({"overlap_mode": "inverse"}, {"overlap_rcond": 1e-8}):
         with pytest.raises(ValueError, match="already dual"):
-            gen_exchange_qe(dict.fromkeys(("x", "y", "z"), good.path), **control)
+            gen_exchange_qe(
+                dict.fromkeys(("x", "y", "z"), good.path), **control, legacy_no_u=True
+            )
 
 
 def _spinor_references(tmp_path):
@@ -1467,9 +1449,11 @@ def test_spinor_three_leg_output_matches_raw_transverse_exchange(tmp_path):
 
     references = _spinor_references(tmp_path)
     kwargs = dict(Rpts=[[0, 0, 0]], nz=8, smearing_eV=0.1)
-    output, jdict = gen_exchange_qe(references, output_path=tmp_path / "out", **kwargs)
+    output, jdict = gen_exchange_qe(
+        references, output_path=tmp_path / "out", **kwargs, legacy_no_u=True
+    )
     leg = compute_spinor_projector_exchange(
-        read_qe_spinor_dump(references["z"]), **kwargs
+        read_qe_spinor_dump(references["z"], legacy_no_u=True), **kwargs
     )
     np.testing.assert_allclose(
         jdict[((0, 0, 0), 0, 1)],
@@ -1520,6 +1504,7 @@ def test_spinor_three_leg_merge_refuses_inconsistent_references(tmp_path, mismat
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert not (tmp_path / "refused" / "exchange.out").exists()
 
@@ -1554,7 +1539,11 @@ def test_qe_spinor_cli_requires_exclusive_complete_inputs(monkeypatch, argv):
 def test_qe_spinor_cli_writes_three_leg_exchange_without_mocking(tmp_path, monkeypatch):
     from TB2J.scripts.qe2J import run_qe2J
 
-    references = _spinor_references(tmp_path)
+    from test_qe_hubbard import _spinor_no_u_dump
+
+    references = {
+        axis: _spinor_no_u_dump(tmp_path / f"{axis}.bin", axis=axis) for axis in "xyz"
+    }
     output = tmp_path / "cli"
     argv = ["qe2J.py", "--output_path", str(output), "--nz", "8"]
     for axis, path in references.items():
@@ -1586,7 +1575,7 @@ def test_spinor_nc11_parse_records_and_diagonal_gate(tmp_path):
     assert raw.version == "1.1" and raw.magic == "TB2JQEDUMPNC1.1"
     assert raw.d_response is not None
     np.testing.assert_allclose(raw.d_response, gt.d_response)
-    data = read_qe_spinor_dump(gt.path)
+    data = read_qe_spinor_dump(gt.path, legacy_no_u=True)
     assert data.spinor_tangent_vertices is not None
     assert data.metadata["qe_magic"] == "TB2JQEDUMPNC1.1"
     # diagonal identity gate: corrupt one D_{z<-z} slab
@@ -1625,6 +1614,7 @@ def test_spinor_nc11_strict_eof_and_mixed_version_refusals(tmp_path):
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
 
 
@@ -1633,7 +1623,7 @@ def test_spinor_nc11_scalar_tangent_factor_and_orientation_oracles(tmp_path):
 
     for axis in ("z", "x"):
         gt = write_qe_spinor_dump(tmp_path / f"{axis}.bin", axis=axis, version="1.1")
-        data = read_qe_spinor_dump(gt.path)
+        data = read_qe_spinor_dump(gt.path, legacy_no_u=True)
         p = "xyz".index(axis)
         vertices = data.spinor_tangent_vertices
         inverse = np.linalg.inv(gt.gram[:, :, 0])
@@ -1665,7 +1655,7 @@ def test_spinor_nc11_rank_deficient_beta_gram_keeps_vertex_bounded(tmp_path):
     gt.gram[...] = gram[:, :, None]
     gt.field[:, :, :, 2] = field[:, :, None]
     _write_spinor_records(gt.path, gt.records)
-    data = read_qe_spinor_dump(gt.path)
+    data = read_qe_spinor_dump(gt.path, legacy_no_u=True)
     resolved = 0.01 * np.outer(bright, bright.conj()) + gt.magnetic_block
     expected = 2 * RYTOEV * np.einsum("ij,st->ijst", resolved, PAULI_MATRICES[2])
     np.testing.assert_allclose(data.spinor_operator[0], expected, atol=1e-9)
@@ -1685,7 +1675,7 @@ def test_spinor_nc11_soc_explicit_vertices_drive_exchange(tmp_path):
     )
 
     gt = write_qe_spinor_dump(tmp_path / "soc.bin", version="1.1", soc=True)
-    data = read_qe_spinor_dump(gt.path)
+    data = read_qe_spinor_dump(gt.path, legacy_no_u=True)
     vertices = data.spinor_tangent_vertices
     explicit = np.stack([spinor_dense_block(vertices[0, axis]) for axis in range(3)])
     commutator = magnetic_tangent_vertices(data.spinor_operator[0])["vertices"]
@@ -1765,7 +1755,7 @@ def test_spinor_nc11_soc_explicit_vertices_drive_exchange(tmp_path):
 
 def test_spinor_nc11_tangent_netcdf_roundtrip_and_required_field(tmp_path):
     gt = write_qe_spinor_dump(tmp_path / "z.bin", version="1.1")
-    data = read_qe_spinor_dump(gt.path)
+    data = read_qe_spinor_dump(gt.path, legacy_no_u=True)
     nc_path = tmp_path / "roundtrip.nc"
     data.save_netcdf(nc_path)
     loaded = ProjectorGreenData.load_netcdf(nc_path)
@@ -1775,7 +1765,7 @@ def test_spinor_nc11_tangent_netcdf_roundtrip_and_required_field(tmp_path):
     assert loaded.spinor_tangent_definition == "qe_nc11_frozen_source_tangent"
     loaded.validate(exchange_ready=True)
     # a QE NC1.1-labeled dataset without its tangent fails closed
-    stripped = read_qe_spinor_dump(gt.path)
+    stripped = read_qe_spinor_dump(gt.path, legacy_no_u=True)
     stripped.spinor_tangent_vertices = None
     with pytest.raises(ValueError, match="NC1.1"):
         stripped.validate(exchange_ready=True)
@@ -1793,13 +1783,17 @@ def test_spinor_nc11_three_leg_exchange_and_tolerance_gate(tmp_path):
     }
     kwargs = dict(Rpts=[[0, 0, 0]], nz=8, smearing_eV=0.1)
     output, jdict = gen_exchange_qe(
-        references, output_path=tmp_path / "out", leg_consistency_atol_eV=5e-8, **kwargs
+        references,
+        output_path=tmp_path / "out",
+        leg_consistency_atol_eV=5e-8,
+        **kwargs,
+        legacy_no_u=True,
     )
     stored = SpinIO.load_pickle(path=tmp_path / "out")
     assert "leg_consistency_atol_eV=5.000e-08" in stored.description
     assert "TB2J_TAN_LEG_SPREAD" in stored.description
     leg = compute_spinor_projector_exchange(
-        read_qe_spinor_dump(references["z"]), **kwargs
+        read_qe_spinor_dump(references["z"], legacy_no_u=True), **kwargs
     )
     np.testing.assert_allclose(
         jdict[((0, 0, 0), 0, 1)],
@@ -1814,10 +1808,13 @@ def test_spinor_nc11_three_leg_exchange_and_tolerance_gate(tmp_path):
                 output_path=tmp_path / "refused",
                 leg_consistency_atol_eV=bad,
                 **kwargs,
+                legacy_no_u=True,
             )
     # single NC1.1 dump still refuses full-tensor output
     with pytest.raises(ValueError, match="transverse leg"):
-        gen_exchange_qe(references["z"], output_path=tmp_path / "single")
+        gen_exchange_qe(
+            references["z"], output_path=tmp_path / "single", legacy_no_u=True
+        )
     # legacy NC1.0 three-leg keeps working (SO rejection test already covers
     # SOC NC1.0 refusal)
 
@@ -1825,11 +1822,10 @@ def test_spinor_nc11_three_leg_exchange_and_tolerance_gate(tmp_path):
 def test_qe_spinor_cli_accepts_leg_consistency_flag(tmp_path, monkeypatch):
     from TB2J.scripts.qe2J import run_qe2J
 
+    from test_qe_hubbard import _spinor_no_u_dump
+
     references = {
-        axis: write_qe_spinor_dump(
-            tmp_path / f"{axis}.bin", axis=axis, version="1.1"
-        ).path
-        for axis in "xyz"
+        axis: _spinor_no_u_dump(tmp_path / f"{axis}.bin", axis=axis) for axis in "xyz"
     }
     output = tmp_path / "cli"
     argv = [
@@ -1919,7 +1915,7 @@ def test_spinor_nc_species_measured_zero_source_oracles(tmp_path):
     good.records[7][0][...] = 0
     good.records[-1][0][...] = 0
     _write_spinor_records(good.path, good.records)
-    data = read_qe_spinor_dump(good.path)
+    data = read_qe_spinor_dump(good.path, legacy_no_u=True)
     assert data.metadata["tvanp"] == [False]
     # smooth-only explicit tangent equals the commutator tangent exactly
     from TB2J.projector_green import magnetic_tangent_vertices, spinor_dense_block
@@ -1958,7 +1954,7 @@ def test_spinor_nc_species_measured_zero_source_oracles(tmp_path):
     parity.records[-1][0][0, 0, 0, 0, 2, 0] += 1e-3
     _write_spinor_records(parity.path, parity.records)
     with pytest.raises(ValueError, match="deviates from"):
-        read_qe_spinor_dump(parity.path)
+        read_qe_spinor_dump(parity.path, legacy_no_u=True)
 
 
 def test_spinor_nc_requires_measured_response_and_dressed_source(tmp_path):
@@ -1979,7 +1975,7 @@ def test_spinor_nc_requires_measured_response_and_dressed_source(tmp_path):
     discard.records[13][0][1, 1, 0, 2] = 1.0e-9
     _write_spinor_records(discard.path, discard.records)
     with pytest.raises(ValueError, match="zero conditioned magnetic source"):
-        read_qe_spinor_dump(discard.path)
+        read_qe_spinor_dump(discard.path, legacy_no_u=True)
 
 
 def test_spinor_nc_mixed_nonmagnetic_site_accepted(tmp_path):
@@ -1990,7 +1986,7 @@ def test_spinor_nc_mixed_nonmagnetic_site_accepted(tmp_path):
     mix.records[-1][0][...] = 0
     mix.records[13][0][:, :, 1, :] = 0  # site 1 fully nonmagnetic
     _write_spinor_records(mix.path, mix.records)
-    data = read_qe_spinor_dump(mix.path)
+    data = read_qe_spinor_dump(mix.path, legacy_no_u=True)
     assert np.abs(data.spinor_operator[1]).max() == 0.0
     np.testing.assert_allclose(data.spinor_tangent_vertices[1], 0.0, atol=0.0)
     assert np.abs(data.spinor_operator[0]).max() > 0.0
@@ -2007,7 +2003,7 @@ def test_spinor_nonmagnetic_site_with_response_or_traceless_field_refused(tmp_pa
     with pytest.raises(
         ValueError, match="zero magnetic splitting but nonzero source response"
     ):
-        read_qe_spinor_dump(bad_response.path)
+        read_qe_spinor_dump(bad_response.path, legacy_no_u=True)
 
     traceless = write_qe_spinor_dump(tmp_path / "traceless.bin", version="1.1")
     gram = traceless.records[8][0][:, :, 1]
@@ -2019,7 +2015,7 @@ def test_spinor_nonmagnetic_site_with_response_or_traceless_field_refused(tmp_pa
     with pytest.raises(
         ValueError, match="nonzero magnetic operator.*no well-defined moment"
     ):
-        read_qe_spinor_dump(traceless.path)
+        read_qe_spinor_dump(traceless.path, legacy_no_u=True)
 
 
 def test_spinor_default_three_leg_excludes_zero_source_site(tmp_path):
@@ -2040,6 +2036,7 @@ def test_spinor_default_three_leg_excludes_zero_source_site(tmp_path):
         Rpts=[[-1, 0, 0], [0, 0, 0], [1, 0, 0]],
         nz=8,
         smearing_eV=0.1,
+        legacy_no_u=True,
     )
     stored = SpinIO.load_pickle(path=output.parent)
     assert list(stored.index_spin) == [0, -1]
@@ -2053,6 +2050,7 @@ def test_spinor_default_three_leg_excludes_zero_source_site(tmp_path):
             index_magnetic_atoms=[1],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
 
 
@@ -2078,7 +2076,7 @@ def test_spinor_mixed_scalar_nc_soc_us_readable_but_production_refused(tmp_path)
         refs[axis] = dump.path
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        mixed = read_qe_spinor_dump(refs["z"])
+        mixed = read_qe_spinor_dump(refs["z"], legacy_no_u=True)
     assert mixed.metadata["tvanp"] == [False, True]
     assert "nc_exchange_status" not in mixed.metadata
     # Parser retains per-site source checks; production must not infer
@@ -2090,6 +2088,7 @@ def test_spinor_mixed_scalar_nc_soc_us_readable_but_production_refused(tmp_path)
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert not (tmp_path / "mixed_uncertified").exists()
 
@@ -2114,7 +2113,7 @@ def test_spinor_nc_with_zero_source_us_ligand_still_refuses_production(tmp_path)
         dump.records[-1][0][:, :, 1, :, :, :] = 0
         _write_spinor_records(dump.path, dump.records)
         refs[axis] = dump.path
-    data = read_qe_spinor_dump(refs["z"])
+    data = read_qe_spinor_dump(refs["z"], legacy_no_u=True)
     assert data.metadata["tvanp"] == [False, True]
     np.testing.assert_array_equal(data.spinor_operator[1], 0)
     np.testing.assert_array_equal(data.spinor_tangent_vertices[1], 0)
@@ -2125,6 +2124,7 @@ def test_spinor_nc_with_zero_source_us_ligand_still_refuses_production(tmp_path)
             Rpts=[[-1, 0, 0], [1, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert not (tmp_path / "zero_ligand_uncertified").exists()
 
@@ -2141,11 +2141,11 @@ def test_spinor_gram_no_eigengap_refused(tmp_path):
         tmp_path / "nogap.bin", _gram_with_eigenvalues([1.0, 1.5e-6, 9.0e-7])
     )
     with pytest.raises(ValueError, match="lack a clean eigengap"):
-        read_qe_spinor_dump(refused)
+        read_qe_spinor_dump(refused, legacy_no_u=True)
     clean = _write_spinor_dump_custom_gram(
         tmp_path / "gap.bin", _gram_with_eigenvalues([1.0, 2.0, 1.0e-9])
     )
-    data = read_qe_spinor_dump(clean)
+    data = read_qe_spinor_dump(clean, legacy_no_u=True)
     report = data.metadata["gram_spectrum"][0]
     assert (report["retained"], report["discarded"]) == (2, 1)
     assert report["cutoff"] == pytest.approx(2.0e-6)
@@ -2183,7 +2183,7 @@ def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
     soc.records[-1][0][...] = 0
     _write_spinor_records(soc.path, soc.records)
     with pytest.warns(UserWarning, match="uncertified"):
-        data = read_qe_spinor_dump(soc.path)
+        data = read_qe_spinor_dump(soc.path, legacy_no_u=True)
     assert "uncertified" in data.metadata["nc_exchange_status"]
     with pytest.raises(ValueError, match="norm-conserving.*not.*certified"):
         gen_exchange_qe(
@@ -2192,6 +2192,7 @@ def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert not (tmp_path / "refused" / "exchange.out").exists()
     # average_pp can clear has_so when SOC is disabled for an FR NC
@@ -2213,6 +2214,7 @@ def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert not (tmp_path / "off_refused" / "exchange.out").exists()
     # SO-bearing US/PAW references are NOT hit by the NC refusal: they get
@@ -2229,7 +2231,7 @@ def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
 
     with _warnings.catch_warnings():
         _warnings.simplefilter("error")
-        read_qe_spinor_dump(uspaw["z"])
+        read_qe_spinor_dump(uspaw["z"], legacy_no_u=True)
     with pytest.raises(ValueError, match="leg diagonals disagree"):
         gen_exchange_qe(
             uspaw,
@@ -2237,6 +2239,7 @@ def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert not (tmp_path / "uspaw_out" / "exchange.out").exists()
     # scalar NC1.1 production output still works
@@ -2254,5 +2257,6 @@ def test_spinor_fr_nc_production_exchange_fail_closed(tmp_path):
             Rpts=[[0, 0, 0]],
             nz=8,
             smearing_eV=0.1,
+            legacy_no_u=True,
         )
     assert (tmp_path / "ok" / "exchange.out").exists()

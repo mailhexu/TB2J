@@ -70,13 +70,17 @@ API; a single reference cannot create a rank-nine tensor:
 from TB2J.interfaces.qe_projector import read_qe_spinor_dump
 from TB2J.interfaces.gpaw_spinor_projector import compute_spinor_projector_exchange
 
-data = read_qe_spinor_dump("nc_fe_z.bin")
+data = read_qe_spinor_dump("nc_fe_z.bin", legacy_no_u=True)
 leg = compute_spinor_projector_exchange(
     data, Rpts=[[1, 0, 0], [-1, 0, 0]], nz=30, smearing_eV=0.05,
 )
 print("R=(1,0,0) transverse Jxx (meV):",
       1000 * leg[((1, 0, 0), 0, 0)]["J_leg"][0, 0])
 ```
+
+For a legacy NC1.1 file, `legacy_no_u=True` is an explicit user attestation
+that the QE calculation did not use +U; the file cannot prove that absence.
+New NC1.2 files with a validated absent-U extension need no assertion.
 
 With the pinned UPF, 12³ mesh, 30 poles and 0.05 eV contour,
 the matched collinear first-neighbor coupling is 14.7932825 meV;
