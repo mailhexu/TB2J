@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added paired executable QE Hubbard convention and joint-frame derivations:
+  native column/action and frozen-source rotation contracts, mixed XC-U
+  contractions without a joint Gram inverse, and one-time atomic-only
+  normalization. These algebraic contracts do not enable native DFT+U
+  export or certify complete XC+U exchange.
 - Added guarded native `write_exchange` for pickle, `exchange.out`, XML,
   and the native-only `tb2j` preset. Every preset member is preflighted
   before IO; populated unsupported fields require named loss opt-ins.

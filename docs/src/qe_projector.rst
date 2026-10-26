@@ -467,3 +467,22 @@ Limitations
   (``nosym = .true., noinv = .true.``).
 * ``becsum`` in KB nscf dumps carries scf-mesh restart occupations, not
   dense-mesh weights; occupation-based diagnostics must use scf dumps.
+
+DFT+U mathematical contracts
+---------------------------
+
+The new executable derivations ``docs/sympy/qe_hubbard_native_contract.py``
+and ``docs/sympy/qe_hubbard_joint_frame.py`` have paired reports in the same
+directory. They pin native Hubbard column/action conventions, frozen-source
+rotations, the redundant joint XC+U trace with all mixed contractions, and
+one-time filtering of the original atomic exchange frame. Run them with the
+``mydev`` environment. They are algebraic checks, not native action or
+exchange certification.
+
+These derivations do not enable DFT+U export or complete XC+U exchange.
+The current collinear formats do not record Hubbard activity and must not
+be treated as evidence that a calculation was Hubbard-free. The current
+spinor exporter rejects active DFT+U. Native independent action,
+occupation, rotation, and family-specific runtime validation are required
+before the interface can claim complete XC+U support. Existing FR-NC,
+mixed-family, and finite atomic-subspace limitations remain unchanged.
