@@ -12,17 +12,15 @@ import struct
 
 import numpy as np
 import pytest
-
 from test_qe_projector import (
-    RYTOEV,
     MAGIC_V12,
+    RYTOEV,
     _frecord,
     _write_spinor_records,
     write_qe_atomic_dump,
     write_qe_dump,
     write_qe_spinor_dump,
 )
-
 
 HUBBARD_MAGIC = b"TB2JHUBBARD1.0"
 NATIVE_REVISION = "301742e16546b927cfe35fb2fcf4d9338f3e294a"
@@ -339,18 +337,56 @@ def _deterministic_collinear_trial(ik, global_g, seed=617021):
     return trial / np.linalg.norm(trial)
 
 
-def _active_collinear_dump(path, *, family="kb"):
+def _active_collinear_dump(
+    path,
+    *,
+    family="kb",
+    state_occupation=None,
+    native_coefficients=None,
+    atomic_grams=None,
+    atomic_coefficients=None,
+):
+    """Write a strict one-orbital active fixture with coherent native C data.
+
+    ``state_occupation`` is the frozen SCF record. ``native_coefficients`` may
+    be an array or a callback on the base writer result; its weighted overlap
+    trace is written independently as the fresh occupation check. Atomic
+    Gram/coefficient overrides feed the existing strict atomic writer.
+    """
     if family == "kb":
         gt = write_qe_dump(path, magic=MAGIC_V12, include_dbeta_xc=True)
         _replace_magic(path, b"TB2JQEDUMPV1.3")
         nat, nkb, source_mode, atom, species_family = gt.nat, gt.nkb, 1, 3, 2
     else:
-        gt = write_qe_atomic_dump(path, magic=b"TB2JQEATWFC1.1")
+        gt = write_qe_atomic_dump(
+            path,
+            magic=b"TB2JQEATWFC1.1",
+            grams=atomic_grams,
+            coeffs=atomic_coefficients,
+        )
         nat, nkb, source_mode, atom, species_family = gt.nat, 0, 2, 2, 1
     ntyp, nspin, nks, nbnd = 2, 2, gt.nks, gt.nbnd
     nchannel = ncol = 1
     u_ev = 2.0
     u_ry = u_ev / RYTOEV
+    frozen_occupation = (
+        np.zeros((1, 1, nspin), dtype="<f8")
+        if state_occupation is None
+        else np.asarray(state_occupation, dtype="<f8").reshape(1, 1, nspin)
+    )
+    state_potential = u_ry * (0.5 - frozen_occupation)
+    if native_coefficients is None:
+        native_coefficients = np.zeros((nks, ncol, nbnd), dtype="<c16")
+    elif callable(native_coefficients):
+        native_coefficients = native_coefficients(gt)
+    native_coefficients = np.asarray(native_coefficients, dtype="<c16")
+    assert native_coefficients.shape == (nks, ncol, nbnd)
+    fresh_occupation = np.zeros((1, 1, nspin), dtype="<f8")
+    for ik in range(nks):
+        spin = int(gt.isk[ik]) - 1
+        fresh_occupation[0, 0, spin] += np.dot(
+            gt.wg[ik], np.abs(native_coefficients[ik, 0]) ** 2
+        )
     _append_record(
         path,
         np.asarray([1], dtype="<i4"),
@@ -445,24 +481,25 @@ def _active_collinear_dump(path, *, family="kb"):
     _append_record(
         path,
         np.asarray([8, 1, atom, 2, 1, nspin], dtype="<i4"),
-        np.zeros((1, 1, nspin), dtype="<f8"),
-        np.full((1, 1, nspin), u_ry / 2, dtype="<f8"),
-        np.asarray([[u_ry / 2]], dtype="<f8"),
-        np.zeros((1, 1), dtype="<f8"),
+        frozen_occupation,
+        state_potential,
+        np.asarray(state_potential.mean(axis=2), dtype="<f8"),
+        np.asarray((state_potential[:, :, 0] - state_potential[:, :, 1]) / 2),
     )
 
     npw = 4
     global_g = np.arange(101, 101 + npw, dtype="<i4")
     wfcu = np.zeros((npw, ncol), dtype="<c16")
     wfcu[0, 0] = 1.0
-    potential = np.asarray([[u_ry / 2]], dtype="<c16")
     for ik in range(nks):
+        spin = int(gt.isk[ik]) - 1
+        action_potential = np.asarray([[state_potential[0, 0, spin]]], dtype="<c16")
         psi = np.zeros((npw, 3), dtype="<c16")
         psi[:, 0] = _deterministic_collinear_trial(ik + 1, global_g)
         psi[0:2, 1] = 1.0 / np.sqrt(2.0)
         psi[1, 2] = 1.0
         trial_projection = wfcu.conj().T @ psi
-        actions = wfcu @ (potential @ trial_projection)
+        actions = wfcu @ (action_potential @ trial_projection)
         action_norms = np.linalg.norm(actions, axis=0)
         metrics = np.vstack(
             (
@@ -484,7 +521,7 @@ def _active_collinear_dump(path, *, family="kb"):
             np.arange(101, 101 + npw, dtype="<i4"),
             np.asarray(gt.wg[ik], dtype="<f8"),
             np.asarray(gt.et[ik], dtype="<f8"),
-            np.zeros((ncol, nbnd), dtype="<c16"),
+            native_coefficients[ik],
         )
         _append_record(
             path,
@@ -500,9 +537,10 @@ def _active_collinear_dump(path, *, family="kb"):
         path,
         np.asarray([12, 1, atom, 2, 1, 1, nspin], dtype="<i4"),
         np.asarray([0.0, 0.0], dtype="<f8"),
-        np.zeros((1, 1, nspin), dtype="<f8"),
-        np.zeros((1, 1, nspin), dtype="<f8"),
+        fresh_occupation,
+        fresh_occupation,
     )
+
     method = 1 if nkb else 2
     source_scale = (
         max(
@@ -529,14 +567,14 @@ def _assert_error_code(excinfo, code):
 
 
 @pytest.mark.parametrize(
-    "family,parser,reader",
+    "family,parser",
     [
-        ("kb", "parse_qe_dump", "read_qe_dump"),
-        ("atomic", "parse_qe_atomic_dump", "read_qe_atomic_dump"),
+        ("kb", "parse_qe_dump"),
+        ("atomic", "parse_qe_atomic_dump"),
     ],
 )
-def test_collinear_active_stream_retains_inventory_and_defers_normalization(
-    tmp_path, family, parser, reader
+def test_collinear_active_stream_retains_strict_native_inventory(
+    tmp_path, family, parser
 ):
     from TB2J.interfaces import qe_projector
 
@@ -575,13 +613,6 @@ def test_collinear_active_stream_retains_inventory_and_defers_normalization(
     assert len(hubbard.actions) == 4
     assert hubbard.validation
     assert hubbard.validation["source_method"] == (1 if family == "kb" else 2)
-
-    with pytest.raises(ValueError) as excinfo:
-        getattr(qe_projector, reader)(path)
-    _assert_error_code(excinfo, "normalization_pending")
-    with pytest.raises(ValueError) as excinfo:
-        getattr(qe_projector, reader)(path, legacy_no_u=True)
-    _assert_error_code(excinfo, "normalization_pending")
 
 
 @pytest.mark.parametrize(
@@ -973,7 +1004,7 @@ def _spinor_active_dump(path):
 
 
 def test_nc12_active_stream_retains_spinor_maps_frames_and_tangents(tmp_path):
-    from TB2J.interfaces.qe_projector import parse_qe_spinor_dump, read_qe_spinor_dump
+    from TB2J.interfaces.qe_projector import parse_qe_spinor_dump
 
     path = _spinor_active_dump(tmp_path / "nc12-active.bin")
     raw = parse_qe_spinor_dump(path)
@@ -1013,13 +1044,6 @@ def test_nc12_active_stream_retains_spinor_maps_frames_and_tangents(tmp_path):
     assert hubbard.restoration
     assert hubbard.validation
 
-    with pytest.raises(ValueError) as excinfo:
-        read_qe_spinor_dump(path)
-    _assert_error_code(excinfo, "normalization_pending")
-    with pytest.raises(ValueError) as excinfo:
-        read_qe_spinor_dump(path, legacy_no_u=True)
-    _assert_error_code(excinfo, "normalization_pending")
-
 
 def _extension_record_index(payloads, record_id, occurrence=0):
     in_extension = False
@@ -1050,6 +1074,66 @@ def _set_i4(payload, offset, value):
 def _set_f8(payload, offset, value):
     struct.pack_into("<d", payload, offset, value)
     return payload
+
+
+def _spinor_native_slot_dump(path):
+    """Active NC1.2 fixture with distinct spin-major native overlaps."""
+    from TB2J.interfaces.qe_projector import parse_qe_spinor_dump
+
+    _spinor_active_dump(path)
+    raw = parse_qe_spinor_dump(path)
+    hubbard = raw.hubbard
+    nks = len(hubbard.kpoints)
+    ncol = hubbard.envelope["ncol"]
+    nbnd = hubbard.kpoints[0].wg.size
+    coefficients = np.zeros((nks, ncol, nbnd), dtype="<c16")
+    fresh = {
+        channel.channel: np.zeros(
+            (channel.dimension, channel.dimension, 4), dtype="<c16"
+        )
+        for channel in hubbard.channels
+    }
+    for ik, kp in enumerate(hubbard.kpoints):
+        for native, channel, orbital, spin_slot in hubbard.spin_columns:
+            value = (
+                0.003 * native
+                + 0.001 * ik
+                + 1j * (0.017 * channel + 0.009 * spin_slot + 0.002 * orbital)
+            )
+            coefficients[ik, native - 1, 0] = value
+        for channel in hubbard.channels:
+            rows = np.flatnonzero(hubbard.spin_columns[:, 1] == channel.channel)
+            vector = coefficients[ik, rows, 0]
+            occupation = kp.wg[0] * np.outer(vector.conj(), vector)
+            dim = channel.dimension
+            for component, (first, second) in enumerate(
+                ((0, 0), (0, 1), (1, 0), (1, 1))
+            ):
+                fresh[channel.channel][:, :, component] += occupation[
+                    first * dim : (first + 1) * dim,
+                    second * dim : (second + 1) * dim,
+                ]
+
+    for ik, native_coefficients in enumerate(coefficients):
+        coefficient_block = native_coefficients.tobytes(order="F")
+
+        def set_coefficients(payload, block=coefficient_block):
+            payload[-len(block) :] = block
+            return payload
+
+        _mutate_record(path, 18, set_coefficients, occurrence=ik)
+    for occurrence, channel in enumerate(hubbard.channels):
+        values = fresh[channel.channel]
+        block = values.tobytes(order="F")
+        nbytes = len(block)
+
+        def set_fresh(payload, block=block, nbytes=nbytes):
+            payload[44 : 44 + nbytes] = block
+            payload[44 + nbytes : 44 + 2 * nbytes] = block
+            return payload
+
+        _mutate_record(path, 20, set_fresh, occurrence=occurrence)
+    return path
 
 
 def test_kb_source_scale_cannot_expand_carrier_tolerance(tmp_path):

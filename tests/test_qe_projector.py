@@ -1537,9 +1537,9 @@ def test_qe_spinor_cli_requires_exclusive_complete_inputs(monkeypatch, argv):
 
 
 def test_qe_spinor_cli_writes_three_leg_exchange_without_mocking(tmp_path, monkeypatch):
-    from TB2J.scripts.qe2J import run_qe2J
-
     from test_qe_hubbard import _spinor_no_u_dump
+
+    from TB2J.scripts.qe2J import run_qe2J
 
     references = {
         axis: _spinor_no_u_dump(tmp_path / f"{axis}.bin", axis=axis) for axis in "xyz"
@@ -1820,9 +1820,9 @@ def test_spinor_nc11_three_leg_exchange_and_tolerance_gate(tmp_path):
 
 
 def test_qe_spinor_cli_accepts_leg_consistency_flag(tmp_path, monkeypatch):
-    from TB2J.scripts.qe2J import run_qe2J
-
     from test_qe_hubbard import _spinor_no_u_dump
+
+    from TB2J.scripts.qe2J import run_qe2J
 
     references = {
         axis: _spinor_no_u_dump(tmp_path / f"{axis}.bin", axis=axis) for axis in "xyz"

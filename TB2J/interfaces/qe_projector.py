@@ -85,9 +85,10 @@ Public API
 ``read_qe_dump(path, *, legacy_no_u=False)``
     Normalized KB :class:`~TB2J.projector_green.ProjectorGreenData`
     (eV / Angstrom / fractional k-points, spin-degenerate dense mesh).
-``read_qe_atomic_dump(path, *, legacy_no_u=False)``
-    Normalized atomic :class:`~TB2J.projector_green.ProjectorGreenData`
-    with primal coefficients and full k-dependent ``overlap_k = M(k)``.
+``read_qe_atomic_dump(path, *, legacy_no_u=False, overlap_mode=None, overlap_rcond=None)``
+    Normalized atomic :class:`~TB2J.projector_green.ProjectorGreenData`.
+    No-U retains primal rows/``overlap_k``; active-U canonicalizes original
+    XC rows once and retains the full Gram in ``original_overlap_k``.
 ``parse_qe_spinor_dump(path)`` / ``read_qe_spinor_dump(path, *, legacy_no_u=False)``
     Strict non-collinear spinor parse (NC1.0 / NC1.1 / NC1.2) and normalized
     :class:`~TB2J.projector_green.ProjectorGreenData` with dual spinor
@@ -106,7 +107,7 @@ import re
 import struct
 import warnings
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -115,6 +116,7 @@ from TB2J.projector_green import (
     PAULI_MATRICES,
     SPINOR_OPERATOR_DEFINITION,
     SPINOR_TANGENT_DEFINITION,
+    ProjectorGreen,
     ProjectorGreenData,
     magnetic_tangent_vertices,
     spinor_dense_block,
@@ -2037,20 +2039,290 @@ def _qe_hubbard_admission(dump, legacy_no_u):
     _hub_require(
         dump.hubbard.complete, "validation", "incomplete native Hubbard source"
     )
-    _hub_require(
-        dump.hubbard.state != "active",
-        "normalization_pending",
-        "active native U requires joint XC+U source normalization",
-    )
+    state = dump.hubbard.state
     return {
-        "hubbard_state": "absent",
+        "hubbard_state": state,
         "legacy_no_u": False,
         "hubbard_provenance": {
             "origin": "native_extension",
-            "native_state": "absent",
+            "native_state": state,
             "native_revision": dump.hubbard.provenance["native_revision"],
         },
     }
+
+
+def _qe_hubbard_identity(hubbard):
+    """Retain source identity without conflating frozen/fresh state across references."""
+    return {
+        "schema": "TB2JHUBBARD1.0",
+        "native_revision": hubbard.provenance["native_revision"],
+        "functional": hubbard.envelope["functional"],
+        "double_counting": hubbard.envelope["dc"],
+        "projector": hubbard.envelope["projector"],
+        "construction": hubbard.provenance["construction"],
+        "metric": hubbard.provenance["metric"],
+        "parameters": [
+            {
+                "species": p.species,
+                "eV": p.ev.tolist(),
+                "Ry": p.ry.tolist(),
+                "quantum_flags": list(p.quantum_flags),
+            }
+            for p in hubbard.parameters
+        ],
+        "channels": [asdict(channel) for channel in hubbard.channels],
+        "columns": hubbard.columns.tolist(),
+        "spin_columns": hubbard.spin_columns.tolist(),
+        "upfs": [asdict(species) for species in hubbard.species],
+    }
+
+
+def _qe_joint_site_layout(original_counts, original_indices, original_owners, owners):
+    """Append source channels globally while preserving noncontiguous site ownership."""
+    projector_site = np.concatenate((original_owners, owners))
+    counts = original_counts + np.bincount(owners, minlength=len(original_counts))
+    indices = np.full((len(counts), int(counts.max())), -1, dtype=int)
+    for site, count in enumerate(counts):
+        indices[site, :count] = np.concatenate(
+            (
+                original_indices[site, : original_counts[site]],
+                len(original_owners) + np.flatnonzero(owners == site),
+            )
+        )
+    return counts, indices, projector_site
+
+
+# MathDoc: tb2j/qe-hubbard-joint-frame#row_filter_transpose
+# MathDoc: tb2j/qe-hubbard-native-contract
+def _qe_joint_collinear(dump, data, spin_mesh, overlap_mode=None, overlap_rcond=None):
+    """One direct separable frame; only original atomic XC rows acquire its filter."""
+    hubbard = dump.hubbard
+    original_overlap = data.overlap_k
+    metadata = dict(data.metadata)
+    original_coefficients = data.coefficients
+    if original_overlap is not None:
+        green = ProjectorGreen(
+            data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond
+        )
+        original_coefficients = np.empty_like(data.coefficients)
+        for spin in range(2):
+            for ik in range(len(data.kpoints)):
+                original_coefficients[spin, ik] = green.get_filtered_coefficients(
+                    ik, spin
+                )
+        metadata.update(
+            effective_overlap_mode=green.overlap_mode,
+            effective_overlap_rcond=green.overlap_rcond,
+            original_overlap_definition=data.overlap_metric_definition
+            or "full per-k atomic_wfc Gram before XC-only canonicalization",
+            overlap_normalization="original_atomic_xc_once_before_native_u_append",
+        )
+    owners = hubbard.columns[:, 3] - 1
+    counts, indices, projector_site = _qe_joint_site_layout(
+        data.site_nproj, data.site_projector_indices, data.projector_site, owners
+    )
+    native_coefficients = np.empty(
+        (*data.coefficients.shape[:-1], hubbard.envelope["ncol"]), dtype=complex
+    )
+    for spin, mesh in enumerate(spin_mesh):
+        for ik, raw_index in enumerate(mesh):
+            native_coefficients[spin, ik] = hubbard.kpoints[raw_index].coefficients.T
+    coefficients = np.concatenate((original_coefficients, native_coefficients), axis=-1)
+    shape = (len(counts), indices.shape[1], indices.shape[1])
+    xc, source_u = np.zeros(shape, complex), np.zeros(shape, complex)
+    local_maps = []
+    for site, count in enumerate(counts):
+        old_count = int(data.site_nproj[site])
+        xc[site, :old_count, :old_count] = data.get_operator_component(
+            "delta_total", site=site
+        )
+        local_maps.append({int(g): p for p, g in enumerate(indices[site, :count])})
+    for state in hubbard.states:
+        site = state.atom - 1
+        for channel, first, width in state.parts:
+            rows = [
+                local_maps[site][data.nproj + int(row)]
+                for row in _hub_channel_columns(hubbard, channel)
+            ]
+            block = (
+                state.potential[first : first + width, first : first + width, 0]
+                - state.potential[first : first + width, first : first + width, 1]
+            )
+            source_u[site][np.ix_(rows, rows)] = block * RYTOEV
+    total = xc + source_u
+    component_metadata = {
+        name: {
+            "units": "eV",
+            "completeness": "complete",
+            "exchange_ready": "true",
+            "definition": definition,
+            "source_role": role,
+        }
+        for name, definition, role in (
+            (
+                "delta_total",
+                "Original magnetic XC plus native Hubbard splitting exactly once",
+                "complete_xc_u",
+            ),
+            (
+                "delta_xc",
+                data.operator_component_metadata["delta_total"]["definition"],
+                "diagnostic_xc_only",
+            ),
+            (
+                "delta_u",
+                "Native acted main/background V_U(up)-V_U(down); scalar charge excluded",
+                "diagnostic_u_only",
+            ),
+        )
+    }
+    metadata.update(
+        coefficient_convention="direct_separable_xc_native_u_no_joint_inverse",
+        operator_component="delta_total",
+        source_completeness="complete_xc_u",
+        hubbard_definition=_qe_hubbard_identity(hubbard),
+        hubbard_validation=dict(hubbard.validation),
+        qe_channel_groups={
+            "xc": list(range(data.nproj)),
+            "u": list(range(data.nproj, coefficients.shape[-1])),
+        },
+    )
+    labels = {}
+    for name, extra in (
+        ("projector_l", hubbard.columns[:, 6]),
+        ("projector_m", hubbard.columns[:, 7]),
+        ("projector_radial", np.full(len(owners), -1, dtype=int)),
+    ):
+        original = getattr(data, name)
+        labels[name] = None if original is None else np.concatenate((original, extra))
+    return replace(
+        data,
+        coefficients=coefficients,
+        overlap_k=None,
+        original_overlap_k=original_overlap,
+        site_nproj=counts,
+        site_projector_indices=indices,
+        projector_site=projector_site,
+        projector_atom=projector_site.copy(),
+        hij=np.stack((total / 2, -total / 2)),
+        hij_definition="qe_joint_xc_native_hubbard_spin_difference",
+        operator_components={"delta_total": total, "delta_xc": xc, "delta_u": source_u},
+        operator_component_metadata=component_metadata,
+        channel_interpretation="qe_joint_xc_native_hubbard",
+        metadata=metadata,
+        **labels,
+    )
+
+
+def _qe_native_source_frame(hubbard):
+    from TB2J.projector_green import QE_SOURCE_FRAME_DEFINITION
+
+    frames = [frame for frame in hubbard.frames if frame.origin]
+    _hub_require(frames, "source", "no defined native magnetic reference direction")
+    return {
+        "version": 1,
+        "definition": QE_SOURCE_FRAME_DEFINITION,
+        "site_map": [frame.atom - 1 for frame in frames],
+        "directions": [frame.direction.tolist() for frame in frames],
+        "direction_provenance": [
+            "original_xc_pauli_trace"
+            if frame.origin == 1
+            else "mapped_native_hubbard_occupation"
+            for frame in frames
+        ],
+    }
+
+
+# MathDoc: tb2j/qe-hubbard-native-contract
+# MathDoc: tb2j/qe-hubbard-joint-frame#joint_trace
+def _qe_joint_spinor(dump, coefficients, operator, vertices, counts, indices):
+    """Pack actual native spin-column contractions, source and tangents once."""
+    hubbard = dump.hubbard
+    original_nproj = coefficients.shape[-1]
+    starts = {}
+    owners = []
+    for channel in hubbard.channels:
+        starts[channel.channel] = len(owners)
+        owners.extend([channel.atom - 1] * channel.dimension)
+    owners = np.asarray(owners, dtype=int)
+    column_map = np.empty((2, len(owners)), dtype=int)
+    for row, (_, channel, orbital, spin) in enumerate(hubbard.spin_columns):
+        column_map[spin - 1, starts[channel] + orbital - 1] = row
+    native_coefficients = np.stack(
+        [kp.coefficients[column_map].transpose(2, 0, 1) for kp in hubbard.kpoints]
+    )[None]
+    original_counts = counts
+    original_owners = np.repeat(np.arange(dump.nat), counts)
+    counts, indices, projector_site = _qe_joint_site_layout(
+        counts, indices, original_owners, owners
+    )
+    nmax = indices.shape[1]
+    xc = np.zeros((dump.nat, nmax, nmax, 2, 2), complex)
+    source_u = np.zeros_like(xc)
+    xc_vertices = np.zeros((dump.nat, 3, nmax, nmax, 2, 2), complex)
+    u_vertices = np.zeros_like(xc_vertices)
+    local_maps = []
+    for site, count in enumerate(counts):
+        old_count = int(original_counts[site])
+        xc[site, :old_count, :old_count] = operator[site, :old_count, :old_count]
+        xc_vertices[site, :, :old_count, :old_count] = vertices[
+            site, :, :old_count, :old_count
+        ]
+        local_maps.append({int(g): p for p, g in enumerate(indices[site, :count])})
+    for state, rotation in zip(hubbard.states, hubbard.rotations, strict=True):
+        site = state.atom - 1
+        rows = [
+            local_maps[site][original_nproj + starts[state.channel] + orbital]
+            for orbital in range(state.dimension)
+        ]
+        source_u[site][np.ix_(rows, rows)] = (
+            2 * RYTOEV * np.einsum("ija,ast->ijst", state.magnetic, PAULI_MATRICES)
+        )
+        # The two native unit transverse directions span I-n n.T. Projecting
+        # Cartesian axes onto them maps physical dV, not twice dV.
+        for axis in range(3):
+            native_tangent = np.einsum(
+                "j,abkj->abk", rotation.tangent_directions[axis], rotation.analytic
+            )
+            u_vertices[site, axis][np.ix_(rows, rows)] = RYTOEV * _qe_native_spinor(
+                native_tangent
+            )
+    total = xc + source_u
+    metadata = {
+        "coefficient_convention": "direct_separable_xc_native_u_no_joint_inverse",
+        "operator_component": "delta_total",
+        "source_completeness": "complete_xc_u",
+        "hubbard_definition": _qe_hubbard_identity(hubbard),
+        "hubbard_validation": dict(hubbard.validation),
+        "qe_channel_groups": {
+            "xc": list(range(original_nproj)),
+            "u": list(range(original_nproj, original_nproj + len(owners))),
+        },
+    }
+    components = {"delta_total": total, "delta_xc": xc, "delta_u": source_u}
+    component_metadata = {
+        name: {
+            "units": "eV",
+            "completeness": "complete",
+            "exchange_ready": "true",
+            "definition": "Magnetic splitting in the declared native joint spin-column frame",
+            "source_role": "complete_xc_u"
+            if name == "delta_total"
+            else f"diagnostic_{name[6:]}_only",
+        }
+        for name in components
+    }
+    return (
+        np.concatenate((coefficients, native_coefficients), axis=-1),
+        total,
+        xc_vertices + u_vertices,
+        counts,
+        indices,
+        projector_site,
+        components,
+        component_metadata,
+        metadata,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3033,6 +3305,8 @@ def read_qe_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
         ),
         metadata=metadata,
     )
+    if dump.hubbard.state == "active":
+        data = _qe_joint_collinear(dump, data, (up, dn[perm]))
     data.validate(exchange_ready=True)
     return data
 
@@ -3040,7 +3314,9 @@ def read_qe_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
 # ---------------------------------------------------------------------------
 # read_qe_atomic_dump: ProjectorGreenData normalization (atomic family)
 # ---------------------------------------------------------------------------
-def read_qe_atomic_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
+def read_qe_atomic_dump(
+    path, *, legacy_no_u=False, overlap_mode=None, overlap_rcond=None
+) -> ProjectorGreenData:
     """Read a QE atomic-wavefunction dump into projector Green data.
 
     The UPF pseudo-atomic coefficients ``C = <phi|psi>`` from QE
@@ -3053,6 +3329,11 @@ def read_qe_atomic_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     is exported as the site-local ``delta_total``
     with ``hij[up] = +Delta/2`` and ``hij[dn] = -Delta/2``; it is primal
     and is never preconjugated by ``M^-1`` at the reader.
+
+    Active native U appends its already S-applied contractions after applying
+    the existing full per-k atomic filter to these XC coefficient rows once.
+    In that joint frame ``overlap_k=None``; ``original_overlap_k`` retains
+    the original Gram as provenance only. No joint Gram is inverted.
     """
     from TB2J.interfaces.abinit_paw import BOHR_TO_ANGSTROM
 
@@ -3210,6 +3491,10 @@ def read_qe_atomic_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
         operator_basis=ATOMIC_OPERATOR_BASIS,
         metadata=metadata,
     )
+    if dump.hubbard.state == "active":
+        data = _qe_joint_collinear(
+            dump, data, (up, dn[perm]), overlap_mode, overlap_rcond
+        )
     data.validate(exchange_ready=True)
     return data
 
@@ -3670,7 +3955,7 @@ def _qe_gram_spectrum_report(gram_block, rcond=1.0e-6):
     }
 
 
-def _spinor_tangent_vertices_from_response(dump, operator, path):
+def _spinor_tangent_vertices_from_response(dump, operator, path, directions=None):
     """Build explicit frozen-source tangent vertices (eV) from NC1.1 blocks.
 
     ``V_a = RYTOEV * sum_{c,j} K^{(a)}_{cj} [(M^+ A_j M^+) (x) sigma_c
@@ -3683,9 +3968,22 @@ def _spinor_tangent_vertices_from_response(dump, operator, path):
     nsite, nmax = operator.shape[0], operator.shape[1]
     vertices = np.zeros((nsite, 3, nmax, nmax, 2, 2), dtype=complex)
     for site, count in enumerate(dump.nh_per_atom):
+        if not count:
+            continue
         response = dump.d_response[:count, :count, site]
+        if directions is not None and site not in directions:
+            _hub_require(
+                not np.any(operator[site]) and not np.any(response),
+                "source",
+                "unmapped original XC source or source response",
+            )
+            continue
         try:
-            n = magnetic_tangent_vertices(operator[site])["n"]
+            n = (
+                magnetic_tangent_vertices(operator[site])["n"]
+                if directions is None
+                else directions[site]
+            )
         except ValueError as exc:
             # A nonmagnetic site can have zero tangents only if every
             # source-response block vanishes. A zero diagonal sum does
@@ -3759,6 +4057,14 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
             "source",
             "no defined native magnetic reference direction for exchange",
         )
+    source_frame = (
+        _qe_native_source_frame(dump.hubbard) if dump.version == "1.2" else None
+    )
+    directions = (
+        dict(zip(source_frame["site_map"], map(np.asarray, source_frame["directions"])))
+        if source_frame is not None
+        else None
+    )
     if dump.version == "1.0" and (dump.lspinorb or np.any(dump.has_so)):
         raise ValueError(
             "QE NC1.0 SO-bearing projector dump lacks native source-resolved "
@@ -3787,6 +4093,8 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     for site, count in enumerate(counts):
         start = int(dump.ofsbeta[site])
         indices[site, :count] = np.arange(start, start + count)
+        if not count:
+            continue
         inverse = _qe_gram_inverse(
             dump.gram[:count, :count, site], path=path, site=site
         )
@@ -3802,7 +4110,7 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
             * RYTOEV
             * (np.einsum("aij,ast->ijst", projected, PAULI_MATRICES) + magnetic)
         )
-    if not np.any(operator != 0):
+    if not np.any(operator != 0) and dump.hubbard.state != "active":
         raise ValueError(
             f"QE spinor dump {path}: zero conditioned magnetic source "
             "after dressing the projected Pauli field"
@@ -3810,8 +4118,15 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     vertices = None
     tangent_definition = None
     if dump.version in ("1.1", "1.2"):
-        vertices = _spinor_tangent_vertices_from_response(dump, operator, path)
-        tangent_definition = SPINOR_TANGENT_DEFINITION
+        vertices = _spinor_tangent_vertices_from_response(
+            dump, operator, path, directions=directions
+        )
+        if source_frame is None:
+            tangent_definition = SPINOR_TANGENT_DEFINITION
+        else:
+            from TB2J.projector_green import QE_SPINOR_TANGENT_DEFINITION
+
+            tangent_definition = QE_SPINOR_TANGENT_DEFINITION
         if not dump.lspinorb:
             # Scalar-relativistic explicit-versus-commutator identity.
             for site, count in enumerate(dump.nh_per_atom):
@@ -3843,12 +4158,27 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
                             "(relative tolerance 1e-6)"
                         )
     sites = np.repeat(np.arange(dump.nat), counts)
+    coefficients = dump.coefficients.transpose(0, 3, 2, 1)[None]
+    components = component_metadata = None
+    joint_metadata = {}
+    if dump.hubbard.state == "active":
+        (
+            coefficients,
+            operator,
+            vertices,
+            counts,
+            indices,
+            sites,
+            components,
+            component_metadata,
+            joint_metadata,
+        ) = _qe_joint_spinor(dump, coefficients, operator, vertices, counts, indices)
     data = ProjectorGreenData(
         kpoints=dump.xk @ dump.at,
         weights=dump.wk,
         eigenvalues=dump.et[None] * RYTOEV,
         occupations=_band_occupations(dump.wg, dump.wk)[None],
-        coefficients=dump.coefficients.transpose(0, 3, 2, 1)[None],
+        coefficients=coefficients,
         efermi=dump.ef * RYTOEV,
         projector_site=sites,
         projector_atom=sites.copy(),
@@ -3863,6 +4193,8 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
         spinor_operator_definition=SPINOR_OPERATOR_DEFINITION,
         spinor_tangent_vertices=vertices,
         spinor_tangent_definition=tangent_definition,
+        operator_components=components,
+        operator_component_metadata=component_metadata,
         coefficient_source="qe_becp_nc",
         coefficient_projector=COEFFICIENT_PROJECTOR,
         channel_interpretation=CHANNEL_INTERPRETATION,
@@ -3953,6 +4285,8 @@ def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
                 "spinor_operator": "eV",
                 **({"spinor_tangent_vertices": "eV"} if vertices is not None else {}),
             },
+            **({"qe_source_frame": source_frame} if source_frame is not None else {}),
+            **joint_metadata,
         },
     )
     if uncertified_nc:
@@ -4151,7 +4485,12 @@ def gen_exchange_qe(
             "Use read_qe_spinor_dump and compute_spinor_projector_exchange for a raw leg"
         )
     if magic.rstrip(b" \x00") in _ATOMIC_MAGICS:
-        data = read_qe_atomic_dump(filename, legacy_no_u=legacy_no_u)
+        data = read_qe_atomic_dump(
+            filename,
+            legacy_no_u=legacy_no_u,
+            overlap_mode=overlap_mode,
+            overlap_rcond=overlap_rcond,
+        )
     elif magic.rstrip(b" ") in _MAGIC_VERSIONS:
         if overlap_mode is not None or overlap_rcond is not None:
             raise ValueError(

@@ -1,14 +1,19 @@
 # Changelog
 
 ## Unreleased
+- Added native QE XC+U joint-frame normalization: unchanged native Hubbard
+  contractions, one-time XC-only full per-k atomic filtering, direct mixed
+  Green blocks without a joint inverse, and explicit versioned spinor
+  reference frames/tangents. Original atomic Grams and frames round-trip in
+  the existing NetCDF container. This enables source-complete normalization,
+  not scientific +U exchange/tensor/material certification.
 - Added strict typed QE Hubbard extensions for KB v1.3, atomic v1.1 and
   NC spinor v1.2 raw readers. New records distinguish explicit absent-U
   provenance from legacy unknown status; production normalization of legacy
   records requires the explicit ``legacy_no_u=True`` user attestation.
   Active records and native provenance remain inspectable, while malformed
-  or unsupported records fail closed and active normalization remains pending
-  joint XC+U source handling (Story 005). This adds no CLI source selection
-  and does not certify +U exchange or alter existing FR-NC/mixed-family gates.
+  or unsupported records fail closed. Reader support does not itself certify
+  +U exchange or alter existing FR-NC/mixed-family production gates.
   Hardened species identity binding, symmetry-invariant fresh-occupation
   checks against native overlaps, and retained-carrier scale validation;
   spinor/atomic native-measurement limits remain explicit.
