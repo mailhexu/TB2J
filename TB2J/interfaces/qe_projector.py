@@ -5,20 +5,18 @@ Parses the binary dumps written by ``PW/src/becp_dump.f90`` (QE fork branch
 :class:`TB2J.projector_green.ProjectorGreenData` for the projector-space
 exchange workflow.
 
-Two dump families are supported (record schemas in
-``TB2J/qe_patch/README.md``). Both use gfortran sequential unformatted
-records with 4-byte little-endian markers and Fortran/column-major
-arrays. A third, non-collinear spinor family is read by
-:func:`parse_qe_spinor_dump` / :func:`read_qe_spinor_dump`:
+Three dump families use gfortran sequential unformatted records with 4-byte
+little-endian markers and Fortran/column-major arrays (predecessor schemas
+in ``TB2J/qe_patch/README.md``):
 
 KB/beta dumps (``TB2J_PROJECTORS=kb``, magic ``TB2JQEDUMPV1`` / ``V1.1`` /
-``V1.2``)
+``V1.2`` / ``V1.3``)
     v1.1 adds the packed-triangular ``becsum`` record (and, for PAW runs,
     ``rho%bec``) after the per-k coefficient stream; v1.0 ends after the
     per-k records; v1.2 adds the projected-xc vertex records.
 
 Atomic-pseudo-wavefunction dumps (``TB2J_PROJECTORS=atomic``, magic
-``TB2JQEATWFC1.0``)
+``TB2JQEATWFC1.0`` / ``TB2JQEATWFC1.1``)
     UPF ``PP_PSWFC`` pseudo-atomic orbitals from QE ``atomic_wfc`` in the
     same k-dependent plane-wave basis as ``evc``; collinear ordering atoms,
     radial UPF orbital ``nb``, QE real spherical-harmonic ordinal
@@ -31,7 +29,7 @@ Atomic-pseudo-wavefunction dumps (``TB2J_PROJECTORS=atomic``, magic
     There is deliberately no ``deeq``/``qq_at``/``becsum`` physical field in
     this format.
 
-Non-collinear spinor KB dumps (magic ``TB2JQEDUMPNC1.0`` / ``NC1.1``)
+Non-collinear spinor KB dumps (``TB2JQEDUMPNC1.0`` / ``NC1.1`` / ``NC1.2``)
     Native ``becp%nc(nkb, 2, nbnd)`` per k in QE's dual beta basis;
     native ``(uu, ud, du, dd)`` total and magnetic ``deeq_nc`` blocks,
     Hermitian projected smooth fields, beta Gram and band occupations.
@@ -41,6 +39,14 @@ Non-collinear spinor KB dumps (magic ``TB2JQEDUMPNC1.0`` / ``NC1.1``)
     Gram conditions only the smooth-field projection, never the dual Green
     coefficients or native nonlocal response. NC1.0 SO-bearing dumps are
     rejected because they have no source-resolved tangents.
+
+KB1.3, atomic1.1 and NC1.2 append the strictly validated
+``TB2JHUBBARD1.0`` native extension. Raw ``.hubbard`` records distinguish
+active, explicitly absent and legacy unknown state. Legacy normalization
+requires ``legacy_no_u=True`` (user attestation, not measured absence).
+Explicit new-format absence needs no assertion. Active records are retained
+but normalization refuses until the joint XC+U source is constructed; the
+legacy assertion never bypasses a declared or failed source gate.
 
 Pinned physics contract (research memo ``2026-10-08-qe-export-surface-and-
 operators``, SymPy pin ``docs/sympy/qe_separable_beta_trace.py`` and the
@@ -76,15 +82,14 @@ Public API
     dumped units).
 ``parse_qe_atomic_dump(path)``
     Raw parse into a :class:`QEAtomicDump`.
-``read_qe_dump(path)``
+``read_qe_dump(path, *, legacy_no_u=False)``
     Normalized KB :class:`~TB2J.projector_green.ProjectorGreenData`
     (eV / Angstrom / fractional k-points, spin-degenerate dense mesh).
-``read_qe_atomic_dump(path)``
+``read_qe_atomic_dump(path, *, legacy_no_u=False)``
     Normalized atomic :class:`~TB2J.projector_green.ProjectorGreenData`
     with primal coefficients and full k-dependent ``overlap_k = M(k)``.
-``parse_qe_spinor_dump(path)`` / ``read_qe_spinor_dump(path)``
-    Strict non-collinear spinor parse (magics ``TB2JQEDUMPNC1.0`` /
-    ``TB2JQEDUMPNC1.1``) and normalized
+``parse_qe_spinor_dump(path)`` / ``read_qe_spinor_dump(path, *, legacy_no_u=False)``
+    Strict non-collinear spinor parse (NC1.0 / NC1.1 / NC1.2) and normalized
     :class:`~TB2J.projector_green.ProjectorGreenData` with dual spinor
     coefficients and the magnetic-only ``spinor_operator``. NC1.1 adds the
     nine native source-response blocks and explicit frozen-source tangent
@@ -101,7 +106,7 @@ import re
 import struct
 import warnings
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -119,6 +124,7 @@ RYTOEV = 13.605693122994
 
 #: 16-byte magic strings; Fortran pads ``CHARACTER(LEN=16)`` with blanks.
 _MAGIC_VERSIONS = {
+    b"TB2JQEDUMPV1.3": "1.3",
     b"TB2JQEDUMPV1.2": "1.2",
     b"TB2JQEDUMPV1.1": "1.1",
     b"TB2JQEDUMPV1": "1.0",
@@ -128,6 +134,8 @@ _MAGIC_VERSIONS = {
 ATOMIC_MAGIC = "TB2JQEATWFC1.0"
 MAGIC_ATOMIC = b"TB2JQEATWFC1.0"
 _MAGIC_ATOMIC = MAGIC_ATOMIC
+MAGIC_ATOMIC_HUBBARD = b"TB2JQEATWFC1.1"
+_ATOMIC_MAGICS = {MAGIC_ATOMIC: "1.0", MAGIC_ATOMIC_HUBBARD: "1.1"}
 
 SPINOR_MAGIC = "TB2JQEDUMPNC1.0"
 MAGIC_SPINOR = SPINOR_MAGIC.encode("ascii")
@@ -135,7 +143,12 @@ MAGIC_SPINOR = SPINOR_MAGIC.encode("ascii")
 #: ``D_response(nhm, nhm, nat, 4, 3, 3)`` (ih, jh, na, spinblock, c, j).
 SPINOR_MAGIC_NC11 = "TB2JQEDUMPNC1.1"
 MAGIC_SPINOR_NC11 = SPINOR_MAGIC_NC11.encode("ascii")
-_SPINOR_MAGICS = {MAGIC_SPINOR: "1.0", MAGIC_SPINOR_NC11: "1.1"}
+MAGIC_SPINOR_NC12 = b"TB2JQEDUMPNC1.2"
+_SPINOR_MAGICS = {
+    MAGIC_SPINOR: "1.0",
+    MAGIC_SPINOR_NC11: "1.1",
+    MAGIC_SPINOR_NC12: "1.2",
+}
 
 HIJ_DEFINITION = "qe_deeq_spin_difference"
 HIJ_UNITS = "eV"
@@ -284,6 +297,1762 @@ class _RecordReader:
         return np.array(flat.reshape(shape, order="F"))
 
 
+# MathDoc: tb2j/qe-hubbard-native-contract
+class QEHubbardError(ValueError):
+    """A refused native Hubbard contract, with a stable semantic category."""
+
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(f"QE Hubbard {code}: {message}")
+
+
+@dataclass
+class QEHubbardSpecies:
+    species: int
+    label: str
+    filename: str
+    path: str
+    family: int
+    flags: int
+    md5: str
+    digest_origin: str
+
+
+@dataclass
+class QEHubbardParameters:
+    species: int
+    ev: np.ndarray
+    ry: np.ndarray
+    excluded_norm: np.ndarray
+    quantum_flags: tuple
+
+
+@dataclass
+class QEHubbardChannel:
+    channel: int
+    atom: int
+    species: int
+    kind: int
+    principal_n: int
+    l: int
+    dimension: int
+    native_offset: int
+    matrix_offset: int
+    acted: int
+    reserved: int
+
+
+@dataclass
+class QEHubbardState:
+    channel: int
+    atom: int
+    species: int
+    dimension: int
+    occupation: np.ndarray
+    potential: np.ndarray
+    scalar: np.ndarray
+    magnetic: np.ndarray
+    # (channel, first matrix row, width); background aggregates keep cross blocks.
+    parts: tuple
+
+
+@dataclass
+class QEHubbardKPoint:
+    index: int
+    npw: int
+    spin: int
+    xk: np.ndarray
+    weight: float
+    global_g_index: np.ndarray
+    wg: np.ndarray
+    et: np.ndarray
+    coefficients: np.ndarray
+
+
+@dataclass
+class QEHubbardAction:
+    index: int
+    algorithm: int
+    seed: int
+    metrics: np.ndarray
+    projection: np.ndarray
+    wfcu: np.ndarray
+    psi: np.ndarray
+    native: np.ndarray
+    exported: np.ndarray
+
+
+@dataclass
+class QEHubbardCheck:
+    channel: int
+    atom: int
+    species: int
+    kind: int
+    absolute_error: float
+    relative_error: float
+    native: np.ndarray
+    reconstructed: np.ndarray
+
+
+@dataclass
+class QEHubbardFrame:
+    atom: int
+    species: int
+    nh: int
+    origin: int
+    xc_operator_max_eV: float
+    xc_trace_vector_eV: np.ndarray
+    xc_trace_norm_eV: float
+    direction: np.ndarray
+    map_id: int
+    occupation_map_vector: np.ndarray
+    occupation_map_norm: float
+    potential_trace_vector_Ry: np.ndarray
+    u_map_residual: float
+    gram_rank: int
+    discarded_rank: int
+    gram_gap_ratio: float
+    rcond: float
+    clean_gap: float
+    frame_unit_residual: float
+
+
+@dataclass
+class QEHubbardRotation:
+    atom: int
+    species: int
+    channel: int
+    dimension: int
+    frame_origin: int
+    reference_direction: np.ndarray
+    axes: np.ndarray
+    angles: np.ndarray
+    metrics: dict
+    tangent_directions: np.ndarray
+    tangent_axes: np.ndarray
+    steps: np.ndarray
+    analytic: np.ndarray
+    central_difference: np.ndarray
+    tangent_absolute_error: np.ndarray
+    tangent_relative_error: np.ndarray
+    step_convergence: np.ndarray
+
+
+@dataclass
+class QEHubbardData:
+    """Complete raw native extension; legacy absence of evidence stays unknown.
+
+    All matrix/action records remain in native units. ``complete`` denotes this
+    source contract, not an exchange-family or material-convergence certificate.
+    """
+
+    state: str = "unknown"
+    complete: bool = False
+    envelope: dict[str, int] = field(default_factory=dict)
+    provenance: dict[str, str] = field(default_factory=dict)
+    species: list[QEHubbardSpecies] = field(default_factory=list)
+    parameters: list[QEHubbardParameters] = field(default_factory=list)
+    channels: list[QEHubbardChannel] = field(default_factory=list)
+    columns: np.ndarray = field(default_factory=lambda: np.empty((0, 8), dtype=int))
+    spin_columns: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 4), dtype=int)
+    )
+    layout: dict[str, int] = field(default_factory=dict)
+    unit_conversion: float = 0.0
+    unit_bridge_residual: float = 0.0
+    states: list[QEHubbardState] = field(default_factory=list)
+    kpoints: list[QEHubbardKPoint] = field(default_factory=list)
+    actions: list[QEHubbardAction] = field(default_factory=list)
+    occupation_checks: list[QEHubbardCheck] = field(default_factory=list)
+    potential_checks: list[QEHubbardCheck] = field(default_factory=list)
+    frames: list[QEHubbardFrame] = field(default_factory=list)
+    rotations: list[QEHubbardRotation] = field(default_factory=list)
+    restoration: dict[str, float | int] = field(default_factory=dict)
+    validation: dict[str, float | int] = field(default_factory=dict)
+
+
+def _hub_require(condition, code, message):
+    if not condition:
+        raise QEHubbardError(code, message)
+
+
+def _hub_close(actual, expected, message, *, atol=1e-12, rtol=1e-10, code="validation"):
+    _hub_require(np.allclose(actual, expected, atol=atol, rtol=rtol), code, message)
+
+
+def _hub_residual(first, second):
+    absolute = float(np.linalg.norm(first - second))
+    scale = max(float(np.linalg.norm(first)), float(np.linalg.norm(second)))
+    return absolute, absolute / scale if scale > np.finfo(float).tiny else 0.0
+
+
+def _hub_hermitian(matrix, name):
+    _hub_close(matrix, matrix.conj().T, name, code="hermiticity")
+
+
+class _HubbardRecord:
+    """Bounds-checked cursor inside one existing sequential Fortran record."""
+
+    def __init__(self, reader, record_id):
+        try:
+            self.payload = reader.read_raw(f"Hubbard record {record_id}")
+        except ValueError as exc:
+            raise QEHubbardError("layout", str(exc)) from exc
+        self.offset = 0
+        _hub_require(
+            self.ints(1) == (record_id,), "layout", f"expected record {record_id}"
+        )
+
+    def array(self, dtype, shape):
+        shape = (shape,) if isinstance(shape, int) else tuple(shape)
+        _hub_require(
+            all(n >= 0 for n in shape), "dimension", "negative array dimension"
+        )
+        count = 1
+        for n in shape:
+            count *= n
+        size = count * np.dtype(dtype).itemsize
+        _hub_require(
+            self.offset + size <= len(self.payload),
+            "layout",
+            f"short record: array {shape} of {dtype} at byte {self.offset}",
+        )
+        result = np.frombuffer(
+            self.payload, dtype=dtype, count=count, offset=self.offset
+        )
+        self.offset += size
+        _hub_require(np.isfinite(result).all(), "nonfinite", "non-finite record values")
+        return result.reshape(shape, order="F")
+
+    def ints(self, n):
+        return tuple(map(int, self.array("<i4", n)))
+
+    def reals(self, shape):
+        return self.array("<f8", shape)
+
+    def text(self, n):
+        _hub_require(self.offset + n <= len(self.payload), "layout", "short text field")
+        raw = self.payload[self.offset : self.offset + n]
+        self.offset += n
+        try:
+            return raw.decode("ascii").rstrip(" \x00")
+        except UnicodeDecodeError as exc:
+            raise QEHubbardError("provenance", "non-ASCII native identity") from exc
+
+    def end(self):
+        _hub_require(
+            self.offset == len(self.payload), "layout", "unexpected record bytes"
+        )
+
+
+_HUBBARD_ENVELOPE_FIELDS = (
+    "major",
+    "minor",
+    "endian",
+    "active",
+    "native_enabled",
+    "complete",
+    "functional",
+    "dc",
+    "projector",
+    "collinear",
+    "source_mode",
+    "nchannel",
+    "ncol",
+    "nat",
+    "ntyp",
+    "nspin",
+    "nks",
+    "nbnd",
+    "nkb",
+    "source_status",
+    "unit_ry",
+    "unit_ev",
+    "integer_bits",
+    "real_bits",
+    "complex_bits",
+)
+_HUBBARD_NATIVE_REVISION = "301742e16546b927cfe35fb2fcf4d9338f3e294a"
+
+
+def _read_hubbard_header(reader, context, profile):
+    c = _HubbardRecord(reader, 1)
+    magic = c.text(16)
+    env = dict(zip(_HUBBARD_ENVELOPE_FIELDS, c.ints(25), strict=True))
+    c.end()
+    _hub_require(
+        magic == "TB2JHUBBARD1.0"
+        and (env["major"], env["minor"], env["endian"]) == (1, 0, 16909060)
+        and (env["integer_bits"], env["real_bits"], env["complex_bits"])
+        == (32, 64, 128),
+        "unsupported",
+        "unknown native schema, endian or scalar widths",
+    )
+    _hub_require((env["unit_ry"], env["unit_ev"]) == (1, 2), "unsupported", "unit IDs")
+    _hub_require(
+        all(env[k] in (0, 1) for k in ("active", "native_enabled", "complete")),
+        "dimension",
+        "invalid envelope flags",
+    )
+    _hub_require(env["complete"] == 1, "validation", "incomplete envelope")
+    for key in ("nat", "ntyp", "nspin", "nks", "nbnd", "nkb"):
+        expected = context.get("nsp" if key == "ntyp" else key)
+        if expected is not None:
+            _hub_require(
+                env[key] == expected, "dimension", f"predecessor {key} mismatch"
+            )
+    spinor = profile == "spinor"
+    _hub_require(
+        env["collinear"] == int(not spinor)
+        and env["source_mode"] == (2 if profile == "atomic" else 1)
+        and env["nspin"] in ((4,) if spinor else (1, 2)),
+        "unsupported",
+        "predecessor/source/spin convention mismatch",
+    )
+    _hub_require(env["nkb"] >= 0, "dimension", "negative native beta count")
+    if env["active"]:
+        _hub_require(
+            env["native_enabled"]
+            == env["functional"]
+            == env["dc"]
+            == env["source_status"]
+            == 1
+            and env["projector"] in (1, 2),
+            "unsupported",
+            "active source is not native scalar Dudarev atomic/ortho-atomic",
+        )
+        _hub_require(
+            0 < env["nchannel"] <= env["nat"] * (1 if spinor else 3)
+            and 0 < env["ncol"] <= 7 * env["nat"] * (2 if spinor else 3),
+            "dimension",
+            "invalid acted shell/column counts",
+        )
+    else:
+        _hub_require(
+            all(
+                env[k] == 0
+                for k in (
+                    "functional",
+                    "dc",
+                    "projector",
+                    "nchannel",
+                    "ncol",
+                    "source_status",
+                )
+            ),
+            "source",
+            "absent-U envelope contains active source metadata",
+        )
+    result = QEHubbardData(state="active" if env["active"] else "absent", envelope=env)
+    c = _HubbardRecord(reader, 2)
+    names = (
+        "qe_version",
+        "native_revision",
+        "source_name",
+        "projector_name",
+        "construction",
+        "metric",
+        "input_path",
+        "input_md5",
+        "input_digest_origin",
+        "pseudo_dir",
+        "pseudo_dir_cur",
+    )
+    sizes = (80, 64, 16, 30, 64, 80, 256, 32, 48, 256, 256)
+    result.provenance = {
+        name: c.text(size) for name, size in zip(names, sizes, strict=True)
+    }
+    c.end()
+    p = result.provenance
+    _hub_require(
+        p["native_revision"] == _HUBBARD_NATIVE_REVISION
+        and p["source_name"] == ("atomic" if profile == "atomic" else "kb")
+        and p["projector_name"]
+        == {0: "inactive", 1: "atomic", 2: "ortho-atomic"}[env["projector"]]
+        and all(
+            p[k]
+            for k in ("qe_version", "construction", "metric", "input_digest_origin")
+        ),
+        "provenance",
+        "missing, unaudited or contradictory native construction identity",
+    )
+    _hub_require(
+        not p["input_md5"] or re.fullmatch(r"[0-9a-fA-F]{32}", p["input_md5"]),
+        "provenance",
+        "invalid input digest",
+    )
+    for species in range(1, env["ntyp"] + 1):
+        c = _HubbardRecord(reader, 3)
+        (nt,) = c.ints(1)
+        label, filename, path = c.text(80), c.text(256), c.text(512)
+        family, flags = c.ints(2)
+        md5, origin = c.text(32), c.text(56)
+        c.end()
+        _hub_require(nt == species, "mapping", "unordered species identities")
+        _hub_require(
+            label == context["atm"][species - 1],
+            "provenance",
+            "Hubbard species label differs from predecessor species identity",
+        )
+        _hub_require(
+            family in (1, 2, 3) and flags >= 0 and flags & ~3 == 0,
+            "unsupported",
+            "unknown pseudopotential family or flags",
+        )
+        _hub_require(
+            label
+            and filename
+            and path
+            and origin
+            and Path(path).name == Path(filename).name
+            and (re.fullmatch(r"[0-9a-fA-F]{32}", md5) or md5 == "NOT SET"),
+            "provenance",
+            "incomplete loaded pseudopotential identity",
+        )
+        if "tvanp" in context:
+            expected = (
+                3 if context["tpawp"][nt - 1] else 2 if context["tvanp"][nt - 1] else 1
+            )
+            _hub_require(
+                family == expected, "provenance", "predecessor UPF family mismatch"
+            )
+        if "has_so" in context:
+            _hub_require(
+                bool(flags & 2) == bool(context["has_so"][nt - 1]),
+                "provenance",
+                "predecessor spin-orbit flag mismatch",
+            )
+        result.species.append(
+            QEHubbardSpecies(nt, label, filename, path, family, flags, md5, origin)
+        )
+    return result
+
+
+def _read_hubbard_maps(reader, data, context, spinor):
+    env = data.envelope
+    if not env["active"]:
+        c = _HubbardRecord(reader, 13)
+        _hub_require(c.ints(1) == (0,), "source", "contradictory absent-U declaration")
+        c.end()
+        return
+    c = _HubbardRecord(reader, 4)
+    _hub_require(
+        c.ints(3) == (env["ntyp"], 2, 1), "dimension", "parameter dimensions/units"
+    )
+    data.unit_conversion, data.unit_bridge_residual = map(float, c.reals(2))
+    _hub_require(
+        c.ints(3) == (1, 1, 0), "unsupported", "functional/double-counting branch"
+    )
+    c.end()
+    _hub_close(
+        data.unit_conversion,
+        RYTOEV,
+        "unrecognized native Ry/eV bridge",
+        rtol=64 * np.finfo(float).eps,
+        atol=0,
+        code="unsupported",
+    )
+    _hub_require(data.unit_bridge_residual >= 0, "validation", "negative unit residual")
+    for nt in range(1, env["ntyp"] + 1):
+        c = _HubbardRecord(reader, 4)
+        _hub_require(c.ints(1) == (nt,), "mapping", "parameter species order")
+        ev, ry, excluded = c.reals(9), c.reals(9), c.reals(8)
+        flags = c.ints(9)
+        c.end()
+        _hub_require(
+            not np.any(excluded) and not np.any(ev[2:]) and not np.any(ry[2:]),
+            "unsupported",
+            "non-Dudarev active parameter inventory",
+        )
+        _hub_require(
+            all(f in (0, 1) for f in flags[6:])
+            and (not flags[8] or flags[7])
+            and (flags[6] or ry[0] == 0)
+            and (flags[7] or ry[1] == 0),
+            "source",
+            "parameter/shell activation inventory mismatch",
+        )
+        if spinor:
+            _hub_require(
+                ry[1] == 0 and flags[7:] == (0, 0) and (not flags[6] or ry[0] > 0),
+                "unsupported",
+                "spinor background or nonpositive main U",
+            )
+        _hub_close(
+            ev,
+            ry * data.unit_conversion,
+            "inconsistent eV/Ry parameters",
+            atol=32 * np.finfo(float).eps,
+            rtol=32 * np.finfo(float).eps,
+        )
+        data.parameters.append(QEHubbardParameters(nt, ev, ry, excluded, flags))
+    bridge_budget = (
+        32
+        * np.finfo(float).eps
+        * max(1.0, *(float(np.abs(p.ev).max()) for p in data.parameters))
+    )
+    _hub_require(
+        data.unit_bridge_residual <= bridge_budget, "validation", "unit conversion gate"
+    )
+    _hub_require(
+        any(np.any(p.ry[:2]) for p in data.parameters),
+        "source",
+        "active envelope has no acting U",
+    )
+    expected_channels = []
+    for atom, nt in enumerate(context["ityp"], 1):
+        flags = data.parameters[nt - 1].quantum_flags
+        if flags[6]:
+            expected_channels.append((atom, nt, 1, flags[0], flags[1], 0))
+        if flags[7]:
+            expected_channels.append((atom, nt, 2, flags[2], flags[3], 0))
+            if flags[8]:
+                expected_channels.append(
+                    (atom, nt, 3, flags[4], flags[5], 2 * flags[3] + 1)
+                )
+    _hub_require(
+        len(expected_channels) == env["nchannel"],
+        "source",
+        "incomplete shell inventory",
+    )
+    c = _HubbardRecord(reader, 5)
+    _hub_require(
+        c.ints(2) == (env["nchannel"], env["ncol"]), "dimension", "map dimensions"
+    )
+    c.end()
+    for ch, expected in enumerate(expected_channels, 1):
+        c = _HubbardRecord(reader, 6)
+        row = c.ints(11)
+        c.end()
+        channel = QEHubbardChannel(*row)
+        atom, nt, kind, principal, ell, moff = expected
+        _hub_require(
+            row[0] == ch
+            and (
+                channel.atom,
+                channel.species,
+                channel.kind,
+                channel.principal_n,
+                channel.l,
+                channel.matrix_offset,
+            )
+            == (atom, nt, kind, principal, ell, moff)
+            and 0 <= ell <= 3
+            and principal > ell
+            and channel.dimension == 2 * ell + 1
+            and channel.native_offset >= 0
+            and (channel.acted, channel.reserved) == (1, 0),
+            "mapping",
+            "invalid shell ownership, dimensions or offsets",
+        )
+        data.channels.append(channel)
+    _hub_require(
+        sum(c.dimension for c in data.channels) * (2 if spinor else 1) == env["ncol"],
+        "mapping",
+        "acted shell columns do not cover native source",
+    )
+    columns = []
+    for export in range(1, env["ncol"] + 1):
+        c = _HubbardRecord(reader, 7)
+        row = c.ints(8)
+        c.end()
+        native, exported, ch, atom, nt, kind, ell, orbital = row
+        _hub_require(1 <= ch <= len(data.channels), "mapping", "unknown column shell")
+        owner = data.channels[ch - 1]
+        _hub_require(
+            exported == export
+            and native > 0
+            and 1 <= orbital <= owner.dimension
+            and (atom, nt, kind, ell)
+            == (owner.atom, owner.species, owner.kind, owner.l),
+            "mapping",
+            "non-reversible column ownership/ordinal",
+        )
+        if not spinor:
+            _hub_require(
+                native == export == owner.native_offset + orbital,
+                "mapping",
+                "collinear native-column offset",
+            )
+        columns.append(row)
+    data.columns = np.asarray(columns, dtype=int)
+    _hub_require(
+        np.all(np.diff(data.columns[:, 0]) > 0),
+        "mapping",
+        "duplicate or unordered native columns",
+    )
+
+
+def _read_hubbard_spin_layout(reader, data):
+    c = _HubbardRecord(reader, 15)
+    npol, norbital, ncol, order, blocks, components, native_ncol = c.ints(7)
+    c.end()
+    _hub_require(
+        (npol, ncol, order, blocks, components) == (2, data.envelope["ncol"], 1, 4, 2)
+        and 2 * norbital == ncol
+        and native_ncol >= ncol
+        and (data.state == "active" or native_ncol == 0),
+        "dimension",
+        "invalid spin-major/orbital-inner layout",
+    )
+    data.layout = dict(
+        npol=npol,
+        norbital=norbital,
+        ncolumn=ncol,
+        column_order=order,
+        potential_blocks=blocks,
+        pw_spin_components=components,
+        native_ncolumn=native_ncol,
+    )
+    rows = []
+    for column in data.columns:
+        c = _HubbardRecord(reader, 16)
+        native, ch, orbital, spin = c.ints(4)
+        c.end()
+        owner = data.channels[column[2] - 1]
+        _hub_require(
+            (native, ch, orbital) == (column[0], column[2], column[7])
+            and spin in (1, 2)
+            and native <= native_ncol
+            and native == owner.native_offset + (spin - 1) * owner.dimension + orbital,
+            "mapping",
+            "native column/orbital/spin map is inconsistent",
+        )
+        rows.append((native, ch, orbital, spin))
+    data.spin_columns = np.asarray(rows, dtype=int).reshape(-1, 4)
+    for channel in data.channels:
+        actual = {(r[2], r[3]) for r in rows if r[1] == channel.channel}
+        _hub_require(
+            actual
+            == {
+                (orbital, spin)
+                for orbital in range(1, channel.dimension + 1)
+                for spin in (1, 2)
+            },
+            "mapping",
+            "incomplete spin-major shell",
+        )
+
+
+def _hub_dense(blocks):
+    dim = blocks.shape[0]
+    return (
+        blocks.reshape(dim, dim, 2, 2).transpose(2, 0, 3, 1).reshape(2 * dim, 2 * dim)
+    )
+
+
+def _hub_blocks(dense):
+    dim = dense.shape[0] // 2
+    return dense.reshape(2, dim, 2, dim).transpose(1, 3, 0, 2).reshape(dim, dim, 4)
+
+
+def _hub_pauli(blocks):
+    uu, ud, du, dd = np.moveaxis(blocks, -1, 0)
+    return (uu + dd) / 2, np.stack(
+        ((ud + du) / 2, (du - ud) / (2j), (uu - dd) / 2), axis=-1
+    )
+
+
+def _hub_magnetic_blocks(magnetic):
+    x, y, z = np.moveaxis(magnetic, -1, 0)
+    return np.stack((z, x - 1j * y, x + 1j * y, -z), axis=-1)
+
+
+def _hub_native_potential(occupation, u):
+    dense = _hub_dense(occupation)
+    return _hub_blocks(u * (0.5 * np.eye(len(dense)) - dense.T))
+
+
+def _read_hubbard_states(reader, data, spinor):
+    for channel in data.channels:
+        if channel.kind == 3:
+            continue
+        dim = channel.dimension
+        parts = [(channel.channel, 0, dim)]
+        if spinor:
+            c = _HubbardRecord(reader, 17)
+            _hub_require(
+                c.ints(6)
+                == (channel.channel, channel.atom, channel.species, dim, 2, 4),
+                "dimension",
+                "complex source dimensions/ownership",
+            )
+        elif channel.kind == 1:
+            c = _HubbardRecord(reader, 8)
+            _hub_require(
+                c.ints(5)
+                == (
+                    channel.channel,
+                    channel.atom,
+                    channel.species,
+                    dim,
+                    data.envelope["nspin"],
+                ),
+                "dimension",
+                "main source dimensions/ownership",
+            )
+        else:
+            second = next(
+                (
+                    ch
+                    for ch in data.channels
+                    if ch.atom == channel.atom and ch.kind == 3
+                ),
+                None,
+            )
+            d2 = second.dimension if second else 0
+            c = _HubbardRecord(reader, 9)
+            _hub_require(
+                c.ints(8)
+                == (
+                    channel.channel,
+                    second.channel if second else 0,
+                    channel.atom,
+                    channel.species,
+                    dim + d2,
+                    dim,
+                    d2,
+                    data.envelope["nspin"],
+                ),
+                "dimension",
+                "background aggregate dimensions/ownership",
+            )
+            if second:
+                parts.append((second.channel, dim, d2))
+            dim += d2
+        dtype = "<c16" if spinor else "<f8"
+        nblock = 4 if spinor else data.envelope["nspin"]
+        occupation = c.array(dtype, (dim, dim, nblock))
+        potential = c.array(dtype, (dim, dim, nblock))
+        scalar = c.array(dtype, (dim, dim))
+        magnetic = c.array(dtype, (dim, dim, 3) if spinor else (dim, dim))
+        c.end()
+        if spinor:
+            _hub_hermitian(_hub_dense(occupation), "complex native occupation")
+            _hub_hermitian(_hub_dense(potential), "complex native potential")
+            expected_scalar, expected_magnetic = _hub_pauli(potential)
+            u = data.parameters[channel.species - 1].ry[0]
+            _hub_close(
+                potential,
+                _hub_native_potential(occupation, u),
+                "native U/2 I - U n-transpose source",
+            )
+        else:
+            for name, matrix in (("occupation", occupation), ("potential", potential)):
+                for spin in range(nblock):
+                    _hub_hermitian(matrix[:, :, spin], f"native {name} spin {spin}")
+            expected_scalar = potential.mean(axis=2)
+            expected_magnetic = (
+                (potential[:, :, 0] - potential[:, :, 1]) / 2
+                if nblock == 2
+                else np.zeros_like(scalar)
+            )
+        _hub_close(scalar, expected_scalar, "scalar U coefficient split")
+        _hub_close(magnetic, expected_magnetic, "magnetic U coefficient split")
+        data.states.append(
+            QEHubbardState(
+                channel.channel,
+                channel.atom,
+                channel.species,
+                dim,
+                occupation,
+                potential,
+                scalar,
+                magnetic,
+                tuple(parts),
+            )
+        )
+
+
+def _hub_channel_columns(data, channel):
+    if data.envelope["collinear"]:
+        return np.flatnonzero(data.columns[:, 2] == channel)
+    rows = np.flatnonzero(data.spin_columns[:, 1] == channel)
+    return rows[np.lexsort((data.spin_columns[rows, 2], data.spin_columns[rows, 3]))]
+
+
+def _hub_source_matrix(data, spin):
+    result = np.zeros((data.envelope["ncol"],) * 2, dtype=complex)
+    spinor = not data.envelope["collinear"]
+    for state in data.states:
+        if spinor:
+            rows = _hub_channel_columns(data, state.channel)
+            result[np.ix_(rows, rows)] = _hub_dense(state.potential)
+        else:
+            for channel, first, width in state.parts:
+                rows = _hub_channel_columns(data, channel)
+                result[np.ix_(rows, rows)] = state.potential[
+                    first : first + width, first : first + width, spin - 1
+                ]
+    return result
+
+
+def _read_hubbard_kpoint(reader, data, context, index, spinor):
+    c = _HubbardRecord(reader, 18 if spinor else 10)
+    if spinor:
+        ik, npw, npol, ncol, nbnd = c.ints(5)
+        _hub_require(npol == 2, "dimension", "PW spin components")
+    else:
+        ik, npw, ncol, nbnd = c.ints(4)
+    _hub_require(
+        ik == index
+        and npw > 0
+        and (ncol, nbnd) == (data.envelope["ncol"], data.envelope["nbnd"]),
+        "dimension",
+        "per-k native coefficient dimensions/order",
+    )
+    xk, weight = c.reals(3), float(c.reals(1)[0])
+    spin = 1 if spinor else c.ints(1)[0]
+    _hub_require(
+        1 <= spin <= (1 if spinor else data.envelope["nspin"]),
+        "mapping",
+        "per-k spin index",
+    )
+    g_index = c.array("<i4", npw)
+    _hub_require(
+        np.all(g_index > 0) and len(np.unique(g_index)) == npw,
+        "mapping",
+        "missing or duplicate global PW indices",
+    )
+    wg, et = c.reals(nbnd), c.reals(nbnd)
+    coeff = c.array("<c16", (ncol, nbnd))
+    c.end()
+    _hub_close(xk, context["xk"][index - 1], "native/predecessor k vector")
+    _hub_close(weight, context["wk"][index - 1], "native/predecessor k weight")
+    _hub_close(wg, context["wg"][index - 1], "native/predecessor occupations")
+    _hub_close(et, context["et"][index - 1], "native/predecessor eigenvalues")
+    if not spinor:
+        _hub_require(
+            spin == context["isk"][index - 1], "mapping", "predecessor spin map"
+        )
+    data.kpoints.append(
+        QEHubbardKPoint(ik, npw, spin, xk, weight, g_index, wg, et, coeff)
+    )
+
+
+def _read_hubbard_action(reader, data, source_matrix, spinor):
+    kp = data.kpoints[-1]
+    c = _HubbardRecord(reader, 19 if spinor else 11)
+    if spinor:
+        ik, npw, npol, trials, ncol, algorithm, seed = c.ints(7)
+        _hub_require(npol == 2, "dimension", "action PW spin components")
+    else:
+        ik, npw, trials, ncol, algorithm, seed = c.ints(6)
+    _hub_require(
+        (ik, npw, trials, ncol, algorithm, seed)
+        == (kp.index, kp.npw, 3, data.envelope["ncol"], 1, 617021),
+        "validation",
+        "missing or inconsistent deterministic full-PW trials",
+    )
+    metrics = c.reals((7, 3))
+    projection = c.array("<c16", (ncol, 3))
+    rows = npw * (2 if spinor else 1)
+    wfcu = c.array("<c16", (rows, ncol))
+    psi, native, exported = (c.array("<c16", (rows, 3)) for _ in range(3))
+    c.end()
+    _hub_require(np.all(metrics >= 0), "validation", "negative action metrics")
+    # First trial is independently reproducible; beta-orthogonality remains
+    # a measured native gate because the entire beta bank is not in the ABI.
+    g = kp.global_g_index.astype(np.int64)
+    samples = []
+    for spin in range(2 if spinor else 1):
+        components = []
+        for stream in (1, 2):
+            state = (
+                seed
+                + ik * 104729
+                + 13007
+                + g * 48271
+                + spin * 15485863
+                + stream * 69621
+            ) % 2147483647
+            components.append(((state * 48271 + 1) % 2147483647) / 2147483647 - 0.5)
+        samples.append(components[0] + 1j * components[1])
+    trial = np.concatenate(samples)
+    trial /= np.linalg.norm(trial)
+    _hub_close(psi[:, 0], trial, "deterministic trial/global-G evidence", rtol=0)
+    rebuilt_projection = wfcu.conj().T @ psi
+    _hub_close(projection, rebuilt_projection, "independent PW trial contractions")
+    rebuilt = wfcu @ (source_matrix @ rebuilt_projection)
+    input_norm = np.linalg.norm(psi, axis=0)
+    native_norm = np.linalg.norm(native, axis=0)
+    exported_norm = np.linalg.norm(exported, axis=0)
+    difference = np.linalg.norm(native - exported, axis=0)
+    scale = np.maximum(native_norm, exported_norm)
+    relative = np.divide(
+        difference, scale, out=np.zeros(3), where=scale > np.finfo(float).tiny
+    )
+    for value, expected, name in (
+        (input_norm, np.ones(3), "trial normalization"),
+        (metrics[0], input_norm, "input action scales"),
+        (
+            metrics[2],
+            np.linalg.norm(rebuilt_projection, axis=0),
+            "projector-span scales",
+        ),
+        (metrics[3], native_norm, "native action scales"),
+        (metrics[4], exported_norm, "exported action scales"),
+        (metrics[5], difference, "absolute action residuals"),
+        (metrics[6], relative, "relative action residuals"),
+    ):
+        _hub_close(value, expected, name, rtol=1e-8)
+    _hub_close(
+        exported, rebuilt, "stored action versus independent WfcU V WfcU-dagger action"
+    )
+    rebuilt_difference = np.linalg.norm(native - rebuilt, axis=0)
+    rebuilt_scale = np.maximum(native_norm, np.linalg.norm(rebuilt, axis=0))
+    rebuilt_relative = np.divide(
+        rebuilt_difference,
+        rebuilt_scale,
+        out=np.zeros(3),
+        where=rebuilt_scale > np.finfo(float).tiny,
+    )
+    _hub_require(
+        np.all(relative[:2] <= 1e-10)
+        and np.all(rebuilt_relative[:2] <= 1e-10)
+        and native_norm[2] <= 1e-12
+        and difference[2] <= 1e-12
+        and rebuilt_difference[2] <= 1e-12
+        and metrics[1, 1] <= 1e-10
+        and metrics[2, 2] <= 1e-10,
+        "validation",
+        "full-PW relative/analytic-zero/span gate",
+    )
+    data.actions.append(
+        QEHubbardAction(
+            ik,
+            algorithm,
+            seed,
+            metrics,
+            projection,
+            wfcu,
+            psi,
+            native,
+            exported,
+        )
+    )
+
+
+def _read_hubbard_checks(reader, data, spinor):
+    # Native new_ns is serialized for every atom before native new_nsb.
+    states = sorted(
+        data.states, key=lambda s: (data.channels[s.channel - 1].kind, s.atom)
+    )
+    for state in states:
+        dim = state.dimension
+        c = _HubbardRecord(reader, 20 if spinor else 12)
+        expected = (
+            (state.channel, state.atom, state.species, dim, 2, 4)
+            if spinor
+            else (
+                state.channel,
+                state.atom,
+                state.species,
+                1 if data.channels[state.channel - 1].kind == 1 else 0,
+                dim,
+                data.envelope["nspin"],
+            )
+        )
+        _hub_require(
+            c.ints(6) == expected, "dimension", "occupation evidence ownership"
+        )
+        absolute, relative = map(float, c.reals(2))
+        shape = (dim, dim, 4 if spinor else data.envelope["nspin"])
+        dtype = "<c16" if spinor else "<f8"
+        native, rebuilt = c.array(dtype, shape), c.array(dtype, shape)
+        c.end()
+        if spinor:
+            _hub_hermitian(_hub_dense(native), "fresh native complex occupation")
+            _hub_hermitian(_hub_dense(rebuilt), "fresh exported complex occupation")
+        else:
+            for spin in range(data.envelope["nspin"]):
+                _hub_hermitian(native[:, :, spin], "fresh native occupation")
+                _hub_hermitian(rebuilt[:, :, spin], "fresh exported occupation")
+        measured_abs, measured_rel = _hub_residual(native, rebuilt)
+        _hub_require(
+            0 <= absolute <= 1e-12
+            and 0 <= relative <= 1e-10
+            and measured_abs <= 1e-12
+            and measured_rel <= 1e-10,
+            "validation",
+            "native occupation reconstruction gate",
+        )
+        _hub_close(absolute, measured_abs, "reported occupation absolute error")
+        _hub_close(
+            relative, measured_rel, "reported occupation relative error", rtol=1e-8
+        )
+        kind = 1 if spinor else expected[3]
+        data.occupation_checks.append(
+            QEHubbardCheck(
+                state.channel,
+                state.atom,
+                state.species,
+                kind,
+                absolute,
+                relative,
+                native,
+                rebuilt,
+            )
+        )
+    # Native symmetry may rotate orbitals/spins and exchange equivalent atoms.
+    # Species/kind total traces survive those operations; per-site matrices do not.
+    groups = {}
+    parts_by_channel = {state.channel: state.parts for state in data.states}
+    for check in data.occupation_checks:
+        groups.setdefault((check.species, check.kind), []).append(check)
+    for checks in groups.values():
+        rows = np.concatenate(
+            [
+                _hub_channel_columns(data, channel)
+                for check in checks
+                for channel, _, _ in parts_by_channel[check.channel]
+            ]
+        )
+        overlap_trace = sum(
+            float(np.dot(kp.wg, np.sum(np.abs(kp.coefficients[rows]) ** 2, axis=0)))
+            for kp in data.kpoints
+        )
+        if not spinor and data.envelope["nspin"] == 1:
+            overlap_trace *= 0.5
+        native_trace = sum(
+            float(
+                np.trace(check.native[:, :, 0] + check.native[:, :, 3]).real
+                if spinor
+                else np.trace(check.native, axis1=0, axis2=1).sum()
+            )
+            for check in checks
+        )
+        # Mean occupation uses the native per-entry tolerances without an
+        # arbitrary atom-count-dependent tolerance. wg already contains k weight.
+        count = sum(check.native.shape[0] for check in checks) * (
+            2 if spinor else data.envelope["nspin"]
+        )
+        _hub_close(
+            overlap_trace / count,
+            native_trace / count,
+            "native overlaps disagree with symmetry-invariant fresh occupation",
+        )
+    if not spinor:
+        return
+    for state in data.states:
+        dim = state.dimension
+        c = _HubbardRecord(reader, 23)
+        _hub_require(
+            c.ints(4) == (state.channel, state.atom, state.species, dim),
+            "dimension",
+            "potential evidence ownership",
+        )
+        absolute, relative = map(float, c.reals(2))
+        native = c.array("<c16", (dim, dim, 4))
+        rebuilt = c.array("<c16", (dim, dim, 4))
+        c.end()
+        expected = _hub_native_potential(
+            state.occupation, data.parameters[state.species - 1].ry[0]
+        )
+        _hub_close(native, state.potential, "frozen native potential evidence")
+        _hub_close(
+            rebuilt, expected, "independent frozen occupation/potential relation"
+        )
+        measured_abs, measured_rel = _hub_residual(native, rebuilt)
+        _hub_close(absolute, measured_abs, "reported potential absolute error")
+        _hub_close(
+            relative, measured_rel, "reported potential relative error", rtol=1e-8
+        )
+        _hub_require(
+            absolute >= 0
+            and relative >= 0
+            and relative <= 1e-10
+            and measured_rel <= 1e-10
+            and (np.max(np.abs(expected), initial=0) > 1e-12 or measured_abs <= 1e-12),
+            "validation",
+            "independent native potential gate",
+        )
+        data.potential_checks.append(
+            QEHubbardCheck(
+                state.channel,
+                state.atom,
+                state.species,
+                1,
+                absolute,
+                relative,
+                native,
+                rebuilt,
+            )
+        )
+
+
+def _read_hubbard_rotations(reader, data):
+    for state in data.states:
+        c = _HubbardRecord(reader, 22)
+        atom, nt, ch, dim, npol, blocks, nrot, ntangent, nstep, origin = c.ints(10)
+        _hub_require(
+            (atom, nt, ch, dim, npol, blocks, nrot, ntangent, nstep)
+            == (
+                state.atom,
+                state.species,
+                state.channel,
+                state.dimension,
+                2,
+                4,
+                3,
+                2,
+                3,
+            )
+            and origin in (0, 1, 2),
+            "dimension",
+            "rotation/tangent dimensions or ownership",
+        )
+        direction, axes, angles = c.reals(3), c.reals((3, 3)), c.reals(3)
+        metrics = {
+            name: c.reals(3)
+            for name in (
+                "su2_pauli",
+                "native_su2",
+                "action_relative",
+                "action_absolute",
+                "charge_absolute",
+                "scalar_absolute",
+            )
+        }
+        tangents, tangent_axes, steps = c.reals((3, 2)), c.reals((3, 2)), c.reals(3)
+        analytic = c.array("<c16", (dim, dim, 4, 2))
+        finite = c.array("<c16", (dim, dim, 4, 2, 3))
+        absolute, relative, convergence = (
+            c.reals((2, 3)),
+            c.reals((2, 3)),
+            c.reals((2, 2)),
+        )
+        c.end()
+        data.rotations.append(
+            QEHubbardRotation(
+                atom,
+                nt,
+                ch,
+                dim,
+                origin,
+                direction,
+                axes,
+                angles,
+                metrics,
+                tangents,
+                tangent_axes,
+                steps,
+                analytic,
+                finite,
+                absolute,
+                relative,
+                convergence,
+            )
+        )
+
+
+def _read_hubbard_frames(reader, data, context):
+    conversion = data.unit_conversion or RYTOEV
+    for atom, nt in enumerate(context["ityp"], 1):
+        c = _HubbardRecord(reader, 21)
+        site, species, count, origin = c.ints(4)
+        operator_max = float(c.reals(1)[0])
+        trace, trace_norm, direction = c.reals(3), float(c.reals(1)[0]), c.reals(3)
+        (map_id,) = c.ints(1)
+        occ_vector, occ_norm = c.reals(3), float(c.reals(1)[0])
+        potential_vector, map_residual = c.reals(3), float(c.reals(1)[0])
+        rank, discarded = c.ints(2)
+        gap, rcond, clean_gap, unit_residual = map(float, c.reals(4))
+        c.end()
+        _hub_require(
+            (site, species, count) == (atom, nt, context["nh"][nt - 1])
+            and origin in (0, 1, 2)
+            and map_id == 1,
+            "mapping",
+            "source-frame site/origin/map",
+        )
+        _hub_require(
+            (rcond, clean_gap) == (1e-6, 100.0),
+            "validation",
+            "source-frame conditioning policy",
+        )
+        n = count
+        if n:
+            gram = context["gram"][:n, :n, atom - 1]
+            _hub_hermitian(gram, "source-frame Gram")
+            spectrum = _qe_gram_spectrum_report(gram)
+            _hub_require(spectrum["retained"] > 0, "validation", "empty retained Gram")
+            try:
+                inverse = _qe_gram_inverse(gram)
+            except ValueError as exc:
+                raise QEHubbardError("validation", str(exc)) from exc
+            eigenvalues = np.asarray(spectrum["eigenvalues"])
+            dropped = eigenvalues[eigenvalues <= spectrum["cutoff"]]
+            kept = eigenvalues[eigenvalues > spectrum["cutoff"]]
+            expected_gap = (
+                float(kept.min() / dropped.max())
+                if dropped.size and dropped.max() > 0
+                else 0.0
+            )
+            expected_rank, expected_discarded = (
+                spectrum["retained"],
+                spectrum["discarded"],
+            )
+            smooth = np.stack(
+                [
+                    inverse @ context["field"][:n, :n, atom - 1, axis] @ inverse
+                    for axis in range(3)
+                ],
+                axis=-1,
+            )
+            _, magnetic = _hub_pauli(context["magnetic"][:n, :n, atom - 1])
+            xc = 2 * conversion * (smooth + magnetic)
+            component_max = max(
+                float(np.abs(2 * conversion * smooth).max()),
+                float(np.abs(2 * conversion * magnetic).max()),
+            )
+        else:
+            expected_rank = expected_discarded = 0
+            expected_gap = component_max = 0.0
+            xc = np.empty((0, 0, 3), dtype=complex)
+        _hub_require(
+            (rank, discarded) == (expected_rank, expected_discarded),
+            "validation",
+            "source-frame Gram ranks",
+        )
+        _hub_close(gap, expected_gap, "source-frame eigengap", rtol=1e-8, atol=1e-10)
+        expected_max = float(np.abs(xc).max(initial=0))
+        expected_trace = np.trace(xc, axis1=0, axis2=1).real
+        expected_norm = float(np.linalg.norm(expected_trace))
+        _hub_close(operator_max, expected_max, "original-XC source maximum")
+        _hub_close(trace, expected_trace, "original-XC source trace")
+        _hub_close(trace_norm, expected_norm, "original-XC source trace norm")
+        expected_origin = 0
+        expected_direction = np.zeros(3)
+        expected_occ = np.zeros(3)
+        expected_potential = np.zeros(3)
+        expected_occ_norm = expected_map = expected_unit = 0.0
+        if expected_norm > 1e-10:
+            expected_origin = 1
+            expected_direction = expected_trace / expected_norm
+            expected_unit = abs(np.linalg.norm(expected_direction) - 1)
+        else:
+            zero_budget = (
+                64 * np.finfo(float).eps * max(component_max, np.finfo(float).tiny)
+            )
+            _hub_require(
+                expected_max <= zero_budget,
+                "source",
+                "nonzero original XC has no Pauli-trace direction",
+            )
+            state = next((s for s in data.states if s.atom == atom), None)
+            if state is not None:
+                rho_trace = np.trace(state.occupation, axis1=0, axis2=1)
+                expected_occ = np.array(
+                    [
+                        (rho_trace[1] + rho_trace[2]).real,
+                        2 * rho_trace[1].imag,
+                        (rho_trace[0] - rho_trace[3]).real,
+                    ]
+                )
+                expected_occ_norm = float(np.linalg.norm(expected_occ))
+                expected_potential = np.trace(state.magnetic, axis1=0, axis2=1).real
+                u = data.parameters[nt - 1].ry[0]
+                native_potential = _hub_native_potential(state.occupation, u)
+                scale = max(
+                    float(np.abs(state.potential).max()),
+                    float(np.abs(native_potential).max()),
+                    np.finfo(float).tiny,
+                )
+                expected_map = (
+                    float(np.abs(state.potential - native_potential).max()) / scale
+                )
+                q_scale = max(
+                    np.linalg.norm(expected_potential),
+                    0.5 * abs(u) * expected_occ_norm,
+                    1e-30,
+                )
+                q_residual = (
+                    float(np.abs(expected_potential + 0.5 * u * expected_occ).max())
+                    / q_scale
+                )
+                _hub_require(
+                    expected_map <= 1e-10 and q_residual <= 1e-8,
+                    "validation",
+                    "native occupation-to-U frame map",
+                )
+                magnetic_max = float(np.abs(state.magnetic).max())
+                _hub_require(
+                    2 * conversion * magnetic_max <= 1e-10 or expected_occ_norm > 1e-12,
+                    "source",
+                    "magnetic U has no mapped reference direction",
+                )
+                if expected_occ_norm > 1e-12 and 2 * conversion * magnetic_max > 1e-10:
+                    expected_origin = 2
+                    expected_direction = expected_occ / expected_occ_norm
+                    expected_unit = max(
+                        q_residual,
+                        _hub_residual(state.potential, native_potential)[1],
+                        abs(np.linalg.norm(expected_direction) - 1),
+                    )
+        _hub_require(
+            origin == expected_origin, "source", "reference-frame origin is not XC/U"
+        )
+        for actual, expected, name in (
+            (direction, expected_direction, "reference direction"),
+            (occ_vector, expected_occ, "occupation-axis map"),
+            (occ_norm, expected_occ_norm, "occupation-axis norm"),
+            (potential_vector, expected_potential, "U trace-vector map"),
+            (map_residual, expected_map, "U coefficient map residual"),
+            (unit_residual, expected_unit, "frame-unit residual"),
+        ):
+            _hub_close(actual, expected, name, rtol=1e-8)
+        _hub_require(
+            unit_residual >= 0 and (not origin or unit_residual <= 1e-12),
+            "validation",
+            "source-frame unit/map gate",
+        )
+        data.frames.append(
+            QEHubbardFrame(
+                atom,
+                nt,
+                count,
+                origin,
+                operator_max,
+                trace,
+                trace_norm,
+                direction,
+                map_id,
+                occ_vector,
+                occ_norm,
+                potential_vector,
+                map_residual,
+                rank,
+                discarded,
+                gap,
+                rcond,
+                clean_gap,
+                unit_residual,
+            )
+        )
+
+
+def _hub_rotation(axis, angle, dim):
+    spin = np.cos(angle / 2) * np.eye(2) - 1j * np.sin(angle / 2) * np.einsum(
+        "a,aij->ij", axis, PAULI_MATRICES
+    )
+    return np.kron(spin, np.eye(dim))
+
+
+def _hub_rotated_native(state, u, axis, angle):
+    q = _hub_rotation(axis, angle, state.dimension)
+    occupation = q.conj() @ _hub_dense(state.occupation) @ q.T
+    return _hub_native_potential(_hub_blocks(occupation), u)
+
+
+def _validate_hubbard_rotations(data):
+    base_source = _hub_source_matrix(data, 1)
+    action = data.actions[0]
+    projection = action.wfcu.conj().T @ action.psi[:, 0]
+    for state, rotation in zip(data.states, data.rotations, strict=True):
+        frame = data.frames[state.atom - 1]
+        _hub_require(
+            rotation.frame_origin == frame.origin, "source", "tangent frame origin"
+        )
+        _hub_close(
+            rotation.reference_direction, frame.direction, "rotation reference frame"
+        )
+        axes = np.array(
+            [[1, 0, 1 / np.sqrt(14)], [0, 1, 2 / np.sqrt(14)], [0, 0, 3 / np.sqrt(14)]]
+        )
+        _hub_close(rotation.axes, axes, "quarter-turn and tilted probe axes")
+        _hub_close(
+            rotation.angles,
+            [np.pi / 2, np.pi / 2, 2 * np.pi / 5],
+            "quarter-turn and tilted probe angles",
+        )
+        _hub_close(
+            rotation.steps, [1e-3, 5e-4, 2.5e-4], "tangent refinement steps", rtol=0
+        )
+        _hub_require(
+            all(np.all(v >= 0) for v in rotation.metrics.values())
+            and np.all(rotation.tangent_absolute_error >= 0)
+            and np.all(rotation.tangent_relative_error >= 0)
+            and np.all(rotation.step_convergence >= 0),
+            "validation",
+            "negative rotation or derivative residual",
+        )
+        tangents = np.zeros((3, 2))
+        tangent_axes = np.zeros((3, 2))
+        if frame.origin:
+            reference = (
+                np.array([1.0, 0.0, 0.0])
+                if abs(frame.direction[0]) < 0.9
+                else np.array([0.0, 1.0, 0.0])
+            )
+            tangents[:, 0] = (
+                reference - np.dot(reference, frame.direction) * frame.direction
+            )
+            tangents[:, 0] /= np.linalg.norm(tangents[:, 0])
+            tangents[:, 1] = np.cross(frame.direction, tangents[:, 0])
+            tangent_axes = np.cross(frame.direction, tangents.T).T
+        _hub_close(
+            rotation.tangent_directions, tangents, "transverse tangent directions"
+        )
+        _hub_close(rotation.tangent_axes, tangent_axes, "positive rotation axes")
+        u = data.parameters[state.species - 1].ry[0]
+        rows = _hub_channel_columns(data, state.channel)
+        source = _hub_dense(state.potential)
+        for ir in range(3):
+            axis, angle = axes[:, ir], rotation.angles[ir]
+            q = _hub_rotation(axis, angle, state.dimension)
+            su2 = _hub_blocks(q @ source @ q.conj().T)
+            native = _hub_rotated_native(state, u, axis, angle)
+            # Rodrigues rotation of the Pauli vector is independent of SU(2).
+            magnetic = (
+                state.magnetic * np.cos(angle)
+                + np.cross(axis, state.magnetic) * np.sin(angle)
+                + np.einsum("a,ija->ij", axis, state.magnetic)[:, :, None]
+                * axis
+                * (1 - np.cos(angle))
+            )
+            pauli = _hub_magnetic_blocks(magnetic)
+            pauli[:, :, 0] += state.scalar
+            pauli[:, :, 3] += state.scalar
+            _, su2_error = _hub_residual(su2, pauli)
+            _, native_error = _hub_residual(native, su2)
+            _hub_require(
+                su2_error <= 1e-10 and native_error <= 1e-10,
+                "validation",
+                "finite SU(2)/Pauli/native coefficient rotation",
+            )
+            _hub_close(
+                rotation.metrics["su2_pauli"][ir],
+                su2_error,
+                "measured SU(2)/Pauli residual",
+            )
+            _hub_close(
+                rotation.metrics["native_su2"][ir],
+                native_error,
+                "measured native/SU(2) residual",
+            )
+            native_source, exported_source = base_source.copy(), base_source.copy()
+            native_source[np.ix_(rows, rows)] = _hub_dense(native)
+            exported_source[np.ix_(rows, rows)] = _hub_dense(pauli)
+            native_action = action.wfcu @ (native_source @ projection)
+            exported_action = action.wfcu @ (exported_source @ projection)
+            absolute, relative = _hub_residual(native_action, exported_action)
+            scale = max(np.linalg.norm(native_action), np.linalg.norm(exported_action))
+            _hub_require(
+                relative <= 1e-10 if scale > 1e-12 else absolute <= 1e-12,
+                "validation",
+                "finite-rotation full-PW action",
+            )
+            for name, measured in (
+                ("action_absolute", absolute),
+                ("action_relative", relative),
+            ):
+                _hub_close(rotation.metrics[name][ir], measured, f"measured {name}")
+            rotated_n = _hub_blocks(q.conj() @ _hub_dense(state.occupation) @ q.T)
+            charge_abs, charge_rel = _hub_residual(
+                rotated_n[:, :, 0] + rotated_n[:, :, 3],
+                state.occupation[:, :, 0] + state.occupation[:, :, 3],
+            )
+            scalar_abs, scalar_rel = _hub_residual(_hub_pauli(native)[0], state.scalar)
+            _hub_require(
+                charge_rel <= 1e-10 and scalar_rel <= 1e-10,
+                "validation",
+                "rotation changed frozen charge or scalar potential",
+            )
+            _hub_close(
+                rotation.metrics["charge_absolute"][ir],
+                charge_abs,
+                "charge invariant residual",
+            )
+            _hub_close(
+                rotation.metrics["scalar_absolute"][ir],
+                scalar_abs,
+                "scalar invariant residual",
+            )
+        if not frame.origin:
+            for value in (
+                rotation.analytic,
+                rotation.central_difference,
+                rotation.tangent_absolute_error,
+                rotation.tangent_relative_error,
+                rotation.step_convergence,
+            ):
+                _hub_require(
+                    not np.any(value),
+                    "source",
+                    "undefined frame has manufactured tangents",
+                )
+            continue
+        for tangent in range(2):
+            axis = tangent_axes[:, tangent]
+            analytic = _hub_magnetic_blocks(np.cross(axis, state.magnetic))
+            _hub_close(
+                rotation.analytic[:, :, :, tangent],
+                analytic,
+                "analytic dVmag/dtheta, not twice Vmag",
+            )
+            for step, h in enumerate(rotation.steps):
+                plus = _hub_pauli(_hub_rotated_native(state, u, axis, h))[1]
+                minus = _hub_pauli(_hub_rotated_native(state, u, axis, -h))[1]
+                finite = _hub_magnetic_blocks((plus - minus) / (2 * h))
+                _hub_close(
+                    rotation.central_difference[:, :, :, tangent, step],
+                    finite,
+                    "independent native central difference",
+                    rtol=1e-9,
+                )
+                absolute, relative = _hub_residual(analytic, finite)
+                _hub_close(
+                    rotation.tangent_absolute_error[tangent, step],
+                    absolute,
+                    "measured derivative absolute error",
+                    rtol=1e-8,
+                )
+                _hub_close(
+                    rotation.tangent_relative_error[tangent, step],
+                    relative,
+                    "measured derivative relative error",
+                    rtol=1e-8,
+                )
+                _hub_require(
+                    absolute <= 1e-12
+                    if np.abs(analytic).max(initial=0) <= 1e-12
+                    else relative <= 1e-6,
+                    "validation",
+                    "central-difference derivative gate",
+                )
+            for step in range(2):
+                first = rotation.central_difference[:, :, :, tangent, step]
+                second = rotation.central_difference[:, :, :, tangent, step + 1]
+                absolute, relative = _hub_residual(first, second)
+                _hub_close(
+                    rotation.step_convergence[tangent, step],
+                    relative,
+                    "measured tangent refinement",
+                    rtol=1e-8,
+                )
+                _hub_require(
+                    absolute <= 1e-12
+                    if max(np.abs(first).max(), np.abs(second).max()) <= 1e-12
+                    else relative <= 1e-6,
+                    "validation",
+                    "tangent step-refinement gate",
+                )
+
+
+def _read_hubbard_restoration(reader, data):
+    c = _HubbardRecord(reader, 24)
+    names = (
+        "evc_abs",
+        "wfcu_abs",
+        "vkb_abs",
+        "becp_r_abs",
+        "becp_k_abs",
+        "becp_nc_abs",
+        "deeq_abs",
+        "deeq_nc_abs",
+        "rho_ns_nc_abs",
+        "v_ns_nc_abs",
+    )
+    data.restoration = dict(zip(names, map(float, c.reals(10)), strict=True))
+    flags = (
+        "dims_equal",
+        "current_k_equal",
+        "npw_equal",
+        "current_spin_equal",
+        "lda_u_equal",
+    )
+    data.restoration.update(zip(flags, c.ints(5), strict=True))
+    data.restoration["native_action_abs"] = float(c.reals(1)[0])
+    c.end()
+    _hub_require(
+        all(0 <= data.restoration[k] <= 1e-12 for k in (*names, "native_action_abs"))
+        and all(data.restoration[k] == 1 for k in flags),
+        "validation",
+        "native state/action was not completely restored",
+    )
+
+
+def _read_hubbard_validation(reader, data, context, profile):
+    c = _HubbardRecord(reader, 14)
+    active, restored, action_restored, trials, algorithm, seed = c.ints(6)
+    measured = c.reals(6)
+    (source_method,) = c.ints(1)
+    source_difference, source_scale, restore_error, unit_bridge = map(float, c.reals(4))
+    c.end()
+    _hub_require(
+        active == data.envelope["active"] and restored == 1,
+        "validation",
+        "missing final source-state restoration",
+    )
+    _hub_require(
+        np.all(measured >= 0)
+        and min(source_difference, source_scale, restore_error, unit_bridge) >= 0,
+        "validation",
+        "negative final validation residual/scale",
+    )
+    if active:
+        _hub_require(
+            (action_restored, trials, algorithm, seed) == (1, 3, 1, 617021),
+            "validation",
+            "missing restored native action probe",
+        )
+        _hub_require(
+            np.all(measured <= [1e-10, 1e-12, 1e-10, 1e-12, 1e-10, 1e-12])
+            and restore_error <= 1e-12,
+            "validation",
+            "aggregate action/occupation/restoration gate",
+        )
+        if profile in ("kb", "spinor"):
+            carrier = context["deeq"] if profile == "kb" else context["total"]
+            retained_scale = max(
+                (
+                    float(np.abs(carrier[:count, :count, atom, :]).max())
+                    for atom, count in enumerate(context["nh"][context["ityp"] - 1])
+                    if count
+                ),
+                default=0.0,
+            )
+            if profile == "kb":
+                _hub_close(
+                    source_scale,
+                    retained_scale,
+                    "reported deeq scale differs from populated carrier",
+                    atol=1e-12,
+                    rtol=1e-12,
+                    code="source",
+                )
+                source_scale = retained_scale
+                data.provenance["carrier_scale_evidence"] = (
+                    "populated_deeq_reconstructed"
+                )
+            else:
+                # QE also measures a real deeq bank that NC1.2 does not export.
+                # The retained complex bank provides a lower bound, not equality.
+                _hub_require(
+                    source_scale + 1e-12 * max(1, retained_scale) >= retained_scale,
+                    "source",
+                    "reported combined carrier scale is below retained deeq_nc",
+                )
+                data.provenance["carrier_scale_evidence"] = (
+                    "native_combined_scale_deeq_nc_lower_bound_only"
+                )
+        else:
+            data.provenance["carrier_scale_evidence"] = "native_measurement_only"
+        _hub_require(
+            source_method == (1 if data.envelope["nkb"] else 2)
+            and source_difference <= 1e-12 * max(1, source_scale)
+            and (source_method != 2 or source_difference == source_scale == 0),
+            "source",
+            "native deeq carrier not independently shown to be U-free",
+        )
+        _hub_close(unit_bridge, data.unit_bridge_residual, "final unit bridge")
+        for index, kind in ((2, 1), (4, 0)):
+            checks = [g for g in data.occupation_checks if g.kind == kind]
+            expected = [
+                max((g.relative_error for g in checks), default=0),
+                max((g.absolute_error for g in checks), default=0),
+            ]
+            _hub_close(
+                measured[index : index + 2], expected, "aggregate occupation evidence"
+            )
+        expected_action = [
+            max(float(a.metrics[6, :2].max()) for a in data.actions),
+            max(float(a.metrics[3, 2]) for a in data.actions),
+        ]
+        _hub_close(measured[:2], expected_action, "aggregate full-PW action evidence")
+    else:
+        _hub_require(
+            (action_restored, trials, algorithm, seed, source_method) == (0, 0, 0, 0, 0)
+            and not np.any(measured)
+            and source_difference == source_scale == restore_error == unit_bridge == 0,
+            "source",
+            "absent-U stream contains active validation payload",
+        )
+    data.validation = dict(
+        active=active,
+        restored=restored,
+        action_restored=action_restored,
+        ntrial=trials,
+        algorithm=algorithm,
+        seed=seed,
+        action_relative=float(measured[0]),
+        analytic_zero_absolute_Ry=float(measured[1]),
+        main_occupation_relative=float(measured[2]),
+        main_occupation_absolute=float(measured[3]),
+        background_occupation_relative=float(measured[4]),
+        background_occupation_absolute=float(measured[5]),
+        source_method=source_method,
+        source_difference_Ry=source_difference,
+        source_scale_Ry=source_scale,
+        restored_action_absolute_Ry=restore_error,
+        unit_bridge_residual=unit_bridge,
+    )
+    _hub_require(reader.at_eof(), "layout", "trailing bytes after final validation")
+    data.complete = True
+
+
+def _parse_qe_hubbard(reader, context, profile):
+    data = _read_hubbard_header(reader, context, profile)
+    spinor = profile == "spinor"
+    _read_hubbard_maps(reader, data, context, spinor)
+    if spinor:
+        _read_hubbard_spin_layout(reader, data)
+    if data.state == "active":
+        _read_hubbard_states(reader, data, spinor)
+        sources = {
+            spin: _hub_source_matrix(data, spin)
+            for spin in range(1, 2 if spinor else data.envelope["nspin"] + 1)
+        }
+        for index in range(1, data.envelope["nks"] + 1):
+            _read_hubbard_kpoint(reader, data, context, index, spinor)
+            _read_hubbard_action(reader, data, sources[data.kpoints[-1].spin], spinor)
+        _read_hubbard_checks(reader, data, spinor)
+        if spinor:
+            _read_hubbard_rotations(reader, data)
+    if spinor:
+        _read_hubbard_frames(reader, data, context)
+        if data.state == "active":
+            _validate_hubbard_rotations(data)
+            _read_hubbard_restoration(reader, data)
+    _read_hubbard_validation(reader, data, context, profile)
+    return data
+
+
+def _qe_hubbard_admission(dump, legacy_no_u):
+    if dump.hubbard.state == "unknown":
+        _hub_require(
+            legacy_no_u is True,
+            "legacy_attestation",
+            "legacy input has unknown Hubbard state; explicit legacy_no_u=True required",
+        )
+        return {
+            "hubbard_state": "user_attested_no_u",
+            "legacy_no_u": True,
+            "hubbard_provenance": {
+                "origin": "user_attestation",
+                "native_state": "unknown",
+            },
+        }
+    _hub_require(
+        dump.hubbard.complete, "validation", "incomplete native Hubbard source"
+    )
+    _hub_require(
+        dump.hubbard.state != "active",
+        "normalization_pending",
+        "active native U requires joint XC+U source normalization",
+    )
+    return {
+        "hubbard_state": "absent",
+        "legacy_no_u": False,
+        "hubbard_provenance": {
+            "origin": "native_extension",
+            "native_state": "absent",
+            "native_revision": dump.hubbard.provenance["native_revision"],
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Raw dump container
 # ---------------------------------------------------------------------------
@@ -346,6 +2115,7 @@ class QEProjectorDump:
     dbeta_xc: np.ndarray | None
     ddd_paw: np.ndarray | None
     ofsbeta: np.ndarray
+    hubbard: QEHubbardData = field(default_factory=QEHubbardData)
 
     @property
     def nh_per_atom(self) -> np.ndarray:
@@ -419,6 +2189,7 @@ class QEAtomicDump:
     cov_xc: np.ndarray
     cov_aug: np.ndarray
     ofswfc: np.ndarray
+    hubbard: QEHubbardData = field(default_factory=QEHubbardData)
 
     @property
     def nsite_per_atom(self) -> np.ndarray:
@@ -537,7 +2308,7 @@ def parse_qe_dump(path) -> QEProjectorDump:
         # layout error.
         payload = reader.read_raw("header")
         magic_raw = bytes(np.frombuffer(payload[:16], dtype="S16")[0])
-        if magic_raw.rstrip(b" \x00") == _MAGIC_ATOMIC:
+        if magic_raw.rstrip(b" \x00") in _ATOMIC_MAGICS:
             raise ValueError(
                 f"QE dump {path}: atomic-wavefunction dump (magic "
                 f"'{ATOMIC_MAGIC}'); use parse_qe_atomic_dump/"
@@ -559,7 +2330,7 @@ def parse_qe_dump(path) -> QEProjectorDump:
         nspin, nks, nkstot, nbnd, nat, nsp, nhm, lmaxkb, nkb = (
             int(v) for v in np.frombuffer(payload[16:], dtype="<i4")
         )
-        if nspin != 2:
+        if nspin != 2 and not (version == "1.3" and nspin == 1):
             raise ValueError(
                 f"QE dump {path}: nspin={nspin}; TB2J requires a collinear "
                 f"LSDA (nspin=2) calculation"
@@ -652,17 +2423,42 @@ def parse_qe_dump(path) -> QEProjectorDump:
         dbeta_xc = None
         ddd_paw = None
         npack = nhm * (nhm + 1) // 2
-        if version in ("1.1", "1.2"):
+        if version in ("1.1", "1.2", "1.3"):
             becsum = reader.array("becsum", "<f8", (npack, nat, nspin))
             # rho%bec is written only for PAW runs (okpaw at dump time).
             if any(bool(f) for f in tpawp):
                 rho_bec = reader.array("rho_bec", "<f8", (npack, nat, nspin))
-        if version == "1.2":
+        if version in ("1.2", "1.3"):
             # <beta_i | V_xc(up) - V_xc(dn) | beta_j> per atom (Ry); plus,
             # for PAW runs, the spin-resolved one-center D^1 coefficients.
             dbeta_xc = reader.array("dbeta_xc", "<f8", (nhm, nhm, nat))
             if any(bool(f) for f in tpawp):
                 ddd_paw = reader.array("ddd_paw", "<f8", (npack, nat, nspin))
+        hubbard = QEHubbardData()
+        if version == "1.3":
+            hubbard = _parse_qe_hubbard(
+                reader,
+                dict(
+                    nspin=nspin,
+                    nks=nks,
+                    nbnd=nbnd,
+                    nat=nat,
+                    nsp=nsp,
+                    nkb=nkb,
+                    ityp=ityp,
+                    atm=atm,
+                    nh=nh,
+                    deeq=deeq,
+                    tvanp=tvanp,
+                    tpawp=tpawp,
+                    xk=xk,
+                    wk=wk,
+                    isk=isk,
+                    et=et,
+                    wg=wg,
+                ),
+                "kb",
+            )
         if not reader.at_eof():
             raise ValueError(
                 f"QE dump {path}: unexpected trailing data after the last "
@@ -720,6 +2516,7 @@ def parse_qe_dump(path) -> QEProjectorDump:
         dbeta_xc=dbeta_xc,
         ddd_paw=ddd_paw,
         ofsbeta=ofsbeta,
+        hubbard=hubbard,
     )
 
 
@@ -749,7 +2546,7 @@ def parse_qe_atomic_dump(path) -> QEAtomicDump:
         # here gets the friendly magic error instead of a layout error.
         payload = reader.read_raw("header")
         magic_raw = bytes(np.frombuffer(payload[:16], dtype="S16")[0])
-        if magic_raw.rstrip(b" \x00") != _MAGIC_ATOMIC:
+        if magic_raw.rstrip(b" \x00") not in _ATOMIC_MAGICS:
             raise ValueError(
                 f"QE atomic dump {path}: unknown magic {magic_raw!r}; expected "
                 f"'{ATOMIC_MAGIC}' (select at QE runtime with "
@@ -868,6 +2665,26 @@ def parse_qe_atomic_dump(path) -> QEAtomicDump:
         # -- records 8+2*nks / 9+2*nks: BZ-weighted R=0 onsite vertex ---------
         cov_xc = reader.array("cov_xc", "<c16", (max_nsite, max_nsite, nat))
         cov_aug = reader.array("cov_aug", "<c16", (max_nsite, max_nsite, nat))
+        hubbard = QEHubbardData()
+        if magic_raw.rstrip(b" \x00") == MAGIC_ATOMIC_HUBBARD:
+            hubbard = _parse_qe_hubbard(
+                reader,
+                dict(
+                    nspin=nspin,
+                    nks=nks,
+                    nbnd=nbnd,
+                    nat=nat,
+                    nsp=nsp,
+                    ityp=ityp,
+                    atm=atm,
+                    xk=xk,
+                    wk=wk,
+                    isk=isk,
+                    et=et,
+                    wg=wg,
+                ),
+                "atomic",
+            )
         if not reader.at_eof():
             raise ValueError(
                 f"QE atomic dump {path}: unexpected trailing data after the "
@@ -919,6 +2736,7 @@ def parse_qe_atomic_dump(path) -> QEAtomicDump:
         cov_xc=cov_xc,
         cov_aug=cov_aug,
         ofswfc=ofswfc,
+        hubbard=hubbard,
     )
 
 
@@ -1026,7 +2844,7 @@ def _fermi_pair(dump) -> tuple:
     return dump.ef * RYTOEV, efermi_spin, efermi_source
 
 
-def read_qe_dump(path) -> ProjectorGreenData:
+def read_qe_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     """Read a QE ``becp_dump`` file into exchange-ready projector Green data.
 
     Normalizes dumped units (Ry -> eV, alat/Bohr -> Angstrom, cartesian k in
@@ -1037,6 +2855,8 @@ def read_qe_dump(path) -> ProjectorGreenData:
     from TB2J.interfaces.abinit_paw import BOHR_TO_ANGSTROM
 
     dump = parse_qe_dump(path)
+    hubbard_metadata = _qe_hubbard_admission(dump, legacy_no_u)
+    _hub_require(dump.nspin == 2, "unsupported", "collinear exchange requires nspin=2")
 
     # -- dense spin-degenerate k mesh from isk --------------------------------
     up, dn, perm, nk, kpoints, weights = _fold_spin_mesh(dump, dump.path)
@@ -1130,6 +2950,7 @@ def read_qe_dump(path) -> ProjectorGreenData:
     }
 
     metadata = {
+        **hubbard_metadata,
         "source": ("Quantum ESPRESSO TB2J_DUMP projector dump (PW/src/becp_dump.f90)"),
         "source_code": "qe",
         "dump_version": dump.version,
@@ -1219,7 +3040,7 @@ def read_qe_dump(path) -> ProjectorGreenData:
 # ---------------------------------------------------------------------------
 # read_qe_atomic_dump: ProjectorGreenData normalization (atomic family)
 # ---------------------------------------------------------------------------
-def read_qe_atomic_dump(path) -> ProjectorGreenData:
+def read_qe_atomic_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     """Read a QE atomic-wavefunction dump into projector Green data.
 
     The UPF pseudo-atomic coefficients ``C = <phi|psi>`` from QE
@@ -1236,6 +3057,7 @@ def read_qe_atomic_dump(path) -> ProjectorGreenData:
     from TB2J.interfaces.abinit_paw import BOHR_TO_ANGSTROM
 
     dump = parse_qe_atomic_dump(path)
+    hubbard_metadata = _qe_hubbard_admission(dump, legacy_no_u)
 
     # -- dense spin-degenerate k mesh from isk --------------------------------
     up, dn, perm, nk, kpoints, weights = _fold_spin_mesh(dump, dump.path)
@@ -1303,12 +3125,13 @@ def read_qe_atomic_dump(path) -> ProjectorGreenData:
     }
 
     metadata = {
+        **hubbard_metadata,
         "source": (
             "Quantum ESPRESSO TB2J_DUMP atomic-wavefunction projector dump "
             "(PW/src/becp_dump.f90, TB2J_PROJECTORS=atomic)"
         ),
         "source_code": "qe",
-        "dump_version": "1.0",
+        "dump_version": _ATOMIC_MAGICS[dump.magic.encode("ascii")],
         "qe_magic": dump.magic,
         "qe_npool_ok": dump.nkstot == dump.nks,
         "projector_source_mode": "qe_atomic_wfc",
@@ -1438,6 +3261,7 @@ class QESpinorDump:
     projected_field: np.ndarray
     becsum: np.ndarray
     d_response: np.ndarray | None = None
+    hubbard: QEHubbardData = field(default_factory=QEHubbardData)
 
     @property
     def nh_per_atom(self):
@@ -1490,18 +3314,19 @@ def _validate_qe_spinor_mesh(kpoints, weights, path):
 
 
 def parse_qe_spinor_dump(path) -> QESpinorDump:
-    """Strictly parse the KB-only NC spinor ABI (NC1.0 or NC1.1).
+    """Strictly parse the KB-only NC spinor ABI (NC1.0, NC1.1 or NC1.2).
 
     NC1.0 ends after the reserved-zero ``becsum`` record; NC1.1 appends
     record ``13+nks``: the nine native source-response blocks
     ``D_response(nhm, nhm, nat, 4, 3, 3)`` in Fortran order
     ``(ih, jh, na, spinblock, c, j)`` (``c`` = target Pauli slot,
     ``j`` = original source axis), used to build the explicit
-    frozen-source tangent vertices. Both versions require finite values,
-    complex-Hermitian site blocks and exact EOF; NC1.1 additionally
+    frozen-source tangent vertices. All versions require finite values,
+    complex-Hermitian site blocks and exact EOF; NC1.1 and NC1.2 additionally
     enforces the diagonal identity gate
     ``sum_j D_response(:,:,:,:,j,j) == deeq_nc_magnetic`` at 1e-8
     relative tolerance per site.
+    NC1.2 then requires the complete typed native Hubbard extension.
     """
     path = Path(path)
     with open(path, "rb") as fh:
@@ -1576,7 +3401,12 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
             [(name, "<i4", nsp) for name in ("nh", "tvanp", "tpawp", "has_so")],
         )
         nh = np.array(meta["nh"], dtype=int)
-        if np.any(nh <= 0) or int(nh.max()) != nhm or int(nh[ityp - 1].sum()) != nkb:
+        minimum_nh = 0 if version == "1.2" else 1
+        if (
+            np.any(nh < minimum_nh)
+            or int(nh.max()) != nhm
+            or int(nh[ityp - 1].sum()) != nkb
+        ):
             raise ValueError(f"QE spinor dump {path}: nh/nhm/nkb site counts disagree")
         for name in ("tvanp", "tpawp", "has_so"):
             if np.any((meta[name] != 0) & (meta[name] != 1)):
@@ -1610,9 +3440,32 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
         field = reader.array("projected Pauli field", "<c16", (nhm, nhm, nat, 3))
         becsum = reader.array("spinor becsum", "<f8", (nhm * (nhm + 1) // 2, nat, 4))
         d_response = None
-        if version == "1.1":
+        if version in ("1.1", "1.2"):
             d_response = reader.array(
                 "source response D", "<c16", (nhm, nhm, nat, 4, 3, 3)
+            )
+        hubbard = QEHubbardData()
+        if version == "1.2":
+            hubbard = _parse_qe_hubbard(
+                reader,
+                dict(
+                    **dims,
+                    ityp=ityp,
+                    atm=atm,
+                    nh=nh,
+                    tvanp=tvanp,
+                    tpawp=tpawp,
+                    has_so=has_so,
+                    gram=gram,
+                    field=field,
+                    magnetic=magnetic,
+                    total=total,
+                    xk=xk,
+                    wk=wk,
+                    et=et,
+                    wg=wg,
+                ),
+                "spinor",
             )
         if not reader.at_eof():
             raise ValueError(
@@ -1660,7 +3513,11 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
                 field[:, :, site, axis], "projected Pauli field", path
             )
         _require_qe_hermitian(gram[:, :, site], "beta Gram", path)
-        if np.linalg.eigvalsh(gram[:count, :count, site]).min() <= 0:
+        if (
+            count
+            and version != "1.2"
+            and np.linalg.eigvalsh(gram[:count, :count, site]).min() <= 0
+        ):
             raise ValueError(
                 f"QE spinor dump {path}: beta Gram must be positive definite"
             )
@@ -1709,11 +3566,11 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
                     "the diagonal identity gate sum_j D_response(:,:,:,:,j,j) "
                     "== deeq_nc_magnetic (relative tolerance 1e-8)"
                 )
-    if not magnetic_source_present:
+    if not magnetic_source_present and hubbard.state == "unknown":
         raise ValueError(f"QE spinor dump {path}: zero magnetic source")
     return QESpinorDump(
         path=path,
-        magic=SPINOR_MAGIC if version == "1.0" else SPINOR_MAGIC_NC11,
+        magic=bytes(header[:16]).rstrip(b" ").decode("ascii"),
         version=version,
         **dims,
         nelec=nelec,
@@ -1745,6 +3602,7 @@ def parse_qe_spinor_dump(path) -> QESpinorDump:
         projected_field=field,
         becsum=becsum,
         d_response=d_response,
+        hubbard=hubbard,
     )
 
 
@@ -1884,7 +3742,7 @@ def _spinor_tangent_vertices_from_response(dump, operator, path):
     return vertices
 
 
-def read_qe_spinor_dump(path) -> ProjectorGreenData:
+def read_qe_spinor_dump(path, *, legacy_no_u=False) -> ProjectorGreenData:
     """Map NC spinor coefficients to a spinor operator and tangent vertices.
 
     NC1.0 stays scalar-relativistic only (SO-bearing rejected fail-closed);
@@ -1894,6 +3752,13 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
     from TB2J.interfaces.abinit_paw import BOHR_TO_ANGSTROM
 
     dump = parse_qe_spinor_dump(path)
+    hubbard_metadata = _qe_hubbard_admission(dump, legacy_no_u)
+    if dump.hubbard.state == "absent":
+        _hub_require(
+            any(frame.origin for frame in dump.hubbard.frames),
+            "source",
+            "no defined native magnetic reference direction for exchange",
+        )
     if dump.version == "1.0" and (dump.lspinorb or np.any(dump.has_so)):
         raise ValueError(
             "QE NC1.0 SO-bearing projector dump lacks native source-resolved "
@@ -1944,7 +3809,7 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
         )
     vertices = None
     tangent_definition = None
-    if dump.version == "1.1":
+    if dump.version in ("1.1", "1.2"):
         vertices = _spinor_tangent_vertices_from_response(dump, operator, path)
         tangent_definition = SPINOR_TANGENT_DEFINITION
         if not dump.lspinorb:
@@ -2004,6 +3869,7 @@ def read_qe_spinor_dump(path) -> ProjectorGreenData:
         operator_basis=OPERATOR_BASIS,
         population_metric="QE spinor becsum reserved zero record; not an occupation reference",
         metadata={
+            **hubbard_metadata,
             "source": f"QE PW/src/becp_dump.f90 NC{dump.version}",
             "source_code": "qe",
             "qe_magic": dump.magic,
@@ -2115,6 +3981,8 @@ def gen_exchange_qe(
     overlap_mode=None,
     overlap_rcond=None,
     leg_consistency_atol_eV=None,
+    *,
+    legacy_no_u=False,
 ):
     """Generate projector exchange output from a QE projector dump file.
 
@@ -2172,7 +4040,8 @@ def gen_exchange_qe(
         )
 
         references = {
-            axis: read_qe_spinor_dump(filename[axis]) for axis in ("x", "y", "z")
+            axis: read_qe_spinor_dump(filename[axis], legacy_no_u=legacy_no_u)
+            for axis in ("x", "y", "z")
         }
         baseline = references["z"].metadata
         for axis, reference in references.items():
@@ -2275,14 +4144,14 @@ def gen_exchange_qe(
         )
 
     magic = _sniff_qe_dump_magic(filename)
-    if magic.rstrip(b" ") in (MAGIC_SPINOR, MAGIC_SPINOR_NC11):
+    if magic.rstrip(b" ") in _SPINOR_MAGICS:
         raise ValueError(
             "a single QE spinor dump measures only a transverse leg; standard "
             "exchange.out requires independent x/y/z dumps (--input_x/y/z). "
             "Use read_qe_spinor_dump and compute_spinor_projector_exchange for a raw leg"
         )
-    if magic.rstrip(b" \x00") == _MAGIC_ATOMIC:
-        data = read_qe_atomic_dump(filename)
+    if magic.rstrip(b" \x00") in _ATOMIC_MAGICS:
+        data = read_qe_atomic_dump(filename, legacy_no_u=legacy_no_u)
     elif magic.rstrip(b" ") in _MAGIC_VERSIONS:
         if overlap_mode is not None or overlap_rcond is not None:
             raise ValueError(
@@ -2293,7 +4162,7 @@ def gen_exchange_qe(
                 "coefficients are already dual, so there is no inverse to "
                 "control"
             )
-        data = read_qe_dump(filename)
+        data = read_qe_dump(filename, legacy_no_u=legacy_no_u)
     else:
         raise ValueError(f"QE dump {filename}: unknown magic/version {magic!r}")
 

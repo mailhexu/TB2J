@@ -479,10 +479,70 @@ one-time filtering of the original atomic exchange frame. Run them with the
 ``mydev`` environment. They are algebraic checks, not native action or
 exchange certification.
 
-These derivations do not enable DFT+U export or complete XC+U exchange.
-The current collinear formats do not record Hubbard activity and must not
-be treated as evidence that a calculation was Hubbard-free. The current
-spinor exporter rejects active DFT+U. Native independent action,
-occupation, rotation, and family-specific runtime validation are required
-before the interface can claim complete XC+U support. Existing FR-NC,
-mixed-family, and finite atomic-subspace limitations remain unchanged.
+The typed native extension profiles add versioned Hubbard provenance to the
+existing QE raw readers:
+
+* KB ``TB2JQEDUMPV1.3`` extends the preceding collinear KB payload.
+* Atomic ``TB2JQEATWFC1.1`` extends the preceding collinear pseudo-atomic
+  payload.
+* Spinor ``TB2JQEDUMPNC1.2`` extends the preceding NC KB payload.
+
+The existing ``parse_qe_dump``, ``parse_qe_atomic_dump`` and
+``parse_qe_spinor_dump`` interfaces retain their legacy versions and read
+these versions as well. Each returned raw record object exposes
+``.hubbard``. Its ``state`` distinguishes ``"active"``, explicit
+``"absent"`` in a new-format extension, and ``"unknown"`` for legacy
+payloads that contain no reliable Hubbard-status evidence. New-format
+``absent`` is explicit no-U provenance; it requires no legacy assertion and
+retains the inherited raw records. ``unknown`` is not evidence of no-U.
+
+For active extensions, raw parsing strictly validates the typed records,
+dimensions, finite and Hermitian matrix data, shell/site/column maps, exact
+stream termination and provenance. The raw ``.hubbard`` data retains the
+native parameter inventory, maps, occupation and potential matrices,
+per-k contractions, validation/action evidence and source provenance for
+inspection; it is not reduced to a summary or silently discarded. The
+``complete`` flag is false for legacy ``unknown`` state and true only after
+strict validation of a complete new-format extension, whether active or
+explicitly absent. Malformed, truncated, inconsistent or unsupported active
+records are refused rather than interpreted as zero-U. These validation gates
+cover the native scalar Dudarev atomic/ortho-atomic contract only; they do not
+authorize exchange normalization.
+
+Extension species labels must match predecessor species identities. Fresh
+occupation evidence is cross-checked against the per-k native contractions
+through species/shell-kind total traces, which survive native orbital/spin
+rotations and equivalent-site permutations. This does not equate fresh NSCF
+occupations with the separately retained frozen SCF state or replay omitted
+symmetry matrices. The KB carrier scale is reconstructed from populated
+``deeq`` blocks before applying the native U-free-carrier tolerance. Spinor
+NC1.2 retains only the complex carrier bank: it supplies a lower bound on
+QE's combined real/complex scale, not an upper bound or full reconstruction.
+Atomic predecessors retain no carrier bank, so their source difference and
+scale remain native measurements. ``hubbard.provenance["carrier_scale_evidence"]``
+records these distinct evidence limits; none substitutes band energies for
+source validation.
+
+The normalized ``read_qe_dump``, ``read_qe_atomic_dump`` and
+``read_qe_spinor_dump`` interfaces accept the keyword-only
+``legacy_no_u=True`` assertion for a legacy ``unknown`` record. This is a
+user attestation, not measured provenance, and normalized metadata labels it
+``hubbard_state="user_attested_no_u"``. Legacy records remain available for
+raw inspection without the assertion, but production normalization requires
+it. The assertion cannot override declared U, missing or invalid source
+evidence, unsupported branches, or failed source/tangent validation. New
+explicitly absent records need no assertion and are labeled
+``hubbard_state="absent"``.
+
+Active records are retained and validated by the raw readers, but normalized
+exchange reads refuse them with ``normalization_pending``: joint XC+U
+coefficient/source handling belongs to Story 005 and is not implemented by
+this reader contract. No CLI source-selection option is added here. This
+reader work does not certify exchange tensors, add production +U exchange,
+or change existing gates: fully relativistic NC conditioning and mixed
+NC/augmented production restrictions remain as described above. U=0 native
+controls omit the ``HUBBARD`` card. See the executable
+``docs/sympy/qe_hubbard_native_contract.py`` and
+``docs/sympy/qe_hubbard_joint_frame.py`` derivations and their paired reports
+for the symbolic native and joint-frame contracts; these are algebraic
+checks, not production exchange certification.

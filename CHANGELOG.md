@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- Added strict typed QE Hubbard extensions for KB v1.3, atomic v1.1 and
+  NC spinor v1.2 raw readers. New records distinguish explicit absent-U
+  provenance from legacy unknown status; production normalization of legacy
+  records requires the explicit ``legacy_no_u=True`` user attestation.
+  Active records and native provenance remain inspectable, while malformed
+  or unsupported records fail closed and active normalization remains pending
+  joint XC+U source handling (Story 005). This adds no CLI source selection
+  and does not certify +U exchange or alter existing FR-NC/mixed-family gates.
+  Hardened species identity binding, symmetry-invariant fresh-occupation
+  checks against native overlaps, and retained-carrier scale validation;
+  spinor/atomic native-measurement limits remain explicit.
 
 - Added paired executable QE Hubbard convention and joint-frame derivations:
   native column/action and frozen-source rotation contracts, mixed XC-U
