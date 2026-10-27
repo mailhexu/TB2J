@@ -85,6 +85,30 @@ def run():
     assert full == physical == s.Rational(1, 2)
     assert local == s.Rational(7, 9)
 
+    # A native separable U factor is primal, whereas the existing projected
+    # XC matrix acts with dual factors. Keep their cross terms explicitly.
+    dual = phi * metric.inv()
+    factors_i = phi[:, 0].row_join(dual[:, 0])
+    factors_j = phi[:, 1].row_join(dual[:, 1])
+    coeff_i = s.diag(2, 3)
+    coeff_j = s.diag(5, 7)
+    total_i = factors_i * coeff_i * factors_i.H
+    total_j = factors_j * coeff_j * factors_j.H
+    g1 = s.Matrix([[1, s.I], [-s.I, 2]])
+    g2 = s.Matrix([[2, 1], [1, 3]])
+    mixed_full = s.trace(total_i * g1 * total_j * g2)
+    mixed_factorized = s.trace(
+        coeff_i * factors_i.H * g1 * factors_j * coeff_j * factors_j.H * g2 * factors_i
+    )
+    u_only = s.trace(
+        (2 * phi[:, 0] * phi[:, 0].H) * g1 * (5 * phi[:, 1] * phi[:, 1].H) * g2
+    )
+    xc_only = s.trace(
+        (3 * dual[:, 0] * dual[:, 0].H) * g1 * (7 * dual[:, 1] * dual[:, 1].H) * g2
+    )
+    assert s.simplify(mixed_full - mixed_factorized) == 0
+    assert s.simplify(mixed_full - u_only - xc_only) != 0
+
     # Rotate the prescribed spin-dependent site operator. Spin-last ordering.
     theta = s.symbols("theta", real=True)
     sy = s.Matrix([[0, -I], [I, 0]])
