@@ -7,14 +7,27 @@ instrumentation does **not** ship as a diff to apply: it lives on branch
 (base: upstream `develop`, reports as `PWSCF v.8.0dev`). You clone the fork,
 check out the branch, and build `pw.x` as usual.
 
-The exporter adds one file, `PW/src/becp_dump.f90`, plus small hooks in
-`electrons.f90` and `non_scf.f90` (and the corresponding source-list
-registrations). When enabled, it recomputes the selected projector
+The exporter uses `PW/src/becp_dump.f90` and
+`PW/src/becp_dump_hubbard.f90`, with hooks in `electrons.f90` and
+`non_scf.f90` and the corresponding source-list registrations.
+When enabled, it recomputes the selected projector
 coefficients for every k-point from stored wavefunctions. The default
 `TB2J_PROJECTORS=kb` exports `<beta|psi>` (the `pw2wannier90` pattern:
 `get_buffer` → `init_us_2` → explicit plane-wave dot product);
 `TB2J_PROJECTORS=atomic` exports `<atomic_wfc|psi>` and the full atomic
 Gram matrix at every k. The dump includes the metadata needed by TB2J.
+
+Current profiles are collinear KB `TB2JQEDUMPV1.3`, collinear atomic
+`TB2JQEATWFC1.1`, and KB spinor `TB2JQEDUMPNC1.2`. Each appends typed
+native Hubbard status/source evidence to its predecessor payload. The
+predecessor layouts and historical **no-U** benchmarks below remain useful
+format references; they are not active-U exchange certification.
+The complete modern contract, `HUBBARD` versus `TB2J_PROJECTORS` choices,
+API/CLI usage and measured capability limits are in
+[`docs/src/qe_projector.rst`](../../docs/src/qe_projector.rst).
+QE's authoritative native layout and reproducible source fixtures are
+`Doc/TB2J_Hubbard_extension.md` and `test-suite/tb2j_hubbard/README.md`
+in the instrumented QE checkout.
 
 ## 1. Obtaining and building
 
@@ -357,8 +370,12 @@ The tight PAW `Rcut=6 Å` family still fails (first
 inconsistent far row `1.558e-5 eV`); do not relax the gate
 to manufacture a six-angstrom US or PAW tensor.
 
-Noncollinear `+U` is also rejected: the frozen Hubbard magnetic
-one-center source has no certified rotation derivative in this ABI.
+The historical NC1.0/NC1.1 payload does not certify a Hubbard-source
+derivative and must not be used to infer active-U support. Current NC1.2
+exports the native scalar-Dudarev main-shell source and explicit frozen
+rotation tangents for admitted KB spinor cases. Native spinor background U
+and atomic-exchange spinor mode remain unsupported. Native source/action
+success alone is not independent x/y/z production-tensor certification.
 
 Real scalar ONCV Fe NC1.1 2³/8³/12³ spinor NSCF runs pass
 the source, native-action and rotation gates. The 2³ nonmagnetic
