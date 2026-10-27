@@ -3,15 +3,15 @@ Quantum ESPRESSO projector-Green exchange
 
 TB2J computes magnetic exchange from Quantum ESPRESSO (QE) calculations
 using separable KB beta channels (the default) or, for collinear runs,
-UPF atomic-wavefunction channels (``TB2J_PROJECTORS=atomic``). The KB
-exporter also writes a distinct NC1.1 noncollinear spinor schema
-for magnetic NC, US, PAW and mixed-family runs. SO-bearing US/PAW
-retain their validated source/action and three-reference
-tensor-consistency gates. NC reads use a smooth-only source;
-fully relativistic NC exchange fails its physical Gram-mode
-certification, and mixed NC/augmented production exchange is
-explicitly refused pending a real nonmagnetic-ligand smoke.
-Atomic mode remains collinear. An instrumented QE
+UPF atomic-wavefunction channels (``TB2J_PROJECTORS=atomic``). The
+current exporter profiles are collinear KB 1.3, collinear atomic 1.1,
+and noncollinear KB NC1.2, including explicit native Hubbard provenance.
+Complete Dudarev XC+U sources are supported by the readers and existing
+API/CLI; format or source validation alone is not physical exchange
+certification. SO-bearing US/PAW tensors require independent x/y/z
+references and all existing source/action and tensor-consistency gates.
+Fully relativistic NC and mixed NC/augmented production tensors remain
+refused. Atomic mode remains collinear. An instrumented QE
 build writes coefficients, eigenvalues, occupations, k-points and the
 spin-split projector operator into a versioned binary dump
 file at the end of a run. TB2J reads that dump into
@@ -74,8 +74,8 @@ The nscf input must generate the **full Brillouin zone** and enough bands:
    nosym = .true.
    noinv = .true.     ! full-BZ k list: the dump stores the run's k-list
                       ! as-is, and G(R,E) needs every k of the mesh
-   # &electrons / cards
    nbnd = ...         ! include the empty bands wanted in G(E)
+   # after the namelists
    K_POINTS automatic
    nk1 nk2 nk3 0 0 0
 
@@ -99,9 +99,9 @@ The raw parser lives in ``TB2J.interfaces.qe_projector``:
 ``nkstot == nks``, family/version compatibility and record shapes;
 violations raise ``ValueError`` with an explicit message. It keeps the
 raw records (``deeq``, ``dvan``, ``qq_at``, the beta Gram diagnostic,
-``becsum``, v1.2 ``dbeta_xc``/``ddd_paw``, per-k coefficients,
+``becsum``, v1.2-and-later ``dbeta_xc``/``ddd_paw``, per-k coefficients,
 cell/species/ions metadata, ``et``/``wg`` and smearing parameters)
-for inspection. NC requires v1.2 for a nonzero exchange vertex.
+for inspection. NC requires v1.2 or later for a nonzero XC exchange vertex.
 
 The normalized view is produced by
 :py:func:`TB2J.interfaces.qe_projector.read_qe_dump`, which returns a validated
@@ -119,7 +119,7 @@ The loader applies the QE conventions:
   species ``ityp[na]`` owns channels ``ofsbeta(na)+1 … +nh(ityp[na])``;
 * the coefficients are **already dual**, so ``overlap_k`` is ``None`` and no
   Gram/overlap dressing is applied anywhere downstream;
-* For v1.2 dumps the exchange vertex (``delta_total`` operator component)
+* For legacy v1.2 no-U dumps the XC exchange vertex
   is ``M^-1 <beta|V_xc^up - V_xc^dn|beta> M^-1 + (deeq(up) - deeq(down))``
   with ``M`` the beta Gram: the projected multiplicative xc spin splitting
   (GPAW ``delta_xc`` analog, conjugated by the joint metric transformation)
@@ -145,10 +145,13 @@ Atomic-wavefunction dumps
 -------------------------
 
 Select ``TB2J_PROJECTORS=atomic`` alongside ``TB2J_DUMP`` for both runs.
-QE constructs pseudo-atomic orbitals from each UPF's ``PP_PSWFC`` block;
-an UPF without atomic wavefunctions (including the tested SG15
-``Fe_ONCV_PBE-1.0.upf``) is rejected. The distinct
-``TB2JQEATWFC1.0`` format stores primal
+QE constructs pseudo-atomic orbitals from each UPF's ``PP_PSWFC`` block.
+These are full-cell Bloch sums represented in the plane-wave basis, not
+all-electron atomic wavefunctions, PAW partial waves, or functions restricted
+to an augmentation sphere. An UPF without atomic wavefunctions (including
+the tested SG15 ``Fe_ONCV_PBE-1.0.upf``) is rejected. The atomic
+``TB2JQEATWFC1.1`` format extends the legacy ``TB2JQEATWFC1.0`` payload,
+which stores primal
 :math:`C_{ni}(k)=\langle\phi_n(k)|\psi_i(k)\rangle` and the full
 k-dependent Gram :math:`M_{nm}(k)=\langle\phi_n(k)|\phi_m(k)\rangle`,
 including intersite blocks. The onsite spin vertex is the full-BZ
@@ -171,9 +174,12 @@ Noncollinear KB spinor dumps
 ----------------------------
 
 For ``noncolin=.true.`` with a magnetic source (``domag=.true.``), the
-KB exporter writes the separate ``TB2JQEDUMPNC1.0`` or ``NC1.1`` schema.
-NC1.0 remains scalar-relativistic-only. NC1.1 records nine native
-magnetic-source responses for US/PAW and their measured zeros for NC.
+KB exporter writes the separate ``TB2JQEDUMPNC1.2`` schema, extending
+NC1.1 with explicit Hubbard status and source records. Legacy NC1.0 remains
+scalar-relativistic-only. A spinor representation does not itself imply
+SOC: ``noncolin=.true., lspinorb=.false.`` also uses two-component states.
+NC1.1 and later record nine native XC magnetic-source responses for US/PAW
+and their measured zeros for NC.
 Each original Cartesian field component is placed into every Pauli
 destination slot at frozen density and fixed ionic/SOC Hamiltonian.
 PAW one-center magnetic source components rotate/zero in lockstep.
@@ -310,6 +316,9 @@ the nearest-neighbor z transverse leg gives
 meV over all six nearest-neighbor vectors, below the
 :math:`0.01` meV G3 gate. The earlier 24-spinor-band smoke
 was *not* a matched-band comparison (0.300 meV difference).
+
+The following NC1.1 exchange benchmarks are historical **no-U** results;
+they do not certify a new active-U source or tensor.
 
 At 12³ full-BZ points, 48 spinor bands, 30 poles and 0.05 eV
 smearing, the scalar-relativistic Fe US NC1.1 z transverse leg gives
@@ -465,11 +474,85 @@ Limitations
   compilers' unformatted ABI.
 * The full Brillouin zone must be present in the nscf run
   (``nosym = .true., noinv = .true.``).
-* ``becsum`` in KB nscf dumps carries scf-mesh restart occupations, not
-  dense-mesh weights; occupation-based diagnostics must use scf dumps.
+* Legacy ``becsum`` in KB nscf dumps carries scf-mesh restart occupations,
+  not dense-mesh weights. Modern Hubbard records separately retain frozen
+  SCF occupations and fresh NSCF contraction checks; these are not equated.
 
-DFT+U mathematical contracts
----------------------------
+DFT+U usage and source contracts
+----------------------------------------
+
+Two independent projector choices
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The QE ``HUBBARD`` card defines the correlated subspace and native
+Hamiltonian. For example, the measured bcc-Fe PBE case uses:
+
+.. code-block:: text
+
+   HUBBARD (ortho-atomic)
+   U Fe-3d 4.0
+
+``U`` is in eV and ``Fe`` must match the species label. ``HUBBARD (atomic)``
+and ``HUBBARD (ortho-atomic)`` are admitted for scalar Dudarev U; the latter
+uses QE's native full-cell orthogonalization, including the full-spinor
+construction for noncollinear input. The actual S-applied QE ``wfcU``
+columns and acted potential are exported. PAW does not change this choice
+into PAW augmentation partial waves or a sphere-only Hubbard construction.
+
+Separately, ``TB2J_PROJECTORS=kb`` (default) or ``atomic`` selects the
+**exchange representation** for the predecessor XC source. It does not
+change QE's Hubbard subspace, remove U, or select a second Hubbard model.
+In atomic exchange mode, the original XC rows use the full per-k atomic
+Gram once; appended native Hubbard rows are not filtered again.
+
+.. list-table:: Native producer/source coverage, not tensor certification
+   :header-rows: 1
+   :widths: 30 24 46
+
+   * - State
+     - Exchange mode
+     - Native Hubbard
+   * - Collinear NC, US, PAW
+     - KB or atomic
+     - Atomic / ortho-atomic
+
+       Main U; US backgrounds/backall
+   * - Scalar-relativistic
+
+       spinor NC, US, PAW
+     - KB
+     - Atomic / ortho-atomic
+
+       Main U; native tangents
+   * - SOC spinor US, PAW
+     - KB
+     - Atomic / ortho-atomic
+
+       Main U; native tangents
+   * - Spinor
+     - Atomic: unsupported
+     - Refused
+
+The admitted branch is scalar Dudarev ``lda_plus_u_kind=0`` with
+``atomic`` or ``ortho-atomic`` projectors. Other projector choices,
+including ``norm-atomic`` and ``pseudo``, are not enabled by this interface.
+Nonzero J/J0, alpha/alpha_back/beta, orbital-resolved parameters, Hubbard V
+and other Hubbard functionals are excluded. Collinear main/background
+manifolds are retained as actually acted native blocks; spinor background U
+is unsupported and refused. Native scalar-U shell angular momenta are
+limited to l=0..3. These restrictions are narrower than QE's general
+DFT+U capabilities.
+
+For a no-U or U=0 control, **omit the entire HUBBARD card**. The pinned QE
+parser rejects an all-zero card; an epsilon U is not a no-U control.
+Retain the converged SCF parent, full-BZ final NSCF input/log, executable,
+UPF hashes and export manifest. An NSCF export is not itself an SCF
+convergence certificate. For matched collinear/spinor comparisons,
+``nbnd`` counts bands per spin in the collinear case and total spinor
+bands in the noncollinear case.
+
+Versioned source contract
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The new executable derivations ``docs/sympy/qe_hubbard_native_contract.py``
 and ``docs/sympy/qe_hubbard_joint_frame.py`` have paired reports in the same
@@ -505,9 +588,9 @@ inspection; it is not reduced to a summary or silently discarded. The
 ``complete`` flag is false for legacy ``unknown`` state and true only after
 strict validation of a complete new-format extension, whether active or
 explicitly absent. Malformed, truncated, inconsistent or unsupported active
-records are refused rather than interpreted as zero-U. These validation gates
-cover the native scalar Dudarev atomic/ortho-atomic contract only; they do not
-authorize exchange normalization.
+records are refused rather than interpreted as zero-U. Raw validation and
+the normalized joint-frame construction below are separate checks; neither
+alone certifies a physical exchange result.
 
 Extension species labels must match predecessor species identities. Fresh
 occupation evidence is cross-checked against the per-k native contractions
@@ -568,7 +651,7 @@ exchange output. Frame metadata and the original atomic Gram round-trip in
 the existing projector-Green NetCDF container.
 
 Complete sources and explicit diagnostics
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The existing readers and ``gen_exchange_qe`` accept
 ``operator_component=None`` or ``"delta_total"`` for complete exchange.
