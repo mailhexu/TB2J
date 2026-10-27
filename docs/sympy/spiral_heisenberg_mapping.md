@@ -258,3 +258,75 @@ synthetics survives the correction exactly.
    shifts), the pair-once doubling, the $1/20$ flag threshold and the $10^{-6}$
    eV/rad² floor are policy choices pinned here; changing any of them changes
    the flagged outcomes and must be re-adjudicated.
+
+## BaMn₂As₂ conditional exchange conversion (section G)
+
+This section verifies conventions, not an inferred Liu exchange set. A
+numerical conversion requires the source Hamiltonian, bond-counting rule,
+spin length and requested-composition mapping to be admitted independently.
+The distinct neutron `SJ` table is not a substitute for missing Liu values.
+
+For a positive-AFM, unique-bond operator Hamiltonian
+$H_{ij}=J^{\rm op}_{ij}\mathbf S_i\cdot\mathbf S_j$ and classical lengths
+$S_i,S_j$, the ordered unit-direction target is
+
+$$
+E_{ij}=-K_{ij}\hat e_i\cdot\hat e_j-K_{ji}\hat e_j\cdot\hat e_i,\qquad
+K_{ij}=K_{ji}=-\frac{J^{\rm op}_{ij}S_iS_j}{2}.
+$$
+
+The script checks both parallel and antiparallel reference alignments and
+the antiparallel laboratory-angle Hessian
+$J^{\rm op}_{ij}S_iS_j\left(\begin{smallmatrix}1&-1\\-1&1\end{smallmatrix}\right)$.
+A pair-once positive-FM unit-direction parameter is instead $J_{\rm pair}=2K$.
+If, and only if, a source reports equal-spin `SJ` in meV with this operator
+convention, the stored eV parameter is $K=-S(SJ)_{\rm meV}/2000$.
+Neither $S=2$ nor $S=5/2$ is selected by this identity.
+
+The inspected runtime stores reciprocal ordered directions in `ExchangeCL2`,
+combines `Jiso*I` in `SpinIO`, and divides by $S_iS_j$ in `Magnon.Jq`, with
+$S_i=|m_i|/2$. These are runtime conventions, not an identification of a
+neutron spin length with a DFT atomic-sphere moment. The existing
+[`emc_magnon_normalization.py`](emc_magnon_normalization.py) remains the
+HP/Nambu and positive-mode normalization authority.
+
+The explicit body-centered tetragonal neighbor list has four diagonal
+in-plane $J_1$, four axial in-plane $J_2$, and two vertical $J_c$ bonds per Mn.
+Its G-type classical energy per spin is
+$S^2(-2J_1+2J_2-J_c)$. Thus $J_c$ is a physical direction, not a
+third-shortest-distance classification. Summing the bond phases gives
+
+$$
+A=2S[2J_1+J_c-J_2(2-\cos\phi_x-\cos\phi_y)],\qquad
+B=2S[J_1\{\cos((\phi_x+\phi_y)/2)+\cos((\phi_x-\phi_y)/2)\}
+       +J_c\cos(\phi_z/2)],
+\quad(\hbar\omega)^2=A^2-B^2.
+$$
+
+This is the isotropic ($D=0$) limit of Eq. (6) in
+[Ramazanoglu et al., PRB 95, 224401 (2017)](https://arxiv.org/html/1702.05082).
+Its printed Eq. (3) has $+D(S^z)^2$, whereas Eq. (6) and its positive-gap
+formula use a positive easy-axis $D$. That sign issue in the examined arXiv
+representation remains unresolved; no anisotropy or gap is imported here.
+
+For the approved primitive rows $P=M\,\mathrm{diag}(a,a,c)$,
+$M=[(-1,1,1),(1,-1,1),(1,1,-1)]/2$, a primitive reduced row $\mathbf q$
+has phases $(\phi_x,\phi_y,\phi_z)=2\pi\mathbf q M^{-T}$.
+The script asserts three nonzero quarter-grid energies at
+$(1/4,0,0)$, $(1/4,1/4,0)$ and $(0,0,1/4)$.
+Its positive synthetic scale ($J_1,J_2,J_c$)=(.03,.005,.002) eV, $S=3/2$
+is an algebra check only, never a material parameter row or an admitted
+Liu/TB2J comparison.
+
+An independent runtime smoke assembled each of the ten physical neighbor
+vectors per Mn into the approved two-Mn primitive cell, stored both bond
+directions, and diagonalized the actual `Magnon.Hq` with its bosonic metric.
+For the synthetic parameters above, both positive branches agree with the
+bond-sum formula at all three probes: 0.10928403360052191,
+0.12742056348957181 and 0.12296340919151517 eV, respectively.
+Maximum absolute residual is $8.33\times10^{-17}$ eV.
+The executable producer source, selected runtime hash and per-probe residuals
+are preserved separately in EMC's
+`data/material_spectra/bamn2as2/exchange_admission/convention-observation-v1.json`.
+This checks the inspected runtime scale only; no material converter or
+source-model numerical admission is claimed.

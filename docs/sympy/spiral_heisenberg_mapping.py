@@ -51,6 +51,10 @@ assertions (nonzero exit on any failure):
       biquadratic (invisible at a collinear anchor, flagged at a
       noncollinear reference), pure three-site (flagged through the
       onsite-block violation).
+  [G] BaMn2As2 convention identities, conditional on an explicitly admitted
+      positive-AFM unique-bond spin-operator source: ordered unit-direction
+      storage, unequal-spin pair curvature, meV SJ units, and isotropic BCT
+      bond counting/nonzero mode scales. No Liu numerical set is admitted.
 
 Conventions are those of docs/sympy/collinear_anchor_projection.py
 (story 011): pair-once energy, TB2J stores both ordered directions at
@@ -987,6 +991,102 @@ def test_synthetic():
     return results
 
 
+def bamn2as2_exchange_identities():
+    """[G] Conditional source conventions, not an inferred Liu parameter set.
+
+    Runtime references: ExchangeCL2 stores reciprocal ordered directions;
+    SpinIO combines Jiso*I without a factor; Magnon.Jq divides by S_i*S_j
+    with S_i=|m_i|/2. Its U=e1+i*e2 and Hq retain the ordered-pair factor.
+    HP/Nambu normalization remains emc_magnon_normalization.py's authority.
+    """
+    print("[G] BaMn2As2 conditional exchange conventions and isotropic BCT scales")
+    j_op, stored, sj_mev = sp.symbols("J_operator J_stored SJ_meV", real=True)
+    si, sj, spin = sp.symbols("S_i S_j S", positive=True, real=True)
+    ta, tb = sp.symbols("theta_a theta_b", real=True)
+    ea = sp.Matrix([sp.sin(ta), 0, sp.cos(ta)])
+    converted = -j_op * si * sj / 2
+    for alignment in (sp.Integer(-1), sp.Integer(1)):
+        eb = alignment * sp.Matrix([sp.sin(tb), 0, sp.cos(tb)])
+        source_energy = j_op * si * sj * ea.dot(eb)
+        ordered_energy = -converted * ea.dot(eb) - converted * eb.dot(ea)
+        zero(source_energy - ordered_energy)
+    afm_energy = -j_op * si * sj * sp.cos(ta - tb)
+    curvature = sp.hessian(afm_energy, (ta, tb)).subs({ta: 0, tb: 0})
+    zero(curvature - j_op * si * sj * sp.Matrix([[1, -1], [-1, 1]]))
+    # Positive FM pair-once unit-direction energy is -J_pair*(ea.eb).
+    pair_once = 2 * stored
+    zero(-pair_once * ea.dot(ea) - (-stored * ea.dot(ea) - stored * ea.dot(ea)))
+    equal_sj_mev = sp.simplify(
+        converted.subs({si: spin, sj: spin, j_op: sj_mev / (1000 * spin)})
+    )
+    zero(equal_sj_mev + sj_mev * spin / 2000)
+
+    j1, j2, jc = sp.symbols("J_1 J_2 J_c", real=True)
+    px, py, pz = sp.symbols("phi_x phi_y phi_z", real=True)
+    # Actual physical neighbor directions: four diagonal in-plane J1,
+    # four axial in-plane J2, and two vertical Jc; no distance-rank Jc guess.
+    phase1 = [ax * px / 2 + ay * py / 2 for ax in (-1, 1) for ay in (-1, 1)]
+    phase2 = [px, -px, py, -py]
+    phasec = [pz / 2, -pz / 2]
+    energy_per_spin = (
+        spin**2 * (-len(phase1) * j1 + len(phase2) * j2 - len(phasec) * jc) / 2
+    )
+    zero(energy_per_spin - spin**2 * (-2 * j1 + 2 * j2 - jc))
+    a_bond = spin * (
+        len(phase1) * j1
+        + len(phasec) * jc
+        - len(phase2) * j2
+        + j2 * sum(sp.cos(p) for p in phase2)
+    )
+    b_bond = spin * (
+        j1 * sum(sp.cos(p) for p in phase1) + jc * sum(sp.cos(p) for p in phasec)
+    )
+    a_source = 2 * spin * (2 * j1 + jc - j2 * (2 - sp.cos(px) - sp.cos(py)))
+    b_source = (
+        2
+        * spin
+        * (j1 * (sp.cos((px + py) / 2) + sp.cos((px - py) / 2)) + jc * sp.cos(pz / 2))
+    )
+    zero(sp.trigsimp(a_bond - a_source))
+    zero(sp.trigsimp(b_bond - b_source))
+    dispersion_squared = a_source**2 - b_source**2
+    # P = M*diag(a,a,c) is the approved body-centered primitive row basis.
+    primitive = sp.Matrix(
+        [[-HALF, HALF, HALF], [HALF, -HALF, HALF], [HALF, HALF, -HALF]]
+    )
+    probes = {
+        "q100_quarter": (HALF / 2, 0, 0),
+        "q110_quarter": (HALF / 2, HALF / 2, 0),
+        "q001_quarter": (0, 0, HALF / 2),
+    }
+    results = {
+        "afm_pair_angle_hessian": curvature,
+        "equal_spin_sj_mev_to_ordered_ev": equal_sj_mev,
+        "g_type_energy_per_spin": energy_per_spin,
+        "isotropic_bct_energy_squared": dispersion_squared,
+        "operator_unique_afm_to_ordered_unit_direction": converted,
+        "ordered_to_unique_fm_unit_direction": pair_once,
+    }
+    for name, q in probes.items():
+        phases = 2 * sp.pi * sp.Matrix([q]) * primitive.inv().T
+        value = sp.simplify(dispersion_squared.subs(dict(zip((px, py, pz), phases))))
+        # Nonzero stable synthetic reference, never a neutron/Liu material row.
+        scale = value.subs(
+            {
+                j1: sp.Rational(3, 100),
+                j2: sp.Rational(1, 200),
+                jc: sp.Rational(1, 500),
+                spin: sp.Rational(3, 2),
+            }
+        )
+        assert scale.is_positive, (name, scale)
+        results[name + "_energy_squared"] = value
+    print(
+        "G PASS: conditional signs/spins/ordered storage, 4/4/2 counts and nonzero scales"
+    )
+    return results
+
+
 def main():
     print(
         f"SymPy {sp.__version__}; spiral A-tensor -> Heisenberg mapping, exact algebra"
@@ -997,6 +1097,7 @@ def main():
     identifiability = test_identifiability()
     residual = test_residual_definitions()
     synthetic = test_synthetic()
+    exchange_conventions = bamn2as2_exchange_identities()
     for path in (Path(__file__), Path(__file__).with_suffix(".md")):
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         print(f"sha256 {path.name}: {digest}")
@@ -1011,6 +1112,7 @@ def main():
         "identifiability": identifiability,
         "compatibility_statistic": residual,
         "synthetic_flags": synthetic,
+        "bamn2as2_exchange_conventions": exchange_conventions,
     }
 
 
