@@ -115,8 +115,10 @@ The normalized view is produced by
 
 The loader applies the QE conventions:
 
-* beta channels are concatenated over atoms in QE ion order; atom ``na`` of
-  species ``ityp[na]`` owns channels ``ofsbeta(na)+1 … +nh(ityp[na])``;
+* beta channels follow QE's **species-major** order: increasing species
+  index, then QE ion order within that species. Atom ``na`` of species
+  ``ityp[na]`` owns ``nh(ityp[na])`` channels starting at its native
+  ``ofsbeta(na)``; this is not a cumulative offset over ion order;
 * the coefficients are **already dual**, so ``overlap_k`` is ``None`` and no
   Gram/overlap dressing is applied anywhere downstream;
 * For legacy v1.2 no-U dumps the XC exchange vertex
@@ -135,6 +137,24 @@ The loader applies the QE conventions:
   ``"qe_deeq_spin_difference"`` (v1.0/v1.1), ``coefficient_source = "qe_becp"``,
   ``coefficient_projector = "qe_beta"``, ``channel_interpretation =
   "qe_dual_to_beta"`` and ``operator_basis = "qe_dual_beta_channel"``.
+
+.. warning::
+
+   Older TB2J readers assumed atom-major beta offsets and ownership. KB
+   calculations whose atoms are not grouped in increasing species-index
+   order can therefore have incorrect site-resolved exchange, in both
+   collinear and spinor modes and with or without Hubbard U. Recompute
+   TB2J results with the corrected reader from the unchanged native dumps;
+   no format change or new DFT calculation is needed for this correction.
+   Single-atom checks and agreement between two affected readers do not
+   establish correct multi-species exchange.
+
+The native coefficient rows retain their species-major order; site index
+maps and owner metadata select the matching rows of each atom's operator.
+Appended Hubbard channels retain their own native atom identities. Atomic
+wavefunction dumps have a different, atom-major ordering and are unchanged.
+Correct channel ownership does not waive native-action, source,
+convergence or production tensor/family gates.
 
 ``qq_at`` and the Gram diagnostic are stored for diagnostics only; ``qq_at``
 belongs to the wavefunction overlap operator
@@ -199,6 +219,8 @@ a tangent oracle.
 ``(beta_i,beta_j,atom,(uu,ud,du,dd),destination_c,source_j)``.
 ``read_qe_spinor_dump`` returns ``ProjectorGreenData(nspinor=2)`` with
 already-dual coefficients and a magnetic-only spinor operator.
+Beta rows use the same species-major ordering as collinear KB dumps;
+per-atom operator and response arrays remain indexed in QE ion order.
 Only the projected smooth field uses a Hermitian beta-Gram
 pseudoinverse (relative cutoff ``1e-6``). No overlap inverse
 acts on dual Green coefficients or native ``D_response``. A

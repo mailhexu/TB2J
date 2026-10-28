@@ -19,6 +19,7 @@ from test_qe_projector import (
     _write_spinor_records,
     write_qe_atomic_dump,
     write_qe_dump,
+    write_qe_interleaved_spinor_dump,
     write_qe_spinor_dump,
 )
 
@@ -129,18 +130,20 @@ def _append_no_u_validation(path) -> None:
     )
 
 
-def _kb_no_u_dump(path):
-    write_qe_dump(path, magic=MAGIC_V12, include_dbeta_xc=True)
+def _kb_no_u_dump(path, *, ityp=(1, 1, 2), nh=(3, 2)):
+    native = write_qe_dump(
+        path, magic=MAGIC_V12, include_dbeta_xc=True, ityp=ityp, nh=nh
+    )
     _replace_magic(path, b"TB2JQEDUMPV1.3")
     _append_common_no_u_extension(
         path,
         family="kb",
-        nat=3,
-        ntyp=2,
-        nspin=2,
-        nks=4,
-        nbnd=3,
-        nkb=8,
+        nat=native.nat,
+        ntyp=native.nsp,
+        nspin=native.nspin,
+        nks=native.nks,
+        nbnd=native.nbnd,
+        nkb=native.nkb,
         source_mode=1,
     )
     return path
@@ -179,7 +182,7 @@ def _atomic_no_u_dump(path):
     return path
 
 
-def _spinor_frame_record(site, gram, field, magnetic):
+def _spinor_frame_record(site, gram, field, magnetic, *, species=1):
     inverse = np.linalg.inv(gram[:, :, site])
     smooth = np.stack(
         [inverse @ field[:, :, site, axis] @ inverse for axis in range(3)],
@@ -197,7 +200,7 @@ def _spinor_frame_record(site, gram, field, magnetic):
     rank = gram.shape[0]
     unit_residual = abs(float(np.linalg.norm(direction)) - 1.0)
     return (
-        np.asarray([21, site + 1, 1, rank, 1], dtype="<i4"),
+        np.asarray([21, site + 1, species, rank, 1], dtype="<i4"),
         np.asarray([np.abs(source).max()], dtype="<f8"),
         trace_vector.astype("<f8"),
         np.asarray([trace_norm], dtype="<f8"),
@@ -212,9 +215,9 @@ def _spinor_frame_record(site, gram, field, magnetic):
     )
 
 
-def _spinor_zero_frame_record(site, rank=2):
+def _spinor_zero_frame_record(site, rank=2, *, species=1):
     return (
-        np.asarray([21, site + 1, 1, rank, 0], dtype="<i4"),
+        np.asarray([21, site + 1, species, rank, 0], dtype="<i4"),
         np.zeros(1, dtype="<f8"),
         np.zeros(3, dtype="<f8"),
         np.zeros(1, dtype="<f8"),
@@ -229,8 +232,14 @@ def _spinor_zero_frame_record(site, rank=2):
     )
 
 
-def _spinor_no_u_dump(path, *, axis="z", zero_source=False):
-    native = write_qe_spinor_dump(path, axis=axis, version="1.1")
+def _spinor_no_u_dump(
+    path, *, axis="z", zero_source=False, interleaved=False, zero_beta_oxygen=False
+):
+    native = (
+        write_qe_interleaved_spinor_dump(path, zero_beta_oxygen=zero_beta_oxygen)
+        if interleaved
+        else write_qe_spinor_dump(path, axis=axis, version="1.1")
+    )
     records = list(native.records)
     if zero_source:
         records[7][0][...] = 0
@@ -241,27 +250,37 @@ def _spinor_no_u_dump(path, *, axis="z", zero_source=False):
         records[0][1],
     )
     _write_spinor_records(path, records)
+    dimensions = records[0][1]
+    nat, ntyp = map(int, dimensions[4:6])
+    ityp = records[4][0]
+    counts = records[5][0][ityp - 1]
     _append_common_no_u_extension(
         path,
         family="kb",
-        nat=2,
-        ntyp=1,
+        nat=nat,
+        ntyp=ntyp,
         nspin=4,
-        nks=2,
-        nbnd=8,
-        nkb=4,
+        nks=int(dimensions[1]),
+        nbnd=int(dimensions[3]),
+        nkb=int(dimensions[8]),
         source_mode=1,
         collinear=0,
-        species_names=("Fe",),
+        species_names=("Fe", "O")[:ntyp],
         finish=False,
         metric="full-spinor ortho-atomic source metric",
     )
     _append_record(path, np.asarray([15, 2, 0, 0, 1, 4, 2, 0], dtype="<i4"))
-    for site in range(2):
+    for site, count in enumerate(counts):
         frame = (
-            _spinor_zero_frame_record(site)
-            if zero_source
-            else _spinor_frame_record(site, native.gram, native.field, native.magnetic)
+            _spinor_zero_frame_record(site, rank=count, species=int(ityp[site]))
+            if zero_source or not count
+            else _spinor_frame_record(
+                site,
+                native.gram[:count, :count],
+                native.field[:count, :count],
+                native.magnetic[:count, :count],
+                species=int(ityp[site]),
+            )
         )
         _append_record(path, *frame)
     _append_no_u_validation(path)
@@ -345,6 +364,7 @@ def _active_collinear_dump(
     native_coefficients=None,
     atomic_grams=None,
     atomic_coefficients=None,
+    kb_ityp=(1, 1, 2),
 ):
     """Write a strict one-orbital active fixture with coherent native C data.
 
@@ -354,9 +374,10 @@ def _active_collinear_dump(
     Gram/coefficient overrides feed the existing strict atomic writer.
     """
     if family == "kb":
-        gt = write_qe_dump(path, magic=MAGIC_V12, include_dbeta_xc=True)
+        gt = write_qe_dump(path, magic=MAGIC_V12, include_dbeta_xc=True, ityp=kb_ityp)
         _replace_magic(path, b"TB2JQEDUMPV1.3")
-        nat, nkb, source_mode, atom, species_family = gt.nat, gt.nkb, 1, 3, 2
+        nat, nkb, source_mode = gt.nat, gt.nkb, 1
+        atom, species_family = kb_ityp.index(2) + 1, 2
     else:
         gt = write_qe_atomic_dump(
             path,
@@ -740,8 +761,12 @@ def _spinor_rotation_record(atom, channel, dim, direction):
     )
 
 
-def _spinor_active_dump(path):
-    native = write_qe_spinor_dump(path, axis="z", version="1.1")
+def _spinor_active_dump(path, *, interleaved=False):
+    native = (
+        write_qe_interleaved_spinor_dump(path)
+        if interleaved
+        else write_qe_spinor_dump(path, axis="z", version="1.1")
+    )
     records = list(native.records)
     records[0] = (
         np.asarray([b"TB2JQEDUMPNC1.2".ljust(16, b" ")], dtype="S16"),
@@ -749,8 +774,10 @@ def _spinor_active_dump(path):
     )
     _write_spinor_records(path, records)
 
-    nat, ntyp, nspin = 2, 1, 4
-    nks, nbnd, nkb = native.xk.shape[1], native.et.shape[0], 4
+    nat, ntyp, nspin = (3, 2, 4) if interleaved else (2, 1, 4)
+    atoms = (1, 3) if interleaved else (1, 2)
+    nks, nbnd = native.xk.shape[1], native.et.shape[0]
+    nkb = native.coefficients.shape[1]
     dimension, nchannel, norbital = 5, 2, 10
     ncol, native_ncolumn = 2 * norbital, 2 * norbital
     u_ev, u_ry = 2.0, 2.0 / RYTOEV
@@ -804,32 +831,44 @@ def _spinor_active_dump(path):
         _fixed("/synthetic/pseudo", 256),
         _fixed("/synthetic/pseudo", 256),
     )
-    _append_record(
-        path,
-        np.asarray([3, 1], dtype="<i4"),
-        _fixed("Fe", 80),
-        _fixed("Fe.upf", 256),
-        _fixed("/synthetic/pseudo/Fe.upf", 512),
-        np.asarray([2, 0], dtype="<i4"),
-        _fixed("c" * 32, 32),
-        _fixed("synthetic fixture identity", 56),
-    )
+    for species_id, name in enumerate(("Fe", "O")[:ntyp], start=1):
+        _append_record(
+            path,
+            np.asarray([3, species_id], dtype="<i4"),
+            _fixed(name, 80),
+            _fixed(f"{name}.upf", 256),
+            _fixed(f"/synthetic/pseudo/{name}.upf", 512),
+            np.asarray([2, 0], dtype="<i4"),
+            _fixed("c" * 32, 32),
+            _fixed("synthetic fixture identity", 56),
+        )
     _append_record(
         path,
         np.asarray([4, ntyp, 2, 1], dtype="<i4"),
         np.asarray([RYTOEV, 0.0], dtype="<f8"),
         np.asarray([1, 1, 0], dtype="<i4"),
     )
-    _append_record(
-        path,
-        np.asarray([4, 1], dtype="<i4"),
-        np.asarray([u_ev, 0, 0, 0, 0, 0, 0, 0, 0], dtype="<f8"),
-        np.asarray([u_ry, 0, 0, 0, 0, 0, 0, 0, 0], dtype="<f8"),
-        np.zeros(8, dtype="<f8"),
-        np.asarray([3, 2, 0, 0, 0, 0, 1, 0, 0], dtype="<i4"),
-    )
+    for species_id in range(1, ntyp + 1):
+        active_u = species_id == 1
+        _append_record(
+            path,
+            np.asarray([4, species_id], dtype="<i4"),
+            np.asarray(
+                [u_ev if active_u else 0.0, 0, 0, 0, 0, 0, 0, 0, 0], dtype="<f8"
+            ),
+            np.asarray(
+                [u_ry if active_u else 0.0, 0, 0, 0, 0, 0, 0, 0, 0], dtype="<f8"
+            ),
+            np.zeros(8, dtype="<f8"),
+            np.asarray(
+                [3, 2, 0, 0, 0, 0, 1, 0, 0]
+                if active_u
+                else [2, 1, 0, 0, 0, 0, 0, 0, 0],
+                dtype="<i4",
+            ),
+        )
     _append_record(path, np.asarray([5, nchannel, ncol], dtype="<i4"))
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         native_offset = (channel - 1) * 2 * dimension
         matrix_offset = 0
         _append_record(
@@ -852,7 +891,7 @@ def _spinor_active_dump(path):
                 dtype="<i4",
             ),
         )
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         native_offset = (channel - 1) * 2 * dimension
         for spin_slot in (1, 2):
             for orbital in range(1, dimension + 1):
@@ -879,7 +918,7 @@ def _spinor_active_dump(path):
         path,
         np.asarray([15, 2, norbital, ncol, 1, 4, 2, native_ncolumn], dtype="<i4"),
     )
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         native_offset = (channel - 1) * 2 * dimension
         for spin_slot in (1, 2):
             for orbital in range(1, dimension + 1):
@@ -897,7 +936,7 @@ def _spinor_active_dump(path):
     potential[:, :, 3] = u_ry / 2 * identity
     scalar = u_ry / 2 * identity
     magnetic_u = np.zeros((dimension, dimension, 3), dtype="<c16")
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         _append_record(
             path,
             np.asarray([17, channel, atom, 1, dimension, 2, 4], dtype="<i4"),
@@ -958,7 +997,7 @@ def _spinor_active_dump(path):
             actions,
             actions,
         )
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         _append_record(
             path,
             np.asarray([20, channel, atom, 1, dimension, 2, 4], dtype="<i4"),
@@ -966,7 +1005,7 @@ def _spinor_active_dump(path):
             zero_occ,
             zero_occ,
         )
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         _append_record(
             path,
             np.asarray([23, channel, atom, 1, dimension], dtype="<i4"),
@@ -975,10 +1014,16 @@ def _spinor_active_dump(path):
             potential,
         )
     frames = [
-        _spinor_frame_record(site, native.gram, native.field, native.magnetic)
-        for site in range(nat)
+        _spinor_frame_record(
+            site,
+            native.gram[:count, :count],
+            native.field[:count, :count],
+            native.magnetic[:count, :count],
+            species=2 if interleaved and site == 1 else 1,
+        )
+        for site, count in enumerate((2, 1, 2) if interleaved else (2, 2))
     ]
-    for channel, atom in enumerate((1, 2), start=1):
+    for channel, atom in enumerate(atoms, start=1):
         _append_record(
             path,
             *_spinor_rotation_record(atom, channel, dimension, frames[atom - 1][4]),
@@ -1076,11 +1121,11 @@ def _set_f8(payload, offset, value):
     return payload
 
 
-def _spinor_native_slot_dump(path):
+def _spinor_native_slot_dump(path, *, interleaved=False):
     """Active NC1.2 fixture with distinct spin-major native overlaps."""
     from TB2J.interfaces.qe_projector import parse_qe_spinor_dump
 
-    _spinor_active_dump(path)
+    _spinor_active_dump(path, interleaved=interleaved)
     raw = parse_qe_spinor_dump(path)
     hubbard = raw.hubbard
     nks = len(hubbard.kpoints)

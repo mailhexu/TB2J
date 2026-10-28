@@ -423,6 +423,32 @@ def test_per_atom_channel_splitting(tmp_path):
     assert data.positions.shape == (3, 3)
 
 
+def test_interleaved_kb_species_preserve_site_resolved_band_action(tmp_path):
+    """QE beta rows are Fe(atom0), Fe(atom2), O(atom1), not ion order."""
+    path = tmp_path / "interleaved-kb.bin"
+    native = write_qe_dump(path, ityp=(1, 2, 1))
+    data = read_qe_dump(path, legacy_no_u=True)
+    green = ProjectorGreen(data)
+    native_rows = ([0, 1, 2], [6, 7], [3, 4, 5])
+    for site, rows in enumerate(native_rows):
+        count = len(rows)
+        native_operator = (
+            native.deeq[:count, :count, site, 0] - native.deeq[:count, :count, site, 1]
+        ) * RYTOEV
+        native_coefficients = native.becps[0][rows]
+        expected = native_coefficients.conj().T @ native_operator @ native_coefficients
+        for selected in (
+            green.get_site_projectors(site),
+            np.flatnonzero(data.projector_site == site),
+            np.flatnonzero(data.projector_atom == site),
+        ):
+            coefficients = data.coefficients[0, 0][:, selected]
+            actual = (
+                coefficients.conj() @ green.get_local_operator(site) @ coefficients.T
+            )
+            np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-12)
+
+
 def test_single_spin_channel_raises(tmp_path):
     p = tmp_path / "onechannel.bin"
     write_qe_dump(p, isk=[1, 1, 1, 1])
@@ -1210,6 +1236,81 @@ def write_qe_spinor_dump(path, axis="z", soc=False, total_shift=0.0, version="1.
         magnetic_block=magnetic_block,
         field_block=field_block,
     )
+
+
+def write_qe_interleaved_spinor_dump(path, *, zero_beta_oxygen=False):
+    """Fe/O/Fe beta stream; zero-channel O is admitted only by modern NC1.2."""
+    native = write_qe_spinor_dump(path, axis="z", version="1.1")
+    records = list(native.records)
+    dimensions = records[0][1].copy()
+    dimensions[[4, 5, 8]] = [3, 2, 4 if zero_beta_oxygen else 5]
+    records[0] = (records[0][0], dimensions)
+    records[3] = (np.array([b"Fe    ", b"O     "], dtype="S6"),)
+    native.tau = np.column_stack((native.tau, [0.25, 0.0, 0.5]))
+    records[4] = (np.array([1, 2, 1], dtype="<i4"), native.tau)
+    records[5] = tuple(
+        np.array(values, dtype="<i4")
+        for values in ([2, 0 if zero_beta_oxygen else 1], [1, 1], [0, 0], [0, 0])
+    )
+    for name in ("gram", "field", "magnetic", "total", "d_response"):
+        values = getattr(native, name)
+        values = np.concatenate((values, values[:, :, :1]), axis=2)
+        values[1, :, 1] = 0
+        values[:, 1, 1] = 0
+        if zero_beta_oxygen:
+            values[:, :, 1] = 0
+        setattr(native, name, values)
+    if not zero_beta_oxygen:
+        native.coefficients = np.concatenate(
+            (native.coefficients, (0.7 + 0.2j) * native.coefficients[:, :1]), axis=1
+        )
+    records[6:9] = [(native.total,), (native.magnetic,), (native.gram,)]
+    records[11:13] = [(coefficients,) for coefficients in native.coefficients]
+    records[13:] = [
+        (native.field,),
+        (np.zeros((3, 3, 4)),),
+        (native.d_response,),
+    ]
+    _write_spinor_records(path, records)
+    native.records = records
+    return native
+
+
+def test_interleaved_spinor_species_preserve_site_resolved_band_action(tmp_path):
+    from TB2J.projector_green import PAULI_MATRICES
+
+    native = write_qe_interleaved_spinor_dump(tmp_path / "interleaved-spinor.bin")
+    data = read_qe_spinor_dump(native.path, legacy_no_u=True)
+    green = ProjectorGreen(data)
+    for site, rows in enumerate(([0, 1], [4], [2, 3])):
+        count = len(rows)
+        inverse = np.linalg.inv(native.gram[:count, :count, site])
+        smooth = inverse @ native.field[:count, :count, site, 2] @ inverse
+        native_operator = (
+            2
+            * RYTOEV
+            * (
+                np.einsum("pq,st->pqst", smooth, PAULI_MATRICES[2])
+                + native.magnetic[:count, :count, site].reshape(count, count, 2, 2)
+            )
+        )
+        coefficients = native.coefficients[0, rows]
+        expected = np.einsum(
+            "psb,pqst,qtc->bc", coefficients.conj(), native_operator, coefficients
+        )
+        for selected in (
+            green.get_site_projectors(site),
+            np.flatnonzero(data.projector_site == site),
+            np.flatnonzero(data.projector_atom == site),
+        ):
+            coefficients = data.coefficients[0, 0][:, :, selected].transpose(2, 1, 0)
+            actual = np.einsum(
+                "psb,pqst,qtc->bc",
+                coefficients.conj(),
+                green.get_local_operator_spinor(site),
+                coefficients,
+            )
+            np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-12)
 
 
 def test_spinor_complex_vertex_native_packing_and_dual_green(tmp_path):
