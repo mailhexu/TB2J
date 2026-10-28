@@ -7,10 +7,12 @@ installation or workstation export is required.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from test_qe_hubbard import (
     _active_collinear_dump,
     _kb_no_u_dump,
     _spinor_native_slot_dump,
+    _spinor_no_u_dump,
 )
 from test_qe_projector import RYTOEV
 
@@ -315,3 +317,126 @@ def test_redundant_joint_frame_trace_retains_xc_u_cross_contractions(tmp_path):
     np.testing.assert_allclose(isolated_u, direct_u, rtol=2e-11, atol=2e-11)
     assert abs(mixed - (isolated_xc + isolated_u)) > 1e-8
     assert abs(direct_mixed - (direct_xc + direct_u)) > 1e-8
+
+
+def test_interleaved_kb_joint_source_preserves_native_site_action(tmp_path):
+    path = _active_collinear_dump(
+        tmp_path / "interleaved-kb-u.bin",
+        kb_ityp=(1, 2, 1),
+        state_occupation=(0.2, 0.6),
+        native_coefficients=_native_coefficients_for_targets,
+    )
+    raw = parse_qe_dump(path)
+    data = read_qe_dump(path)
+    green = ProjectorGreen(data)
+    for site, rows in enumerate(([0, 1, 2], [6, 7], [3, 4, 5])):
+        count = len(rows)
+        inverse = np.linalg.inv(raw.gram[:count, :count, site])
+        xc = (
+            raw.deeq[:count, :count, site, 0]
+            - raw.deeq[:count, :count, site, 1]
+            + inverse @ raw.dbeta_xc[:count, :count, site] @ inverse
+        ) * RYTOEV
+        coefficients = raw.coefficients[0][rows].T
+        expected = coefficients.conj() @ xc @ coefficients.T
+        if site == 1:
+            native_u = raw.hubbard.kpoints[0].coefficients.T
+            state = raw.hubbard.states[0]
+            splitting = RYTOEV * (state.potential[:, :, 0] - state.potential[:, :, 1])
+            expected += native_u.conj() @ splitting @ native_u.T
+        for selected in (
+            green.get_site_projectors(site),
+            np.flatnonzero(data.projector_site == site),
+            np.flatnonzero(data.projector_atom == site),
+        ):
+            coefficients = data.coefficients[0, 0][:, selected]
+            actual = (
+                coefficients.conj() @ green.get_local_operator(site) @ coefficients.T
+            )
+            np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-11)
+
+
+def test_interleaved_spinor_joint_source_preserves_native_site_action(tmp_path):
+    from TB2J.projector_green import PAULI_MATRICES
+
+    path = _spinor_native_slot_dump(
+        tmp_path / "interleaved-spinor-u.bin", interleaved=True
+    )
+    raw = parse_qe_spinor_dump(path)
+    data = read_qe_spinor_dump(path)
+    green = ProjectorGreen(data)
+    for site, rows in enumerate(([0, 1], [4], [2, 3])):
+        count = len(rows)
+        inverse = np.linalg.inv(raw.gram[:count, :count, site])
+        smooth = inverse @ raw.projected_field[:count, :count, site, 2] @ inverse
+        native_operator = (
+            2
+            * RYTOEV
+            * (
+                np.einsum("pq,st->pqst", smooth, PAULI_MATRICES[2])
+                + raw.deeq_nc_magnetic[:count, :count, site].reshape(count, count, 2, 2)
+            )
+        )
+        # The frozen Hubbard states have a scalar potential, hence zero
+        # magnetic vertex; nonzero native U overlaps still extend the frame.
+        coefficients = raw.coefficients[0, rows]
+        expected = np.einsum(
+            "psb,pqst,qtc->bc", coefficients.conj(), native_operator, coefficients
+        )
+        for selected in (
+            green.get_site_projectors(site),
+            np.flatnonzero(data.projector_site == site),
+            np.flatnonzero(data.projector_atom == site),
+        ):
+            coefficients = data.coefficients[0, 0][:, :, selected].transpose(2, 1, 0)
+            actual = np.einsum(
+                "psb,pqst,qtc->bc",
+                coefficients.conj(),
+                green.get_local_operator_spinor(site),
+                coefficients,
+            )
+            np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-11)
+
+
+@pytest.mark.parametrize("spinor", [False, True])
+@pytest.mark.parametrize("zero_beta_oxygen", [False, True])
+def test_modern_no_u_interleaved_species_preserve_site_green(
+    tmp_path, spinor, zero_beta_oxygen
+):
+    """A nonmagnetic/empty intervening species cannot shift the second Fe."""
+    energy = 0.73 + 0.29j
+    if spinor:
+        path = _spinor_no_u_dump(
+            tmp_path / "modern-spinor.bin",
+            interleaved=True,
+            zero_beta_oxygen=zero_beta_oxygen,
+        )
+        raw = parse_qe_spinor_dump(path)
+        data = read_qe_spinor_dump(path)
+        green = ProjectorGreen(data)
+        weights = 1.0 / (energy + raw.ef * RYTOEV - raw.et[0] * RYTOEV)
+        expected = np.einsum(
+            "psb,qtb,b->pqst",
+            raw.coefficients[0, 2:4],
+            raw.coefficients[0, :2].conj(),
+            weights,
+        )
+        actual = green.get_site_block_spinor(green.get_Gk_spinor(0, energy), 2, 0)
+    else:
+        path = _kb_no_u_dump(
+            tmp_path / "modern-kb.bin",
+            ityp=(1, 2, 1),
+            nh=(3, 0 if zero_beta_oxygen else 2),
+        )
+        raw = parse_qe_dump(path)
+        data = read_qe_dump(path)
+        green = ProjectorGreen(data)
+        weights = 1.0 / (energy + raw.ef_up * RYTOEV - raw.et[0] * RYTOEV)
+        expected = np.einsum(
+            "pb,qb,b->pq",
+            raw.coefficients[0][3:6],
+            raw.coefficients[0][:3].conj(),
+            weights,
+        )
+        actual = green.get_site_block(green.get_Gk(0, energy, ispin=0), 2, 0)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)

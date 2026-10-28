@@ -146,10 +146,12 @@ the deeq-only vertex failed bccFe G3.
 ### Semantics and caveats
 
 * **Channel layout.** `becp(nkb, nbnd)` per k holds
-  `P_ni = <beta_n|psi_i>` with beta channels concatenated over atoms in QE
-  ion order; atom `na` (1-based) of species `nt = ityp(na)` owns channels
-  `ofsbeta(na)+1 … ofsbeta(na)+nh(nt)`, where `ofsbeta` is the cumulative
-  offset over atoms (the TB2J reader rebuilds it from `ityp` + `nh`).
+  `P_ni = <beta_n|psi_i>` with beta channels in native **species-major**
+  order: increasing species index, then ion order within that species.
+  Atom `na` (1-based) of species `nt = ityp(na)` owns channels
+  `ofsbeta(na)+1 … ofsbeta(na)+nh(nt)`. The reader reconstructs the same
+  type-outer/atom-inner offsets as QE `init_us_1`, not an ion-order
+  cumulative sum. Per-atom operator arrays still use ion order.
 * **Coefficients are already dual** relative to the implicit basis dual to
   beta, and `deeq` is the matching covariant separable-operator coefficient
   (`V_NL = beta D beta^dagger`). The TB2J contract therefore keeps
@@ -164,6 +166,12 @@ the deeq-only vertex failed bccFe G3.
   smooth-XC splitting plus `deeq(up) - deeq(down)`; v1.0/v1.1 use the
   `deeq` difference alone. Energies and operators are in Ry, converted
   to eV by the reader with `RYTOEV = 13.605693122994`.
+* **Old-reader correction.** Earlier scalar and spinor KB readers assigned
+  beta rows in atom-major order. Inputs not grouped by increasing species
+  index can have incorrect exchange, including no-U and historical dumps.
+  Reconsume the unchanged native dumps with the corrected reader to
+  regenerate TB2J output. Atomic-wavefunction channel order is unaffected;
+  no ABI or QE Hamiltonian change is involved.
 * **Spin selection.** LSDA (`nspin = 2`): every k belongs to one spin channel
   via `isk` (1 = up, 2 = down).
 * **`becsum` scf-vs-nscf caveat.** In a v1.1 dump, scf dumps hold the
@@ -281,8 +289,10 @@ and little-endian gfortran four-byte record markers:
 
 TB2J normalizes one full-BZ spinor k set (`sum(wk)=1`), takes band
 occupations from `wg/wk`, and keeps already-dual beta coefficients
-without applying an overlap inverse to the Green function. The
-Hermitian beta-Gram pseudoinverse (`rcond=1e-6`) dresses only the
+without applying an overlap inverse to the Green function.
+Both scalar and spinor KB coefficients retain the native species-major row
+order described above, including when native Hubbard channels are appended.
+The Hermitian beta-Gram pseudoinverse (`rcond=1e-6`) dresses only the
 **projected smooth magnetic field**; it never changes `becp` or the
 native nonlocal blocks. A numerical eigengap is necessary for stable
 truncation, but does **not** bound the physical weight of a

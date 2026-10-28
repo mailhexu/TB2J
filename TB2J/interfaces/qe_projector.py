@@ -2383,7 +2383,9 @@ def _qe_native_source_frame(hubbard):
 
 # MathDoc: tb2j/qe-hubbard-native-contract
 # MathDoc: tb2j/qe-hubbard-joint-frame#joint_trace
-def _qe_joint_spinor(dump, coefficients, operator, vertices, counts, indices):
+def _qe_joint_spinor(
+    dump, coefficients, operator, vertices, counts, indices, original_owners
+):
     """Pack actual native spin-column contractions, source and tangents once."""
     hubbard = dump.hubbard
     original_nproj = coefficients.shape[-1]
@@ -2400,7 +2402,6 @@ def _qe_joint_spinor(dump, coefficients, operator, vertices, counts, indices):
         [kp.coefficients[column_map].transpose(2, 0, 1) for kp in hubbard.kpoints]
     )[None]
     original_counts = counts
-    original_owners = np.repeat(np.arange(dump.nat), counts)
     counts, indices, projector_site = _qe_joint_site_layout(
         counts, indices, original_owners, owners
     )
@@ -2707,6 +2708,17 @@ def _read_spectral_record(reader: _RecordReader, nbnd: int, nks: int):
     return et, wg
 
 
+def _qe_beta_offsets(ityp, nh):
+    """Rebuild QE init_us_1 offsets: species first, then atoms of that species."""
+    offsets = np.empty(len(ityp), dtype=int)
+    start = 0
+    for species, count in enumerate(nh, start=1):
+        for atom in np.flatnonzero(ityp == species):
+            offsets[atom] = start
+            start += int(count)
+    return offsets
+
+
 # ---------------------------------------------------------------------------
 # parse_qe_dump (KB/beta dump family)
 # ---------------------------------------------------------------------------
@@ -2885,9 +2897,7 @@ def parse_qe_dump(path) -> QEProjectorDump:
                 f"expected record ({reader.remaining_bytes()} bytes)"
             )
 
-    ofsbeta = np.zeros(nat, dtype=int)
-    if nat > 1:
-        ofsbeta[1:] = np.cumsum(nh[ityp - 1])[:-1]
+    ofsbeta = _qe_beta_offsets(ityp, nh)
 
     return QEProjectorDump(
         path=path,
@@ -3308,10 +3318,11 @@ def read_qe_dump(
     natom = dump.nat
     nmax = int(site_nproj.max())
     site_projector_indices = -np.ones((natom, nmax), dtype=int)
-    projector_site = np.repeat(np.arange(natom), site_nproj)
+    projector_site = np.empty(dump.nkb, dtype=int)
     for site, count in enumerate(site_nproj):
         start = int(dump.ofsbeta[site])
         site_projector_indices[site, :count] = np.arange(start, start + count)
+        projector_site[start : start + count] = site
 
     # -- separable operator: deeq per spin, eV ---------------------------------
     hij = (
@@ -3709,7 +3720,7 @@ class QESpinorDump:
 
     @property
     def ofsbeta(self):
-        return np.r_[0, np.cumsum(self.nh_per_atom[:-1])]
+        return _qe_beta_offsets(self.ityp, self.nh)
 
 
 def _require_qe_hermitian(matrix, what, path):
@@ -4246,10 +4257,13 @@ def read_qe_spinor_dump(
     )
     nmax = int(counts.max())
     indices = np.full((dump.nat, nmax), -1, dtype=int)
+    sites = np.empty(dump.nkb, dtype=int)
+    offsets = dump.ofsbeta
     operator = np.zeros((dump.nat, nmax, nmax, 2, 2), dtype=complex)
     for site, count in enumerate(counts):
-        start = int(dump.ofsbeta[site])
+        start = int(offsets[site])
         indices[site, :count] = np.arange(start, start + count)
+        sites[start : start + count] = site
         if not count:
             continue
         inverse = _qe_gram_inverse(
@@ -4335,7 +4349,6 @@ def read_qe_spinor_dump(
                             f"TB2J_TAN_PARITY_RESIDUAL={residual:.6e} "
                             "(relative tolerance 1e-6)"
                         )
-    sites = np.repeat(np.arange(dump.nat), counts)
     coefficients = dump.coefficients.transpose(0, 3, 2, 1)[None]
     components = component_metadata = None
     joint_metadata = {}
@@ -4350,7 +4363,9 @@ def read_qe_spinor_dump(
             components,
             component_metadata,
             joint_metadata,
-        ) = _qe_joint_spinor(dump, coefficients, operator, vertices, counts, indices)
+        ) = _qe_joint_spinor(
+            dump, coefficients, operator, vertices, counts, indices, sites
+        )
     data = ProjectorGreenData(
         kpoints=dump.xk @ dump.at,
         weights=dump.wk,

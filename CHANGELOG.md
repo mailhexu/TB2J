@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
+  QE concatenates beta rows by species, then atoms within each species;
+  earlier readers assumed atom-major order. Inputs not grouped in increasing
+  species-index order could therefore yield incorrect site-resolved
+  exchange, with or without +U, including attested historical no-U data.
+  Site maps and appended Hubbard frames now preserve the actual ownership.
+  Recompute affected TB2J outputs from the existing native dumps; atomic
+  wavefunction ordering, the dump ABI and scientific acceptance gates are
+  unchanged.
 - Added complete-source QE API/CLI selection: `delta_total` by default,
   explicit `delta_xc`/`delta_u` diagnostics with matched spinor tangents and
   unchanged reference frames, and `--legacy_no_u` for explicit historical
