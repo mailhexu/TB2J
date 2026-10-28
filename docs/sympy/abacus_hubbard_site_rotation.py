@@ -109,19 +109,23 @@ def run():
     assert s.simplify(mixed_full - mixed_factorized) == 0
     assert s.simplify(mixed_full - u_only - xc_only) != 0
 
-    # Rotate the prescribed spin-dependent site operator. Spin-last ordering.
+    # The physical magnetic Hamiltonian is half the up-minus-down splitting.
+    # Spin-last ordering; the adjacent resolvent example has Hup-Hdn = W.
     theta = s.symbols("theta", real=True)
     sy = s.Matrix([[0, -I], [I, 0]])
     sx = s.Matrix([[0, 1], [1, 0]])
     sz = s.diag(1, -1)
     u = s.cos(theta / 2) * s.eye(2) - I * s.sin(theta / 2) * sy
     rotation = s.kronecker_product(s.eye(2), u)
-    M = s.kronecker_product(W, sz)
-    dM = (rotation * M * rotation.H).diff(theta).subs(theta, 0)
+    hmag = s.kronecker_product(W, sz) / 2
+    dhmag = (rotation * hmag * rotation.H).diff(theta).subs(theta, 0)
     phi_spin = s.kronecker_product(phi, s.eye(2))
-    dM_cov = s.simplify(phi_spin.H * dM * phi_spin)
-    assert dM_cov == s.kronecker_product(vertex, sx)
-    assert dM_cov != s.kronecker_product(site_only, sx)
+    dH_cov = s.simplify(phi_spin.H * dhmag * phi_spin)
+    assert dH_cov == s.kronecker_product(vertex, sx) / 2
+    assert dH_cov != s.kronecker_product(site_only, sx) / 2
+    # Two transverse spin channels, each with two half-splitting tangents,
+    # combine with the tangent contour prefactor 1/(2*pi).
+    assert 2 * (s.Rational(1, 2) ** 2) / (2 * s.pi) == 1 / (4 * s.pi)
     # Native scalar potential: U * (1/2 delta - occupation transpose).
     # Evaluate both physical spin channels independently before swapping them.
     U = s.symbols("U", real=True)
@@ -136,6 +140,14 @@ def run():
     assert s.simplify(split - U * (ndn - nup).T) == s.zeros(2)
     assert s.simplify(swapped + split) == s.zeros(2)
     assert split.subs(dict(zip(ndn, nup)), simultaneous=True) == s.zeros(2)
+    vu, vd = potential(nup), potential(ndn)
+    spin_hamiltonian = s.kronecker_product(
+        (vu + vd) / 2, s.eye(2)
+    ) + s.kronecker_product(split / 2, sz)
+    assert spin_hamiltonian[0::2, 0::2] == vu
+    assert spin_hamiltonian[1::2, 1::2] == vd
+    rotated = (rotation * spin_hamiltonian * rotation.H).diff(theta).subs(theta, 0)
+    assert s.simplify(rotated - s.kronecker_product(split / 2, sx)) == s.zeros(4)
 
     # Two-cell finite periodic model: a local site perturbation couples
     # distinct k points. Compare direct-space trace with explicit double-k
