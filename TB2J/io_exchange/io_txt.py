@@ -50,40 +50,41 @@ def write_atom_section(cls, myfile):
     # sns = list(symnum.keys())
     poses = cls.atoms.get_positions()
 
-    tchg, tmx, tmy, tmz = 0, 0, 0, 0
-    for i, s in enumerate(symnum):
+    charges = cls.charges
+    spins = cls.spinat
+    moments_z = getattr(cls, "magmoms", None)
+    if cls.colinear and spins is not None and moments_z is None:
+        moments_z = np.asarray(spins)[:, 2]
+    if charges is None or spins is None:
+        myfile.write(
+            "(Unavailable fields were not supplied; totals are unavailable.)\n"
+        )
+
+    def number(value):
+        return f"{value:9.4f}" if value is not None else f'{"unavailable":>9s}'
+
+    for i, symbol in enumerate(symnum):
+        charge = None if charges is None else charges[i]
         if cls.colinear:
-            mag = cls.magmoms[i]
-            chg = cls.charges[i]
-            myfile.write(
-                "{:<12s} {:13.8f} {:13.8f} {:13.8f} {:9.4f} {:9.4f}\n".format(
-                    s, poses[i, 0], poses[i, 1], poses[i, 2], chg, mag
-                )
-            )
+            moments = [None if spins is None else moments_z[i]]
         else:
-            chg = cls.charges[i]
-            mx, my, mz = cls.spinat[i, :]
-            myfile.write(
-                "{:<12s} {:13.8f} {:13.8f} {:13.8f} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n".format(
-                    s, poses[i, 0], poses[i, 1], poses[i, 2], chg, mx, my, mz
-                )
-            )
-            tchg += chg
-            tmx += mx
-            tmy += my
-            tmz += mz
+            moments = [None] * 3 if spins is None else spins[i]
+        myfile.write(
+            f"{symbol:<12s} {poses[i, 0]:13.8f} {poses[i, 1]:13.8f} "
+            f"{poses[i, 2]:13.8f} {number(charge)} "
+            + " ".join(number(moment) for moment in moments)
+            + "\n"
+        )
+    total_charge = None if charges is None else np.sum(charges)
     if cls.colinear:
-        myfile.write(
-            "{:<12s} {:13s} {:13s} {:13s} {:9.4f} {:9.4f}\n".format(
-                "Total", "", "", "", np.sum(cls.charges), np.sum(cls.magmoms)
-            )
-        )
+        total_moments = [None if spins is None else np.sum(moments_z)]
     else:
-        myfile.write(
-            "{:<12s} {:13s} {:13s} {:13s} {:9.4f} {:9.4f} {:9.4f} {:9.4f}\n".format(
-                "Total", "", "", "", tchg, tmx, tmy, tmz
-            )
-        )
+        total_moments = [None] * 3 if spins is None else np.sum(spins, axis=0)
+    myfile.write(
+        f'{"Total":<12s} {"":13s} {"":13s} {"":13s} {number(total_charge)} '
+        + " ".join(number(moment) for moment in total_moments)
+        + "\n"
+    )
 
     # write single ion anisotropy
     if cls.k1 is not None and cls.k1dir is not None:
@@ -134,9 +135,15 @@ def write_exchange_section(
     myfile.write("Exchange: \n")
 
     # l = [x for x in cls.exchange_Jlist if abs(x.J) > cutoff]
-    keys = cls.exchange_Jdict
+    exchange = cls.exchange_Jdict or {}
+    keys = list(exchange)
+    extra = set()
+    for channel in (cls.dmi_ddict, cls.Jani_dict):
+        if channel is not None:
+            extra.update(channel)
+    keys.extend(sorted(extra - set(exchange)))
     if order == "amplitude":
-        l = sorted(keys, key=lambda x: abs(cls.exchange_Jdict[x]), reverse=True)
+        l = sorted(keys, key=lambda x: abs(exchange.get(x, 0)), reverse=True)
     elif order == "distance":
         l = sorted(keys, key=lambda x: cls.distance_dict[x][1])
     else:
@@ -156,25 +163,21 @@ def write_exchange_section(
     for ll in l:
         myfile.write("-" * 88 + "\n")
         R, i, j = ll
-        J = cls.exchange_Jdict[ll]
+        J = exchange.get(ll)
         vec, distance = cls.distance_dict[ll]
-        myfile.write(
-            "   {:5s} {:5s} ({:3d}, {:3d}, {:3d}) {:7.4f}   ({:6.3f}, {:6.3f}, {:6.3f}) {:6.3f} \n".format(
-                sns[cls.ind_atoms[i]],
-                sns[cls.ind_atoms[j]],
-                R[0],
-                R[1],
-                R[2],
-                J * 1e3,
-                vec[0],
-                vec[1],
-                vec[2],
-                distance,
-            )
+        prefix = (
+            f"   {sns[cls.ind_atoms[i]]:5s} {sns[cls.ind_atoms[j]]:5s} "
+            f"({R[0]:3d}, {R[1]:3d}, {R[2]:3d}) "
         )
-
-        Jiso = cls.exchange_Jdict[ll] * 1e3
-        myfile.write(f"J_iso: {Jiso:7.4f} \n")
+        jtext = f"{J * 1e3:7.4f}" if J is not None else "unavailable"
+        myfile.write(
+            f"{prefix}{jtext}   ({vec[0]:6.3f}, {vec[1]:6.3f}, "
+            f"{vec[2]:6.3f}) {distance:6.3f} \n"
+        )
+        Jiso = None if J is None else J * 1e3
+        myfile.write(
+            "J_iso: unavailable\n" if Jiso is None else f"J_iso: {Jiso:7.4f} \n"
+        )
 
         write_experimental = False
 
@@ -182,11 +185,11 @@ def write_exchange_section(
             Jprime, B = cls.biquadratic_Jdict[ll]
             myfile.write(f"[Testing!] Jprime: {Jprime * 1e3:.3f},  B: {B * 1e3:.3f}\n")
 
-        if cls.dJdx is not None:
+        if cls.dJdx is not None and ll in cls.dJdx:
             dJdx = cls.dJdx[ll]
             myfile.write(f"dJ/dx: {dJdx * 1e3:.3f}\n")
 
-        if cls.dJdx2 is not None:
+        if cls.dJdx2 is not None and ll in cls.dJdx2:
             dJdx2 = cls.dJdx2[ll]
             myfile.write(f"d2J/dx2: {dJdx2 * 1e3:.3f}\n")
 
@@ -215,14 +218,21 @@ def write_exchange_section(
                 f"[Testing!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
             )
 
-        Jiso_val = cls.exchange_Jdict[ll]
+        Jiso_val = exchange.get(ll)
         DMI_val = cls.dmi_ddict.get(ll) if cls.dmi_ddict is not None else None
         Jani_val = cls.Jani_dict.get(ll) if cls.Jani_dict is not None else None
-        Jtensor = combine_J_tensor(Jiso=Jiso_val, D=DMI_val, Jani=Jani_val)
-        myfile.write(
-            "Combined J tensor (meV) [J = Jiso*I + DMI_antisymmetric + Jani_symmetric]:\n"
-        )
-        myfile.write(f"{array_str(Jtensor * 1e3, precision=3, suppress_small=True)}\n")
+        if Jiso_val is None:
+            myfile.write(
+                "Combined J tensor: unavailable (isotropic component missing)\n"
+            )
+        else:
+            Jtensor = combine_J_tensor(Jiso=Jiso_val, D=DMI_val, Jani=Jani_val)
+            myfile.write(
+                "Combined J tensor (meV) [J = Jiso*I + DMI_antisymmetric + Jani_symmetric]:\n"
+            )
+            myfile.write(
+                f"{array_str(Jtensor * 1e3, precision=3, suppress_small=True)}\n"
+            )
 
         if cls.NJT_ddict is not None and ll in cls.NJT_ddict:
             DMI = cls.NJT_ddict[ll] * 1e3
@@ -241,7 +251,7 @@ def write_exchange_section(
             )
 
         if write_orb_decomposition:
-            if cls.Jiso_orb:
+            if cls.Jiso_orb and ll in cls.Jiso_orb:
                 myfile.write(
                     "Orbital contributions:\n isotropic J:\n {} \n".format(
                         np.array_str(
@@ -251,7 +261,7 @@ def write_exchange_section(
                 )
 
             xyz = "xyz"
-            if cls.DMI_orb:
+            if cls.DMI_orb and ll in cls.DMI_orb:
                 for i in range(3):
                     myfile.write(f"DMI {xyz[i]}:\n")
                     myfile.write(
@@ -261,7 +271,7 @@ def write_exchange_section(
                     )
                     myfile.write("\n")
 
-            if cls.Jani_orb:
+            if cls.Jani_orb and ll in cls.Jani_orb:
                 for i in range(3):
                     for j in range(3):
                         myfile.write(f"Jani {xyz[i]}{xyz[j]}:\n")

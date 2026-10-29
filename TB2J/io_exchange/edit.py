@@ -86,11 +86,12 @@ def save(spinio, path="modified_results"):
     --------
     >>> save(spinio, 'my_modified_results')
     """
-    spinio.write_all(path=path)
+    report = spinio.write_all(path=path)
 
     # Fix mb.in to use SIA from exchange.xml when SIA is present
-    if spinio.has_uniaxial_anistropy or (
-        hasattr(spinio, "has_sia_tensor") and spinio.has_sia_tensor
+    if "Multibinit" in report.written and (
+        spinio.has_uniaxial_anistropy
+        or (hasattr(spinio, "has_sia_tensor") and spinio.has_sia_tensor)
     ):
         mb_in_path = os.path.join(path, "Multibinit", "mb.in")
         if os.path.exists(mb_in_path):
