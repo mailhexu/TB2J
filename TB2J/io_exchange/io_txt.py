@@ -127,6 +127,8 @@ def write_exchange_section(
     write_experimental: bool = True,
     write_orb_decomposition: bool = False,
 ):
+    from .shells import _numbers
+
     symnum = symbol_number(cls.atoms)
     sns = list(symnum.keys())
     # poses = cls.atoms.get_positions()
@@ -235,7 +237,7 @@ def write_exchange_section(
             )
 
         if cls.NJT_ddict is not None and ll in cls.NJT_ddict:
-            DMI = cls.NJT_ddict[ll] * 1e3
+            DMI = _numbers(cls.NJT_ddict[ll], (3,), f"NJT_ddict {ll!r}") * 1e3
             myfile.write(
                 "[Experimental!] DMI_NJt: ({:7.4f} {:7.4f} {:7.4f})\n".format(
                     DMI[0], DMI[1], DMI[2]
@@ -243,7 +245,7 @@ def write_exchange_section(
             )
 
         if cls.NJT_Jdict is not None and ll in cls.NJT_Jdict:
-            J = cls.NJT_Jdict[ll] * 1e3
+            J = _numbers(cls.NJT_Jdict[ll], (3,), f"NJT_Jdict {ll!r}") * 1e3
             myfile.write(
                 "[Testing!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n".format(
                     J[0], J[1], J[2]

@@ -73,8 +73,6 @@ def write_vampire_unitcell_file(cls, fname):
             for i in range(3):
                 for j in range(3):
                     val = np.real(Jtensor[i, j] * 2.0 / J)
-                    if np.abs(val) < 1e-30:
-                        val = 0.0
                     myfile.write(f"{val:< 12.5e} ")
             myfile.write("\n")
 

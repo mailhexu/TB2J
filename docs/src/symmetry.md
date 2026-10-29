@@ -58,53 +58,9 @@ If transferring reference symmetry produces a non-integer bond image,
 the image. Check that the stored and reference structures share the cell
 and have consistent positions and symmetry tolerance.
 
-### Guarded native exchange export
+### Editable symmetry-shell exchange
 
-`TB2J.io_exchange.shells.write_exchange` writes native formats without
-the solver fan-out of `SpinIO.write_all`:
-
-```python
-from TB2J.io_exchange.shells import read_exchange, write_exchange
-
-# Native pickle input must come from a trusted source.
-model = read_exchange("TB2J_results/TB2J.pickle", "pickle").spinio
-report = write_exchange(model, "edited_native", "pickle")
-```
-
-The supported targets are `pickle`, `text`, `xml`, and `tb2j`. Output is a
-directory containing `TB2J.pickle`, `exchange.out`, or `exchange.xml`;
-`tb2j` writes all three plus `structure.vasp` in that directory. The preset
-checks every member before creating output. Existing solver export APIs
-remain separate and unchanged.
-
-Text needs actual per-atom charges and reference moments. XML needs
-reference moments and chemical identity on re-import: its masses alone
-do not establish species. `NativeContext` supplies missing context without
-overwriting conflicting source values. Scalar moments mean signed z-axis
-components; vector moments use noncollinear mode. Pickle can retain
-explicitly absent context without claiming dynamics-readiness.
-Structure context is checked without replacing native isotope masses or
-other populated atom arrays. The preset also checks actual VASP structure
-serialization before IO, including ASE constraint representability.
-
-Losses fail by default. Text cannot retain populated damping, gyromagnetic,
-normalized SIA tensor, biquadratic, or orbital fields; XML cannot retain
-charges, normalized SIA tensor, biquadratic, NJT, orbital, or derivative
-fields. A text DMI/Jani key without a corresponding isotropic key also
-requires an explicit per-channel loss. For example, if the intended
-omissions are text damping/gyro and XML charges:
-
-```python
-report = write_exchange(
-    model, "edited_native", "tb2j",
-    allow_loss=("damping", "gyromag", "charges"),
-)
-```
-
-`ConversionReport` records actual losses and printed-precision bounds.
-Named loss options never fabricate missing charges, moments, or isotropic
-pair values. Unsupported NumPy matrix-printing regimes fail before IO.
-Native outputs preserve raw site images and pair translations, not just
-periodically equivalent coordinates. Pickle retains shell labels/user
-metadata; text/XML report their omission. IO failures retain the existing
-writers' behavior; this interface does not provide rollback.
+Use `TB2J_shell generate` to create a symmetry-aware editable file from a
+structure or a trusted TB2J pickle, then `TB2J_shell export` to write standard
+results. See [symmetry-shell exchange files](exchange_shells.md) for the format,
+Python interface, and supported solver-output omissions.

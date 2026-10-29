@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from TB2J.io_exchange import shells
+from TB2J.io_exchange.io_exchange import SpinIO
 
 HAND_FILE = '''exchange = "isotropic"
 [structure]
@@ -65,7 +66,7 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
     assert output.exchange_Jdict == {key: 0.002}
     np.testing.assert_allclose(output.distance_dict[key][0], vector, atol=1e-14)
     output.write_pickle(path=tmp_path)
-    native = shells.read_exchange(tmp_path / "TB2J.pickle", "pickle").spinio
+    native = SpinIO.load_pickle(path=tmp_path)
     restored = shells.compress(native, mode="isotropic").document
     assert restored.site_labels == reloaded.site_labels
     assert restored.metadata == reloaded.metadata
