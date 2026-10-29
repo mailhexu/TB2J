@@ -21,12 +21,31 @@ Select magnetic sites with `magnetic_species` or, alternatively,
 Angstrom. For magnetic space-group symmetry, pass `symmetry="msg"` and complete
 `reference_spins` in full atom order; `symprec` and `magnetic_tol` are configurable.
 Use `mode="tensor"` for 3×3 exchange values. Each shell remains `unfilled` until
-edited. This Python entry point currently generates structure templates; the
-native conversion commands below retain their existing behavior.
+edited. The native conversion commands below retain their existing behavior.
 
 Both this entry point and `write_shells` add format explanations. Set
 `equivalent_comments=False` to omit equivalent-pair lists without omitting
 the explanations. Comments are informational and can be deleted.
+
+## Generate from a trusted TB2J pickle
+
+```python
+from TB2J.io_exchange.shell_workflow import generate_shells
+
+result = generate_shells("TB2J_results/TB2J.pickle", "exchange.shells.toml")
+```
+
+Only load a pickle from a trusted source: Python pickle loading can execute code.
+The generator writes `exchange.shells.context.npz` beside the TOML. Keep the two
+files together, including when moving or renaming them: the sibling name is the
+TOML filename with its final suffix replaced by `.context.npz`. The companion
+contains data, not the pickle, and its digest detects accidental mismatches; it
+does not establish authenticity. The original pickle is not needed after generation.
+Selectors, reference-spin overrides and cutoff apply to structure input only.
+Native import preserves anisotropic exchange by selecting tensor mode when needed.
+Symmetry-inconsistent values are rejected unless `project=True` explicitly requests
+projection. A companion requiring unsupported objects, constraints, or a calculator
+is rejected instead of silently dropping them.
 
 ## A small hand-authored document
 
