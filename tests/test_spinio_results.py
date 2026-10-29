@@ -103,28 +103,6 @@ def test_missing_distance_is_derived_for_writing_without_mutating_native_model(
     assert "3.000" in text and "J_iso:" in text
 
 
-def test_out_of_cell_frame_is_omitted_for_wrapping_writers(tmp_path):
-    model = _single_spin(moments=np.array([[0.0, 0.0, 2.0]]))
-    model.atoms.positions[0, 0] += 3.0
-    original = model.atoms.positions.copy()
-    report = model.write_all(path=tmp_path / "results")
-    reasons = dict(report.omitted)
-    assert {"TomASD", "Vampire", "ESPInS"} <= set(reasons)
-    assert all("frame" in reasons[name] for name in ("TomASD", "Vampire", "ESPInS"))
-    np.testing.assert_array_equal(model.atoms.positions, original)
-
-
-def test_tensor_input_omits_scalar_only_solver_without_dropping_native_data(tmp_path):
-    model = _single_spin(moments=np.array([[0.0, 0.0, 2.0]]))
-    key = next(iter(model.exchange_Jdict))
-    model.dmi_ddict = {key: np.array([0.001, 0.002, 0.003])}
-    report = model.write_all(path=tmp_path / "results")
-    assert "tensor" in dict(report.omitted)["TomASD"]
-    assert not (tmp_path / "results" / "TomASD").exists()
-    result = SpinIO.load_pickle(path=tmp_path / "results")
-    np.testing.assert_array_equal(result.dmi_ddict[key], model.dmi_ddict[key])
-
-
 def test_list_moments_are_not_mutated_by_writer(tmp_path):
     model = _single_spin(moments=[[0.0, 0.0, 2.0]], charges=[8.0])
     report = model.write_all(path=tmp_path / "results")

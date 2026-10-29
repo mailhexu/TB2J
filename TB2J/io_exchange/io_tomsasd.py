@@ -15,7 +15,7 @@ def write_tom_ucf(cls, fname):
     with open(fname, "w") as myfile:
         myfile.write("%s\n" % nmatom)
         myfile.write("%s\n" % nmatom)
-        for i in range(natom):
+        for i in sorted(range(natom), key=lambda atom: cls.index_spin[atom]):
             text = ""
             id_spin = cls.index_spin[i]
             if id_spin > -1:
@@ -53,17 +53,15 @@ def write_tom_ucf(cls, fname):
 
 def write_tom_exch(cls, fname):
     """
-    write exchange_J to exch file.
+    Write each supported full Cartesian pair tensor in eV.
     """
-    # TODO convert DMI to matrix form and
-
-    # prepare
-    maxInt = 0
-    if cls.has_exchange:
-        for key, group in groupby(cls.exchange_Jdict.keys(), lambda x: (x[1], x[2])):
-            l = len(list(group))
-            if l > maxInt:
-                maxInt = l
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization
+    pairs = sorted(cls.exchange_Jdict or {}, key=lambda key: (key[1], key[2], key[0]))
+    groups = [
+        (key, list(group)) for key, group in groupby(pairs, lambda x: (x[1], x[2]))
+    ]
+    shifts = cls._site_image_shifts()
+    maxInt = max((len(group) for _, group in groups), default=0)
 
     with open(fname, "w") as myfile:
         myfile.write(
@@ -79,35 +77,23 @@ TruncateExchange = FALSE;
             % maxInt
         )
         if cls.has_exchange:
-            for key, group in groupby(
-                cls.exchange_Jdict.keys(), lambda x: (x[1], x[2])
-            ):
-                group = list(group)
+            for key, group in groups:
                 myfile.write("exchange_{}_{}:\n".format(key[0], key[1]))
                 myfile.write("{ \n")
                 myfile.write("Num_Interactions = {};\n".format(len(list(group))))
                 myfile.write('units = "eV";\n')
                 for i, k in enumerate(group):
+                    R = cls._wrapped_translation(k[0], k[1], k[2], shifts)
                     myfile.write(
-                        "UnitCell{} = [{:.5e} , {:.5e} , {:.5e} ];\n".format(
-                            i + 1, k[0][0], k[0][1], k[0][2]
-                        )
+                        "UnitCell{} = [{:.5e} , {:.5e} , {:.5e} ];\n".format(i + 1, *R)
                     )
-                    myfile.write(
-                        "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
-                            i + 1, 1, cls.exchange_Jdict[k], 0.0, 0.0
+                    tensor = cls.get_J_tensor(k[1], k[2], k[0], SIA=False)
+                    for row in range(3):
+                        myfile.write(
+                            "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
+                                i + 1, row + 1, *tensor[row]
+                            )
                         )
-                    )
-                    myfile.write(
-                        "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
-                            i + 1, 2, 0.0, cls.exchange_Jdict[k], 0.0
-                        )
-                    )
-                    myfile.write(
-                        "J{}_{} = [{:.8e} , {:.8e}, {:.8e}];\n".format(
-                            i + 1, 3, 0.0, 0.0, cls.exchange_Jdict[k]
-                        )
-                    )
                 myfile.write("};\n")
 
 

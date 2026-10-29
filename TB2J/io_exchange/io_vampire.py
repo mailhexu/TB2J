@@ -4,7 +4,18 @@ import numpy as np
 from ase.units import J
 
 
+def _validate_vampire_cell(atoms):
+    """Vampire builds positions from axis dimensions, not the shape matrix."""
+    cell = np.asarray(atoms.cell.array)
+    diagonal = np.diag(cell)
+    if np.any(diagonal <= 0) or not np.allclose(
+        cell, np.diag(diagonal), rtol=0, atol=1e-12
+    ):
+        raise ValueError("Vampire cell must be positive and axis-aligned")
+
+
 def write_vampire(cls, path="TB2J_results/Vampire"):
+    _validate_vampire_cell(cls.atoms)
     if not os.path.exists(path):
         os.makedirs(path)
     write_vampire_unitcell_file(cls, os.path.join(path, "vampire.UCF"))
@@ -13,19 +24,22 @@ def write_vampire(cls, path="TB2J_results/Vampire"):
 
 
 def write_vampire_unitcell_file(cls, fname):
+    _validate_vampire_cell(cls.atoms)
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#site_frame_wrapped_translation
+    shifts = cls._site_image_shifts()
     with open(fname, "w") as myfile:
         cell = cls.atoms.get_cell().array
         lattice_parameters = np.linalg.norm(cell, axis=-1)
         myfile.write("# Unit cell size (Angstrom):\n")
         np.savetxt(myfile, [lattice_parameters], fmt="%f")
         myfile.write("# Unit cell lattice vectors:\n")
-        np.savetxt(myfile, cell / lattice_parameters, fmt="%f")
+        np.savetxt(myfile, cell / lattice_parameters[:, None], fmt="%f")
 
         myfile.write("# Atoms\n")
         nspins = sum([1 if i > -1 else 0 for i in cls.index_spin])
         myfile.write("%s %s\n" % (nspins, nspins))
         natom = len(cls.atoms)
-        for i in range(natom):
+        for i in sorted(range(natom), key=lambda atom: cls.index_spin[atom]):
             text = ""
             id_spin = cls.index_spin[i]
             if id_spin > -1:
@@ -51,9 +65,10 @@ def write_vampire_unitcell_file(cls, fname):
         for key in cls.exchange_Jdict:
             R, ispin, jspin = key
             Jtensor = cls.get_J_tensor(ispin, jspin, R, Jani=True, DMI=True)
+            output_R = cls._wrapped_translation(R, ispin, jspin, shifts)
             counter += 1  # starts at 0
             myfile.write(
-                f"{counter:5d} {ispin:3d} {jspin:3d} {R[0]:3d} {R[1]:3d} {R[2]:3d} "
+                f"{counter:5d} {ispin:3d} {jspin:3d} {output_R[0]:3d} {output_R[1]:3d} {output_R[2]:3d} "
             )
             for i in range(3):
                 for j in range(3):
@@ -84,7 +99,7 @@ material[{id}]:unit-cell-category =  {id}
         myfile.write("material:num-materials = %s\n" % (nspins))
         nspins = sum([1 if i > -1 else 0 for i in cls.index_spin])
         natom = len(cls.atoms)
-        for i in range(natom):
+        for i in sorted(range(natom), key=lambda atom: cls.index_spin[atom]):
             text = ""
             id_spin = cls.index_spin[i]
             if id_spin > -1:
