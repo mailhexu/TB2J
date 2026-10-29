@@ -6,6 +6,28 @@ The shell document stores one value per **symmetry orbit of ordered atom pairs**
 
 Supported shell/native formats are `shells`, trusted `pickle`, `text` (`exchange.out`), `xml` (`exchange.xml`), and the composed native `tb2j` output preset. External-solver formats are not targets of this interface. The former solver-export scenario A17 is **withdrawn, not passed**; existing solver writers and `write_all` are unchanged and outside this contract.
 
+## Generate a structure template from Python
+
+```python
+from TB2J.io_exchange.shell_workflow import generate_shells
+
+result = generate_shells(
+    "POSCAR", "exchange.shells.toml", magnetic_species=["Fe"], cutoff=6.0
+)
+```
+
+Select magnetic sites with `magnetic_species` or, alternatively,
+`magnetic_atoms` containing one-based full-structure indices. The cutoff is in
+Angstrom. For magnetic space-group symmetry, pass `symmetry="msg"` and complete
+`reference_spins` in full atom order; `symprec` and `magnetic_tol` are configurable.
+Use `mode="tensor"` for 3×3 exchange values. Each shell remains `unfilled` until
+edited. This Python entry point currently generates structure templates; the
+native conversion commands below retain their existing behavior.
+
+Both this entry point and `write_shells` add format explanations. Set
+`equivalent_comments=False` to omit equivalent-pair lists without omitting
+the explanations. Comments are informational and can be deleted.
+
 ## A small hand-authored document
 
 This complete scalar example is TOML schema v2 (the `schema_version` key is optional for hand-written v2 input). It has one explicit representative, a nonmagnetic atom with its own negative spin sentinel, and complete reference moments. The moment rows include every atom, including O2; a nonmagnetic selection does not imply a physical zero moment.

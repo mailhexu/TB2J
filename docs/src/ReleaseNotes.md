@@ -4,6 +4,7 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 - Editable symmetry-shell TOML documents provide orbit-based exchange editing and guarded conversion between shell files and the native pickle, ``exchange.out``, and Multibinit XML formats; the ``tb2j`` preset writes the native bundle. See ``docs/src/exchange_shells.md``.
+- Python structure template generation now supports magnetic-species or atom-index selection; generated shell files include format explanations independently of optional equivalent-pair lists.
 
 - New Quantum ESPRESSO interface: a version-pinned ``becp_dump``
   instrumentation on the ``TB2J`` branch of the QE fork
