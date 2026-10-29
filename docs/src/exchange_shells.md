@@ -46,62 +46,242 @@ Symmetry-inconsistent values are rejected unless `project=True` explicitly reque
 projection. A companion requiring unsupported objects, constraints, or a calculator
 is rejected instead of silently dropping them.
 
-## A small hand-authored document
+## A complete hand-authored scalar document
 
-This complete scalar example is TOML schema v2 (the `schema_version` key is optional for hand-written v2 input). It has one explicit representative, a nonmagnetic atom with its own negative spin sentinel, and complete reference moments. The moment rows include every atom, including O2; a nonmagnetic selection does not imply a physical zero moment.
+The following file is complete and independent: copy it, edit the `J` values,
+and export it. It describes one Fe atom in the primitive cell of body-centered
+cubic iron (a = 2.87 Å), hand-written as TOML schema v2 (the `schema_version`
+key is optional for hand-written v2 input) with space-group symmetry. Every
+explanatory comment may be deleted without changing the physics.
 
 ```toml
+# Complete hand-authored scalar (isotropic) example: one Fe atom in the
+# primitive cell of body-centered cubic iron (a = 2.87 Angstrom).
+#
+# One [[shell]] stores ONE exchange value for one symmetry orbit of ordered
+# atom pairs. Pairs related by a space-group operation (including lattice
+# centering) share a shell; equal bond lengths alone never merge shells, and
+# a reversed pair is a separate shell unless an operation maps it back.
+
+# Exchange model of this file: "isotropic" = one scalar J per shell.
+# (The alternative is "tensor" = one Cartesian 3x3 matrix per shell.)
 exchange = "isotropic"
+
+# Wire unit of every J below: "meV" (default, may be omitted) or "eV".
+# Distances/cutoff are Angstrom, moments are mu_B; Python values and the
+# exported native results are always eV (1 meV = 0.001 eV).
+energy_unit = "meV"
+
+# Optional, informational neighbor radius in Angstrom. It records the radius
+# used when a template was generated; it does NOT filter the shells below.
+cutoff = 4.5
 
 [structure]
 coordinates = "fractional"
+
+# Exactly three rows of three Cartesian lattice-vector components (Angstrom):
+# body-centered cubic primitive vectors of Fe (conventional a = 2.87 Angstrom).
 lattice = """
-4 0 0
-0.3 5 0
-0.2 0.4 6
+-1.435 1.435 1.435
+1.435 -1.435 1.435
+1.435 1.435 -1.435
 """
+
+# Atom rows, exactly seven whitespace-separated columns:
+#   atom-index label x y z magnetic spin-index
+# atom-index  sequential one-based index in row order (1, 2, ...).
+# label       unique element symbol + positive integer (Fe1); gives the species.
+# x y z       finite raw fractional coordinates; values outside [0, 1) are kept,
+#             never wrapped, so native fixed-R bonds keep their geometry.
+# magnetic    "Y" for a selected magnetic site, "N" otherwise.
+# spin-index  zero-based index into the native spin map: every Y row together
+#             must map exactly onto 0..nspin-1; an N row carries a negative
+#             sentinel, "-" spelling -1. This mapping is never reordered.
+# Blank lines and '#' comments are ignored inside row blocks.
 atoms = """
-1 Fe7 -0.87 0.21 0.17 Y 1
-2 O2 0.27 1.11 0.41 N -2
-3 Co4 1.39 0.36 0.23 Y 0
+1 Fe1 0.0 0.0 0.0 Y 0
 """
 
 [reference_spins]
+# One row per atom in full atom order (every atom, magnetic or not):
+#   label m         signed collinear moment along z, or
+#   label mx my mz  Cartesian axial moment vector.
+# Moments are in mu_B. Rows must be complete; missing atoms are not zero-filled.
 moments = """
-Fe7 2
-O2 0.03
-Co4 -1
+Fe1 2.2
 """
 
 [symmetry]
+# "spacegroup" (CLI/Python: "sg") detects the crystal space group and ignores
+# magnetic moments. The alternative "magnetic" (CLI/Python: "msg") detects the
+# magnetic space group: it REQUIRES the complete [reference_spins] moments above
+# plus a positive magnetic_tol (mu_B), and may include time-reversal (primed)
+# operations. mode and the scalar/tensor choice are independent.
 mode = "spacegroup"
+# Structural symmetry tolerance in Angstrom (default 1e-5).
+symprec = 1e-5
+
+# One [[shell]] per symmetry orbit of ordered atom pairs. The representative
+# names ONE member: "label-first label-second Rx Ry Rz", where (Rx Ry Rz) is
+# the lattice translation moving the SECOND atom into its bonded image.
+[[shell]]
+representative = "Fe1 Fe1 1 0 0"
+# Editable exchange of this orbit, in the wire unit above (meV).
+# While editing, J = "unfilled" marks an untouched shell; export rejects
+# unfilled shells until every one carries a real number.
+J = 45.0
 
 [[shell]]
-representative = "Fe7 Co4 1 0 -1"
-J = 2
+# Second-nearest neighbors: R = (0, 1, 1) is the Cartesian vector a2 + a3 =
+# (2.87, 0, 0) Angstrom, the bcc second-neighbor bond along x.
+representative = "Fe1 Fe1 0 1 1"
+J = 15.0
 
 [metadata]
-source_note = "hand-edited"
+# Optional free-form metadata; never affects exchange or symmetry.
+source_note = "hand-edited scalar example"
+
+# Generator/writer comments, including the per-shell equivalent-pair lists with
+# atom/spin cross-references, are informational: pass --no-equivalent-comments
+# (or equivalent_comments=False in Python) to suppress them, or delete any
+# comment; identity, support, and values never depend on comments.
 ```
 
-With no `distance` or `n_equivalent_pairs` supplied, both are computed when the document is canonicalized or written. No `name` is invented. To make this a tensor document, change `exchange` to `"tensor"` and replace the scalar `J` with a 3×3 Cartesian tensor, for example:
+No `name`, `distance`, or `n_equivalent_pairs` is supplied here: all three are
+optional. `name` is display text only; TB2J computes `distance` (Angstrom) and
+`n_equivalent_pairs` (the size of the full ordered-pair orbit, including the
+representative) for every shell when the document is canonicalized or written.
+No `name` is invented. With the geometry above the first shell validates as an
+8-pair orbit at 2.4855 Å and the second as a 6-pair orbit at 2.87 Å. A row
+flagged `N` carries a negative spin sentinel, and marking an atom nonmagnetic
+does not imply a physical zero moment: moment rows stay complete for every
+atom, magnetic or not.
+
+## A complete hand-authored tensor document
+
+The tensor variant is equally complete and independent. This file declares the
+same cell with `exchange = "tensor"` and magnetic symmetry, which requires the
+complete reference moments and a `magnetic_tol`. For the collinear moment
+written here the detector reports magnetic space group 229.140 with 48
+operations and no primed operation; primed operations (`time_reversal = true`)
+appear for other magnetic configurations.
 
 ```toml
+# Complete hand-authored tensor example: the same single-Fe body-centered
+# cubic primitive cell (a = 2.87 Angstrom), with a magnetic space group and
+# full 3x3 exchange tensors. Self-contained and independent of any other
+# example: data lines and '#' comments only; comments may be deleted freely.
+#
+# One [[shell]] stores ONE tensor for one symmetry orbit of ordered atom
+# pairs. Space-group/magnetic-group operations (including centering) map pair
+# images into the same shell; equal bond lengths alone never merge shells.
+
+# Exchange model of this file: "tensor" = one Cartesian 3x3 matrix J per shell.
+# (The alternative is "isotropic" = one scalar per shell. There is no implicit
+# scalar-to-tensor conversion: pick the model that matches your data.)
 exchange = "tensor"
 
+# Wire unit of every J entry below: "meV" (default, may be omitted) or "eV".
+# Distances are Angstrom, moments mu_B; Python values and exported native
+# results are always eV (1 meV = 0.001 eV).
+energy_unit = "meV"
+
+[structure]
+coordinates = "fractional"
+
+# Exactly three rows of three Cartesian lattice-vector components (Angstrom):
+# body-centered cubic primitive vectors of Fe (conventional a = 2.87 Angstrom).
+lattice = """
+-1.435 1.435 1.435
+1.435 -1.435 1.435
+1.435 1.435 -1.435
+"""
+
+# Atom rows, exactly seven whitespace-separated columns:
+#   atom-index label x y z magnetic spin-index
+# atom-index  sequential one-based index in row order (1, 2, ...).
+# label       unique element symbol + positive integer (Fe1); gives the species.
+# x y z       finite raw fractional coordinates; values outside [0, 1) are kept,
+#             never wrapped, so native fixed-R bonds keep their geometry.
+# magnetic    "Y" for a selected magnetic site, "N" otherwise.
+# spin-index  zero-based index into the native spin map: every Y row together
+#             must map exactly onto 0..nspin-1; an N row carries a negative
+#             sentinel, "-" spelling -1. This mapping is never reordered.
+atoms = """
+1 Fe1 0.0 0.0 0.0 Y 0
+"""
+
+[reference_spins]
+# One row per atom in full atom order (every atom, magnetic or not):
+#   label m         signed collinear moment along z, or
+#   label mx my mz  Cartesian axial moment vector.
+# Moments are in mu_B. Magnetic symmetry REQUIRES them complete, and collinear
+# values are valid even when primed operations are detected.
+moments = """
+Fe1 2.2
+"""
+# Provenance of the moments: "explicit" (default), "native:spinat", or
+# "model:unit-along-z".
+source = "explicit"
+
+[symmetry]
+# "magnetic" (CLI/Python: "msg") detects the magnetic space group from the
+# structure AND the reference moments; an operation that flips the moments is
+# combined with time reversal ("primed", time_reversal = true). The alternative
+# "spacegroup" (CLI/Python: "sg") ignores moments entirely. Magnetic mode
+# requires the complete [reference_spins] moments above and a positive
+# magnetic_tol (mu_B, default 1e-5); "spacegroup" may omit both. mode and the
+# scalar/tensor choice are independent.
+mode = "magnetic"
+symprec = 1e-5
+magnetic_tol = 1e-5
+
+# One [[shell]] per symmetry orbit of ordered atom pairs. The representative
+# names ONE member: "label-first label-second Rx Ry Rz", where (Rx Ry Rz) is
+# the lattice translation moving the SECOND atom into its bonded image.
 [[shell]]
-representative = "Fe7 Co4 1 0 -1"
-J = [[2, 0.4, 0.3], [-0.4, 1, 0.2], [0.3, 0.2, 3]]
+# Optional display name; never used as identity, never generated when absent.
+name = "1NN"
+representative = "Fe1 Fe1 1 0 0"
+# Editable exchange tensor, in the wire unit above (meV): rows/columns are the
+# Cartesian spin components, J transforms as an axial matrix, and the
+# representative bond's stabilizer decides which entries are allowed.
+# Cubic symmetry does not force every bond tensor to be isotropic; equivalent
+# bonds have tensors related by their Cartesian symmetry rotations.
+# Use J = "unfilled" while editing; export rejects unfilled shells.
+J = [[45.0, 0.0, 0.0], [0.0, 45.0, 0.0], [0.0, 0.0, 45.0]]
+
+[[shell]]
+# Second-nearest neighbors: R = (0, 1, 1) is the Cartesian vector a2 + a3 =
+# (2.87, 0, 0) Angstrom, the bcc second-neighbor bond along x.
+name = "2NN"
+representative = "Fe1 Fe1 0 1 1"
+# Optional input summaries: distance (Angstrom) and n_equivalent_pairs (size
+# of the FULL ordered-pair orbit, including the representative - not a
+# coordination number and not the sparse support size). Supplying them is
+# optional; supplied values are validated against geometry and symmetry, and
+# TB2J computes both for every shell when the file is canonicalized/written.
+distance = 2.87
+n_equivalent_pairs = 6
+J = [[16.0, 0.0, 0.0], [0.0, 15.0, 0.0], [0.0, 0.0, 15.0]]
+
+# Generator/writer comments, including the per-shell equivalent-pair lists with
+# atom/spin cross-references, are informational: pass --no-equivalent-comments
+# (or equivalent_comments=False in Python) to suppress them, or delete any
+# comment; identity, support, and values never depend on comments.
 ```
 
-Use the tensor replacement in the same file, not as a second `[[shell]]` entry. Scalar and tensor modes are explicit; no scalar-to-tensor or tensor-to-scalar conversion is implicit. The wire values above are in meV by default. The corresponding scalar value in Python/native storage is `0.002` eV.
+The second-neighbor tensor is anisotropic along its representative bond; symmetry
+rotates that tensor onto equivalent bonds. Tensor mode always requires the
+representative. Scalar and tensor modes are explicit; no scalar-to-tensor or
+tensor-to-scalar conversion is implicit.
 
 Export validates the file automatically and writes standard results:
 
 ```python
 from TB2J.io_exchange.shell_workflow import export_shells
 
-result = export_shells("pair.shells.toml")
+result = export_shells("exchange.shells.toml")
 print(result.results.omitted)
 ```
 
