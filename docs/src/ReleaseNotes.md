@@ -6,6 +6,7 @@ These are the new features and changes  not yet included in the official release
 - Editable symmetry-shell TOML documents provide orbit-based exchange editing and guarded conversion between shell files and the native pickle, ``exchange.out``, and Multibinit XML formats; the ``tb2j`` preset writes the native bundle. See ``docs/src/exchange_shells.md``.
 - Python structure template generation now supports magnetic-species or atom-index selection; generated shell files include format explanations independently of optional equivalent-pair lists.
 - ``SpinIO.write_all`` validates standard-result readiness, preserves absent charges and magnetic moments in its pickle, marks them unavailable in exchange text, and returns written targets and solver omissions with reasons.
+- TomASD writes full exchange tensors; TomASD, Vampire, and ESPInS preserve native bond geometry when site positions are wrapped. Vampire output requires a positive axis-aligned cell; other cells are omitted with a readiness reason. Standard-result reports enumerate emitted files and omitted-target candidates without claiming ownership of pre-existing files.
 
 - New Quantum ESPRESSO interface: a version-pinned ``becp_dump``
   instrumentation on the ``TB2J`` branch of the QE fork

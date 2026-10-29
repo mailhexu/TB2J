@@ -29,10 +29,29 @@ from TB2J.versioninfo import __version__
 
 @dataclass(frozen=True)
 class ResultsPlan:
-    """Standard output targets and solver targets omitted with reasons."""
+    """Planned targets and leaf paths; omitted paths are not ownership proof.
+
+    After successful ``write_all``, written paths identify this invocation's
+    output. An omitted path is only a stale candidate; deleting it requires
+    separate evidence that a previous TB2J invocation owned that path.
+    """
 
     written: tuple[str, ...]
     omitted: tuple[tuple[str, str], ...]
+    written_paths: tuple[str, ...]
+    omitted_paths: tuple[str, ...]
+
+
+_RESULT_TARGET_FILES = {
+    "Multibinit": (
+        "Multibinit/mb.files",
+        "Multibinit/mb.in",
+        "Multibinit/exchange.xml",
+    ),
+    "TomASD": ("TomASD/exchange.ucf", "TomASD/exchange.exch"),
+    "Vampire": ("Vampire/vampire.UCF", "Vampire/vampire.mat", "Vampire/input"),
+    "ESPInS": ("ESPInS/espins.in",),
+}
 
 
 class SpinIO(object):
@@ -397,6 +416,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         param j: spin index j
         param R (tuple of integers): cell index R
         """
+        # MathDoc: tb2j/spacegroup-exchange-symmetrization
         i = self.i_spin(i)
         j = self.i_spin(j)
         J = D = Ja = None
@@ -404,12 +424,8 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             J = self.get_Jiso(i, j, R)
         if DMI:
             D = self.get_DMI(i, j, R)
-            if D is not None:
-                D *= 1
         if Jani:
             Ja = self.get_Jani(i, j, R)
-            if Ja is not None:
-                Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
         if SIA and i == j and np.linalg.norm(R) < 0.001:
             if (
@@ -664,21 +680,6 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         )
         spin_order = [i for i in indices if i >= 0]
         permuted_mapping = spin_order != list(range(len(spin_order)))
-        pair_groups = [(key[1], key[2]) for key in (self.exchange_Jdict or {})]
-        closed_groups = set()
-        previous = None
-        repeated_group = False
-        for group in pair_groups:
-            if group != previous:
-                if group in closed_groups:
-                    repeated_group = True
-                    break
-                if previous is not None:
-                    closed_groups.add(previous)
-                previous = group
-        raw = self.atoms.get_scaled_positions(wrap=False)
-        wrapped = self.atoms.get_scaled_positions(wrap=True)
-        changed_frame = not np.allclose(raw, wrapped, atol=1e-12, rtol=0)
         written = ["TB2J.pickle", "structure.vasp", "exchange.out", "JvsR.pdf"]
         orbital = [
             getattr(self, name, None)
@@ -694,6 +695,13 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 )
             else:
                 written.append("exchange_orb_decomposition.out")
+        from .io_vampire import _validate_vampire_cell
+
+        try:
+            _validate_vampire_cell(self.atoms)
+            vampire_cell_reason = None
+        except ValueError as error:
+            vampire_cell_reason = str(error)
         for target in ("Multibinit", "TomASD", "Vampire", "ESPInS"):
             reason = None
             if invalid_spin:
@@ -708,25 +716,34 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 reason = "isotropic exchange section is required by the XML reader"
             elif target in {"ESPInS", "Vampire"} and legacy_sia:
                 reason = "legacy uniaxial anisotropy is not faithfully represented"
-            elif permuted_mapping:
+            elif target == "Vampire" and vampire_cell_reason is not None:
+                reason = vampire_cell_reason
+            elif target == "Multibinit" and permuted_mapping:
                 reason = (
-                    "solver serialization of a permuted spin mapping is unsupported"
-                )
-            elif target == "TomASD" and repeated_group:
-                reason = "isotropic pair groups are not contiguous"
-            elif target != "Multibinit" and changed_frame:
-                reason = (
-                    "raw site frame requires unsupported wrapped-coordinate rebasing"
+                    "Multibinit serialization of a permuted spin mapping is unsupported"
                 )
             elif target != "Multibinit" and extra_support:
                 reason = "anisotropic pair support is absent from the isotropic channel"
-            elif target == "TomASD" and (present("dmi_ddict") or present("Jani_dict")):
-                reason = "full exchange tensor is not represented"
             if reason is None:
                 written.append(target)
             else:
                 omitted.append((target, reason))
-        return ResultsPlan(tuple(written), tuple(omitted))
+        if any(target in written for target in ("TomASD", "Vampire", "ESPInS")):
+            self._site_image_shifts()
+
+        def paths(targets):
+            return tuple(
+                path
+                for target in targets
+                for path in _RESULT_TARGET_FILES.get(target, (target,))
+            )
+
+        return ResultsPlan(
+            tuple(written),
+            tuple(omitted),
+            paths(written),
+            paths(target for target, _ in omitted),
+        )
 
     def write_all(self, path="TB2J_results"):
         plan = self.results_plan()
@@ -796,6 +813,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     def model(self, path):
         m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
         return m
+
+    def _site_image_shifts(self):
+        raw = self.atoms.get_scaled_positions(wrap=False)
+        wrapped = self.atoms.get_scaled_positions(wrap=True)
+        shifts = np.rint(raw - wrapped).astype(int)
+        if not np.allclose(raw - wrapped, shifts, rtol=0, atol=1e-8):
+            raise ValueError("wrapped site coordinates have non-integer image shifts")
+        return shifts
+
+    def _wrapped_translation(self, R, i, j, shifts):
+        # MathDoc: tb2j/spacegroup-exchange-symmetrization#site_frame_wrapped_translation
+        return np.asarray(R, dtype=int) - shifts[self.iatom(i)] + shifts[self.iatom(j)]
 
     def _pair_geometry(self, key):
         if self.distance_dict is not None and key in self.distance_dict:
