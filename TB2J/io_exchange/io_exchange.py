@@ -13,6 +13,7 @@ import gc
 import os
 import pickle
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 
 import matplotlib.pyplot as plt
@@ -24,6 +25,14 @@ from TB2J.kpoints import monkhorst_pack
 from TB2J.spinham.spin_api import SpinModel
 from TB2J.utils import symbol_number
 from TB2J.versioninfo import __version__
+
+
+@dataclass(frozen=True)
+class ResultsPlan:
+    """Standard output targets and solver targets omitted with reasons."""
+
+    written: tuple[str, ...]
+    omitted: tuple[tuple[str, str], ...]
 
 
 class SpinIO(object):
@@ -559,10 +568,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             os.makedirs(path)
         fname = os.path.join(path, fname)
         with open(fname, "wb") as myfile:
-            try:
-                pickle.dump(self.__dict__, myfile)
-            except Exception as ex:
-                print(f"Pickle not written due to {ex}")
+            pickle.dump(self.__dict__, myfile)
 
     @classmethod
     def load_pickle(cls, path="TB2J_results", fname="TB2J.pickle"):
@@ -579,23 +585,187 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         obj._build_Rlist()
         return obj
 
+    def results_plan(self):
+        """Validate the model and plan faithful standard results before writing."""
+        from .shells import _numbers, _transform_native_key
+
+        natom = len(self.atoms)
+        indices = self.index_spin
+        if len(indices) != natom or any(
+            isinstance(i, (bool, np.bool_)) or not isinstance(i, (int, np.integer))
+            for i in indices
+        ):
+            raise ValueError("index_spin must contain one integer per atom")
+        active = sorted(i for i in indices if i >= 0)
+        if active != list(range(len(active))):
+            raise ValueError("index_spin must declare contiguous unique spins")
+        spin_to_atom = {i: atom for atom, i in enumerate(indices) if i >= 0}
+        cell = _numbers(self.atoms.cell.array, (3, 3), "cell")
+        if abs(np.linalg.det(cell)) < np.finfo(float).tiny:
+            raise ValueError("cell must be nonsingular")
+        _numbers(self.atoms.positions, (natom, 3), "positions")
+        from io import StringIO
+
+        self.atoms.write(StringIO(), format="vasp", vasp5=True)
+        legacy_sia = False
+        if self.has_uniaxial_anistropy:
+            amplitudes = _numbers(self.k1, (len(active),), "k1")
+            _numbers(self.k1dir, (len(active), 3), "k1dir")
+            legacy_sia = bool(np.any(amplitudes != 0))
+        for name, shape in (
+            ("spinat", (natom, 3)),
+            ("charges", (natom,)),
+            ("damping", (natom,)),
+            ("gyro_ratio", (natom,)),
+        ):
+            value = getattr(self, name, None)
+            if value is not None:
+                _numbers(value, shape, name)
+        keys = set()
+        for name, shape in (
+            ("exchange_Jdict", ()),
+            ("dmi_ddict", (3,)),
+            ("Jani_dict", (3, 3)),
+        ):
+            channel = getattr(self, name, None)
+            if channel is None:
+                continue
+            if not isinstance(channel, dict):
+                raise ValueError(f"{name} must be a pair dictionary")
+            for key, value in channel.items():
+                _transform_native_key(name, key, spin_to_atom)
+                _numbers(value, shape, f"{name} {key!r}")
+                keys.add(key)
+        if not keys:
+            raise ValueError("at least one exchange pair is required")
+        distances = self.distance_dict or {}
+        for key in keys & distances.keys():
+            vector, distance = distances[key]
+            _numbers(vector, (3,), f"distance_dict {key!r} vector")
+            _numbers(distance, (), f"distance_dict {key!r} distance")
+
+        omitted = []
+        moments = None if self.spinat is None else np.asarray(self.spinat)
+        invalid_spin = moments is None or any(
+            np.linalg.norm(moments[spin_to_atom[i]]) == 0 for i in active
+        )
+
+        def present(name):
+            return bool(getattr(self, name, None))
+
+        unsupported = any(
+            present(name)
+            for name in ("biquadratic_Jdict", "NJT_Jdict", "NJT_ddict", "sia_tensor")
+        )
+        iso_keys = set(self.exchange_Jdict or {})
+        extra_support = any(
+            set(getattr(self, name, None) or {}) - iso_keys
+            for name in ("dmi_ddict", "Jani_dict")
+        )
+        spin_order = [i for i in indices if i >= 0]
+        permuted_mapping = spin_order != list(range(len(spin_order)))
+        pair_groups = [(key[1], key[2]) for key in (self.exchange_Jdict or {})]
+        closed_groups = set()
+        previous = None
+        repeated_group = False
+        for group in pair_groups:
+            if group != previous:
+                if group in closed_groups:
+                    repeated_group = True
+                    break
+                if previous is not None:
+                    closed_groups.add(previous)
+                previous = group
+        raw = self.atoms.get_scaled_positions(wrap=False)
+        wrapped = self.atoms.get_scaled_positions(wrap=True)
+        changed_frame = not np.allclose(raw, wrapped, atol=1e-12, rtol=0)
+        written = ["TB2J.pickle", "structure.vasp", "exchange.out", "JvsR.pdf"]
+        orbital = [
+            getattr(self, name, None)
+            for name in ("Jiso_orb", "DMI_orb", "Jani_orb", "dJdx_orb")
+        ]
+        if any(orbital):
+            if any(set(channel) - keys for channel in orbital if channel):
+                omitted.append(
+                    (
+                        "exchange_orb_decomposition.out",
+                        "orbital pair support has no corresponding exchange pair",
+                    )
+                )
+            else:
+                written.append("exchange_orb_decomposition.out")
+        for target in ("Multibinit", "TomASD", "Vampire", "ESPInS"):
+            reason = None
+            if invalid_spin:
+                reason = "magnetic reference moments are missing or zero"
+            elif unsupported:
+                reason = "solver does not represent all present interaction fields"
+            elif target in {"Multibinit", "TomASD"} and (
+                self.damping is None or self.gyro_ratio is None
+            ):
+                reason = "damping or gyromagnetic ratio is missing"
+            elif target == "Multibinit" and self.exchange_Jdict is None:
+                reason = "isotropic exchange section is required by the XML reader"
+            elif target in {"ESPInS", "Vampire"} and legacy_sia:
+                reason = "legacy uniaxial anisotropy is not faithfully represented"
+            elif permuted_mapping:
+                reason = (
+                    "solver serialization of a permuted spin mapping is unsupported"
+                )
+            elif target == "TomASD" and repeated_group:
+                reason = "isotropic pair groups are not contiguous"
+            elif target != "Multibinit" and changed_frame:
+                reason = (
+                    "raw site frame requires unsupported wrapped-coordinate rebasing"
+                )
+            elif target != "Multibinit" and extra_support:
+                reason = "anisotropic pair support is absent from the isotropic channel"
+            elif target == "TomASD" and (present("dmi_ddict") or present("Jani_dict")):
+                reason = "full exchange tensor is not represented"
+            if reason is None:
+                written.append(target)
+            else:
+                omitted.append((target, reason))
+        return ResultsPlan(tuple(written), tuple(omitted))
+
     def write_all(self, path="TB2J_results"):
+        plan = self.results_plan()
+        from copy import copy
+
+        # Keep the native pickle and the caller's derived state unchanged.
         self.write_pickle(path=path)
-        self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
-        self.write_txt(path=path)
-        if self.Jiso_orb or self.DMI_orb or self.Jani_orb or self.dJdx_orb:
-            self.write_txt(
+        model = copy(self)
+        if model.spinat is not None:
+            model.spinat = np.asarray(model.spinat, dtype=float)
+        model._build_Rlist()
+        model._build_ind_atoms()
+        model.distance_dict = dict(self.distance_dict or {})
+        keys = set().union(
+            *(
+                set(channel or {})
+                for channel in (self.exchange_Jdict, self.dmi_ddict, self.Jani_dict)
+            )
+        )
+        for key in keys - model.distance_dict.keys():
+            model.distance_dict[key] = model._pair_geometry(key)
+        model.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
+        model.write_txt(path=path)
+        if "exchange_orb_decomposition.out" in plan.written:
+            model.write_txt(
                 path=path,
                 fname="exchange_orb_decomposition.out",
                 write_orb_decomposition=True,
             )
-        self.write_multibinit(path=os.path.join(path, "Multibinit"))
-        self.write_tom_format(path=os.path.join(path, "TomASD"))
-        self.write_vampire(path=os.path.join(path, "Vampire"))
-        self.write_espins(path=os.path.join(path, "ESPInS"))
-
-        self.plot_all(savefile=os.path.join(path, "JvsR.pdf"))
-        # self.write_Jq(kmesh=[9, 9, 9], path=path)
+        for target, writer in (
+            ("Multibinit", model.write_multibinit),
+            ("TomASD", model.write_tom_format),
+            ("Vampire", model.write_vampire),
+            ("ESPInS", model.write_espins),
+        ):
+            if target in plan.written:
+                writer(path=os.path.join(path, target))
+        model.plot_all(savefile=os.path.join(path, "JvsR.pdf"))
+        return plan
 
     def write_txt(self, *args, **kwargs):
         from TB2J.io_exchange.io_txt import write_txt
@@ -627,6 +797,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         m = SpinModel(fname=os.path.join(path, "Multibinit", "exchange.xml"))
         return m
 
+    def _pair_geometry(self, key):
+        if self.distance_dict is not None and key in self.distance_dict:
+            return self.distance_dict[key]
+        R, i, j = key
+        # Same fixed raw-frame bond as gen_distance_dict.
+        vector = (
+            self.atoms.positions[self.ind_atoms[j]]
+            + np.dot(R, self.atoms.cell.array)
+            - self.atoms.positions[self.ind_atoms[i]]
+        )
+        return vector, np.linalg.norm(vector)
+
     def plot_JvsR(
         self,
         ax=None,
@@ -651,7 +833,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 pair_name = "-".join(pair)
                 if pair_name not in groups:
                     groups[pair_name] = {"ds": [], "Js": []}
-                d = self.distance_dict[key][1]
+                d = self._pair_geometry(key)[1]
                 groups[pair_name]["ds"].append(d)
                 groups[pair_name]["Js"].append(val * 1e3)
 
@@ -664,7 +846,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             ds = []
             Js = []
             for key, val in self.exchange_Jdict.items():
-                d = self.distance_dict[key][1]
+                d = self._pair_geometry(key)[1]
                 ds.append(d)
                 Js.append(val * 1e3)
             ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
@@ -693,7 +875,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 pair_name = "-".join(pair)
                 if pair_name not in groups:
                     groups[pair_name] = {"ds": [], "Ds": []}
-                d = self.distance_dict[key][1]
+                d = self._pair_geometry(key)[1]
                 groups[pair_name]["ds"].append(d)
                 groups[pair_name]["Ds"].append(val * 1e3)
 
@@ -727,7 +909,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             ds = []
             Ds = []
             for key, val in self.dmi_ddict.items():
-                d = self.distance_dict[key][1]
+                d = self._pair_geometry(key)[1]
                 ds.append(d)
                 Ds.append(val * 1e3)
             Ds = np.array(Ds)
@@ -763,7 +945,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
                 pair_name = "-".join(pair)
                 if pair_name not in groups:
                     groups[pair_name] = {"ds": [], "Jani": []}
-                d = self.distance_dict[key][1]
+                d = self._pair_geometry(key)[1]
                 groups[pair_name]["ds"].append(d)
                 groups[pair_name]["Jani"].append(val * 1e3)
 
@@ -794,7 +976,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             ds = []
             Jani = []
             for key, val in self.Jani_dict.items():
-                d = self.distance_dict[key][1]
+                d = self._pair_geometry(key)[1]
                 ds.append(d)
                 # val = val - np.diag([np.trace(val) / 3] * 3)
                 Jani.append(val * 1e3)
@@ -822,18 +1004,21 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return ax
 
     def plot_all(self, title=None, savefile=None, show=False, by_species=False):
-        if self.has_dmi and self.has_bilinear:
-            naxis = 3
-        else:
-            naxis = 1
+        plotters = [
+            plotter
+            for channel, plotter in (
+                (self.exchange_Jdict, self.plot_JvsR),
+                (self.dmi_ddict, self.plot_DvsR),
+                (self.Jani_dict, self.plot_JanivsR),
+            )
+            if channel
+        ]
+        if not plotters:
+            raise ValueError("no exchange channels to plot")
+        naxis = len(plotters)
         fig, axes = plt.subplots(naxis, 1, sharex=True, figsize=(5, 2.2 * naxis))
-
-        if self.has_dmi and self.has_bilinear:
-            self.plot_JvsR(axes[0], by_species=by_species)
-            self.plot_DvsR(axes[1], by_species=by_species)
-            self.plot_JanivsR(axes[2], by_species=by_species)
-        else:
-            self.plot_JvsR(axes, by_species=by_species)
+        for axis, plotter in zip(np.atleast_1d(axes), plotters):
+            plotter(axis, by_species=by_species)
 
         if title is not None:
             fig.suptitle(title)
