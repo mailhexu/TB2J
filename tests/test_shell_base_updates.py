@@ -270,10 +270,10 @@ def test_native_precision_and_ancillary_requirements_survive_shell_save_reload(
 ):
     source, key = _source()
     source.write_pickle(path=tmp_path)
-    native = shells.read_exchange(tmp_path / "TB2J.pickle", "pickle")
-    compressed = shells.compress(native.spinio, mode="isotropic")
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
     path = tmp_path / "shells.toml"
-    shells.write_shells(compressed.document, path)
+    generate_shells(tmp_path / "TB2J.pickle", path, mode="isotropic")
     document = shells.read_shells(path)
     assert document.source_format == "pickle" and document.precision_profile == "exact"
     assert set(document.required_base_fields) == {"charges", "damping", "gyromag"}

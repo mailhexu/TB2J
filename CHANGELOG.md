@@ -51,12 +51,9 @@
   contractions without a joint Gram inverse, and one-time atomic-only
   normalization. These algebraic contracts do not enable native DFT+U
   export or certify complete XC+U exchange.
-- Added guarded native `write_exchange` for pickle, `exchange.out`, XML,
-  and the native-only `tb2j` preset. Every preset member is preflighted
-  before IO; populated unsupported fields require named loss opt-ins.
-  Reports include emitted precision, annotation omissions and explicit
-  context defaults. Raw site images, native pair keys and source objects
-  are preserved. Solver exports remain outside this shell-format interface.
+- Shell generation now accepts structures or trusted native pickles; automatic
+  export validates edited shells and writes standard results, reporting solver
+  omissions and protecting unrelated and previously modified output files.
 - Replaced the shell text grammar with hand-first schema v2: multiline
   lattice/site rows, element-based labels, labeled reference moments,
   `exchange`/`J`, optional display names and nested user metadata.
@@ -72,11 +69,6 @@
   normalization, and named conflicts for stale orbital/derivative data.
   `compress` now persists native precision provenance and required-base fields;
   standalone expansion never silently discards source-present physical context.
-- Added `read_exchange` for explicitly trusted native pickle, `exchange.out`,
-  and Multibinit XML inputs. Imports retain sparse channel support and exact
-  atom-to-spin maps, require missing identity or magnetic context explicitly,
-  report printed precision, and reject unsupported blocks unless their loss
-  is named. Combined text tensors are checked, never substituted for channels.
 - Added `compress` for symmetry-orbit exchange editing, with exact sparse
   channel masks and atom-to-spin indexing, default rejection of inconsistent
   values, and explicit projection and zero-snapping reports. Internal replay
