@@ -127,6 +127,7 @@ class ShellDocument:
     zero_tol: float = 1e-10
     source_format: str | None = None
     precision_profile: str | None = None
+    context_sha256: str | None = None
     required_base_fields: tuple = ()
     schema_version: int = 2
     site_labels: tuple | None = None
@@ -551,6 +552,11 @@ def _validate_context(document):
         or not document.precision_profile
     ):
         raise ValueError("source.precision_profile: expected a nonempty profile name")
+    if document.context_sha256 is not None and (
+        not isinstance(document.context_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", document.context_sha256) is None
+    ):
+        raise ValueError("source.context_sha256: expected a lowercase SHA-256 digest")
     allowed = _BASE_FIELDS
     if any(
         not isinstance(name, str) or name not in allowed
@@ -1354,6 +1360,7 @@ def compress(
         moment_source=moment_source,
         source_format=source_format,
         precision_profile=precision_profile,
+        context_sha256=None,
         required_base_fields=required_base_fields,
         value_atol=value_atol,
         value_rtol=value_rtol,

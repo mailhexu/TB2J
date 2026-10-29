@@ -122,7 +122,7 @@ def _schema(data):
         _keys(
             data["source"],
             (),
-            ("format", "precision_profile", "required_base_fields"),
+            ("format", "precision_profile", "required_base_fields", "context_sha256"),
             "source",
         )
     if "operations" in data["symmetry"]:
@@ -292,6 +292,7 @@ def load(path):
         cutoff=_floats(data.get("cutoff")),
         source_format=source.get("format"),
         precision_profile=source.get("precision_profile"),
+        context_sha256=source.get("context_sha256"),
         required_base_fields=tuple(source.get("required_base_fields", ())),
         **{key: _floats(value) for key, value in data.get("tolerances", {}).items()},
     )
@@ -503,6 +504,7 @@ def dump(document, path, *, equivalent_comments=True):
         for key, value in (
             ("format", document.source_format),
             ("precision_profile", document.precision_profile),
+            ("context_sha256", document.context_sha256),
             ("required_base_fields", document.required_base_fields),
         )
         if value
