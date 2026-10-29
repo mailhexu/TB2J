@@ -10,6 +10,108 @@ from ase import Atoms
 from TB2J.io_exchange import shells
 
 
+def test_structure_generation_selects_species_and_preserves_mapping(tmp_path):
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    atoms = Atoms(
+        ["Fe", "O", "Fe"],
+        cell=np.eye(3) * 4,
+        scaled_positions=[(0, 0, 0), (0.25, 0.25, 0.25), (0.5, 0.5, 0.5)],
+        pbc=True,
+    )
+    source = tmp_path / "POSCAR"
+    atoms.write(source, format="vasp")
+    by_species = tmp_path / "species.toml"
+    by_atoms = tmp_path / "atoms.toml"
+    species_result = generate_shells(
+        source, by_species, magnetic_species=["Fe"], cutoff=3.6
+    )
+    atom_result = generate_shells(source, by_atoms, magnetic_atoms=[1, 3], cutoff=3.6)
+    assert species_result.document.index_spin == (0, -1, 1)
+    assert species_result.document == atom_result.document
+    assert shells.read_shells(by_species) == species_result.document
+    assert all(entry.Jiso == "unfilled" for entry in species_result.document.shells)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"magnetic_species": ["Fe"], "magnetic_atoms": [1]},
+        {"magnetic_species": ["Co"]},
+        {"magnetic_species": ["NotAnElement"]},
+        {"magnetic_atoms": [1, 1]},
+        {"magnetic_atoms": [2]},
+        {"magnetic_species": ["Fe"], "cutoff": -1},
+        {"magnetic_species": ["Fe"], "symmetry": "msg"},
+        {"magnetic_species": ["Fe"], "mode": ""},
+        {"magnetic_species": ["Fe"], "mode": False},
+        {"magnetic_species": ["Fe"], "mode": 0},
+    ],
+)
+def test_structure_generation_refuses_invalid_context_without_overwriting(
+    tmp_path, options
+):
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    source = tmp_path / "POSCAR"
+    Atoms("Fe", cell=np.eye(3) * 2, scaled_positions=[(0, 0, 0)], pbc=True).write(
+        source, format="vasp"
+    )
+    output = tmp_path / "shells.toml"
+    output.write_text("untouched")
+    options = {"cutoff": 2.01, **options}
+    with pytest.raises(ValueError):
+        generate_shells(source, output, **options)
+    assert output.read_text() == "untouched"
+
+
+def test_structure_generation_msg_tensor_retains_reference_and_tolerances(tmp_path):
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    source = tmp_path / "POSCAR"
+    Atoms("Fe", cell=np.eye(3) * 2, scaled_positions=[(0, 0, 0)], pbc=True).write(
+        source, format="vasp"
+    )
+    output = tmp_path / "shells.toml"
+    result = generate_shells(
+        source,
+        output,
+        magnetic_species=["Fe"],
+        cutoff=2.01,
+        symmetry="msg",
+        mode="tensor",
+        reference_spins=[[0, 0, 2]],
+        symprec=2e-5,
+        magnetic_tol=3e-5,
+    )
+    parsed = shells.read_shells(output)
+    assert parsed == result.document
+    assert parsed.moments == ((0.0, 0.0, 2.0),)
+    assert parsed.symprec == 2e-5 and parsed.magnetic_tol == 3e-5
+    assert all(
+        entry.tensor == "unfilled" and entry.representative for entry in parsed.shells
+    )
+
+
+def test_shell_comments_explain_editing_and_can_be_removed(tmp_path):
+    atoms = Atoms("Fe", cell=np.eye(3) * 2, scaled_positions=[(0, 0, 0)], pbc=True)
+    document = shells.template(atoms, [1], 2.01, mode="tensor")
+    with_pairs = tmp_path / "pairs.toml"
+    without_pairs = tmp_path / "without-pairs.toml"
+    without_comments = tmp_path / "without-comments.toml"
+    shells.write_shells(document, with_pairs)
+    shells.write_shells(document, without_pairs, equivalent_comments=False)
+    explained = without_pairs.read_text()
+    without_comments.write_text(
+        "\n".join(
+            line for line in explained.splitlines() if not line.lstrip().startswith("#")
+        )
+    )
+    assert shells.read_shells(with_pairs) == shells.read_shells(without_pairs)
+    assert shells.read_shells(without_comments) == document
+
+
 def test_cubic_template_is_one_full_direct_neighbor_orbit(tmp_path):
     atoms = Atoms("Fe", cell=np.eye(3) * 2.0, scaled_positions=[(0, 0, 0)], pbc=True)
     document = shells.template(atoms, [1], 2.01, mode="tensor")

@@ -434,7 +434,14 @@ def dump(document, path, *, equivalent_comments=True):
     header["symmetry"] = symmetry
     if document.metadata:
         header["metadata"] = _thaw(document.metadata)
-    parts = [tomli_w.dumps(header, multiline_strings=True)]
+    parts = [
+        "# Exchange values use energy_unit (meV or eV); cutoff and distance are in Angstrom.\n"
+        "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
+        "# Atom rows: one-based atom index, label, x, y, z, magnetic Y/N, zero-based spin index.\n"
+        "# Nonmagnetic atoms use N and a negative spin index; retain the exact existing mapping.\n"
+        "# Reference moments, when present, follow the complete atom order.\n"
+        + tomli_w.dumps(header, multiline_strings=True)
+    ]
     scale = Decimal(1000) if document.energy_unit == "meV" else Decimal(1)
     for shell, orbit in zip(document.shells, _shell_orbits(document)):
         representative = (
@@ -462,7 +469,14 @@ def dump(document, path, *, equivalent_comments=True):
         for key in _MASKS:
             if getattr(shell, key) is not None:
                 entry[key] = getattr(shell, key)
-        text = "[[shell]]\n" + tomli_w.dumps(entry)
+        text = (
+            "# representative: first label, second label, Rx Ry Rz; translation moves the second atom.\n"
+            "# J is a scalar for isotropic exchange or a Cartesian 3x3 tensor; replace 'unfilled'.\n"
+            "# name is optional; distance and n_equivalent_pairs may be omitted on input.\n"
+            "# n_equivalent_pairs counts the full ordered-pair symmetry orbit, not coordination.\n"
+            + "[[shell]]\n"
+            + tomli_w.dumps(entry)
+        )
         if equivalent_comments:
             text += "# Equivalent ordered pairs (informational):\n"
             for pair in orbit:
