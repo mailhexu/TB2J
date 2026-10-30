@@ -471,7 +471,9 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
             for row in document.cell_angstrom
         )
         + "\n",
-        "atoms": "\n".join(
+        "atoms": "# atom-index (1-based)  element-label  fractional-x  fractional-y  fractional-z  magnetic  spin-index\n"
+        "# magnetic: Y = magnetic, N = nonmagnetic; spin-index: zero-based for Y, negative for N.\n"
+        + "\n".join(
             f"{atom:>{atom_width}} {label:<{label_width}} "
             + " ".join(_number_text(value) for value in position)
             + f" {'Y' if spin >= 0 else 'N'} {spin}"
@@ -526,8 +528,6 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         "# Validation tolerances retain additional decimal places as needed.\n"
         "# Exchange values use energy_unit; cutoff and distance use distance_unit.\n"
         "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
-        "# Atom rows: one-based atom index, label, x, y, z, magnetic Y/N, zero-based spin index.\n"
-        "# Nonmagnetic atoms use N and a negative spin index; retain the exact existing mapping.\n"
         "# Reference moments, when present, follow the complete atom order.\n"
         "# Shell representative: first label, second label, Rx Ry Rz; translation moves the second atom.\n"
         "# J is a scalar or Cartesian 3x3 tensor; replace 'unfilled'.\n"

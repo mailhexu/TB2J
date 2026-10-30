@@ -28,7 +28,8 @@ identifies the TB2J version and, for generation from a file, the input path;
 that path is informational and is never reopened during export. Equivalent
 ordered-pair comments are grouped by shell after the complete shell list.
 Set `equivalent_comments=False` to omit those lists without omitting format
-explanations. Rotation matrices use one row per line and translations use a
+explanations. The atom block has column and magnetic-index comments immediately
+above its rows. Rotation matrices use one row per line and translations use a
 single vector line. All comments are informational and can be deleted.
 
 Generated floating-point values use fixed notation with eight digits after the

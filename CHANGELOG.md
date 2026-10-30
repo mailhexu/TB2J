@@ -9,6 +9,8 @@
   shows defaults.
 - Generated shell files include a source/version header, compact shell entries,
   grouped equivalent-pair comments and readable symmetry matrices and vectors.
+- Generated atom blocks explain the row columns and magnetic/spin indices next
+  to the atom data.
 - Shell numerical output uses eight fixed decimal places with aligned vector and
   tensor columns; validation tolerances retain their precision. Small exchange
   values can round to zero, and rounded output is validated before publication.

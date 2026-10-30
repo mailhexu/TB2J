@@ -131,7 +131,11 @@ def test_atom_and_moment_vectors_align_after_different_labels(tmp_path):
     shells.write_shells(document, output)
     with output.open("rb") as stream:
         data = tomli.load(stream)
-    atom_rows = data["structure"]["atoms"].strip("\n").splitlines()
+    atom_rows = [
+        row
+        for row in data["structure"]["atoms"].splitlines()
+        if row.strip() and not row.lstrip().startswith("#")
+    ]
     moment_rows = data["reference_spins"]["moments"].strip("\n").splitlines()
     assert len({list(re.finditer(r"\S+", row))[2].end() for row in atom_rows}) == 1
     assert len({list(re.finditer(r"\S+", row))[1].end() for row in moment_rows}) == 1
