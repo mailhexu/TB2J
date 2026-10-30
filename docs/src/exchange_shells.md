@@ -338,9 +338,9 @@ of shells, and any context companion. Pickle import symmetrizes automatically an
 reports the largest absolute component change in eV; the original pickle is not
 modified. Review that change before using the generated exchange values.
 
-Structure templates order shells by increasing distance without merging equal
-distances from different symmetry orbits. For example, use
-`TB2J_shell generate POSCAR -s Fe -c 0.6 -d nm`; `TB2J_shell generate --help`
+Structure templates and pickle imports order shells by increasing geometric
+distance, using the shell ID to break exact ties without merging different orbits.
+For example, use `TB2J_shell generate POSCAR -s Fe -c 0.6 -d nm`; `TB2J_shell generate --help`
 lists every short option and its default or automatic behavior.
 
 ## V3 document grammar and indexing

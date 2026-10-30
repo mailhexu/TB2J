@@ -178,7 +178,7 @@ class ShellDocument:
                 )
             ),
         )
-        if self.source_format == "template":
+        if self.source_format in {"template", "pickle"}:
             positions = np.asarray(self.positions_frac)
             cell = np.asarray(self.cell_angstrom)
 

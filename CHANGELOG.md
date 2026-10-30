@@ -15,7 +15,7 @@
 - `TB2J_shell` reports version, license and generation progress. Pickle
   generation symmetrizes exchange by default and reports the maximum change;
   Python callers can request strict checking with `project=False`.
-- Structure shell templates sort by distance; shell files support explicit
+- Structure and pickle shell generation sort by distance; shell files support explicit
   Angstrom, Bohr or nm distance units. CLI options have short forms and help
   shows defaults.
 - Generated shell files include a source/version header, compact shell entries,

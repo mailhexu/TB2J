@@ -229,6 +229,27 @@ def test_pickle_generate_writes_companion_and_imports_values(tmp_path, inputs, c
     assert document.moments == (2.0,)
 
 
+def test_pickle_generation_orders_shells_by_distance(tmp_path):
+    atoms = Atoms("Fe", cell=3 * np.eye(3), scaled_positions=[[0, 0, 0]], pbc=True)
+    source = SpinIO(
+        atoms,
+        spinat=[[0, 0, 2]],
+        charges=None,
+        index_spin=[0],
+        exchange_Jdict={
+            ((2, 0, 0), 0, 0): 0.001,
+            ((10, 0, 0), 0, 0): 0.002,
+        },
+    )
+    source.write_pickle(path=tmp_path)
+    output = tmp_path / "ordered.toml"
+    assert _run("generate", tmp_path / "TB2J.pickle", "-o", output) == 0
+    with output.open("rb") as stream:
+        entries = tomli.load(stream)["shell"]
+    assert [entry["distance"] for entry in entries] == pytest.approx([6.0, 30.0])
+    assert [entry["J"] for entry in entries] == pytest.approx([1.0, 2.0])
+
+
 def test_pickle_generate_rejects_structure_controls(tmp_path, inputs, capsys):
     output = tmp_path / "out.toml"
     for flag, value in (
