@@ -197,6 +197,40 @@ def run():
         for k in range(2)
     )
     assert s.simplify(diagonal_only - physical_periodic) != 0
+
+    # Two translated nonorthogonal functions have different metrics at
+    # k=0 and k=pi. The dressing for a q-resolved Green block must use S(q).
+    shift = s.Matrix([[0, 1], [1, 0]])
+    pcell = s.eye(2) + s.Rational(1, 3) * shift
+    overlap = pcell.H * pcell
+    fourier = s.Matrix([[1, 1], [1, -1]]) / s.sqrt(2)
+    sk = s.simplify(fourier * overlap * fourier.H)
+    assert (sk[0, 0], sk[1, 1], sk[0, 1]) == (s.Rational(16, 9), s.Rational(4, 9), 0)
+    left, right = pcell[:, 0], pcell[:, 1]
+    wi, wj = left * left.H, right * right.H
+    gu = (3 * s.eye(2) - shift / 3).inv()
+    gd = (4 * s.eye(2) - shift / 5).inv()
+    vi, vj = pcell.H * wi * pcell, pcell.H * wj * pcell
+    du = overlap.inv() * pcell.H * gu * pcell * overlap.inv()
+    dd = overlap.inv() * pcell.H * gd * pcell * overlap.inv()
+    physical = s.simplify(s.trace(wi * gu * wj * gd))
+    assert physical == s.Rational(520, 10773)
+    assert s.simplify(s.trace(vi * du * vj * dd) - physical) == 0
+    ki, kj = fourier * vi * fourier.H, fourier * vj * fourier.H
+    ku, kd = fourier * du * fourier.H, fourier * dd * fourier.H
+    double_k_varying = sum(
+        ki[k, q] * ku[q, q] * kj[q, k] * kd[k, k] for k in range(2) for q in range(2)
+    )
+    assert s.simplify(double_k_varying - physical) == 0
+    raw_u = fourier * (pcell.H * gu * pcell) * fourier.H
+    raw_d = fourier * (pcell.H * gd * pcell) * fourier.H
+    wrong_endpoint = sum(
+        ki[k, q] * raw_u[q, q] / sk[k, k] ** 2 * kj[q, k] * raw_d[k, k] / sk[k, k] ** 2
+        for k in range(2)
+        for q in range(2)
+    )
+    assert s.simplify(wrong_endpoint) == -s.Rational(4345, 21546)
+    assert wrong_endpoint != physical
     print("PASS: two-cell periodic trace requires distinct-k rotation blocks")
     print("PASS: generic separable projection and prescribed spin rotation")
     print("PASS: nonorthogonal physical/covariant trace 1/2; site block 7/9")
