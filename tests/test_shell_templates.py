@@ -10,18 +10,45 @@ from ase import Atoms
 from TB2J.io_exchange import shells
 
 
-def test_generated_float_precision_preserves_small_exchange_and_alignment(tmp_path):
+@pytest.mark.parametrize(
+    "value, wire, expected",
+    [(1.234567891e-14, "0.00000000", 0.0), (1.234567891e-11, "0.00000001", 1e-11)],
+)
+def test_generated_fixed_decimals_round_exchange(tmp_path, value, wire, expected):
     atoms = Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True)
     document = shells.template(atoms, [1], 3.1)
-    entry = replace(document.shells[0], Jiso=1.234567891e-14)
+    entry = replace(document.shells[0], Jiso=value)
     document = replace(document, shells=(entry,))
     path = tmp_path / "shell.toml"
     shells.write_shells(document, path)
     replayed = shells.read_shells(path)
-    assert replayed.shells[0].Jiso == pytest.approx(1.2345679e-14, rel=1e-15, abs=0)
+    assert replayed.shells[0].Jiso == pytest.approx(expected, abs=0)
     text = path.read_text()
-    assert "1.2345679" in text
-    assert "1.234567891" not in text
+    assert f"J = {wire}" in text
+    assert "symprec = 0.00001000" in text
+    assert "zero_tol = 0.0000000001" in text
+    assert "3.00000000" in text
+
+
+def test_fixed_notation_preserves_validation_tolerances(tmp_path):
+    atoms = Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True)
+    document = shells.template(
+        atoms,
+        [1],
+        3.1,
+        symprec=1.234567891e-5,
+        magnetic_tol=1.234567891e-6,
+        value_atol=1.234567891e-9,
+        value_rtol=1.234567891e-7,
+        zero_tol=1e-10,
+    )
+    path = tmp_path / "shell.toml"
+    shells.write_shells(document, path)
+    replayed = shells.read_shells(path)
+    for field in ("symprec", "magnetic_tol", "value_atol", "value_rtol", "zero_tol"):
+        assert getattr(replayed, field) == getattr(document, field)
+    assert "symprec = 0.00001234567891" in path.read_text()
+    assert "zero_tol = 0.0000000001" in path.read_text()
 
 
 def test_rounding_that_invalidates_geometry_does_not_replace_output(tmp_path):

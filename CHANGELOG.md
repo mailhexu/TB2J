@@ -9,9 +9,9 @@
   shows defaults.
 - Generated shell files include a source/version header, compact shell entries,
   grouped equivalent-pair comments and readable symmetry matrices and vectors.
-- Shell numerical output uses eight significant digits with aligned vector and
-  tensor columns. Rounded geometry and native-context compatibility are validated
-  before publication.
+- Shell numerical output uses eight fixed decimal places with aligned vector and
+  tensor columns; validation tolerances retain their precision. Small exchange
+  values can round to zero, and rounded output is validated before publication.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing

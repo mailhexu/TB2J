@@ -408,12 +408,29 @@ def _pair_text(pair, labels):
 
 
 def _number_text(value):
-    return f"{float(value):15.8g}"
+    return f"{value:15.8f}"
+
+
+class _FixedDecimal(Decimal):
+    """Preserve fixed decimal formatting when tomli_w serializes numbers."""
+
+    def __str__(self):
+        return format(self, ".8f")
+
+
+class _FixedTolerance(Decimal):
+    """Write a tolerance exactly, with at least eight fixed decimal places."""
+
+    def __str__(self):
+        whole, _, fraction = format(self, "f").partition(".")
+        return whole + "." + fraction.ljust(8, "0")
 
 
 def _rounded(value):
+    if isinstance(value, _FixedTolerance):
+        return value
     if isinstance(value, (float, Decimal)):
-        return Decimal(format(value, ".8g"))
+        return _FixedDecimal(str(value))
     if isinstance(value, dict):
         return {key: _rounded(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -491,10 +508,10 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         }
     symmetry = {
         "mode": {"sg": "spacegroup", "msg": "magnetic"}[document.symmetry_mode],
-        "symprec": document.symprec,
+        "symprec": _FixedTolerance(str(document.symprec)),
     }
     if document.magnetic_tol is not None:
-        symmetry["magnetic_tol"] = document.magnetic_tol
+        symmetry["magnetic_tol"] = _FixedTolerance(str(document.magnetic_tol))
     if document.producer is not None:
         symmetry["producer"] = document.producer
     header["symmetry"] = symmetry
@@ -505,7 +522,8 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         provenance += f"# Source: {json.dumps(str(source_path), ensure_ascii=True)}\n"
     parts = [
         provenance
-        + "# Floating-point values are rounded to eight significant digits.\n"
+        + "# Numerical data are rounded to eight decimal places; small values may become zero.\n"
+        "# Validation tolerances retain additional decimal places as needed.\n"
         "# Exchange values use energy_unit; cutoff and distance use distance_unit.\n"
         "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
         "# Atom rows: one-based atom index, label, x, y, z, magnetic Y/N, zero-based spin index.\n"
@@ -578,7 +596,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         )
     footer = {}
     footer["tolerances"] = {
-        name: getattr(document, name)
+        name: _FixedTolerance(str(getattr(document, name)))
         for name in ("value_atol", "value_rtol", "zero_tol")
     }
     source = {
@@ -610,6 +628,6 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
             _expand_core(replace(parsed, shells=filled))
     except ValueError as error:
         raise ValueError(
-            f"serialized shell validation failed at eight-significant-digit precision: {error}"
+            f"serialized shell validation failed at eight-decimal-place precision: {error}"
         ) from error
     Path(path).write_text(text, encoding="utf-8")

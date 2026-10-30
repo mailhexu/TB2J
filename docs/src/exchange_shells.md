@@ -31,13 +31,14 @@ Set `equivalent_comments=False` to omit those lists without omitting format
 explanations. Rotation matrices use one row per line and translations use a
 single vector line. All comments are informational and can be deleted.
 
-Generated floating-point values are rounded to eight significant digits, including
-exchange values and structural/symmetry data; small values use scientific notation.
-This is a lossy write: a read/write cycle need not reproduce the original floats.
-The generated representation is validated before publication; if the rounding
-violates the declared symmetry or native-context tolerances, generation fails
-without replacing the existing output. Do not widen tolerances without considering
-the physical consequences.
+Generated floating-point values use fixed notation with eight digits after the
+decimal point, including exchange and structural/symmetry data. This is a lossy
+write: values smaller than the displayed resolution can round to zero. Exchange
+rounding is in the declared energy unit (normally meV), and geometry rounding is
+in the units stated in the file. Validation tolerances retain their exact values
+with additional decimal places where needed. The generated representation is
+validated before publication; if rounding violates symmetry or native-context
+tolerances, generation fails without replacing the existing output.
 
 ## Generate from a trusted TB2J pickle
 

@@ -2,14 +2,12 @@
 
 import os
 import re
-from dataclasses import replace
 
 import numpy as np
 import pytest
 from ase import Atoms
 from ase.units import J
 
-from TB2J.io_exchange import shells
 from TB2J.io_exchange.io_exchange import SpinIO
 from TB2J.io_exchange.shell_workflow import export_shells, generate_shells
 
@@ -178,11 +176,9 @@ def test_export_rejects_invalid_njt_shapes_without_publication(tmp_path, field, 
 
 def test_export_does_not_snap_small_nonzero_vampire_tensor(tmp_path):
     shell = _shell(tmp_path, "input")
-    doc = shells.read_shells(shell)
-    shells.write_shells(
-        replace(doc, shells=tuple(replace(item, Jiso=1e-12) for item in doc.shells)),
-        shell,
-    )
+    text, replacements = re.subn(r"(?m)^J = .*$", "J = 0.000000001", shell.read_text())
+    assert replacements == 1
+    shell.write_text(text)
     result = export_shells(shell, tmp_path / "results")
     assert "Vampire" in result.results.written
     rows = (tmp_path / "results" / "Vampire" / "vampire.UCF").read_text().splitlines()

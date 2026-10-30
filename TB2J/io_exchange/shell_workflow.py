@@ -79,7 +79,7 @@ def _generate_native(
             shells._validate_compatible_base(document, spinio)
         except ValueError as error:
             raise ValueError(
-                f"eight-significant-digit precision is incompatible with the native context: {error}"
+                f"eight-decimal-place precision is incompatible with the native context: {error}"
             ) from error
         os.replace(stages[0], companion)
         os.replace(stages[1], output)
