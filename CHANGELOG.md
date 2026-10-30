@@ -1,8 +1,9 @@
 # Changelog
 
 ## Unreleased
-- `TB2J_shell` reports its version, license and generation progress; strict
-  symmetry failures summarize mismatches and explain the opt-in projection.
+- `TB2J_shell` reports version, license and generation progress. Pickle
+  generation symmetrizes exchange by default and reports the maximum change;
+  Python callers can request strict checking with `project=False`.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing

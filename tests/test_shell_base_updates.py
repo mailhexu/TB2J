@@ -237,7 +237,7 @@ def test_pickle_mode_preserves_present_anisotropic_channel(tmp_path):
         generate_shells(tmp_path / "TB2J.pickle", path, mode="isotropic")
 
 
-def test_pickle_projection_is_explicit_and_reports_residuals(tmp_path):
+def test_pickle_projection_default_and_explicit_strict_mode(tmp_path):
     from TB2J.io_exchange.shell_workflow import generate_shells
 
     atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[3, 3, 3], pbc=True)
@@ -258,9 +258,9 @@ def test_pickle_projection_is_explicit_and_reports_residuals(tmp_path):
     source.write_pickle(path=tmp_path)
     path = tmp_path / "shells.toml"
     with pytest.raises(ValueError, match="deviation"):
-        generate_shells(tmp_path / "TB2J.pickle", path)
+        generate_shells(tmp_path / "TB2J.pickle", path, project=False)
     assert not path.exists()
-    result = generate_shells(tmp_path / "TB2J.pickle", path, project=True)
+    result = generate_shells(tmp_path / "TB2J.pickle", path)
     assert result.document.shells[0].Jiso == pytest.approx(0.002)
     assert len(result.report.residuals) >= 6
 

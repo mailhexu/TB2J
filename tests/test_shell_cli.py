@@ -68,6 +68,7 @@ def _fill(path, value=0.00125):
     shells.write_shells(filled, path)
     return filled
 
+
 def test_generate_reports_identification_and_result(tmp_path, inputs, capsys):
     import TB2J
 
@@ -80,25 +81,33 @@ def test_generate_reports_identification_and_result(tmp_path, inputs, capsys):
     assert "isotropic" in captured.out and "sg" in captured.out
     assert "1 shells" in captured.out and output.exists()
 
-def test_inconsistent_pickle_reports_bounded_actionable_failure(tmp_path, capsys):
+
+def test_inconsistent_pickle_is_symmetrized_by_default(tmp_path, capsys):
     atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[3, 3, 3], pbc=True)
     source = SpinIO(
-        atoms, spinat=[[0, 0, 2]], charges=None, index_spin=[0],
+        atoms,
+        spinat=[[0, 0, 2]],
+        charges=None,
+        index_spin=[0],
         exchange_Jdict={
-            ((1, 0, 0), 0, 0): 0.001, ((-1, 0, 0), 0, 0): 0.001,
-            ((0, 1, 0), 0, 0): 0.003, ((0, -1, 0), 0, 0): 0.003,
-            ((0, 0, 1), 0, 0): 0.002, ((0, 0, -1), 0, 0): 0.002,
+            ((1, 0, 0), 0, 0): 0.001,
+            ((-1, 0, 0), 0, 0): 0.001,
+            ((0, 1, 0), 0, 0): 0.003,
+            ((0, -1, 0), 0, 0): 0.003,
+            ((0, 0, 1), 0, 0): 0.002,
+            ((0, 0, -1), 0, 0): 0.002,
         },
     )
     source.write_pickle(path=tmp_path)
+    original = (tmp_path / "TB2J.pickle").read_bytes()
     output = tmp_path / "inconsistent.toml"
-    assert _run("generate", tmp_path / "TB2J.pickle", "-o", output) == 2
+    assert _run("generate", tmp_path / "TB2J.pickle", "-o", output) == 0
     captured = capsys.readouterr()
-    assert "inconsistent exchange data" in captured.err
-    assert "4 inconsistencies" in captured.err and "deviation=" in captured.err
-    assert "--project" in captured.err and "changes" in captured.err
-    assert "Wrote" not in captured.out
-    assert not output.exists()
+    assert "symmetr" in captured.out.lower()
+    assert "0.001" in captured.out
+    assert shells.read_shells(output).shells[0].Jiso == pytest.approx(0.002)
+    assert output.with_suffix(".context.npz").exists()
+    assert (tmp_path / "TB2J.pickle").read_bytes() == original
 
 
 def test_structure_generate_matches_public_api_bytes(tmp_path, inputs):

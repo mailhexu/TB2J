@@ -42,9 +42,10 @@ contains data, not the pickle, and its digest detects accidental mismatches; it
 does not establish authenticity. The original pickle is not needed after generation.
 Selectors, reference-spin overrides and cutoff apply to structure input only.
 Native import preserves anisotropic exchange by selecting tensor mode when needed.
-Symmetry-inconsistent values are rejected unless `project=True` explicitly requests
-projection. A companion requiring unsupported objects, constraints, or a calculator
-is rejected instead of silently dropping them.
+Pickle import symmetrizes exchange under the selected symmetry by default; this
+can change values. Python callers can use `project=False` to reject inconsistent
+values instead and inspect `result.report.residuals` after projection. A companion
+requiring unsupported objects, constraints, or a calculator is rejected.
 
 ## A complete hand-authored scalar document
 
@@ -300,11 +301,9 @@ incompatible context and output collisions before publishing results.
 
 The CLI prints the TB2J version and license, source, absolute output destination,
 and symmetry before processing. On success it reports the exchange mode, number
-of shells, and any context companion. If native exchange values violate the
-selected symmetry, generation stops with a count and sample of inconsistencies;
-no new shell file is published. `--project` explicitly changes those values to
-their symmetry projection and should be used only when that is scientifically
-appropriate.
+of shells, and any context companion. Pickle import symmetrizes automatically and
+reports the largest absolute component change in eV; the original pickle is not
+modified. Review that change before using the generated exchange values.
 
 ## V2 document grammar and indexing
 
@@ -355,7 +354,7 @@ Their advanced controls do not alter the ordinary CLI defaults.
 `--magnetic-tol`, `--project`, `-o`, and `--no-equivalent-comments` where
 applicable. Structure input requires a selector and cutoff; pickle input uses
 its stored map and rejects structure-only controls. `--project` explicitly
-requests symmetry projection for pickle input.
+requests the same default symmetry projection for pickle input.
 
 `TB2J_shell export FILE [-o DIRECTORY]` validates automatically. The default
 output is `TB2J_results`. The output report names solver omissions. Existing

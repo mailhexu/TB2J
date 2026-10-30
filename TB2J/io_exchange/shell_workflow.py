@@ -88,7 +88,7 @@ def generate_shells(
     reference_spins=None,
     symprec=1e-5,
     magnetic_tol=1e-5,
-    project=False,
+    project=None,
     equivalent_comments=True,
 ):
     """Generate an annotated shell document from a structure or trusted pickle.
@@ -96,9 +96,11 @@ def generate_shells(
     Magnetic atom indices are one-based over the complete structure; species
     select all atoms with the given chemical symbols. The cutoff is in Angstrom.
     Pickle input must be trusted because loading it can execute arbitrary code.
+    Pickle exchange is symmetrized by default; ``project=False`` requires
+    consistency instead. Structure input does not project exchange.
     """
-    if not isinstance(project, bool):
-        raise ValueError("project must be a boolean")
+    if project is not None and not isinstance(project, bool):
+        raise ValueError("project must be a boolean or None")
     source = Path(source)
     output = Path(output)
     if source.suffix.lower() in {".pickle", ".pkl"}:
@@ -116,7 +118,7 @@ def generate_shells(
             symmetry=symmetry,
             symprec=symprec,
             magnetic_tol=magnetic_tol,
-            project=project,
+            project=True if project is None else project,
             equivalent_comments=equivalent_comments,
         )
     if (magnetic_species is None) == (magnetic_atoms is None):

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from pickle import UnpicklingError
 
+import numpy as np
 import tomli
 
 from TB2J.io_exchange.shell_workflow import export_shells, generate_shells
@@ -69,7 +70,8 @@ def _parser():
     generate.add_argument(
         "--project",
         action="store_true",
-        help="Project inconsistent native exchange instead of failing (pickle input)",
+        default=None,
+        help="Symmetrize native exchange (the default for pickle input)",
     )
     generate.add_argument("--no-equivalent-comments", action="store_true")
     generate.add_argument(
@@ -88,11 +90,9 @@ def _parser():
 
 def _generate(args):
     print(f"Source: {args.source}\nOutput: {args.output.resolve()}")
-    print(
-        f"Generating shells using {args.symmetry} symmetry "
-        f"({'projection enabled' if args.project else 'strict consistency'}).",
-        flush=True,
-    )
+    pickle_input = args.source.suffix.lower() in {".pickle", ".pkl"}
+    action = "symmetrizing imported exchange" if pickle_input else "building template"
+    print(f"Generating shells using {args.symmetry} symmetry ({action}).", flush=True)
     reference_spins = _moments(args.reference_spins)
     kwargs = {}
     for name in ("magnetic_species", "magnetic_atoms", "cutoff", "mode"):
@@ -113,6 +113,14 @@ def _generate(args):
         equivalent_comments=not args.no_equivalent_comments,
         **kwargs,
     )
+    if pickle_input:
+        maximum = max(
+            (float(np.max(np.abs(row[4]))) for row in result.report.residuals),
+            default=0.0,
+        )
+        print(
+            f"Symmetrized exchange; maximum absolute component change: {maximum:.8g} eV"
+        )
     print(
         f"Exchange mode: {result.document.exchange_mode}; "
         f"symmetry: {result.document.symmetry_mode}"
@@ -150,19 +158,7 @@ def main(argv=None):
         UnpicklingError,
         AssertionError,
     ) as error:
-        message = str(error) or type(error).__name__
-        prefix = "inconsistent exchange data: "
-        if message.startswith(prefix):
-            details = message[len(prefix):]
-            count = details.count("; ") + 1
-            sample = details.split("; ", 3)[:3]
-            message = (
-                f"inconsistent exchange data: {count} inconsistencies; "
-                f"sample: {'; '.join(sample)}. "
-                "Use --project only if projection, which changes exchange values, "
-                "is appropriate."
-            )
-        print(f"TB2J_shell: {message}", file=sys.stderr)
+        print(f"TB2J_shell: {error or type(error).__name__}", file=sys.stderr)
         return 2
     return 0
 
