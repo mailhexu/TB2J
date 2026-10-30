@@ -155,58 +155,6 @@ def test_public_entry_rejects_operator_modes_before_parsers(
         )
 
 
-def test_real_cli_wfsx_dispatch_and_measured_output(tmp_path):
-    import os
-    import subprocess
-    import sys
-
-    inputs = tmp_path / "input"
-    inputs.mkdir()
-    model, _, _, _ = source_model(inputs, "collinear_nspin2_reduced")
-    output = tmp_path / "result"
-    root = Path(__file__).resolve().parents[1]
-    env = {
-        **os.environ,
-        "PYTHONPATH": str(root) + os.pathsep + os.environ.get("PYTHONPATH", ""),
-    }
-    run = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; from TB2J.scripts.siesta2J import run_siesta2J; sys.exit(run_siesta2J())",
-            "--input-mode",
-            "wfsx",
-            "--wfsx-file",
-            str(model.eigenstate_source.wfsx_path),
-            "--wfsx-metadata",
-            str(inputs / "metadata.json"),
-            "--elements",
-            "O",
-            "--kmesh",
-            "1",
-            "1",
-            "5",
-            "--nz",
-            "8",
-            "--rcut",
-            "4.3",
-            "--output_path",
-            str(output),
-        ],
-        cwd=inputs,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert run.returncode == 0, run.stdout + run.stderr
-    summary = json.loads((output / "wfsx_run.json").read_text())
-    assert summary["electronic_eigensolver"]["calls"] == 0
-    assert summary["kpoints"]["requested"] == 5
-    assert (output / "TB2J.pickle").is_file()
-    assert {path.name for path in inputs.iterdir()} == {"metadata.json", "states.WFSX"}
-
-
 def test_public_failed_import_removes_owned_factors_and_preserves_inputs(tmp_path):
     from HamiltonIO.siesta.wfsx import IncompleteSpectrum
 

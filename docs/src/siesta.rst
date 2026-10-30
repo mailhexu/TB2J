@@ -289,6 +289,37 @@ Malformed metadata JSON raises ``InconsistentMetadata``; unreadable metadata
 raises ``MissingMetadata``, with the original cause chained.
 
 
+Rerunning the scientific acceptance comparison
+-----------------------------------------------
+
+From the TB2J source worktree, with its paired HamiltonIO worktree and the
+test dependencies available::
+
+   PYTHONPATH="$PWD:../siesta-wfsx-hamiltonio" python \
+       tests/test_siesta_wfsx_equivalence.py \
+       --work-root /tmp/tb2j-wfsx-equivalence \
+       --output-json tests/siesta_wfsx_equivalence_reports/observations.json \
+       --output-md tests/siesta_wfsx_equivalence_reports/report.md \
+       --native-trace
+
+This opt-in scientific command compares complete operator, population,
+complex Green and full exchange-tensor arrays against same-run complete-spectrum
+H/S, in both metric modes. It includes full/internal-reduced/representative
+collinear states, full NC4 spinors, ordered-mesh controls and explicit subsets.
+No raw eigenvector equality or aggregate-norm substitute is used.
+
+``--native-trace`` additionally requires Linux ``strace`` and permission to
+trace child processes. It observes native file-open system calls alongside
+electronic-solver/parser guards during real console and Python runs. Portable
+permanent tests exercise the same entry guards without requiring ptrace.
+Runtime inputs, factors and trace logs stay in a fresh ``equivalence-*`` child
+under ``--work-root`` on every invocation, so repeating the same command does
+not reuse or overwrite earlier runtime evidence. The two explicitly selected
+reports are replaced with the new measured errors, provenance, counters and limits.
+Original fixtures are read-only. These are same-mesh equivalence checks, not
+performance or mesh-convergence measurements.
+
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 
