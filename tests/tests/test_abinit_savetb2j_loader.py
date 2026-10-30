@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from TB2J.interfaces.abinit_savetb2j import (
+    abinit_netcdf_kind,
     compute_projector_shell_populations,
     gen_exchange_abinit_nc_pao,
     gen_exchange_abinit_projector,
@@ -22,7 +23,13 @@ FIXTURE_DIR = (
 )
 
 
-def write_minimal_abinit_savetb2j_fixture(path):
+def write_minimal_abinit_savetb2j_fixture(path, occupations="wellformed"):
+    """Write a tiny ABINIT savetb2j file.
+
+    ``occupations`` selects the bands/occupations variable layout:
+    ``"wellformed"`` (an old-schema file still carrying occupations),
+    ``"malformed"`` (wrong rank and type), or ``"absent"``.
+    """
     netcdf4 = pytest.importorskip("netCDF4")
 
     with netcdf4.Dataset(path, "w") as nc:
@@ -63,7 +70,15 @@ def write_minimal_abinit_savetb2j_fixture(path):
         bands = nc.createGroup("bands")
         bands.efermi = 0.0
         bands.createVariable("eigenvalues", "f8", ("nspin", "nkpt", "nband"))[:] = 0.0
-        bands.createVariable("occupations", "f8", ("nspin", "nkpt", "nband"))[:] = 1.0
+        if occupations == "wellformed":
+            bands.createVariable("occupations", "f8", ("nspin", "nkpt", "nband"))[:] = (
+                1.0
+            )
+        elif occupations == "malformed":
+            # Wrong rank and integer type: unreadable if any consumer tried.
+            bands.createVariable("occupations", "i4", ("nband",))[:] = np.full(
+                len(nc.dimensions["nband"]), -3, dtype="i4"
+            )
 
         projectors = nc.createGroup("projectors")
         projectors.coefficient_source = "abinit.cprj"
@@ -272,6 +287,11 @@ def test_load_abinit_savetb2j_normalizes_projector_green_data(tmp_path):
     np.testing.assert_allclose(data.atomic_numbers, [26])
     assert data.population_metric_matrix is None
     assert "smooth pseudo-density" in data.population_metric
+    # Occupations are never read from ABINIT savetb2j files, even when the
+    # variable exists (this fixture writes one), and v1.0 predates the
+    # electron count.
+    assert data.occupations is None
+    assert data.number_of_electrons is None
     np.testing.assert_array_equal(data.site_projector_indices, [[0, 1]])
     np.testing.assert_allclose(
         data.operator_components["delta_total"], data.hij[0] - data.hij[1]
@@ -357,7 +377,7 @@ def test_gen_exchange_abinit_nc_pao_accepts_spherical_window(tmp_path):
         output_path=output_path,
         Rpts=[(0, 0, 0)],
         nz=4,
-        population_mode="projector",
+        population_mode="green",
         shell_charge_threshold=None,
         shell_moment_threshold=None,
     )
@@ -406,7 +426,7 @@ def test_abinit_savetb2j_smooth_component_exchange_ready_policy(tmp_path):
         filename,
         output_path=tmp_path / "TB2J_results_projector_population",
         operator_component="delta_paw_smooth_xc",
-        population_mode="projector",
+        population_mode="green",
     )
     assert exchange_out.exists()
     assert data.has_operator_component("delta_paw_smooth_xc")
@@ -430,8 +450,452 @@ def test_gen_exchange_abinit_projector_green_population(tmp_path):
     assert "mag" in text.lower()
 
 
+@pytest.mark.parametrize("usepawu", [0, 1, -1])
+def test_abinit_schema_12_preserves_hubbard_provenance(tmp_path, usepawu):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "paw12.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.2"
+        nc.usepawu = usepawu
+        delta = nc.groups["operators"].groups["operator_components"]["delta_total"]
+        delta.hubbard_included = "true" if usepawu else "false"
+    data = load_abinit_savetb2j(filename)
+    assert data.metadata["usepawu"] == usepawu
+    assert data.operator_component_metadata["delta_total"]["hubbard_included"] == (
+        "true" if usepawu else "false"
+    )
+
+
+@pytest.mark.parametrize("version", ["1.2", "1.3"])
+@pytest.mark.parametrize(
+    "usepawu,included",
+    [(0, "true"), (1, "false"), (0, "maybe"), ("invalid", "false")],
+)
+def test_abinit_schema_12_rejects_invalid_hubbard_provenance(
+    tmp_path, usepawu, included, version
+):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "bad-paw12.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = version
+        if version == "1.3":
+            nc.groups["bands"].number_of_electrons = 8.0
+        nc.usepawu = usepawu
+        nc.groups["operators"].groups["operator_components"][
+            "delta_total"
+        ].hubbard_included = included
+    with pytest.raises(ValueError):
+        load_abinit_savetb2j(filename)
+
+
+def test_abinit_schema_12_rejects_invalid_nondefault_component_provenance(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "bad-component.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.2"
+        nc.groups["operators"].groups["operator_components"][
+            "smooth_xc"
+        ].hubbard_included = "invalid"
+    with pytest.raises(ValueError):
+        load_abinit_savetb2j(filename)
+
+
+def test_abinit_schema_12_missing_hubbard_provenance_is_unknown(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "unknown-paw12.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.2"
+    data = load_abinit_savetb2j(filename)
+    assert data.metadata["usepawu"] is None
+    assert "hubbard_included" not in data.operator_component_metadata["delta_total"]
+
+
+@pytest.mark.parametrize("variant", ["spinor", "nc", "magnetic"])
+def test_abinit_schema_12_rejects_unsupported_variants(tmp_path, variant):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "unsupported-paw12.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.2"
+        if variant == "spinor":
+            nc.spin_mode = "spinor"
+        elif variant == "nc":
+            nc.coefficient_source = "abinit.nc_pao"
+        else:
+            nc.groups["operators"].groups["operator_components"][
+                "delta_total"
+            ].spin_treatment = "magnetic_2x2"
+    with pytest.raises(ValueError):
+        load_abinit_savetb2j(filename)
+
+
+def write_minimal_nc_pao_projector_wrapper_fixture(
+    path,
+    *,
+    schema_version="1.2",
+    include_overlap_k=True,
+    include_delta_total=True,
+    delta_completeness="complete",
+    coefficients=None,
+    overlap_k_values=None,
+    delta_total_values=None,
+    number_of_electrons=None,
+):
+    netcdf4 = pytest.importorskip("netCDF4")
+
+    with netcdf4.Dataset(path, "w") as nc:
+        for name, size in (
+            ("nspin", 2),
+            ("nkpt", 2),
+            ("nband", 2),
+            ("nproj", 2),
+            ("nsite", 1),
+            ("nproj_site_max", 2),
+            ("natom", 1),
+            ("three", 3),
+            ("complex", 2),
+        ):
+            nc.createDimension(name, size)
+        nc.schema_name = "abinit.savetb2j.projector"
+        nc.schema_version = schema_version
+        nc.source_code = "abinit"
+        nc.abinit_version = "synthetic"
+        nc.spin_mode = "collinear"
+        nc.spin_channel_order = "up,down"
+        nc.full_bz = "true"
+        nc.kpoint_convention = "fractional_reciprocal"
+        nc.phase_convention = "exp(-2*pi*i*k.R)"
+        nc.coefficient_source = "abinit.nc_pao"
+        nc.operator_basis = "abinit_nc_pao"
+        nc.units_json = "{}"
+
+        structure = nc.createGroup("structure")
+        structure.createVariable("cell", "f8", ("three", "three"))[:] = np.eye(3)
+        structure.createVariable("positions", "f8", ("natom", "three"))[:] = 0.0
+        structure.createVariable("atomic_numbers", "i4", ("natom",))[:] = [26]
+
+        kpoints = nc.createGroup("kpoints")
+        kpoints.createVariable("kpoints", "f8", ("nkpt", "three"))[:] = [
+            [0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0],
+        ]
+        kpoints.createVariable("weights", "f8", ("nkpt",))[:] = [0.5, 0.5]
+
+        bands = nc.createGroup("bands")
+        bands.efermi = 0.0
+        bands.createVariable("eigenvalues", "f8", ("nspin", "nkpt", "nband"))[:] = 0.0
+        if number_of_electrons is not None:
+            bands.number_of_electrons = float(number_of_electrons)
+        # Older wrappers still carry occupations; readers must ignore them.
+        bands.createVariable("occupations", "f8", ("nspin", "nkpt", "nband"))[:] = 1.0
+
+        projectors = nc.createGroup("projectors")
+        projectors.coefficient_source = "abinit.nc_pao"
+        projectors.coefficient_projector = "nc_pao_tphi"
+        projectors.channel_interpretation = "abinit_nc_pao_lmn_channel"
+        projectors.operator_basis = "abinit_nc_pao"
+        projectors.index_base = 0
+        coefficients_var = projectors.createVariable(
+            "coefficients",
+            "f8",
+            ("nspin", "nkpt", "nband", "nproj", "complex"),
+        )
+        if coefficients is not None:
+            coefficients_var[..., 0] = np.real(coefficients)
+            coefficients_var[..., 1] = np.imag(coefficients)
+        else:
+            coefficients_var[:] = 0.0
+        projectors.createVariable("projector_atom", "i4", ("nproj",))[:] = [0, 0]
+        projectors.createVariable("projector_site", "i4", ("nproj",))[:] = [0, 0]
+        projectors.createVariable("projector_l", "i4", ("nproj",))[:] = [0, 0]
+        projectors.createVariable("projector_m", "i4", ("nproj",))[:] = [0, 0]
+        projectors.createVariable("projector_radial", "i4", ("nproj",))[:] = [0, 1]
+        projectors.createVariable("site_nproj", "i4", ("nsite",))[:] = [2]
+        projectors.createVariable(
+            "site_projector_indices", "i4", ("nsite", "nproj_site_max")
+        )[:] = [[0, 1]]
+        if include_overlap_k:
+            overlap_k = projectors.createVariable(
+                "overlap_k", "f8", ("nkpt", "nproj", "nproj", "complex")
+            )
+            if overlap_k_values is not None:
+                # Serialize the true producer byte order: nctkarr_t reverses
+                # the Fortran dim list, so Python reads B[k, j, i, c] =
+                # A[c, i, j, k] and the npm row/column pair is stored swapped.
+                swapped = np.swapaxes(overlap_k_values, -1, -2)
+                overlap_k[..., 0] = np.real(swapped)
+                overlap_k[..., 1] = np.imag(swapped)
+            else:
+                overlap_values = np.zeros((2, 2, 2, 2))
+                overlap_values[:, :, :, 0] = np.broadcast_to(np.eye(2), (2, 2, 2))
+                overlap_k[:] = overlap_values
+
+        operators = nc.createGroup("operators")
+        components = operators.createGroup("operator_components")
+        if include_delta_total:
+            delta_total = components.createVariable(
+                "delta_total",
+                "f8",
+                ("nsite", "nproj_site_max", "nproj_site_max", "complex"),
+            )
+            if delta_total_values is not None:
+                # Producer bytes: npm pair swapped, as for overlap_k above.
+                swapped = np.swapaxes(delta_total_values, -1, -2)
+                delta_total[..., 0] = np.real(swapped)
+                delta_total[..., 1] = np.imag(swapped)
+            else:
+                delta_total[:] = 0.0
+                delta_total[0, 0, 0, 0] = 1.0
+            delta_total.source = "nc_pao.delta_xc+delta_u"
+            delta_total.units = "eV"
+            delta_total.operator_basis = "abinit_nc_pao"
+            delta_total.spin_treatment = "spin_difference"
+            delta_total.completeness = delta_completeness
+
+
+@pytest.mark.parametrize("loader", [load_abinit_savetb2j, load_abinit_nc_pao_savetb2j])
+@pytest.mark.parametrize("completeness", ["complete", "zero_by_symmetry"])
+def test_load_abinit_schema_12_nc_pao_projector_wrapper(loader, completeness, tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "nc-pao-projector-wrapper.nc"
+    write_minimal_nc_pao_projector_wrapper_fixture(
+        filename, delta_completeness=completeness
+    )
+
+    data = loader(filename)
+
+    assert data.schema_name == "tb2j.projector_green"
+    assert data.metadata["abinit_schema_name"] == "abinit.savetb2j.projector"
+    assert data.metadata["abinit_schema_version"] == "1.2"
+    assert data.coefficient_source == "abinit.nc_pao"
+    assert data.coefficient_projector == "nc_pao_tphi"
+    assert data.channel_interpretation == "abinit_nc_pao_lmn_channel"
+    assert data.operator_basis == "abinit_nc_pao"
+    assert data.coefficients.shape == (2, 2, 2, 2)
+    assert data.overlap_k.shape == (2, 2, 2)
+    assert data.overlap_metric is None
+    assert data.overlap_metric_definition == "k-dependent NC PAO overlap_k"
+    # Wrapper 1.2 predates the electron count; occupations are never read.
+    assert data.number_of_electrons is None
+    assert data.occupations is None
+    assert data.hij is None
+    assert data.operator_component_metadata["delta_total"] == {
+        "source": "nc_pao.delta_xc+delta_u",
+        "units": "eV",
+        "operator_basis": "abinit_nc_pao",
+        "spin_treatment": "spin_difference",
+        "completeness": completeness,
+    }
+    data.validate(exchange_ready=True)
+
+
+def test_load_abinit_schema_13_nc_pao_projector_wrapper_electron_count(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "nc-pao-projector-wrapper-v13.nc"
+    write_minimal_nc_pao_projector_wrapper_fixture(filename, schema_version="1.3")
+
+    # Wrapper 1.3 requires the producer valence-electron count.
+    with pytest.raises(ValueError, match="number_of_electrons"):
+        load_abinit_savetb2j(filename)
+
+    netcdf4 = pytest.importorskip("netCDF4")
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.groups["bands"].number_of_electrons = 8.0
+
+    data = load_abinit_nc_pao_savetb2j(filename)
+
+    assert data.metadata["abinit_schema_version"] == "1.3"
+    assert data.number_of_electrons == 8.0
+    # The occupations variable from the old layout is still ignored.
+    assert data.occupations is None
+
+
+def test_load_abinit_nc_pao_projector_wrapper_physical_oracle(tmp_path):
+    """Conjugation/orientation oracle with non-real Hermitian matrices.
+
+    The wrapper producer exports coefficients as <psi|p> (verified in
+    m_nc_savetb2j_netcdf.F90 / m_nc_pao_hamiltonian.F90), so the loaded
+    coefficients must be <p|psi> = conj(<psi|p>).  The writer declares
+    overlap_k and delta_total via nctkarr_t in Fortran order ("complex,
+    nproj, nproj, nkpt" / "..., nsite"), so Python reads the duplicate npm
+    row/column pair swapped (B[k, j, i, c] = A[c, i, j, k]); the fixture
+    serializes that true byte order and the loader must normalize it back to
+    the physical <p_i|.|p_j> rows=bra orientation.  With a complete window the
+    loaded arrays satisfy the spectral identity
+    S[p,q] = sum_n C[p,n] conj(C[q,n]) and the generalized eigenproblem
+    sum_q H[p,q] x[q] = eps_n sum_q S[p,q] x[q] with
+    H[p,q] = sum_n C[p,n] conj(C[q,n]) eps_n -- identities that fail for the
+    unconjugated coefficients and for the unnormalized (still-swapped) bytes
+    when the matrices are non-real Hermitian.
+    """
+    netCDF4 = pytest.importorskip("netCDF4")
+    import scipy.linalg as sla
+
+    rng = np.random.default_rng(23)
+    nproj = 2
+    g = 5
+    phi = rng.normal(size=(g, nproj)) + 1j * rng.normal(size=(g, nproj))  # <G|p>
+    vmat = rng.normal(size=(g, g)) + 1j * rng.normal(size=(g, g))
+
+    overlap = phi.conj().T @ phi
+    overlap = 0.5 * (overlap + overlap.conj().T)
+    assert not np.allclose(overlap.imag, 0.0), "oracle needs non-real Hermitian S"
+
+    delta = phi.conj().T @ vmat @ phi
+    delta = 0.5 * (delta + delta.conj().T)
+    assert not np.allclose(delta.imag, 0.0), "oracle needs non-real Hermitian O"
+
+    # Orthonormal band basis of the projector span (complete window).
+    qvec, _ = np.linalg.qr(phi)
+    proj = qvec.conj().T @ phi  # proj[n, p] = <psi_n|p_p> (producer)
+    eps = np.array([0.7, -1.3])
+
+    filename = tmp_path / "wrapper-oracle.nc"
+    write_minimal_nc_pao_projector_wrapper_fixture(
+        filename,
+        schema_version="1.3",
+        number_of_electrons=4.0,
+        coefficients=np.broadcast_to(proj, (2, 2, nproj, nproj)).copy(),
+        overlap_k_values=np.broadcast_to(overlap, (2, nproj, nproj)).copy(),
+        delta_total_values=delta,
+    )
+
+    # The file bytes carry the npm-swapped (transposed) matrices: this pins
+    # the fixture to the true serialized producer convention.
+    with netCDF4.Dataset(filename) as nc:
+        projectors = nc.groups["projectors"]
+        raw = np.asarray(projectors.variables["overlap_k"][:])
+        raw_mat = raw[..., 0] + 1j * raw[..., 1]
+        components = nc.groups["operators"].groups["operator_components"]
+        raw_delta = np.asarray(components.variables["delta_total"][:])
+        raw_delta_mat = raw_delta[..., 0] + 1j * raw_delta[..., 1]
+    np.testing.assert_allclose(raw_mat[0], overlap.T, atol=1e-14)
+    np.testing.assert_allclose(raw_delta_mat[0], delta.T, atol=1e-14)
+    assert not np.allclose(overlap.T, overlap), "oracle needs non-symmetric S"
+    assert not np.allclose(delta.T, delta), "oracle needs non-symmetric O"
+
+    data = load_abinit_nc_pao_savetb2j(filename)
+
+    # Loaded coefficients are <p|psi>, not the stored <psi|p>.
+    c_loaded = data.coefficients[0, 0]  # (nband, nproj)
+    np.testing.assert_allclose(c_loaded, proj.conj(), atol=1e-14)
+
+    # The loader normalizes the swapped npm pair back to the physical
+    # rows=bra orientation; both matrices are non-real Hermitian and
+    # non-symmetric, so a missing swapaxes is caught here.
+    np.testing.assert_allclose(data.overlap_k[0], overlap, atol=1e-14)
+    np.testing.assert_allclose(
+        data.operator_components["delta_total"][0], delta, atol=1e-14
+    )
+
+    # Spectral identity: S[p,q] = sum_n C[p,n] conj(C[q,n]).
+    loaded_overlap = data.overlap_k[0]
+    c = c_loaded.T  # (nproj, nband)
+    spectral = np.einsum("pn,qn->pq", c, c.conj())
+    np.testing.assert_allclose(spectral, loaded_overlap, atol=1e-12)
+
+    # The generalized eigenproblem recovers the producer eigenvalues.
+    h_mat = np.einsum("pn,qn->pq", c * eps[None, :], c.conj())
+    w_vals = sla.eigh(h_mat, loaded_overlap, eigvals_only=True)
+    np.testing.assert_allclose(np.sort(w_vals), np.sort(eps), atol=1e-10)
+
+    # The unconjugated convention would fail both identities.
+    c_bug = proj.T
+    assert np.max(np.abs(np.einsum("pn,qn->pq", c_bug, c_bug.conj()) - overlap)) > 1e-2
+
+
+def test_abinit_netcdf_kind_classifies_nc_pao_wrapper(tmp_path):
+    pytest.importorskip("netCDF4")
+    nc_filename = tmp_path / "nc-pao-projector-wrapper.nc"
+    write_minimal_nc_pao_projector_wrapper_fixture(nc_filename)
+    assert abinit_netcdf_kind(nc_filename) == "nc_pao"
+
+    paw_filename = tmp_path / "paw-projector.nc"
+    write_minimal_abinit_savetb2j_fixture(paw_filename)
+    assert abinit_netcdf_kind(paw_filename) == "paw_savetb2j"
+
+
+def test_gen_exchange_abinit_projector_refuses_nc_pao_wrapper(tmp_path):
+    pytest.importorskip("netCDF4")
+    nc_filename = tmp_path / "nc-pao-projector-wrapper.nc"
+    write_minimal_nc_pao_projector_wrapper_fixture(nc_filename)
+    with pytest.raises(ValueError, match="k-dependent overlap_k metric"):
+        gen_exchange_abinit_projector(
+            nc_filename,
+            output_path=tmp_path / "unused",
+            Rpts=[(0, 0, 0)],
+            nz=2,
+            population_mode="none",
+        )
+
+
+@pytest.mark.parametrize("loader", [load_abinit_savetb2j, load_abinit_nc_pao_savetb2j])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "spinor",
+        "magnetic",
+        "wrong_units",
+        "wrong_completeness",
+        "missing_overlap_k",
+        "missing_delta_total",
+        "root_basis_conflict",
+        "projector_basis_conflict",
+        "component_basis_conflict",
+        "wrong_coefficient_projector",
+        "wrong_channel_interpretation",
+    ],
+)
+def test_load_abinit_schema_12_nc_pao_projector_wrapper_rejects_invalid_payload(
+    loader, variant, tmp_path
+):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "invalid-nc-pao-projector-wrapper.nc"
+    write_minimal_nc_pao_projector_wrapper_fixture(
+        filename,
+        include_overlap_k=variant != "missing_overlap_k",
+        include_delta_total=variant != "missing_delta_total",
+    )
+    with netcdf4.Dataset(filename, "a") as nc:
+        if variant == "spinor":
+            nc.nspinor = 2
+        elif variant == "magnetic":
+            nc.groups["operators"].groups["operator_components"][
+                "delta_total"
+            ].spin_treatment = "magnetic_2x2"
+        elif variant == "wrong_units":
+            nc.groups["operators"].groups["operator_components"][
+                "delta_total"
+            ].units = "Hartree"
+        elif variant == "wrong_completeness":
+            nc.groups["operators"].groups["operator_components"][
+                "delta_total"
+            ].completeness = "partial"
+        elif variant == "root_basis_conflict":
+            nc.operator_basis = "abinit_native_paw_projector"
+        elif variant == "projector_basis_conflict":
+            nc.groups["projectors"].operator_basis = "abinit_native_paw_projector"
+        elif variant == "component_basis_conflict":
+            nc.groups["operators"].groups["operator_components"][
+                "delta_total"
+            ].operator_basis = "abinit_native_paw_projector"
+        elif variant == "wrong_coefficient_projector":
+            nc.groups["projectors"].coefficient_projector = "nc_pao"
+        elif variant == "wrong_channel_interpretation":
+            nc.groups["projectors"].channel_interpretation = "norm_conserving_pao"
+
+    with pytest.raises(ValueError):
+        loader(filename)
+
+
 def test_load_abinit_savetb2j_generated_abinit_fixture():
     pytest.importorskip("netCDF4")
+    if not (FIXTURE_DIR / "fe_savetb2j.nc").is_file():
+        pytest.skip("fe_savetb2j.nc fixture not present in this worktree")
 
     data = load_abinit_savetb2j(FIXTURE_DIR / "fe_savetb2j.nc")
 
@@ -448,53 +912,123 @@ def test_load_abinit_savetb2j_generated_abinit_fixture():
     )
 
 
-def test_abinit_projected_population_uses_kpoint_weights(tmp_path):
+def test_abinit_savetb2j_occupation_features_fail_closed(tmp_path):
     pytest.importorskip("netCDF4")
+    from TB2J.interfaces.abinit_savetb2j import build_nc_pao_band_mask
+
     filename = tmp_path / "abinit_savetb2j.nc"
     write_minimal_abinit_savetb2j_fixture(filename)
 
     data = load_abinit_savetb2j(filename)
-    data.occupations[:] = 0.0
-    data.occupations[0, :, 0] = 1.0
-    data.coefficients[:] = 0.0
-    data.coefficients[0, 0, 0, 0] = 1.0
-    data.coefficients[0, 1, 0, 0] = 3.0
-    data.population_metric_matrix = np.zeros_like(data.overlap_metric)
-    data.population_metric_matrix[0, 0] = 2.0
 
-    charges, spinat, density_by_spin = compute_projected_charges_moments(data)
+    with pytest.raises(ValueError, match="require occupations"):
+        compute_projected_charges_moments(data)
+    with pytest.raises(ValueError, match="require occupations"):
+        compute_projector_shell_populations(data)
+    with pytest.raises(ValueError, match="require occupations"):
+        build_nc_pao_band_mask(data, n_empty=1)
+    with pytest.raises(ValueError, match="do not export occupations"):
+        gen_exchange_abinit_projector(
+            filename,
+            output_path=tmp_path / "TB2J_results_projector_population",
+            population_mode="projector",
+        )
 
-    np.testing.assert_allclose(density_by_spin[:, 0], [10.0, 0.0])
-    np.testing.assert_allclose(charges, [10.0])
-    np.testing.assert_allclose(spinat[:, 2], [10.0])
+
+def test_load_abinit_savetb2j_13_exposes_number_of_electrons(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j_v13.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.3"
+        nc.groups["bands"].number_of_electrons = 8.0
+
+    data = load_abinit_savetb2j(filename)
+
+    assert data.number_of_electrons == 8.0
+    assert isinstance(data.number_of_electrons, float)
+    # The occupations variable is still present in this file; it must be ignored.
+    assert data.occupations is None
+
+    exchange_out, exchange = gen_exchange_abinit_projector(
+        filename,
+        output_path=tmp_path / "TB2J_results_v13",
+        Rpts=[(0, 0, 0)],
+        nz=4,
+        population_mode="none",
+    )
+    assert exchange_out.exists()
+    assert exchange
+    text = exchange_out.read_text(encoding="utf-8")
+    assert "number_of_electrons: 8.0" in text
+
+
+def test_load_abinit_savetb2j_13_rejects_missing_number_of_electrons(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j_v13_missing_nelect.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.3"
+
+    with pytest.raises(ValueError, match="number_of_electrons"):
+        load_abinit_savetb2j(filename)
+
+
+def test_load_abinit_savetb2j_13_rejects_invalid_number_of_electrons(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j_v13_bad_nelect.nc"
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.3"
+        nc.groups["bands"].number_of_electrons = 0.0
+
+    with pytest.raises(ValueError, match="number_of_electrons"):
+        load_abinit_savetb2j(filename)
+
+
+def test_load_abinit_savetb2j_ignores_malformed_occupations(tmp_path):
+    pytest.importorskip("netCDF4")
+    filename = tmp_path / "abinit_savetb2j_malformed_occupations.nc"
+    # Wrong rank, wrong dimensions, non-numeric type: none of it may affect
+    # the load because occupation variables are never read.
+    write_minimal_abinit_savetb2j_fixture(filename, occupations="malformed")
+
+    data = load_abinit_savetb2j(filename)
+
+    assert data.occupations is None
 
 
 def test_abinit_paw_shell_moment_filter_masks_local_operator(tmp_path):
+    # Shell selection/masking operate on population records; the records
+    # themselves require occupations, which ABINIT savetb2j no longer
+    # exports (see test_abinit_savetb2j_occupation_features_fail_closed).
     pytest.importorskip("netCDF4")
     filename = tmp_path / "abinit_savetb2j.nc"
     write_minimal_abinit_savetb2j_fixture(filename)
 
     data = load_abinit_savetb2j(filename)
-    data.projector_radial = np.array([0, 1])
-    data.population_metric_matrix = np.eye(2, dtype=complex)
-    data.occupations[:] = 0.0
-    data.occupations[:, :, 0] = 1.0
-    data.coefficients[:] = 0.0
-    data.coefficients[0, :, 0, 0] = 1.0
-    data.coefficients[1, :, 0, 1] = 0.05
-    local_operators = {0: np.ones((2, 2), dtype=complex)}
-
-    shells = select_nc_pao_shells(
-        compute_projector_shell_populations(data),
+    selected = select_nc_pao_shells(
+        [
+            {
+                "projector_indices": [0],
+                "charge": 1.0,
+                "moment_norm": 1.0,
+                "selected": True,
+            },
+            {
+                "projector_indices": [1],
+                "charge": 0.001,
+                "moment_norm": 0.0025,
+                "selected": False,
+            },
+        ],
         charge_threshold=0.0,
         moment_threshold=0.01,
     )
-    masked = mask_local_operators_by_shell_selection(data, local_operators, shells)
-
-    np.testing.assert_allclose(
-        [shell["moment_norm"] for shell in shells], [1.0, 0.0025]
+    assert [shell["selected"] for shell in selected] == [True, False]
+    masked = mask_local_operators_by_shell_selection(
+        data, {0: np.ones((2, 2), dtype=complex)}, selected
     )
-    assert [shell["selected"] for shell in shells] == [True, False]
     np.testing.assert_allclose(masked[0], [[1.0, 0.0], [0.0, 0.0]])
 
 
@@ -511,19 +1045,20 @@ def test_abinit_paw_shell_filter_rejects_incomplete_population_metric(tmp_path):
         )
 
 
-def test_abinit_exchange_projector_population_uses_sij_metric(tmp_path):
+def test_abinit_exchange_projector_population_fails_closed_green_works(tmp_path):
     pytest.importorskip("netCDF4")
     filename = tmp_path / "abinit_savetb2j.nc"
     write_minimal_abinit_savetb2j_fixture(filename)
 
-    exchange_out, _ = gen_exchange_abinit_projector(
-        filename,
-        output_path=tmp_path / "TB2J_results_projector_population",
-        population_mode="projector",
-    )
-
-    text = exchange_out.read_text()
-    assert "not PAW-complete AE charges" in text
+    # Occupation-based projector populations fail closed on ABINIT files.
+    # Exchange itself keeps working via eigenvalues and the Fermi energy;
+    # that path is covered by test_gen_exchange_abinit_projector_green_population.
+    with pytest.raises(ValueError, match="do not export occupations"):
+        gen_exchange_abinit_projector(
+            filename,
+            output_path=tmp_path / "TB2J_results_projector_population",
+            population_mode="projector",
+        )
 
 
 def test_load_abinit_savetb2j_rejects_missing_full_bz(tmp_path):

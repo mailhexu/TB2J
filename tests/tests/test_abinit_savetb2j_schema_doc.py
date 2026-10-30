@@ -206,6 +206,11 @@ def test_abinit_savetb2j_schema_doc_defines_required_contract():
         "atomic_numbers(natom)",
         'spin_treatment = "spin_difference"',
         'spin_treatment = "spin_resolved"',
+        "number_of_electrons",
+        "occupations removed, electron count added",
+        "Occupation variables are ignored in **every** schema version",
+        "never inferred from occupations or eigenvalues",
+        "fail closed",
     ]
     for term in required_terms:
         assert term in text
@@ -263,6 +268,20 @@ def test_minimal_abinit_savetb2j_fixture_matches_schema_contract(tmp_path):
             nc.groups["operators"].variables["hij"][0, :, :, :, :]
             - nc.groups["operators"].variables["hij"][1, :, :, :, :],
         )
+
+
+def test_minimal_abinit_savetb2j_v13_fixture_carries_electron_count(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    filename = tmp_path / "minimal_abinit_savetb2j_v13.nc"
+
+    write_minimal_abinit_savetb2j_fixture(filename)
+    with netcdf4.Dataset(filename, "a") as nc:
+        nc.schema_version = "1.3"
+        nc.groups["bands"].number_of_electrons = 8.0
+
+    with netcdf4.Dataset(filename) as nc:
+        assert nc.schema_version == "1.3"
+        assert float(nc.groups["bands"].number_of_electrons) == 8.0
 
 
 def test_minimal_abinit_savetb2j_fixture_rejects_missing_required_metadata(tmp_path):

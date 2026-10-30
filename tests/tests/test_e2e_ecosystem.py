@@ -44,7 +44,9 @@ def test_abinit_abinao_feo(tmp_path):
         nz=30,
         smearing_eV=0.05,
         operator_component="delta_total",
-        population_mode="projector",
+        population_mode="none",
+        shell_charge_threshold=None,
+        shell_moment_threshold=None,
     )
 
     txt = (tmp_path / "exchange.out").read_text()

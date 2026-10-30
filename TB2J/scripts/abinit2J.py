@@ -84,7 +84,6 @@ def _paw_xml_arg(tokens):
 
 _PAW_SAVETB2J_ONLY = ("population_mode",)
 _NC_ONLY = (
-    "no_shell_filter",
     "emax",
     "emax_relative_to_fermi",
     "n_empty",
@@ -137,7 +136,7 @@ def _run_savetb2j(args):
     if kind == "paw_savetb2j":
         exchange_out, _ = gen_exchange_abinit_projector(
             args.input,
-            population_mode=args.population_mode or "projector",
+            population_mode=args.population_mode or "green",
             shell_charge_threshold=args.shell_charge_threshold,
             shell_moment_threshold=args.shell_moment_threshold,
             **common,
@@ -146,12 +145,8 @@ def _run_savetb2j(args):
         exchange_out, _ = gen_exchange_abinit_nc_pao(
             args.input,
             population_mode=args.population_mode or "none",
-            shell_charge_threshold=(
-                None if args.no_shell_filter else args.shell_charge_threshold
-            ),
-            shell_moment_threshold=(
-                None if args.no_shell_filter else args.shell_moment_threshold
-            ),
+            shell_charge_threshold=args.shell_charge_threshold,
+            shell_moment_threshold=args.shell_moment_threshold,
             emax_eV=args.emax,
             emax_relative_to_fermi_eV=args.emax_relative_to_fermi,
             n_empty=args.n_empty,
@@ -184,7 +179,7 @@ def _run_orbitals(args):
         keep_pao_hs=args.keep_pao_hs,
         report_path=args.report,
         fermi_energy_eV=args.fermi_eV,
-        population_mode=args.population_mode or "projector",
+        population_mode=args.population_mode or "none",
         n_empty=args.n_empty,
         emax_relative_to_fermi_eV=args.emax_relative_to_fermi,
     )
@@ -253,9 +248,13 @@ def build_parser():
     )
     p.add_argument(
         "--population_mode",
-        choices=("none", "green", "projector"),
+        choices=("none", "green"),
         default=None,
-        help="source for exchange.out charge/moment fields",
+        help=(
+            "source for exchange.out charge/moment fields; ABINIT savetb2j "
+            "files export no occupations, so 'projector' populations are "
+            "unavailable and eigenvalue-based 'green' is the default"
+        ),
     )
     p.add_argument(
         "--shell_charge_threshold",
@@ -268,11 +267,6 @@ def build_parser():
         type=float,
         default=None,
         help="PAO shell moment filter",
-    )
-    p.add_argument(
-        "--no_shell_filter",
-        action="store_true",
-        help="disable default NC shell filtering (NC files only)",
     )
     p.add_argument(
         "--emax", type=float, default=None, help="band energy window (NC only)"
@@ -333,13 +327,13 @@ def build_parser():
     p.add_argument(
         "--shell_charge_threshold",
         type=float,
-        default=0.01,
+        default=None,
         help="PAO shell charge filter",
     )
     p.add_argument(
         "--shell_moment_threshold",
         type=float,
-        default=0.01,
+        default=None,
         help="PAO shell moment filter",
     )
     p.add_argument(
@@ -351,7 +345,11 @@ def build_parser():
         "--population_mode",
         choices=("none", "green", "projector"),
         default=None,
-        help="source for exchange.out charge/moment fields",
+        help=(
+            "source for exchange.out charge/moment fields; occupation-based "
+            "'projector' populations need an external occupation source and "
+            "are not the default"
+        ),
     )
     p.add_argument("--n_empty", type=int, default=None, help="empty bands added")
     p.add_argument(

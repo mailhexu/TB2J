@@ -493,9 +493,9 @@ def test_soc_off_leg_matches_collinear_kernel_shell_by_shell(tmp_path):
         np.testing.assert_array_equal(
             leg_data.eigenvalues[0, :, spin::2], data.eigenvalues[spin]
         )
-        np.testing.assert_array_equal(
-            leg_data.occupations[0, :, spin::2], data.occupations[spin]
-        )
+        # ABINIT savetb2j occupations are never read; both stay unset.
+        assert leg_data.occupations is None
+        assert data.occupations is None
         np.testing.assert_array_equal(
             leg_data.coefficients[0, :, spin::2, spin, :], data.coefficients[spin]
         )

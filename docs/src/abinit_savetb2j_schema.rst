@@ -55,7 +55,9 @@ The NetCDF root group must define these attributes:
    * - ``schema_name``
      - ``abinit.savetb2j.projector``
    * - ``schema_version``
-     - ``1.0``
+     - ``1.0``; extended by ``1.1`` (additive ``soc_pauli``), ``1.2``
+       (Hubbard provenance; PAW and NC PAO wrappers) and ``1.3``
+       (non-additive: occupations removed, ``number_of_electrons`` added)
    * - ``source_code``
      - ``abinit``
    * - ``abinit_version``
@@ -143,11 +145,24 @@ Groups and Variables
     Eigenvalues in eV.  For version 1, spin index 0 is spin-up and spin index 1
     is spin-down, matching root attribute ``spin_channel_order = "up,down"``.
 
-``occupations(nspin, nkpt, nband)``
-    Optional occupations in the same spin/k/band order.
+``number_of_electrons``
+    Fermi-reference valence-electron count stored as a floating-point group
+    attribute.  Required in version 1.3 and equals the producing ABINIT
+    dataset's ``dtset%nelect``.  The TB2J loader exposes the value exactly as
+    exported (``ProjectorGreenData.number_of_electrons``); it never derives
+    the count from band occupancies.  Version 1.0/1.1 files predate the
+    attribute: the count is then unknown (``None``), not guessed.
 
 ``efermi``
     Fermi energy in eV, stored as a group attribute.
+
+.. note::
+
+   Version 1.3 exports contain **no** ``occupations(nspin, nkpt, nband)``
+   array.  TB2J never reads or validates an occupations variable in any
+   ABINIT savetb2j schema version, including older 1.0/1.1 files that still
+   contain one: a malformed occupation array cannot make a file fail to
+   load, because the array is ignored entirely.
 
 ``/projectors``
 ~~~~~~~~~~~~~~~
@@ -246,7 +261,12 @@ The TB2J ABINIT loader must reject files when:
 * site block metadata references out-of-range projectors;
 * operator basis metadata is absent or differs from the coefficient basis;
 * exchange is requested but neither ``operator_components/delta_total`` nor
-  sufficient spin-resolved ``hij`` data are present.
+  sufficient spin-resolved ``hij`` data are present;
+* a version 1.3 file lacks the ``/bands:number_of_electrons`` attribute or
+  stores a value that is not a positive finite float.
+
+Occupation variables are exempt from this list by construction: the loader
+never opens them, in any version, whatever their shape or metadata.
 
 Version 1.1: ``soc_pauli`` (additive)
 -------------------------------------
@@ -297,6 +317,92 @@ Loader validation for ``soc_pauli``
     or contradict unit strength / lattice-frame quantization / all-atom
     coverage / SOC-only term class, or the component appears in a
     ``schema_version`` ``1.0`` file.
+
+
+Version 1.2: PAW Hubbard provenance
+-----------------------------------
+
+The collinear native-PAW loader accepts the version 1.2 spectral and operator
+layout.  If present, root ``usepawu`` is preserved as an integer
+and ``delta_total:hubbard_included`` as ``"true"`` or ``"false"``.  Conflicting
+values are rejected.  An absent value remains unknown, not false.  These
+attributes record exporter provenance; they do not establish the completeness
+of a Hubbard operator or a PAW population.
+
+Version 1.3: occupations removed, electron count added (non-additive)
+---------------------------------------------------------------------
+
+Version 1.3 is a **non-additive** change to the savetb2j export:
+
+* New exports no longer write ``occupations(nspin, nkpt, nband)``.  The NSCF
+  occupancies of a fixed post-SCF export are misleading for exchange work and
+  must not be consumed.
+* New exports write ``/bands:number_of_electrons`` (float) equal to the
+  producing dataset's ``dtset%nelect``, i.e. the valence-electron count that
+  defines the intended Fermi reference.
+
+Reader contract (TB2J and HamiltonIO):
+
+* Occupation variables are ignored in **every** schema version — 1.3 files by
+  design, older 1.0/1.1 files even when they still contain the array, and even
+  when that array is malformed.  Occupation data is neither read nor
+  validated.
+* ``number_of_electrons`` is exposed as supplied.  Version 1.0/1.1 files
+  predate the attribute and yield an unknown count (``None``); the count is
+  never inferred from occupations or eigenvalues.
+* Occupation-dependent consumers fail closed for ABINIT savetb2j data:
+  occupation-based projector/shell populations, fixed ``n_empty`` band
+  windows, and occupied-state window verification raise a clear error instead
+  of silently consuming occupations.  Exchange itself is unaffected: it uses
+  eigenvalues and the Fermi energy (optionally the electron count as
+  provenance), both of which every schema version exports.
+
+The ``soc_pauli`` component and all version 1.1 semantics are unchanged in
+version 1.3 files.
+
+Version 1.2/1.3 NC PAO projector wrappers
+-----------------------------------------
+
+The unified savetb2j writer also emits norm-conserving PAO exports inside this
+same projector schema wrapper: ``schema_name = abinit.savetb2j.projector`` with
+``coefficient_source = "abinit.nc_pao"``, ``operator_basis =
+"abinit_nc_pao"``, ``coefficient_projector = "nc_pao_tphi"``,
+``channel_interpretation = "abinit_nc_pao_lmn_channel"``, k-dependent
+``overlap_k`` Gram matrices, and ``delta_total`` with source
+``nc_pao.delta_xc+delta_u``.  TB2J detects the wrapper by its NC coefficient
+source or operator basis, normalizes it into the NC PAO contract
+(``overlap_k``, no ``overlap_metric``), and routes it to the NC exchange
+backend; the PAW exchange API refuses it because NC projector populations
+require the k-dependent metric, which the PAW population path does not apply.
+Spinor or PAW payloads inside an NC wrapper are rejected.
+
+Coefficient convention: the wrapper producer exports ``<psi_nk|p_a(k)>``
+(``m_nc_savetb2j_netcdf.F90``; ``m_nc_pao_hamiltonian.F90`` accumulates
+``sum_G conj(psi) * phi``), whereas ProjectorGreen and the collinear PAW
+savetb2j writer (``cprj``) use ``<p|psi>``.  The TB2J wrapper loader therefore
+conjugates the coefficients; the nctk Fortran dimension reversal puts their
+axes directly into TB2J order.  For ``overlap_k`` and ``delta_total``, the
+Fortran dimensions contain a duplicate ``nproj, nproj`` pair
+(``complex, nproj, nproj, nkpt`` and
+``complex, nproj_site_max, nproj_site_max, nsite``).  Reversing that dimension
+list makes the Python-visible pair appear transposed, so the loader swaps the
+last two axes back to the physical ``<p_i|.|p_j>`` orientation (rows = bra).
+The physical-oracle test
+(``test_load_abinit_nc_pao_projector_wrapper_physical_oracle``) serializes
+these transposed bytes, verifies the loader's normalization with non-real
+Hermitian matrices, and checks the spectral identity
+``S[p,q] = sum_n C[p,n] conj(C[q,n])`` and generalized eigenvalue recovery.
+The unconjugated coefficients or unnormalized serialized matrix orientation
+fail those checks.
+
+* Wrapper ``schema_version = "1.2"`` predates the occupation cutover: the
+  electron count is unknown (``None``), and any occupation variable present in
+  the file is ignored like in every other ABINIT savetb2j schema.
+* Wrapper ``schema_version = "1.3"`` additionally requires
+  ``/bands:number_of_electrons``.
+
+This NC wrapper support does not certify the physical accuracy of the export
+or equivalence with ``abinit.nc_pao_hs`` v2 files.
 
 Split-SOC workflow
     ``TB2J/interfaces/abinit_paw_split_soc.py`` consumes the normalized

@@ -208,6 +208,9 @@ class ProjectorGreenData:
     positions: np.ndarray | None = None
     atomic_numbers: np.ndarray | None = None
     occupations: np.ndarray | None = None
+    # Producer valence-electron count when the source schema exports one
+    # (ABINIT savetb2j >= 1.3 bands attribute).  Never inferred; unknown is None.
+    number_of_electrons: float | None = None
     band_mask: np.ndarray | None = None
     projector_l: np.ndarray | None = None
     projector_m: np.ndarray | None = None
@@ -272,6 +275,14 @@ class ProjectorGreenData:
             self.atomic_numbers = np.asarray(self.atomic_numbers, dtype=int)
         if self.occupations is not None:
             self.occupations = np.asarray(self.occupations, dtype=float)
+        if self.number_of_electrons is not None:
+            self.number_of_electrons = float(self.number_of_electrons)
+            if not np.isfinite(self.number_of_electrons) or (
+                self.number_of_electrons <= 0.0
+            ):
+                raise ValueError(
+                    "number_of_electrons must be a positive finite float when supplied"
+                )
         if self.band_mask is not None:
             self.band_mask = np.asarray(self.band_mask, dtype=bool)
         if self.projector_l is not None:
@@ -335,6 +346,7 @@ class ProjectorGreenData:
             "overlap_metric_definition",
             "population_metric",
             "operator_basis",
+            "number_of_electrons",
         ):
             value = getattr(self, name)
             if value is None:

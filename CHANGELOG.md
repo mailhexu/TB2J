@@ -1,6 +1,39 @@
 # Changelog
 
 ## Unreleased
+- Fixed the NC savetb2j projector-wrapper coefficient and matrix conventions:
+  the producer exports `<psi|p>` while ProjectorGreen uses `<p|psi>` (collinear
+  PAW `cprj` files already store `<p|psi>`), so the wrapper loader conjugates
+  coefficients. The nctk Fortran dimension reversal also stores the duplicate
+  `nproj, nproj` pairs of `overlap_k` and `delta_total` swapped in the Python
+  view; the loader restores rows=bra with `swapaxes(-1, -2)`. A serialized-byte
+  physical-oracle test pins both conventions with non-real Hermitian matrices,
+  spectral identity and generalized eigenvalue recovery.
+- Support collinear ABINIT PAW schema 1.2 with preserved Hubbard provenance
+  and explicit rejection of contradictory metadata. Absent provenance remains
+  unknown; support does not certify the completeness of the PAW operator.
+- Added ABINIT NC PAO support for schema-1.2/1.3 `savetb2j` projector-wrapper
+  exports (`abinit.nc_pao` basis with k-dependent `overlap_k`), integrated with
+  the 1.3 occupation cutover: wrapper 1.2 exposes no electron count, wrapper
+  1.3 requires `bands:number_of_electrons`, and occupation variables are never
+  read in either. The backend classifier routes wrappers to the NC exchange
+  API; the PAW exchange API refuses them because NC projector populations
+  require the k-dependent overlap_k metric. Loader/exchange success does not
+  certify physical accuracy or equivalence with `abinit.nc_pao_hs` v2 exports.
+- ABINIT savetb2j schema 1.3 cutover (TB2J reader side): new ABINIT exports
+  drop the `occupations` array and store the producer valence-electron count
+  as the `bands:number_of_electrons` attribute (`dtset%nelect`). The TB2J
+  loader accepts 1.3 files, exposes `ProjectorGreenData.number_of_electrons`
+  exactly as exported, and never fabricates the count for older 1.0/1.1 files,
+  where it stays unknown. ABINIT savetb2j readers no longer read or validate
+  occupation variables in any schema version, including malformed arrays in
+  older files. Occupation-dependent features fail closed on ABINIT savetb2j
+  data (projector/shell populations, fixed `n_empty` band windows,
+  occupied-state window verification report `unavailable`); exchange still
+  runs on eigenvalues and the Fermi energy. The `abinit2J.py savetb2j`
+  subcommand defaults to eigenvalue-based `--population_mode green` and no
+  longer offers `projector`; the meaningless `--no_shell_filter` flag was
+  removed. GPAW and other non-ABINIT formats keep their occupation physics.
 
 - SIESTA spiral certified exports now bind AC-009 to the complete derivative
   records (`seam_payload_sha256` for dH/dR+dS/dR and
