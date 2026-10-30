@@ -31,6 +31,14 @@ Set `equivalent_comments=False` to omit those lists without omitting format
 explanations. Rotation matrices use one row per line and translations use a
 single vector line. All comments are informational and can be deleted.
 
+Generated floating-point values are rounded to eight significant digits, including
+exchange values and structural/symmetry data; small values use scientific notation.
+This is a lossy write: a read/write cycle need not reproduce the original floats.
+The generated representation is validated before publication; if the rounding
+violates the declared symmetry or native-context tolerances, generation fails
+without replacing the existing output. Do not widen tolerances without considering
+the physical consequences.
+
 ## Generate from a trusted TB2J pickle
 
 ```python
@@ -325,7 +333,7 @@ The document is UTF-8 TOML. Scientific tables accept only their declared fields;
 - Blank lines and `#` comments are ignored inside row blocks. Row numbers count data rows. The rows accept decimal/scientific real numbers, not Python expressions, complex numbers, NaN/Inf, booleans, or locale-formatted numbers.
 - Optional `[reference_spins]` contains `moments` as one label row per atom: either `label m` for signed collinear moments along z, or `label mx my mz` for Cartesian axial vectors. All rows must have the same width, labels must be unique and complete for every atom, and values are in μB. Missing atoms are not filled with zeros. `source` records `explicit`, `native:spinat`, or `model:unit-along-z` provenance.
 - `[symmetry]` requires `mode = "spacegroup"` or `"magnetic"`; these correspond to `sg` and `msg` in Python and CLI arguments. `symprec` defaults to `1e-5` Å. Magnetic mode requires complete reference moments and a positive `magnetic_tol` (default `1e-5` μB). Space-group mode may omit moments. Collinear scalar moments are valid for MSG even when operations are primed; Cartesian vectors use the axial-vector convention.
-- Optional `[metadata]` accepts finite TOML scalar/list/table data, including dates and times. Its values do not affect exchange or symmetry and are semantically preserved through shell read/write.
+- Optional `[metadata]` accepts finite TOML scalar/list/table data, including dates and times. Its values do not affect exchange or symmetry; floating-point values are rounded on writing.
 - Optional `[symmetry].producer` is informational and does not select the group. Canonical writes place the validated `[[symmetry.operations]]` snapshot after shell entries; each operation has a 3×3 integer `rotation`, three-component fractional `translation`, and Boolean `time_reversal` flag.
 - Optional `[tolerances]` records `value_atol` and `zero_tol` in eV and dimensionless `value_rtol`; defaults are `1e-8`, `1e-10`, and `1e-6`, and canonical writes emit all three.
 - Optional `[source]` records `format` (`template`, `pickle`, `text`, or `xml`), a nonempty source `precision_profile`, and/or the unique `required_base_fields` manifest. These fields record provenance and unencoded source context; they do not bypass scientific validation.

@@ -74,6 +74,13 @@ def _generate_native(
             equivalent_comments=equivalent_comments,
             source_path=source,
         )
+        document = shells.read_shells(stages[1])
+        try:
+            shells._validate_compatible_base(document, spinio)
+        except ValueError as error:
+            raise ValueError(
+                f"eight-significant-digit precision is incompatible with the native context: {error}"
+            ) from error
         os.replace(stages[0], companion)
         os.replace(stages[1], output)
     finally:
@@ -192,6 +199,7 @@ def generate_shells(
             equivalent_comments=equivalent_comments,
             source_path=source,
         )
+        document = shells.read_shells(temporary)
         os.replace(temporary, output)
     finally:
         if temporary is not None:

@@ -10,6 +10,106 @@ from ase import Atoms
 from TB2J.io_exchange import shells
 
 
+def test_generated_float_precision_preserves_small_exchange_and_alignment(tmp_path):
+    atoms = Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True)
+    document = shells.template(atoms, [1], 3.1)
+    entry = replace(document.shells[0], Jiso=1.234567891e-14)
+    document = replace(document, shells=(entry,))
+    path = tmp_path / "shell.toml"
+    shells.write_shells(document, path)
+    replayed = shells.read_shells(path)
+    assert replayed.shells[0].Jiso == pytest.approx(1.2345679e-14, rel=1e-15, abs=0)
+    text = path.read_text()
+    assert "1.2345679" in text
+    assert "1.234567891" not in text
+
+
+def test_rounding_that_invalidates_geometry_does_not_replace_output(tmp_path):
+    atoms = Atoms(
+        "Fe3",
+        cell=np.eye(3) * 3,
+        scaled_positions=[[0, 0, 0], [1 / 3, 0, 0], [2 / 3, 0, 0]],
+        pbc=True,
+    )
+    document = shells.template(atoms, [1, 2, 3], 1.1, symprec=1e-10)
+    path = tmp_path / "shell.toml"
+    path.write_text("untouched")
+    with pytest.raises(ValueError, match="precision"):
+        shells.write_shells(document, path)
+    assert path.read_text() == "untouched"
+
+
+def test_rounded_filled_exchange_must_still_obey_symmetry(tmp_path):
+    atoms = Atoms(
+        "Fe",
+        cell=[[2, 0, 0], [1, np.sqrt(3), 0], [0, 0, 5]],
+        scaled_positions=[[0, 0, 0]],
+        pbc=True,
+    )
+    document = shells.template(atoms, [1], 5.1, value_atol=1e-12, value_rtol=0)
+    entry = next(
+        entry
+        for entry in document.shells
+        if abs(entry.representative[4]) == 1 and entry.representative[2:4] == (0, 0)
+    )
+    document = replace(document, shells=(replace(entry, Jiso=0.001),))
+    output = tmp_path / "shell.toml"
+    output.write_text("untouched")
+    with pytest.raises(ValueError, match="precision"):
+        shells.write_shells(document, output)
+    assert output.read_text() == "untouched"
+
+
+def test_rounded_tensor_must_still_obey_bond_fixpoint(tmp_path):
+    atoms = Atoms(
+        "Fe",
+        cell=[[3, 4, 0], [-4, 3, 0], [0, 0, 5]],
+        scaled_positions=[[0, 0, 0]],
+        pbc=True,
+    )
+    document = shells.template(
+        atoms, [1], 5.1, mode="tensor", value_atol=1e-12, value_rtol=0
+    )
+    operations = (
+        shells.ShellOperation(rotation=np.eye(3, dtype=int), translation=(0, 0, 0)),
+        shells.ShellOperation(rotation=np.diag([-1, 1, 1]), translation=(0, 0, 0)),
+    )
+    entry = shells.ShellEntry(
+        id="1:1:0,0,1",
+        representative=(1, 1, 0, 0, 1),
+        tensor=np.array([[9, 12, 0], [12, 16, 0], [0, 0, 0]]) / 16384,
+    )
+    document = replace(document, operations=operations, shells=(entry,))
+    shells.expand(document)
+    output = tmp_path / "shell.toml"
+    output.write_text("untouched")
+    with pytest.raises(ValueError, match="precision"):
+        shells.write_shells(document, output)
+    assert output.read_text() == "untouched"
+
+
+def test_atom_and_moment_vectors_align_after_different_labels(tmp_path):
+    import re
+
+    import tomli
+
+    atoms = Atoms(
+        ["Fe", "O", "Fe"],
+        cell=np.eye(3) * 4,
+        scaled_positions=[(0, 0, 0), (0.25, 0.25, 0.25), (0.5, 0.5, 0.5)],
+        pbc=True,
+    )
+    document = shells.template(atoms, [1, 3], 3.6, reference_spins=[2, 0, -2])
+    output = tmp_path / "shell.toml"
+    shells.write_shells(document, output)
+    with output.open("rb") as stream:
+        data = tomli.load(stream)
+    atom_rows = data["structure"]["atoms"].strip("\n").splitlines()
+    moment_rows = data["reference_spins"]["moments"].strip("\n").splitlines()
+    assert len({list(re.finditer(r"\S+", row))[2].end() for row in atom_rows}) == 1
+    assert len({list(re.finditer(r"\S+", row))[1].end() for row in moment_rows}) == 1
+
+
 def test_structure_shells_are_ordered_by_distance():
     atoms = Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True)
     document = shells.template(atoms, [1], 5.3)

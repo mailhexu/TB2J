@@ -57,6 +57,22 @@ def test_generate_from_pickle_retains_native_mapping_and_sparse_exchange(tmp_pat
     assert (tmp_path / "shells.context.npz").is_file()
 
 
+def test_native_rounding_incompatible_with_context_preserves_existing_files(tmp_path):
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    source, _ = _source()
+    source.spinat[0, 2] = 2.123456789
+    source.write_pickle(path=tmp_path)
+    output = tmp_path / "shells.toml"
+    context = tmp_path / "shells.context.npz"
+    output.write_text("existing shell")
+    context.write_bytes(b"existing context")
+    with pytest.raises(ValueError, match="precision.*native context"):
+        generate_shells(tmp_path / "TB2J.pickle", output, magnetic_tol=1e-10)
+    assert output.read_text() == "existing shell"
+    assert context.read_bytes() == b"existing context"
+
+
 def test_native_context_survives_relocation_and_rejects_tampering(tmp_path):
     from TB2J.io_exchange.shell_context import load_context
     from TB2J.io_exchange.shell_workflow import generate_shells

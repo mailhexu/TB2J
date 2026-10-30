@@ -297,7 +297,7 @@ def test_exchange_values_reject_nonfinite_boolean_and_wrong_shapes(tmp_path, val
         read_shells(source)
 
 
-def test_canonical_roundtrip_preserves_float_values_and_operation_order(tmp_path):
+def test_canonical_roundtrip_rounds_exchange_and_preserves_operation_order(tmp_path):
     inversion = """[[symmetry.operations]]
 rotation = [[-1, 0, 0], [0, -1, 0], [0, 0, -1]]
 translation = [0.0, 0.0, 0.0]
@@ -312,7 +312,11 @@ time_reversal = false
     first, second = tmp_path / "first.toml", tmp_path / "second.toml"
     write_shells(document, first)
     reloaded = read_shells(first)
-    assert_preserved(document, reloaded)
+    assert reloaded.shells[0].Jiso == pytest.approx(0.00012345679, rel=1e-15)
+    expected = replace(
+        document, shells=(replace(document.shells[0], Jiso=reloaded.shells[0].Jiso),)
+    )
+    assert_preserved(expected, reloaded)
     write_shells(reloaded, second)
     assert first.read_bytes() == second.read_bytes()
 

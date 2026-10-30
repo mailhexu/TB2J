@@ -19,6 +19,7 @@ from .shells import (
     ShellDocument,
     ShellEntry,
     ShellOperation,
+    _expand_core,
     _freeze,
     _pair_id,
     _shell_orbits,
@@ -278,9 +279,12 @@ def _representative(value, labels, field):
 
 
 def load(path):
+    return loads(Path(path).read_text(encoding="utf-8"))
+
+
+def loads(text):
     try:
-        with Path(path).open("rb") as stream:
-            data = tomli.load(stream, parse_float=Decimal)
+        data = tomli.loads(text, parse_float=Decimal)
     except tomli.TOMLDecodeError as error:
         raise ValueError(f"invalid TOML: {error}") from error
     _schema(data)
@@ -404,7 +408,17 @@ def _pair_text(pair, labels):
 
 
 def _number_text(value):
-    return repr(float(value))
+    return f"{float(value):15.8g}"
+
+
+def _rounded(value):
+    if isinstance(value, (float, Decimal)):
+        return Decimal(format(value, ".8g"))
+    if isinstance(value, dict):
+        return {key: _rounded(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_rounded(item) for item in value]
+    return value
 
 
 def _shell_entry_text(entry):
@@ -420,14 +434,19 @@ def _shell_entry_text(entry):
                 )
                 parts.append(f"{key} = [\n{''.join(rows)}]\n")
         elif key == "J" and isinstance(value, (list, tuple)):
-            rows = "".join("    [" + ", ".join(map(str, row)) + "],\n" for row in value)
+            rows = "".join(
+                "    [" + ", ".join(_number_text(item) for item in row) + "],\n"
+                for row in value
+            )
             parts.append(f"J = [\n{rows}]\n")
         else:
-            parts.append(tomli_w.dumps({key: value}))
+            parts.append(tomli_w.dumps({key: _rounded(value)}))
     return "".join(parts)
 
 
 def dump(document, path, *, equivalent_comments=True, source_path=None):
+    atom_width = len(str(len(document.site_labels)))
+    label_width = max(map(len, document.site_labels), default=0)
     structure = {
         "coordinates": "fractional",
         "lattice": "\n".join(
@@ -436,7 +455,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         )
         + "\n",
         "atoms": "\n".join(
-            f"{atom} {label} "
+            f"{atom:>{atom_width}} {label:<{label_width}} "
             + " ".join(_number_text(value) for value in position)
             + f" {'Y' if spin >= 0 else 'N'} {spin}"
             for atom, (label, position, spin) in enumerate(
@@ -460,8 +479,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
     if document.moments is not None:
         header["reference_spins"] = {
             "moments": "\n".join(
-                label
-                + " "
+                f"{label:<{label_width}} "
                 + " ".join(
                     _number_text(value)
                     for value in (moment if isinstance(moment, tuple) else (moment,))
@@ -487,7 +505,8 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         provenance += f"# Source: {json.dumps(str(source_path), ensure_ascii=True)}\n"
     parts = [
         provenance
-        + "# Exchange values use energy_unit; cutoff and distance use distance_unit.\n"
+        + "# Floating-point values are rounded to eight significant digits.\n"
+        "# Exchange values use energy_unit; cutoff and distance use distance_unit.\n"
         "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
         "# Atom rows: one-based atom index, label, x, y, z, magnetic Y/N, zero-based spin index.\n"
         "# Nonmagnetic atoms use N and a negative spin index; retain the exact existing mapping.\n"
@@ -496,7 +515,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         "# J is a scalar or Cartesian 3x3 tensor; replace 'unfilled'.\n"
         "# name, distance and n_equivalent_pairs are optional input summaries.\n"
         "# n_equivalent_pairs counts the full ordered-pair symmetry orbit, not coordination.\n"
-        + tomli_w.dumps(header, multiline_strings=True)
+        + tomli_w.dumps(_rounded(header), multiline_strings=True)
     ]
     pair_sections = []
     scale = Decimal(1000) if document.energy_unit == "meV" else Decimal(1)
@@ -577,5 +596,20 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
     parts.append(
         "# Generated replay snapshot and tolerances\n" + "\n".join(operation_sections)
     )
-    parts.append(tomli_w.dumps(footer))
-    Path(path).write_text("\n".join(parts), encoding="utf-8")
+    parts.append(tomli_w.dumps(_rounded(footer)))
+    text = "\n".join(parts)
+    try:
+        parsed = loads(text)
+        filled = tuple(
+            shell
+            for shell in parsed.shells
+            if (shell.Jiso if parsed.exchange_mode == "isotropic" else shell.tensor)
+            != "unfilled"
+        )
+        if filled:
+            _expand_core(replace(parsed, shells=filled))
+    except ValueError as error:
+        raise ValueError(
+            f"serialized shell validation failed at eight-significant-digit precision: {error}"
+        ) from error
+    Path(path).write_text(text, encoding="utf-8")
