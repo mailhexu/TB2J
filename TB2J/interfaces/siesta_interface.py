@@ -22,6 +22,125 @@ def siesta_anisotropy(**kwargs):
     pass
 
 
+def prepare_exchange_siesta_wfsx(
+    source, *, reduce_scalar=False, operation="exchange", **params
+):
+    """Prepare the existing exchange kernel from complete states, without H/S.
+
+    ``source`` is a validated HamiltonIO ``SiestaWFSXParser``. Its full ``scf_mesh``
+    establishes electron provenance independently of optional requested
+    ``kpts``/``kweights``. The caller owns ``calculate_all`` and ``finalize``.
+    ``kmesh`` retains its ordinary R-list meaning; explicit points determine the
+    actual integration domain. Only full-operator CPU exchange is supported.
+    """
+    from types import SimpleNamespace
+
+    from ase import Atoms
+    from ase.units import kB
+    from HamiltonIO.siesta.wfsx import (
+        InconsistentMetadata,
+        MissingMetadata,
+        SiestaWFSXParser,
+        UnsupportedOperatorMode,
+        UnsupportedSpinMode,
+    )
+
+    from TB2J.utils import symbol_number
+
+    if not isinstance(source, SiestaWFSXParser):
+        raise MissingMetadata("source: supply a validated SiestaWFSXParser")
+    bool_options = (
+        "read_H_soc",
+        "orth",
+        "use_gpu",
+        "ibz",
+        "split_soc",
+        "spin_spiral",
+        "dmft",
+    )
+    operator_options = ("mae_angles", "so_strength", "qspiral", "self_energy")
+    if (
+        operation != "exchange"
+        or any(params.get(key, False) for key in bool_options)
+        or any(key in params and params[key] is not None for key in operator_options)
+        or params.get("nproc", 1) != 1
+    ):
+        raise UnsupportedOperatorMode(
+            f"file {source.wfsx_path}: plain WFSX supports single-process CPU full-operator "
+            "exchange, not split-SOC/MAE/rescaling, spiral/GBT, GPU or DMFT operations"
+        )
+    metadata = source.metadata
+    if metadata.nspin not in (2, 4, 8):
+        raise UnsupportedSpinMode(
+            f"file {source.wfsx_path}: nspin={metadata.nspin}: scalar nspin=1 is a "
+            "reader/Green interface; supply magnetic collinear or full spinor states for exchange"
+        )
+    spinor = metadata.nspin in (4, 8)
+    if spinor and reduce_scalar:
+        raise UnsupportedSpinMode(
+            f"file {source.wfsx_path}: scalar reduction is forbidden for full spinor exchange"
+        )
+    if params.get("efermi") not in (None, 0):
+        raise InconsistentMetadata(
+            "efermi: WFSX energies are already Ef-relative; use zero"
+        )
+    params["efermi"] = 0.0
+    params.setdefault("ne", metadata.electron_count)
+    params.setdefault("smearing", metadata.electronic_temperature_k * kB)
+    method = params.get("method", params.get("integration_method", "CFR")) or "CFR"
+    if method.lower() in ("cfr", "cfr2") and params["smearing"] <= 0:
+        raise UnsupportedOperatorMode(
+            f"file {source.wfsx_path}: CFR requires positive integration broadening; "
+            "explicitly supply positive smearing or select a non-CFR contour"
+        )
+    atoms = Atoms(
+        symbols=metadata.atom_symbols,
+        positions=metadata.positions_angstrom,
+        cell=metadata.cell_angstrom,
+        pbc=True,
+    )
+    atom_names = {index: name for name, index in symbol_number(atoms).items()}
+    # MathDoc: tb2j/siesta-wfsx-spectral
+    # Basis labels follow the validated AO/interleaved-spin row order unchanged.
+    orbs = [
+        f"{atom_names[iatom]}|{orbital}" + (f"|{spin}" if spinor else "")
+        for iatom, orbitals in enumerate(metadata.orbital_names_by_atom)
+        for orbital in orbitals
+        for spin in (("up", "down") if spinor else ("",))
+    ]
+    models = [
+        SimpleNamespace(
+            name="SIESTA",
+            atoms=atoms,
+            orbs=orbs,
+            norb=metadata.no_u,
+            nbasis=metadata.nbasis,
+            eigenstate_source=source,
+            spin_channel=spin,
+            reduce_scalar=reduce_scalar,
+        )
+        for spin in ((0,) if spinor else (0, 1))
+    ]
+    cls = ExchangeNCL if spinor else ExchangeCL2
+    # Keep the partially initialized owner reachable for failure-path cleanup.
+    exchange = cls.__new__(cls)
+    try:
+        cls.__init__(
+            exchange,
+            tbmodels=models[0] if spinor else tuple(models),
+            atoms=atoms,
+            basis=dict(zip(orbs, range(metadata.nbasis))),
+            **params,
+        )
+    except BaseException:
+        for name in ("G", "Gup", "Gdn"):
+            green = getattr(exchange, name, None)
+            if green is not None:
+                green.clean_cache()
+        raise
+    return exchange
+
+
 def gen_exchange_siesta(
     fdf_fname, read_H_soc=False, use_gpu=False, skip=False, **kwargs
 ):

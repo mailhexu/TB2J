@@ -5,8 +5,8 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
-from shutil import rmtree
 from contextlib import contextmanager
+from shutil import rmtree
 
 import numpy as np
 from HamiltonIO.epw.epwparser import EpmatOneMode
@@ -204,6 +204,14 @@ class TBGreen:
             f"Finished preparing eigenvalues and eigenvectors. Time taken: {time.time() - t0:.2f} seconds"
         )
 
+    @staticmethod
+    def _spectral_occupations(energies, width):
+        # MathDoc: tb2j/siesta-wfsx-spectral
+        # Retain the zero-temperature half occupation exactly at the Fermi pole.
+        if width == 0:
+            return np.heaviside(-energies, 0.5)
+        return fermi(energies, 0, width=width, nspin=2)
+
     def _prepare_spectral(
         self,
         model,
@@ -221,15 +229,16 @@ class TBGreen:
     ):
         """Stage complete single-record factors under the existing cache owner."""
         import warnings
-        from scipy import linalg
+
         from HamiltonIO.siesta.wfsx import (
-            InconsistentMetadata,
             IncompleteSpectrum,
+            InconsistentMetadata,
             MissingMetadata,
             SiestaWFSXParser,
             SingularEigenbasis,
             UnsupportedOperatorMode,
         )
+        from scipy import linalg
 
         parser = self._spectral_source
         if not isinstance(parser, SiestaWFSXParser):
@@ -239,6 +248,12 @@ class TBGreen:
         if use_gpu or ibz or nproc != 1:
             raise UnsupportedOperatorMode(
                 "WFSX preparation requires CPU, one process and an explicit full requested mesh"
+            )
+        if getattr(model, "split_soc", False) or hasattr(model, "get_sigma"):
+            raise UnsupportedOperatorMode(
+                f"file {parser.wfsx_path}: plain WFSX contains complete static full-operator "
+                "states, not split-SOC components or frequency-dependent self-energy; "
+                "use the ordinary operator-aware workflow for that operation"
             )
         if efermi not in (None, 0):
             raise InconsistentMetadata(
@@ -287,6 +302,7 @@ class TBGreen:
         self.spectral_stats = {
             "factorizations": 0,
             "energy_evaluations": 0,
+            "scalar_partner_expansions": 0,
             "import_seconds": 0.0,
         }
         start = time.perf_counter()
@@ -353,10 +369,8 @@ class TBGreen:
                     )
                     count_weight = electron_weights[block.original_index]
                     if count_weight:
-                        occupation = (
-                            fermi(block.eigenvalues, 0, width=occupation_width, nspin=2)
-                            if occupation_width > 0
-                            else np.heaviside(-block.eigenvalues, 0.5)
+                        occupation = self._spectral_occupations(
+                            block.eigenvalues, occupation_width
                         )
                         electron_count += (
                             count_weight
@@ -412,7 +426,8 @@ class TBGreen:
                             )
                             h = (dual * energies) @ dual.conj().T
                             rho = (
-                                c * fermi(energies, 0, width=self.fermi_width, nspin=2)
+                                c
+                                * self._spectral_occupations(energies, self.fermi_width)
                             ) @ dual.conj().T
                             slots = self._spectral_slots[rep]
                             inverse = source.map.representative_inverted[slots]
@@ -524,6 +539,14 @@ class TBGreen:
         self.spectral_stats["energy_evaluations"] += 1
         return result
 
+    def _spectral_slot_green(self, green, ik):
+        # MathDoc: tb2j/siesta-wfsx-spectral
+        # At the same complex energy a scalar inverse partner uses transpose.
+        if self._spectral_map.representative_inverted[ik]:
+            self.spectral_stats["scalar_partner_expansions"] += 1
+            return green.T
+        return green
+
     def _spectral_GR(self, Rpts, energy, Gk_all):
         # MathDoc: tb2j/siesta-wfsx-spectral
         contravariant = os.environ.get("TB2J_SIESTA_GREEN_MODE") == "contravariant"
@@ -546,10 +569,7 @@ class TBGreen:
         for rep, slots in enumerate(self._spectral_slots):
             green = self._spectral_green(rep, energy, contravariant)
             for ik in slots:
-                # Same complex z uses transpose, NEVER complex conjugation.
-                matrix = (
-                    green.T if self._spectral_map.representative_inverted[ik] else green
-                )
+                matrix = self._spectral_slot_green(green, ik)
                 phases = (
                     np.exp(self.k2Rfactor * (rvecs @ self.kpts[ik])) * self.kweights[ik]
                 )
@@ -637,6 +657,9 @@ class TBGreen:
             self._spectral_closed = True
             if not self._spectral_cache_owned:
                 return
+        elif not self._use_cache:
+            # Without staging, cache_path is a caller directory, not our child.
+            return
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
         if self._spectral_source is not None:
@@ -843,10 +866,15 @@ class TBGreen:
         rho_R = np.zeros((nR, self.nbasis, self.nbasis), dtype=complex)
         for ik, kpt in enumerate(self.kpts):
             evec = self.get_evecs(ik)
+            occupations = (
+                self._spectral_occupations(self.evals[ik], self.fermi_width)
+                if self._spectral_source is not None
+                else fermi(self.evals[ik], self.efermi, width=self.fermi_width, nspin=2)
+            )
             rhok = np.einsum(
                 "ib,b, bj-> ij",
                 evec,
-                fermi(self.evals[ik], self.efermi, width=self.fermi_width, nspin=2),
+                occupations,
                 evec.conj().T,
             )
             for iR, R in enumerate(Rlist):
@@ -872,9 +900,7 @@ class TBGreen:
             result = self._spectral_green(
                 self._spectral_map.representative_indices[ik], energy
             )
-            return (
-                result.T if self._spectral_map.representative_inverted[ik] else result
-            )
+            return self._spectral_slot_green(result, ik)
         if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
             # DMFT case
             sigma = self.tbmodel.get_sigma(energy, ispin=ispin)
@@ -921,11 +947,7 @@ class TBGreen:
             for rep, slots in enumerate(self._spectral_slots):
                 green = self._spectral_green(rep, energy)
                 for ik in slots:
-                    result[ik] = (
-                        green.T
-                        if self._spectral_map.representative_inverted[ik]
-                        else green
-                    )
+                    result[ik] = self._spectral_slot_green(green, ik)
             return result
         if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
             Gk0 = self.get_Gk(0, energy, ispin=ispin)

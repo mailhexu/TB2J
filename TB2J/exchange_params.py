@@ -72,6 +72,10 @@ class ExchangeParams:
         vectorize_energy=False,
         e_batch_size=None,
         debug_options=None,
+        cache_path=None,
+        kpts=None,
+        kweights=None,
+        complete_spectrum=False,
         **kwargs,
     ):
         # Only check for GPU if use_gpu is explicitly True or None
@@ -122,6 +126,10 @@ class ExchangeParams:
         self.use_gpu = use_gpu
         self.vectorize_energy = vectorize_energy
         self.e_batch_size = e_batch_size
+        self.cache_path = cache_path
+        self.kpts = kpts
+        self.kweights = kweights
+        self.complete_spectrum = complete_spectrum
 
         # Save other kwargs
         for key, val in kwargs.items():

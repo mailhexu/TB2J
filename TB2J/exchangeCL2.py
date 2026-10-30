@@ -30,6 +30,10 @@ class ExchangeCL2(ExchangeCL):
             use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
+            cache_path=self.cache_path,
+            kpts=self.kpts,
+            kweights=self.kweights,
+            complete_spectrum=self.complete_spectrum,
         )
         self.Gdn = TBGreen(
             tbmodel=self.tbmodel_dn,
@@ -38,6 +42,10 @@ class ExchangeCL2(ExchangeCL):
             use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
+            cache_path=self.cache_path,
+            kpts=self.kpts,
+            kweights=self.kweights,
+            complete_spectrum=self.complete_spectrum,
         )
         if self.write_density_matrix:
             self.Gup.write_rho_R(

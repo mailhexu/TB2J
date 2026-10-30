@@ -101,6 +101,63 @@ factorization, import/preparation and disk-size fields are available in
 without a matched measurement.
 
 
+Exchange from complete WFSX states (Python)
+------------------------------------------
+
+``prepare_exchange_siesta_wfsx`` prepares the existing collinear or full
+noncollinear exchange kernel directly from a validated HamiltonIO parser.
+No H/S files or electronic eigensolver are used:
+
+.. code-block:: python
+
+   from TB2J.interfaces.siesta_interface import prepare_exchange_siesta_wfsx
+
+   exchange = prepare_exchange_siesta_wfsx(
+       model.eigenstate_source, magnetic_elements=["O"],
+       kmesh=[1, 1, 5], nz=100, Rcut=4.3,
+       reduce_scalar=True, cache_path="spectral_cache",
+   )
+   try:
+       exchange.calculate_all()
+       exchange.write_output(path="TB2J_results")
+   finally:
+       exchange.finalize()
+
+For collinear states each spin channel is reduced independently. Supplied
+and reconstructed scalar partners retain their distinct full-grid Fourier
+phases and weights; the same-complex-energy partner Green is transposed,
+not conjugated. Mesh H0 includes the partner operator before averaging.
+Both existing Green metric modes retain their ordinary conventions.
+
+Explicit ``kpts``/``kweights`` select the actual integration quadrature.
+``kmesh`` retains the ordinary real-space R-list construction, including
+its existing odd-mesh convention; it does not replace explicit points.
+Non-inversion-closed requested meshes gain no extra points. Full spinor
+states require direct records at every requested point and
+``reduce_scalar=False``.
+
+The supported operation is single-process CPU full-operator exchange.
+Scalar nspin=1 is reader/Green-only. Spinor reduction raises
+``UnsupportedSpinMode``. Split-SOC/MAE decomposition, operator rescaling,
+spin-spiral/GBT, orthogonalization, GPU, IBZ interpolation and DMFT requests
+raise ``UnsupportedOperatorMode`` rather than falling back to H/S.
+Missing scalar symmetry declarations and invalid meshes retain HamiltonIO's
+named errors.
+
+The default occupation/integration width is the metadata temperature times
+Boltzmann's constant. Exactly zero temperature retains half occupation at
+the Fermi pole. CFR/CFR2 contours require positive integration broadening:
+explicitly supply positive ``smearing`` or choose a non-CFR ``method``
+such as ``"semicircle"``. No width or contour is changed automatically.
+The global electron provenance check still uses the metadata temperature,
+independently of an explicitly requested integration width.
+
+Same-run magnetic collinear full/reduced and NC4 full-grid fixtures were
+compared against complete-spectrum H/S exchange, including the full spinor
+tensor, nonzero R, and both metric modes. This does not establish SOC8
+producer coverage or a performance improvement.
+
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 

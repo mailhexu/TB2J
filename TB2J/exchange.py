@@ -382,6 +382,10 @@ class ExchangeNCL(Exchange):
             initial_emin=self.emin,
             smearing_width=self.smearing,
             use_gpu=self.use_gpu,
+            cache_path=self.cache_path,
+            kpts=self.kpts,
+            kweights=self.kweights,
+            complete_spectrum=self.complete_spectrum,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -409,7 +413,16 @@ class ExchangeNCL(Exchange):
         """
         Calculate the magnetic anisotropy energy.
         """
-        pass
+        if any(
+            getattr(getattr(self, name, None), "_spectral_source", None) is not None
+            for name in ("G", "Gup", "Gdn")
+        ):
+            from HamiltonIO.siesta.wfsx import UnsupportedOperatorMode
+
+            raise UnsupportedOperatorMode(
+                "plain WFSX does not separate SOC/non-SOC operators for MAE; "
+                "use the ordinary operator-aware workflow"
+            )
 
     def _prepare_NijR(self):
         self.N = {}
