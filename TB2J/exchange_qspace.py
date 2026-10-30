@@ -1,9 +1,13 @@
-import numpy as np
-from TB2J.utils import kmesh_to_R
 from functools import lru_cache
-from .utils import simpson_nonuniform, trapezoidal_nonuniform
+
+import numpy as np
 from ase.dft.kpoints import monkhorst_pack
+
+from TB2J.contour import Contour
 from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J.utils import kmesh_to_R
+
+from .utils import simpson_nonuniform, trapezoidal_nonuniform
 
 
 def find_index_k(kpts, q):
@@ -111,6 +115,7 @@ class ExchangeCLQspace(ExchangeCL2):
 
                             K2 = Gij_dn_kq @ Deltaj @ Gji_up_k
                             X = Gij_up_k @ Gji_dn_kq
+                            # MathDoc: tb2j/qspace-unrenormalized-kernel
                             A = (np.trace(Deltai @ K1) + np.trace(Deltai @ K2)) * 0.5
                             K = K1 + K2
                             K += Gij_dn_kq @ Deltaj @ Gji_up_k
@@ -165,6 +170,7 @@ class ExchangeCLQspace(ExchangeCL2):
         self.KR = np.zeros_like(self.JR)
         for iR, R in enumerate(self.Rlist):
             for iq, q in enumerate(self.qpts):
+                # MathDoc: tb2j/qspace-finite-grid-transform
                 phase = np.exp(-2.0j * np.pi * (R @ q))
                 self.JR[iR] += np.real(self.Jq[iq] * phase) / len(self.qpts)
                 self.Jnorm_R[iR] += np.real(self.Jnorm_q[iq] * phase) / len(self.qpts)
@@ -189,6 +195,19 @@ class ExchangeCLQspace(ExchangeCL2):
                     if is_nonself:
                         self.exchange_Jdict[keyspin] = Jij
                         # self.exchange_Jdict_orb[keyspin] = Jorbij
+
+    def calculate_raw(self):
+        """Return unrenormalized J(q) using a geometric contour, without Bruno."""
+        if not isinstance(self.contour, Contour):
+            raise ValueError("raw q-space exchange requires a geometric contour")
+        self._prepare()
+        self.get_all_A()
+        raw = self.integrate()
+        if not np.isfinite(raw).all():
+            raise ValueError(
+                "non-finite raw q-space exchange; check the contour for poles"
+            )
+        return raw
 
     def calculate_all(self):
         self._prepare()
