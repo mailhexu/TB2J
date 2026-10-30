@@ -62,5 +62,8 @@ and have consistent positions and symmetry tolerance.
 
 Use `TB2J_shell generate` to create a symmetry-aware editable file from a
 structure or a trusted TB2J pickle, then `TB2J_shell export` to write standard
-results. See [symmetry-shell exchange files](exchange_shells.md) for the format,
-Python interface, and supported solver-output omissions.
+results. A bond and its reverse share one editable shell; equal distance alone
+does not merge symmetry-inequivalent bonds. Schema version 3 replaces version 2:
+regenerate older shell files from the structure or trusted pickle.
+See [symmetry-shell exchange files](exchange_shells.md) for commented examples,
+tensor reversal, the Python interface, and supported solver-output omissions.
