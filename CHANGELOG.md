@@ -7,6 +7,9 @@
   Non-finite raw results are rejected, including a pole on the sampled path.
 - Added an independent zero-temperature dispersive-chain spectral and finite-grid
   regression for the raw reciprocal-space response; this is not material validation.
+- Added a private self-inclusive reciprocal/real-space study runner with explicit
+  provenance, zero-temperature geometric contours and saved residuals; it does
+  not certify material exchange.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing
