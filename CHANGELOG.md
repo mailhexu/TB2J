@@ -5,6 +5,8 @@
   Bruno inversion. It requires a geometric contour; CFR/CFR2 pole contours are
   refused because this source revision does not integrate them correctly.
   Non-finite raw results are rejected, including a pole on the sampled path.
+- Added an independent zero-temperature dispersive-chain spectral and finite-grid
+  regression for the raw reciprocal-space response; this is not material validation.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing
