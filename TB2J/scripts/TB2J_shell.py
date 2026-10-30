@@ -18,6 +18,13 @@ from TB2J.io_exchange.shell_workflow import export_shells, generate_shells
 from TB2J.versioninfo import print_license
 
 
+class _DefaultsFormatter(argparse.ArgumentDefaultsHelpFormatter):
+    def _get_help_string(self, action):
+        if "default:" in (action.help or "").lower():
+            return action.help
+        return super()._get_help_string(action)
+
+
 def _moments(path):
     if path is None:
         return None
@@ -37,54 +44,107 @@ def _parser():
     generate = commands.add_parser(
         "generate",
         help="Generate an editable shell document from a structure or trusted pickle",
+        formatter_class=_DefaultsFormatter,
     )
     generate.add_argument("source", type=Path)
     selection = generate.add_mutually_exclusive_group()
     selection.add_argument(
+        "-s",
         "--magnetic-species",
         nargs="+",
         metavar="SYMBOL",
-        help="Chemical symbols selecting every matching atom (structure input)",
+        help="Chemical symbols selecting every matching atom (structure input; required unless -a)",
     )
     selection.add_argument(
+        "-a",
         "--magnetic-atoms",
         nargs="+",
         type=int,
         metavar="INDEX",
-        help="One-based full-structure atom indices (structure input)",
+        help="One-based full-structure atom indices (structure input; required unless -s)",
     )
     generate.add_argument(
+        "-c",
         "--cutoff",
         type=float,
-        help="Neighbor cutoff in Angstrom (structure input)",
+        help="Neighbor cutoff in the selected distance unit (required for structure input)",
     )
-    generate.add_argument("--mode", choices=("isotropic", "tensor"))
-    generate.add_argument("--symmetry", choices=("sg", "msg"), default="sg")
     generate.add_argument(
+        "-d",
+        "--distance-unit",
+        choices=("Angstrom", "Bohr", "nm"),
+        default="Angstrom",
+        help="Unit for cutoff and shell distances",
+    )
+    generate.add_argument(
+        "-m",
+        "--mode",
+        choices=("isotropic", "tensor"),
+        help="Exchange mode (default: isotropic for structures; infer from pickle)",
+    )
+    generate.add_argument(
+        "-y",
+        "--symmetry",
+        choices=("sg", "msg"),
+        default="sg",
+        help="Symmetry type",
+    )
+    generate.add_argument(
+        "-r",
         "--reference-spins",
         type=Path,
-        help="TOML moments = [...] array in full atom order (structure input)",
+        help="TOML moments = [...] array in full atom order (default: none)",
     )
-    generate.add_argument("--symprec", type=float)
-    generate.add_argument("--magnetic-tol", type=float)
     generate.add_argument(
+        "-p",
+        "--symprec",
+        type=float,
+        default=1e-5,
+        help="Spatial symmetry tolerance in Angstrom",
+    )
+    generate.add_argument(
+        "-t",
+        "--magnetic-tol",
+        type=float,
+        default=1e-5,
+        help="Magnetic symmetry tolerance",
+    )
+    generate.add_argument(
+        "-P",
         "--project",
         action="store_true",
         default=None,
-        help="Symmetrize native exchange (the default for pickle input)",
+        help="Symmetrize native exchange (default: automatic for pickle input)",
     )
-    generate.add_argument("--no-equivalent-comments", action="store_true")
     generate.add_argument(
-        "-o", "--output", type=Path, default=Path("exchange.shells.toml")
+        "-n",
+        "--no-equivalent-comments",
+        action="store_true",
+        help="Omit equivalent-pair comments",
+    )
+    generate.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=Path("exchange.shells.toml"),
+        help="Output shell document",
     )
 
     export = commands.add_parser(
-        "export", help="Expand an edited shell document into standard TB2J results"
+        "export",
+        help="Expand an edited shell document into standard TB2J results",
+        formatter_class=_DefaultsFormatter,
     )
     export.add_argument(
         "source", type=Path, help="Shell TOML document, with its context companion"
     )
-    export.add_argument("-o", "--output", type=Path, default=Path("TB2J_results"))
+    export.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=Path("TB2J_results"),
+        help="Output results directory",
+    )
     return parser
 
 
@@ -110,6 +170,7 @@ def _generate(args):
         args.output,
         symmetry=args.symmetry,
         project=args.project,
+        distance_unit=args.distance_unit,
         equivalent_comments=not args.no_equivalent_comments,
         **kwargs,
     )

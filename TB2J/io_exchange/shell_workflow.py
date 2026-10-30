@@ -22,6 +22,7 @@ def _generate_native(
     symprec,
     magnetic_tol,
     project,
+    distance_unit,
     equivalent_comments,
 ):
     from .shell_context import write_context
@@ -64,7 +65,9 @@ def _generate_native(
             ) as stream:
                 stages.append(Path(stream.name))
         digest = write_context(spinio, stages[0])
-        document = replace(result.document, context_sha256=digest)
+        document = replace(
+            result.document, context_sha256=digest, distance_unit=distance_unit
+        )
         shells.write_shells(
             document, stages[1], equivalent_comments=equivalent_comments
         )
@@ -89,18 +92,24 @@ def generate_shells(
     symprec=1e-5,
     magnetic_tol=1e-5,
     project=None,
+    distance_unit="Angstrom",
     equivalent_comments=True,
 ):
     """Generate an annotated shell document from a structure or trusted pickle.
 
     Magnetic atom indices are one-based over the complete structure; species
-    select all atoms with the given chemical symbols. The cutoff is in Angstrom.
+    select all atoms with the given chemical symbols. The cutoff uses distance_unit.
     Pickle input must be trusted because loading it can execute arbitrary code.
     Pickle exchange is symmetrized by default; ``project=False`` requires
     consistency instead. Structure input does not project exchange.
     """
     if project is not None and not isinstance(project, bool):
         raise ValueError("project must be a boolean or None")
+    if (
+        not isinstance(distance_unit, str)
+        or distance_unit not in shells.DISTANCE_TO_ANGSTROM
+    ):
+        raise ValueError("distance_unit: expected Angstrom, Bohr, or nm")
     source = Path(source)
     output = Path(output)
     if source.suffix.lower() in {".pickle", ".pkl"}:
@@ -119,6 +128,7 @@ def generate_shells(
             symprec=symprec,
             magnetic_tol=magnetic_tol,
             project=True if project is None else project,
+            distance_unit=distance_unit,
             equivalent_comments=equivalent_comments,
         )
     if (magnetic_species is None) == (magnetic_atoms is None):
@@ -153,13 +163,17 @@ def generate_shells(
     document = shells.template(
         atoms,
         magnetic_atoms,
-        cutoff,
+        (
+            shells._template_number(cutoff, "cutoff", positive=True)
+            * shells.DISTANCE_TO_ANGSTROM[distance_unit]
+        ),
         symmetry=symmetry,
         reference_spins=reference_spins,
         mode="isotropic" if mode is None else mode,
         symprec=symprec,
         magnetic_tol=magnetic_tol,
     )
+    document = replace(document, distance_unit=distance_unit)
     report = shells.ConversionReport()
     # Use sibling staging so validation or serialization failures cannot truncate
     # the user's existing output. Preserve the requested path until publication.

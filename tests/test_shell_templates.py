@@ -10,6 +10,39 @@ from ase import Atoms
 from TB2J.io_exchange import shells
 
 
+def test_structure_shells_are_ordered_by_distance():
+    atoms = Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True)
+    document = shells.template(atoms, [1], 5.3)
+    distances = [entry.distance for entry in document.shells]
+    assert distances == sorted(distances)
+    assert distances == pytest.approx([3.0, 3.0 * np.sqrt(2), 3.0 * np.sqrt(3)])
+
+
+@pytest.mark.parametrize(
+    "unit, cutoff, expected",
+    [("Angstrom", 3.1, 3.0), ("Bohr", 5.9, 5.6691783739), ("nm", 0.31, 0.3)],
+)
+def test_structure_distance_units_round_trip(tmp_path, unit, cutoff, expected):
+    import tomli
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    source = tmp_path / "POSCAR"
+    Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True).write(
+        source, format="vasp"
+    )
+    output = tmp_path / "shells.toml"
+    result = generate_shells(
+        source, output, magnetic_species=["Fe"], cutoff=cutoff, distance_unit=unit
+    )
+    with output.open("rb") as stream:
+        data = tomli.load(stream)
+    assert data["distance_unit"] == unit
+    assert data["cutoff"] == pytest.approx(cutoff)
+    assert data["shell"][0]["distance"] == pytest.approx(expected, rel=1e-8)
+    assert shells.read_shells(output) == result.document
+    assert result.document.shells[0].distance == pytest.approx(3.0)
+
+
 def test_structure_generation_selects_species_and_preserves_mapping(tmp_path):
     from TB2J.io_exchange.shell_workflow import generate_shells
 
@@ -47,6 +80,7 @@ def test_structure_generation_selects_species_and_preserves_mapping(tmp_path):
         {"magnetic_species": ["Fe"], "mode": ""},
         {"magnetic_species": ["Fe"], "mode": False},
         {"magnetic_species": ["Fe"], "mode": 0},
+        {"magnetic_species": ["Fe"], "distance_unit": "meter"},
     ],
 )
 def test_structure_generation_refuses_invalid_context_without_overwriting(

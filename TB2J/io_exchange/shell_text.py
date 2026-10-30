@@ -12,6 +12,7 @@ import tomli
 import tomli_w
 
 from .shells import (
+    DISTANCE_TO_ANGSTROM,
     ShellDocument,
     ShellEntry,
     ShellOperation,
@@ -20,6 +21,7 @@ from .shells import (
     _shell_orbits,
     _template_distance,
     _template_operations,
+    _template_number,
     _thaw,
     _validate_context,
 )
@@ -82,6 +84,7 @@ def _schema(data):
         (
             "schema_version",
             "energy_unit",
+            "distance_unit",
             "cutoff",
             "metadata",
             "reference_spins",
@@ -98,6 +101,11 @@ def _schema(data):
         raise ValueError("exchange: expected isotropic or tensor")
     if data.get("energy_unit", "meV") not in {"meV", "eV"}:
         raise ValueError("energy_unit: expected meV or eV")
+    if (
+        not isinstance(data.get("distance_unit", "Angstrom"), str)
+        or data.get("distance_unit", "Angstrom") not in DISTANCE_TO_ANGSTROM
+    ):
+        raise ValueError("distance_unit: expected Angstrom, Bohr, or nm")
     _keys(data["structure"], ("coordinates", "lattice", "atoms"), (), "structure")
     if data["structure"]["coordinates"] != "fractional":
         raise ValueError("structure.coordinates: expected fractional")
@@ -277,11 +285,14 @@ def load(path):
     symmetry = _floats(data["symmetry"])
     reference = data.get("reference_spins")
     source = data.get("source", {})
+    distance_unit = data.get("distance_unit", "Angstrom")
+    distance_scale = DISTANCE_TO_ANGSTROM[distance_unit]
     mode = {"spacegroup": "sg", "magnetic": "msg"}[symmetry["mode"]]
     kwargs = dict(
         **structure,
         exchange_mode=data["exchange"],
         energy_unit=data.get("energy_unit", "meV"),
+        distance_unit=distance_unit,
         symmetry_mode=mode,
         symprec=symmetry.get("symprec", 1e-5),
         magnetic_tol=symmetry.get("magnetic_tol", 1e-5 if mode == "msg" else None),
@@ -289,7 +300,12 @@ def load(path):
         moments=_moments(reference, structure["site_labels"]),
         moment_source=reference.get("source", "explicit") if reference else "explicit",
         metadata=_floats(data.get("metadata", {})),
-        cutoff=_floats(data.get("cutoff")),
+        cutoff=(
+            _template_number(_floats(data["cutoff"]), "cutoff", positive=True)
+            * distance_scale
+            if "cutoff" in data
+            else None
+        ),
         source_format=source.get("format"),
         precision_profile=source.get("precision_profile"),
         context_sha256=source.get("context_sha256"),
@@ -357,6 +373,11 @@ def load(path):
             for key in ("name", "distance", "n_equivalent_pairs", *_MASKS)
             if key in entry
         }
+        if "distance" in extras:
+            extras["distance"] = (
+                _template_number(extras["distance"], "distance", nonnegative=True)
+                * distance_scale
+            )
         entries.append(
             ShellEntry(
                 id=identifier,
@@ -406,9 +427,12 @@ def dump(document, path, *, equivalent_comments=True):
         "schema_version": 2,
         "exchange": document.exchange_mode,
         "energy_unit": document.energy_unit,
+        "distance_unit": document.distance_unit,
     }
     if document.cutoff is not None:
-        header["cutoff"] = document.cutoff
+        header["cutoff"] = (
+            document.cutoff / DISTANCE_TO_ANGSTROM[document.distance_unit]
+        )
     header["structure"] = structure
     if document.moments is not None:
         header["reference_spins"] = {
@@ -436,7 +460,7 @@ def dump(document, path, *, equivalent_comments=True):
     if document.metadata:
         header["metadata"] = _thaw(document.metadata)
     parts = [
-        "# Exchange values use energy_unit (meV or eV); cutoff and distance are in Angstrom.\n"
+        "# Exchange values use energy_unit; cutoff and distance use distance_unit.\n"
         "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
         "# Atom rows: one-based atom index, label, x, y, z, magnetic Y/N, zero-based spin index.\n"
         "# Nonmagnetic atoms use N and a negative spin index; retain the exact existing mapping.\n"
@@ -456,10 +480,13 @@ def dump(document, path, *, equivalent_comments=True):
         # Do not invent a representative outside that empty support.
         if shell.support_members != ():
             entry["representative"] = _pair_text(representative, document.site_labels)
-        entry["distance"] = _template_distance(
-            representative,
-            np.asarray(document.positions_frac),
-            np.asarray(document.cell_angstrom),
+        entry["distance"] = (
+            _template_distance(
+                representative,
+                np.asarray(document.positions_frac),
+                np.asarray(document.cell_angstrom),
+            )
+            / DISTANCE_TO_ANGSTROM[document.distance_unit]
         )
         entry["n_equivalent_pairs"] = len(orbit)
         entry["J"] = _wire_energy(

@@ -14,8 +14,11 @@ from itertools import product
 from types import MappingProxyType
 
 import numpy as np
+from ase.units import Bohr
 
 from TB2J import symmetry_core
+
+DISTANCE_TO_ANGSTROM = {"Angstrom": 1.0, "Bohr": Bohr, "nm": 10.0}
 
 _ID = re.compile(r"([1-9][0-9]*):([1-9][0-9]*):(-?[0-9]+),(-?[0-9]+),(-?[0-9]+)\Z")
 _BASE_FIELDS = {
@@ -133,6 +136,7 @@ class ShellDocument:
     site_labels: tuple | None = None
     metadata: Mapping = field(default_factory=dict)
     cutoff: float | None = None
+    distance_unit: str = "Angstrom"
 
     def __post_init__(self):
         for name in (
@@ -174,9 +178,23 @@ class ShellDocument:
                 )
             ),
         )
-        object.__setattr__(
-            self, "shells", tuple(sorted(self.shells, key=lambda shell: shell.id))
-        )
+        if self.source_format == "template":
+            positions = np.asarray(self.positions_frac)
+            cell = np.asarray(self.cell_angstrom)
+
+            def key(shell):
+                return (
+                    _template_distance(
+                        shell.representative or _pair_from_id(shell.id), positions, cell
+                    ),
+                    shell.id,
+                )
+        else:
+
+            def key(shell):
+                return shell.id
+
+        object.__setattr__(self, "shells", tuple(sorted(self.shells, key=key)))
 
 
 @dataclass(frozen=True)
@@ -514,6 +532,8 @@ def _validate_context(document):
     if not isinstance(document.metadata, Mapping):
         raise ValueError("metadata: expected a TOML table")
     _validate_metadata(document.metadata)
+    if document.distance_unit not in DISTANCE_TO_ANGSTROM:
+        raise ValueError("distance_unit: expected Angstrom, Bohr, or nm")
     if document.cutoff is not None:
         cutoff = _numbers(document.cutoff, (), "cutoff")
         if cutoff <= 0:
@@ -1341,6 +1361,7 @@ def compress(
         site_labels=_freeze(labels),
         metadata=metadata,
         cutoff=None,
+        distance_unit="Angstrom",
     )
     _validate_context(operations_context)
     core_operations, site_maps = _validated_operations(

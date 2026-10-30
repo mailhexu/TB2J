@@ -17,8 +17,9 @@ result = generate_shells(
 ```
 
 Select magnetic sites with `magnetic_species` or, alternatively,
-`magnetic_atoms` containing one-based full-structure indices. The cutoff is in
-Angstrom. For magnetic space-group symmetry, pass `symmetry="msg"` and complete
+`magnetic_atoms` containing one-based full-structure indices. The cutoff uses
+`distance_unit` (`"Angstrom"` by default, `"Bohr"` or `"nm"`). For magnetic
+space-group symmetry, pass `symmetry="msg"` and complete
 `reference_spins` in full atom order; `symprec` and `magnetic_tol` are configurable.
 Use `mode="tensor"` for 3×3 exchange values. Each shell remains `unfilled` until edited.
 
@@ -149,7 +150,7 @@ source_note = "hand-edited scalar example"
 ```
 
 No `name`, `distance`, or `n_equivalent_pairs` is supplied here: all three are
-optional. `name` is display text only; TB2J computes `distance` (Angstrom) and
+optional. `name` is display text only; TB2J computes `distance` (in the declared unit) and
 `n_equivalent_pairs` (the size of the full ordered-pair orbit, including the
 representative) for every shell when the document is canonicalized or written.
 No `name` is invented. With the geometry above the first shell validates as an
@@ -305,11 +306,16 @@ of shells, and any context companion. Pickle import symmetrizes automatically an
 reports the largest absolute component change in eV; the original pickle is not
 modified. Review that change before using the generated exchange values.
 
+Structure templates order shells by increasing distance without merging equal
+distances from different symmetry orbits. For example, use
+`TB2J_shell generate POSCAR -s Fe -c 0.6 -d nm`; `TB2J_shell generate --help`
+lists every short option and its default or automatic behavior.
+
 ## V2 document grammar and indexing
 
 The document is UTF-8 TOML. Scientific tables accept only their declared fields; unknown scientific keys and the superseded v1 array grammar/field names are rejected. There are no compatibility aliases for old names such as `exchange_mode`, `Jiso`, `tensor`, or `orbit_size`.
 
-- Top-level `exchange` is required and is `"isotropic"` or `"tensor"`. `schema_version` may be omitted (means 2); canonical output writes `2`. Explicit other versions fail. `energy_unit` is `"meV"` (default) or `"eV"`; canonical output writes it explicitly. Optional `cutoff` records a positive radius in Angstrom and does not re-filter imported or existing shells.
+- Top-level `exchange` is required and is `"isotropic"` or `"tensor"`. `schema_version` may be omitted (means 2); canonical output writes `2`. `energy_unit` is `"meV"` (default) or `"eV"`. `distance_unit` is `"Angstrom"` (default), `"Bohr"`, or `"nm"`; it applies to `cutoff` and shell distances. Optional `cutoff` does not re-filter imported or existing shells.
 - `[structure]` requires `coordinates = "fractional"`, `lattice`, and `atoms`. The lattice is exactly three rows of three Cartesian lattice-vector components in Angstrom. There is no POSCAR scale factor or selective-dynamics syntax.
 - Each atom row has exactly seven whitespace-separated fields: `atom-index label x y z magnetic spin-index`. Atom indices are sequential, one-based, in source row order. A label is a unique valid element symbol followed by a positive integer (for example `Fe7`); the element symbol provides species. Coordinates are finite raw fractional coordinates and may be outside `[0, 1)`. `Y` requires a unique nonnegative spin index; all selected rows map exactly onto `0..nspin-1`. `N` requires a negative index; `-` spells `-1`. Native negative sentinels are retained when written. Labels resolve to atom rows and never reorder or renumber spin indices.
 - Blank lines and `#` comments are ignored inside row blocks. Row numbers count data rows. The rows accept decimal/scientific real numbers, not Python expressions, complex numbers, NaN/Inf, booleans, or locale-formatted numbers.
@@ -322,7 +328,7 @@ The document is UTF-8 TOML. Scientific tables accept only their declared fields;
 
 Each `[[shell]]` has one `J` value: a finite scalar in isotropic mode, a finite Cartesian 3×3 tensor in tensor mode, or the template string `"unfilled"`. Tensor mode requires `representative`; the same label-based representative is emitted for generated scalar templates. An isotropic hand-authored shell may omit the representative only when it supplies an authoritative canonical `id`. A representative has the form `"Fe7 Co4 1 0 -1"`: two site labels followed by the three signed integer translation components `R`, which translates the second site in the raw site-image frame. Optional `id` must equal the canonical minimum numeric pair key `i:j:Rx,Ry,Rz` for the full orbit; atom indices in that ID are one-based. Duplicate entries for the same orbit fail.
 
-`name` is optional display text, not identity, and is never generated if absent. Input may omit `distance` and `n_equivalent_pairs`; TB2J writes both computed summaries for every shell, even when equivalent-pair comments are suppressed. `distance` is the representative bond length in Angstrom. `n_equivalent_pairs` counts the full orbit's ordered pairs, including the representative—not the sparse support size or a coordination number. Both supplied summaries are validated against geometry and symmetry and never select or merge shells.
+`name` is optional display text, not identity, and is never generated if absent. Input may omit `distance` and `n_equivalent_pairs`; TB2J writes both computed summaries for every shell, even when equivalent-pair comments are suppressed. `distance` is the representative bond length in the declared `distance_unit`. `n_equivalent_pairs` counts the full orbit's ordered pairs, including the representative—not the sparse support size or a coordination number. Both supplied summaries are validated against geometry and symmetry and never select or merge shells.
 
 By default, equivalent-pair and atom/spin cross-reference comments are emitted. They are informational; deleting them does not change shell identity, support, or values. `--no-equivalent-comments` suppresses these generated comments without changing data. Rewriting canonicalizes TOML and regenerates its own comments; arbitrary comments, whitespace, and formatting are not preserved.
 
@@ -336,7 +342,7 @@ Canonical full orbits are sorted. `support_members` and channel-presence masks a
 
 ## Units and tolerances
 
-Shell wire values use the file-wide `energy_unit` (`meV` by default, alternatively `eV`). Python `ShellEntry` values and native `SpinIO` exchange values are in eV. `value_atol` (default `1e-8` eV) and `zero_tol` (default `1e-10` eV) are always in eV, independent of the wire unit; `value_rtol` defaults to `1e-6` and is dimensionless. Symmetry tolerances are `symprec` in Angstrom and `magnetic_tol` in μB. The template `cutoff` is a real-space radius **always in Angstrom**; there is no cutoff-unit option. Cutoff selects candidate pairs/orbits when building a template, not distance bins or a later filter on imported support.
+Shell wire values use the file-wide `energy_unit` (`meV` by default, alternatively `eV`). Python `ShellEntry` values and native `SpinIO` exchange values are in eV. `value_atol` and `zero_tol` are always in eV; `value_rtol` is dimensionless. `symprec` is in Angstrom and `magnetic_tol` in μB. `distance_unit` applies to wire cutoff and shell distances; lattice vectors and Python geometry remain in Angstrom. Cutoff selects candidate pairs/orbits when building a template, not distance bins or a later filter on imported support.
 
 ## Python interfaces and CLI options
 

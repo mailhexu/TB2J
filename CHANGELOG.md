@@ -4,6 +4,9 @@
 - `TB2J_shell` reports version, license and generation progress. Pickle
   generation symmetrizes exchange by default and reports the maximum change;
   Python callers can request strict checking with `project=False`.
+- Structure shell templates sort by distance; shell files support explicit
+  Angstrom, Bohr or nm distance units. CLI options have short forms and help
+  shows defaults.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing

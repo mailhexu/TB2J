@@ -25,6 +25,22 @@ def _run(*arguments):
         return error.code
 
 
+def test_short_options_generate_nm_and_help_shows_defaults(tmp_path, inputs, capsys):
+    output = tmp_path / "short.toml"
+    assert (
+        _run("generate", inputs[1], "-s", "Fe", "-c", "0.31", "-d", "nm", "-o", output)
+        == 0
+    )
+    with output.open("rb") as stream:
+        data = tomli.load(stream)
+    assert data["distance_unit"] == "nm"
+    assert data["shell"][0]["distance"] == pytest.approx(0.3)
+    assert _run("generate", "--help") == 0
+    help_text = capsys.readouterr().out
+    assert "-d" in help_text and "Angstrom" in help_text
+    assert "default" in help_text.lower() and "1e-05" in help_text
+
+
 @pytest.fixture
 def inputs(tmp_path):
     atoms = Atoms("Fe", cell=3 * np.eye(3), scaled_positions=[[0, 0, 0]], pbc=True)
