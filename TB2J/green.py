@@ -6,6 +6,7 @@ import tempfile
 import time
 from collections import defaultdict
 from shutil import rmtree
+from contextlib import contextmanager
 
 import numpy as np
 from HamiltonIO.epw.epwparser import EpmatOneMode
@@ -82,6 +83,9 @@ def find_energy_ingap(evals, rbound, gap=2.0):
 
 
 class TBGreen:
+    # Ordinary subclasses may intentionally initialize without calling super().
+    _spectral_source = None
+
     def __init__(
         self,
         tbmodel,
@@ -98,6 +102,7 @@ class TBGreen:
         initial_emin=-25,
         smearing_width=0.01,
         use_gpu=False,
+        complete_spectrum=False,
     ):
         """
         :param tbmodel: A tight binding model
@@ -113,6 +118,28 @@ class TBGreen:
         :param emin: minimum energy relative to fermi level to consider
         :param use_gpu: if True, use TBGreenGPU for GPU acceleration
         """
+        self.complete_spectrum = bool(complete_spectrum)
+        self._spectral_source = getattr(tbmodel, "eigenstate_source", None)
+        if self._spectral_source is not None:
+            self._prepare_spectral(
+                tbmodel,
+                kmesh,
+                gamma,
+                kpts,
+                kweights,
+                efermi,
+                cache_path,
+                initial_emin,
+                smearing_width,
+                use_gpu,
+                ibz,
+                nproc,
+            )
+            return
+        if self.complete_spectrum and use_gpu:
+            raise ValueError(
+                "complete_spectrum requires CPU TBGreen; GPU mode is unsupported"
+            )
         # Use GPU-accelerated Green's function if requested
         if use_gpu:
             # Import here to avoid JAX import when not using GPU
@@ -176,6 +203,360 @@ class TBGreen:
         print(
             f"Finished preparing eigenvalues and eigenvectors. Time taken: {time.time() - t0:.2f} seconds"
         )
+
+    def _prepare_spectral(
+        self,
+        model,
+        kmesh,
+        gamma,
+        kpts,
+        kweights,
+        efermi,
+        cache_path,
+        initial_emin,
+        smearing_width,
+        use_gpu,
+        ibz,
+        nproc,
+    ):
+        """Stage complete single-record factors under the existing cache owner."""
+        import warnings
+        from scipy import linalg
+        from HamiltonIO.siesta.wfsx import (
+            InconsistentMetadata,
+            IncompleteSpectrum,
+            MissingMetadata,
+            SiestaWFSXParser,
+            SingularEigenbasis,
+            UnsupportedOperatorMode,
+        )
+
+        parser = self._spectral_source
+        if not isinstance(parser, SiestaWFSXParser):
+            raise MissingMetadata(
+                "eigenstate_source: supply a validated SiestaWFSXParser"
+            )
+        if use_gpu or ibz or nproc != 1:
+            raise UnsupportedOperatorMode(
+                "WFSX preparation requires CPU, one process and an explicit full requested mesh"
+            )
+        if efermi not in (None, 0):
+            raise InconsistentMetadata(
+                "WFSX energies are already Ef-relative; use efermi=0"
+            )
+        metadata = parser.metadata
+        if metadata.scf_mesh is None:
+            raise MissingMetadata(
+                f"file {parser.wfsx_path}: scf_mesh: supply the original full SCF "
+                "coordinates and weights for electron-provenance validation"
+            )
+        from ase.units import kB
+
+        occupation_width = metadata.electronic_temperature_k * kB
+        electron_count = 0.0
+        self._spectral_spin = getattr(model, "spin_channel", 0)
+        channels = (0, 1) if metadata.nspin == 2 else (0,)
+        if self._spectral_spin not in channels:
+            raise InconsistentMetadata(f"spin_channel: require one of {channels}")
+        self.tbmodel = model
+        self.is_orthogonal = False
+        self.R2kfactor, self.k2Rfactor = 2j * np.pi, -2j * np.pi
+        self.norb, self.nbasis = metadata.no_u, metadata.nbasis
+        self.efermi, self.complete_spectrum = 0.0, True
+        self.initial_emin = initial_emin
+        self.fermi_width = float(smearing_width)
+        self.k_sym, self.nproc, self.use_gpu = False, 1, False
+        self._use_cache = True  # Spectral staging is mandatory, not ordinary use_cache.
+        self._spectral_cache_owned = False
+        self._spectral_closed = False
+        self.cache_path = (
+            os.fspath(cache_path) if cache_path is not None else tempfile.gettempdir()
+        )
+        self._Rmap = self._Rmap_rev = None
+        self.H = self.S = self.evecs = None
+        if kmesh is None and kpts is None:
+            if metadata.scf_mesh is None:
+                raise MissingMetadata(
+                    "requested mesh: supply kpts/kweights or kmesh explicitly"
+                )
+            kpts, kweights = metadata.scf_mesh.kpoints, metadata.scf_mesh.weights
+        self.prepare_kpts(
+            kmesh=kmesh, gamma=gamma, kpts=kpts, kweights=kweights, tbmodel=model
+        )
+        mesh = {"kpoints": self.kpts, "weights": self.kweights}
+        self.spectral_stats = {
+            "factorizations": 0,
+            "energy_evaluations": 0,
+            "import_seconds": 0.0,
+        }
+        start = time.perf_counter()
+        dtypes = set()
+        try:
+            # MathDoc: tb2j/siesta-wfsx-spectral
+            # Validate global occupations independently of the requested subset.
+            with parser.open(metadata.scf_mesh) as provenance:
+                count_map = provenance.map
+                electron_weights = np.zeros(
+                    len(count_map.record_representatives)
+                    * count_map.record_indices.shape[1]
+                )
+                for spin in range(count_map.record_indices.shape[1]):
+                    np.add.at(
+                        electron_weights,
+                        count_map.record_indices[:, spin],
+                        count_map.mesh.weights,
+                    )
+            with parser.open(
+                mesh, reduce_scalar=getattr(model, "reduce_scalar", False)
+            ) as source:
+                self.spectral_stats["import_seconds"] += time.perf_counter() - start
+                self._spectral_map = source.map
+                self.kpts, self.kweights = (
+                    source.map.mesh.kpoints,
+                    source.map.mesh.weights,
+                )
+                self.nkpts = len(self.kpts)
+                self._spectral_nrep = len(source.map.representative_kpoints)
+                self._spectral_slots = [[] for _ in range(self._spectral_nrep)]
+                for slot, rep in enumerate(source.map.representative_indices):
+                    self._spectral_slots[rep].append(slot)
+                self._spectral_specs = {
+                    "C": (np.dtype(complex), (self.nbasis, self.nbasis)),
+                    "D": (np.dtype(complex), (self.nbasis, self.nbasis)),
+                    "E": (np.dtype(float), (self.nbasis,)),
+                }
+                self._prepare_cache()
+                for name, (dtype, shape) in self._spectral_specs.items():
+                    with open(
+                        os.path.join(self.cache_path, f"wfsx_{name}.dat"), "wb"
+                    ) as stream:
+                        stream.truncate(
+                            self._spectral_nrep * int(np.prod(shape)) * dtype.itemsize
+                        )
+                self.evals = np.empty((self.nkpts, self.nbasis), dtype=float)
+                self.H0 = np.zeros((self.nbasis, self.nbasis), dtype=complex)
+                self._spectral_density = np.zeros_like(self.H0)
+                identity = np.eye(self.nbasis, dtype=complex)
+                staged = np.zeros(self._spectral_nrep, dtype=bool)
+                iterator = source.iter_eigenstates()
+                while True:
+                    before_read = time.perf_counter()
+                    try:
+                        block = next(iterator)
+                    except StopIteration:
+                        self.spectral_stats["import_seconds"] += (
+                            time.perf_counter() - before_read
+                        )
+                        break
+                    self.spectral_stats["import_seconds"] += (
+                        time.perf_counter() - before_read
+                    )
+                    count_weight = electron_weights[block.original_index]
+                    if count_weight:
+                        occupation = (
+                            fermi(block.eigenvalues, 0, width=occupation_width, nspin=2)
+                            if occupation_width > 0
+                            else np.heaviside(-block.eigenvalues, 0.5)
+                        )
+                        electron_count += (
+                            count_weight
+                            * occupation.sum()
+                            * (2 if metadata.nspin == 1 else 1)
+                        )
+                    dtypes.add((block.coefficient_dtype, block.energy_dtype))
+                    if (
+                        block.spin != self._spectral_spin
+                        or block.representative_index is None
+                    ):
+                        del block
+                        continue
+                    rep = block.representative_index
+                    work = np.array(block.coefficients, order="F", copy=True)
+                    if block.conjugated:
+                        np.conjugate(work, out=work)
+                    if block.stage:
+                        with self._spectral_arrays(rep, "C", "D", "E", mode="r+") as (
+                            c,
+                            dual,
+                            energies,
+                        ):
+                            c[:] = work
+                            energies[:] = block.eigenvalues
+                            anorm = linalg.norm(work, 1, check_finite=False)
+                            self.spectral_stats["factorizations"] += 1
+                            try:
+                                with warnings.catch_warnings():
+                                    warnings.simplefilter("error", linalg.LinAlgWarning)
+                                    lu, piv = linalg.lu_factor(
+                                        work, overwrite_a=True, check_finite=False
+                                    )
+                                rcond, info = linalg.lapack.get_lapack_funcs(
+                                    "gecon", (lu,)
+                                )(lu, anorm)
+                            except (linalg.LinAlgWarning, linalg.LinAlgError) as error:
+                                raise SingularEigenbasis(
+                                    f"file {parser.wfsx_path}: k={block.kpoint.tolist()} spin={block.spin}: "
+                                    "singular coefficient basis; export complete well-conditioned states"
+                                ) from error
+                            if info or not np.isfinite(rcond) or rcond < 1e-10:
+                                raise SingularEigenbasis(
+                                    f"file {parser.wfsx_path}: k={block.kpoint.tolist()} spin={block.spin}: "
+                                    f"coefficient reciprocal condition {rcond} below 1e-10; "
+                                    "export complete well-conditioned states; no regularization"
+                                )
+                            # MathDoc: tb2j/siesta-wfsx-spectral
+                            # The full dual is reused for full H0/metric consumers,
+                            # not formed merely to obtain a selected local block.
+                            dual[:] = linalg.lu_solve(
+                                (lu, piv), identity, trans=2, check_finite=False
+                            )
+                            h = (dual * energies) @ dual.conj().T
+                            rho = (
+                                c * fermi(energies, 0, width=self.fermi_width, nspin=2)
+                            ) @ dual.conj().T
+                            slots = self._spectral_slots[rep]
+                            inverse = source.map.representative_inverted[slots]
+                            self.H0 += (
+                                np.count_nonzero(~inverse) * h
+                                + np.count_nonzero(inverse) * h.conj()
+                            ) / self.nkpts
+                            weights = self.kweights[slots]
+                            self._spectral_density += (
+                                weights[~inverse].sum() * rho
+                                + weights[inverse].sum() * rho.conj()
+                            )
+                            self.evals[slots] = energies
+                        staged[rep] = True
+                    else:
+                        if not staged[rep]:
+                            raise IncompleteSpectrum(
+                                "WFSX map: partner validation preceded its stage record"
+                            )
+                        with self._spectral_arrays(rep, "D", "E") as (dual, energies):
+                            overlap = dual @ dual.conj().T
+                            h = (dual * energies) @ dual.conj().T
+                            if not np.allclose(
+                                work.conj().T @ overlap @ work,
+                                identity,
+                                atol=2e-5,
+                                rtol=1e-5,
+                            ) or not np.allclose(
+                                h @ work,
+                                (overlap @ work) * block.eigenvalues,
+                                atol=2e-5,
+                                rtol=1e-5,
+                            ):
+                                raise InconsistentMetadata(
+                                    f"file {parser.wfsx_path}: k={block.kpoint.tolist()} spin={block.spin}: "
+                                    "exported scalar partner operators violate symmetry; use full input without reduction"
+                                )
+                    del work, block
+                if not np.all(staged):
+                    raise IncompleteSpectrum(
+                        "WFSX map: missing representative/channel; export the requested complete spectrum"
+                    )
+            if not np.isclose(
+                electron_count, metadata.electron_count, atol=1e-4, rtol=1e-5
+            ):
+                raise InconsistentMetadata(
+                    f"file {parser.wfsx_path}: electron_count: declared {metadata.electron_count}, "
+                    f"complete SCF occupations give {electron_count} at "
+                    f"{metadata.electronic_temperature_k} K; supply consistent electron/Fermi provenance"
+                )
+            self.adjusted_emin = find_energy_ingap(
+                self.evals, self.initial_emin, gap=2.0
+            )
+            self.spectral_stats.update(
+                preparation_seconds=time.perf_counter()
+                - start
+                - self.spectral_stats["import_seconds"],
+                full_kpoints=self.nkpts,
+                representative_kpoints=self._spectral_nrep,
+                source_precision=sorted(dtypes),
+                spectral_disk_bytes=sum(
+                    os.path.getsize(os.path.join(self.cache_path, f"wfsx_{name}.dat"))
+                    for name in self._spectral_specs
+                ),
+            )
+        except BaseException:
+            self.clean_cache()
+            raise
+
+    @contextmanager
+    def _spectral_arrays(self, rep, *names, mode="r"):
+        """Map only one representative; returned internal views never escape."""
+        from HamiltonIO.siesta.wfsx import InconsistentMetadata
+
+        if self._spectral_closed:
+            raise InconsistentMetadata(
+                "spectral cache is closed; construct a new TBGreen"
+            )
+        arrays = []
+        try:
+            for name in names:
+                dtype, shape = self._spectral_specs[name]
+                arrays.append(
+                    np.memmap(
+                        os.path.join(self.cache_path, f"wfsx_{name}.dat"),
+                        dtype=dtype,
+                        mode=mode,
+                        offset=rep * int(np.prod(shape)) * dtype.itemsize,
+                        shape=shape,
+                    )
+                )
+            yield tuple(arrays)
+        finally:
+            try:
+                if mode != "r":
+                    for array in arrays:
+                        array.flush()
+            finally:
+                for array in arrays:
+                    array._mmap.close()
+
+    def _spectral_green(self, rep, energy, contravariant=False):
+        # MathDoc: tb2j/siesta-wfsx-spectral
+        with self._spectral_arrays(rep, "C", "E") as (c, energies):
+            result = eigen_to_G(energies, c, 0, energy)
+            if contravariant:
+                inverse_metric = c @ c.conj().T
+                result = inverse_metric @ result @ inverse_metric
+        self.spectral_stats["energy_evaluations"] += 1
+        return result
+
+    def _spectral_GR(self, Rpts, energy, Gk_all):
+        # MathDoc: tb2j/siesta-wfsx-spectral
+        contravariant = os.environ.get("TB2J_SIESTA_GREEN_MODE") == "contravariant"
+        if Gk_all is not None:
+            if contravariant:
+                for rep, slots in enumerate(self._spectral_slots):
+                    with self._spectral_arrays(rep, "C") as (c,):
+                        inverse_metric = c @ c.conj().T
+                    for ik in slots:
+                        metric = (
+                            inverse_metric.conj()
+                            if self._spectral_map.representative_inverted[ik]
+                            else inverse_metric
+                        )
+                        Gk_all[ik] = metric @ Gk_all[ik] @ metric
+            return self.compute_GR(Rpts, self.kpts, Gk_all)
+        rvecs = np.asarray(Rpts)
+        result = np.zeros((len(rvecs), self.nbasis, self.nbasis), dtype=complex)
+        workspace = np.empty((self.nbasis, self.nbasis), dtype=complex)
+        for rep, slots in enumerate(self._spectral_slots):
+            green = self._spectral_green(rep, energy, contravariant)
+            for ik in slots:
+                # Same complex z uses transpose, NEVER complex conjugation.
+                matrix = (
+                    green.T if self._spectral_map.representative_inverted[ik] else green
+                )
+                phases = (
+                    np.exp(self.k2Rfactor * (rvecs @ self.kpts[ik])) * self.kweights[ik]
+                )
+                for ir, phase in enumerate(phases):
+                    np.multiply(matrix, phase, out=workspace)
+                    result[ir] += workspace
+        return result
 
     def prepare_kpts(
         self, kmesh=None, gamma=True, ibz=False, kpts=None, kweights=None, tbmodel=None
@@ -245,11 +626,21 @@ class TBGreen:
         if not os.path.exists(rpath):
             os.makedirs(rpath)
         self.cache_path = tempfile.mkdtemp(prefix="TB2J", dir=rpath)
-        print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
+        if self._spectral_source is not None:
+            self._spectral_cache_owned = True
+            print(f"Writing WFSX spectral factors in cache {self.cache_path}")
+        else:
+            print(f"Writting wavefunctions and Hamiltonian in cache {self.cache_path}")
 
     def clean_cache(self):
+        if self._spectral_source is not None:
+            self._spectral_closed = True
+            if not self._spectral_cache_owned:
+                return
         if (self.cache_path is not None) and os.path.exists(self.cache_path):
             rmtree(self.cache_path)
+        if self._spectral_source is not None:
+            self._spectral_cache_owned = False
 
     def _prepare_eigen(self, solve=True, saveH=False):
         """
@@ -312,14 +703,18 @@ class TBGreen:
             - self.efermi
         )
         # print(f"Adjusted emin relative to Fermi level: {self.adjusted_emin}")
-        self.evals, self.evecs = self._reduce_eigens(
-            self.evals,
-            self.evecs,
-            emin=self.efermi + self.adjusted_emin,
-            emax=self.efermi + 5.1,
-            # emin=self.efermi -10,
-            # emax=self.efermi + 10,
-        )
+        # MathDoc: tb2j/siesta-wfsx-spectral
+        # Complete-resolvent comparisons must retain every pole. The ordinary
+        # contour window remains the default unless explicitly bypassed.
+        if not self.complete_spectrum:
+            self.evals, self.evecs = self._reduce_eigens(
+                self.evals,
+                self.evecs,
+                emin=self.efermi + self.adjusted_emin,
+                emax=self.efermi + 5.1,
+                # emin=self.efermi -10,
+                # emax=self.efermi + 10,
+            )
         if self._use_cache:
             evecs = self.evecs
             self.evecs_shape = self.evecs.shape
@@ -347,6 +742,13 @@ class TBGreen:
                 del self.S
 
     def get_evecs(self, ik):
+        if self._spectral_source is not None:
+            rep = self._spectral_map.representative_indices[ik]
+            with self._spectral_arrays(rep, "C") as (c,):
+                result = np.array(c, copy=True)
+            if self._spectral_map.representative_inverted[ik]:
+                np.conjugate(result, out=result)
+            return result
         if self._use_cache:
             return np.memmap(
                 os.path.join(self.cache_path, "evecs.dat"),
@@ -361,6 +763,15 @@ class TBGreen:
         return self.evals[ik]
 
     def get_Hk(self, ik):
+        if self._spectral_source is not None:
+            rep = self._spectral_map.representative_indices[ik]
+            with self._spectral_arrays(rep, "D", "E") as (dual, energies):
+                result = (dual * energies) @ dual.conj().T
+            return (
+                result.conj()
+                if self._spectral_map.representative_inverted[ik]
+                else result
+            )
         if self._use_cache:
             return np.memmap(
                 os.path.join(self.cache_path, "H.dat"),
@@ -372,6 +783,15 @@ class TBGreen:
             return self.H[ik]
 
     def get_Sk(self, ik):
+        if self._spectral_source is not None:
+            rep = self._spectral_map.representative_indices[ik]
+            with self._spectral_arrays(rep, "D") as (dual,):
+                result = dual @ dual.conj().T
+            return (
+                result.conj()
+                if self._spectral_map.representative_inverted[ik]
+                else result
+            )
         if self.is_orthogonal:
             return None
         elif self._use_cache:
@@ -385,6 +805,8 @@ class TBGreen:
             return self.S[ik]
 
     def get_density_matrix(self):
+        if self._spectral_source is not None:
+            return self._spectral_density.copy()
         rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         if self.is_orthogonal:
             for ik, _ in enumerate(self.kpts):
@@ -446,6 +868,13 @@ class TBGreen:
         :returns: Gk
         :rtype:  a matrix of indices (nbasis, nbasis)
         """
+        if self._spectral_source is not None and evals is None and evecs is None:
+            result = self._spectral_green(
+                self._spectral_map.representative_indices[ik], energy
+            )
+            return (
+                result.T if self._spectral_map.representative_inverted[ik] else result
+            )
         if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
             # DMFT case
             sigma = self.tbmodel.get_sigma(energy, ispin=ispin)
@@ -487,6 +916,17 @@ class TBGreen:
 
     def get_Gk_all(self, energy, ispin=0):
         """Green's function G(k) for one energy for all kpoints"""
+        if self._spectral_source is not None:
+            result = np.empty((self.nkpts, self.nbasis, self.nbasis), dtype=complex)
+            for rep, slots in enumerate(self._spectral_slots):
+                green = self._spectral_green(rep, energy)
+                for ik in slots:
+                    result[ik] = (
+                        green.T
+                        if self._spectral_map.representative_inverted[ik]
+                        else green
+                    )
+            return result
         if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
             Gk0 = self.get_Gk(0, energy, ispin=ispin)
             Gk_all = np.zeros((self.nkpts,) + Gk0.shape, dtype=complex)
@@ -515,6 +955,8 @@ class TBGreen:
         :returns: real space green's function for one energy for a list of R.
         :rtype: numpy array of shape (len(Rpts), nbasis, nbasis)
         """
+        if self._spectral_source is not None:
+            return self._spectral_GR(Rpts, energy, Gk_all)
 
         import os as _os
 

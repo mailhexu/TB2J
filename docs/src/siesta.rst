@@ -19,6 +19,88 @@ contour-integration and derivative evidence, see
    siesta_spiral_material_campaign.md
 
 
+Complete WFSX spectral preparation (Python)
+------------------------------------------
+
+``TB2J.green.TBGreen`` accepts a metadata-only model capability named
+``eigenstate_source`` containing a HamiltonIO ``SiestaWFSXParser``. This
+low-level preparation interface reads complete WFSX records and explicit
+metadata; it never loads Hamiltonian/overlap input or solves an electronic
+eigenproblem. It is separate from the ordinary exchange tutorial below.
+
+Supply HamiltonIO's flat metadata mapping, including ``schema_version=1``,
+ordered lattice/atom/AO/spin data, absolute Fermi energy and its provenance,
+electron/occupation provenance, raw gauge and weight semantics. A fixture's
+provenance ``fixture.json`` is not this flat consumer mapping. TB2J additionally
+requires ``scf_mesh`` for every export mode, including selected lists: supply the
+original full SCF coordinates and uniform weights, not only representatives.
+The full-domain all-channel electron count is checked at the declared occupation
+temperature before any contour work. Missing provenance mesh raises
+``MissingMetadata`` and inconsistent electron/Fermi provenance raises
+``InconsistentMetadata``. Requested subsets retain their separate explicit
+uniform quadrature; their populations do not substitute for the global count.
+
+For example, for a complete export covering a Gamma-centered 1x1x5 grid::
+
+   import json
+   from pathlib import Path
+   from types import SimpleNamespace
+   from HamiltonIO.siesta.wfsx import SiestaWFSXParser
+   from TB2J.green import TBGreen
+
+   metadata = json.loads(Path("wfsx_metadata.json").read_text())
+   model = SimpleNamespace(
+       eigenstate_source=SiestaWFSXParser("states.WFSX", metadata),
+       spin_channel=0,
+       reduce_scalar=False,
+   )
+   green = TBGreen(
+       model, kmesh=(1, 1, 5), gamma=True, efermi=0,
+       cache_path="spectral_cache",
+   )
+   try:
+       gk = green.get_Gk(0, -5 + 1j)
+       gr = green.get_GR([[0, 0, 1]], -5 + 1j)
+       population = green.get_density_matrix()
+       onsite = green.H0
+   finally:
+       green.clean_cache()
+
+``spin_channel`` is 0 or 1 for independent collinear channels, and 0 for
+scalar/full-spinor input. ``reduce_scalar=True`` requests optional internal
+scalar folding only for a fully inversion-closed requested domain. It needs
+all four true symmetry declarations (real scalar Hamiltonian, no SOC, no
+orbital field and no spin spiral). Supplied partners must pass operator and
+normalization validation before contour evaluation. Missing scalar partners
+retain declaration-only provenance. Spinors require direct full-grid records.
+
+One coefficient LU factorization per representative/channel is reused across
+contour energies. Reciprocal condition below 1e-10 raises HamiltonIO's
+``SingularEigenbasis``; no regularization or H/S fallback is attempted. The
+cache holds coefficient/eigenvalue/dual factors, never all-k H/S. Only one
+representative is memory-mapped at a time and internal mappings close before
+a getter returns. Full energy arrays and explicitly requested output arrays
+still have their normal sizes.
+
+Spectral disk staging is mandatory even if ordinary ``use_cache=False``.
+Choose a real disk cache directory with adequate capacity; the default uses
+the system temporary directory, not the ordinary ``/dev/shm/TB2J_cache``
+default. A user-configured temporary directory may itself be RAM-backed.
+Cleanup removes only the owned temporary child and preserves its parent and
+user inputs. ``get_Hk``/``get_Sk`` reconstruct one requested dense diagnostic
+operator. Both ordinary ``TB2J_SIESTA_GREEN_MODE`` settings are preserved;
+the environment's metric dressing applies at ``get_GR`` as in the ordinary
+path.
+
+WFSX preparation always retains the complete spectrum. Ordinary H/S
+``TBGreen`` keeps its legacy contour band window by default. Use its explicit
+``complete_spectrum=True`` option for matched full-spectrum H/S comparisons;
+this bypasses only that window, not the ordinary eigensolve. Measured
+factorization, import/preparation and disk-size fields are available in
+``green.spectral_stats``. No net speed or memory improvement is implied
+without a matched measurement.
+
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 
