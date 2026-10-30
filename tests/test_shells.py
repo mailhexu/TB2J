@@ -8,7 +8,7 @@ import tomli
 
 from TB2J.io_exchange.shells import read_shells, write_shells
 
-HEADER = '''schema_version = 2
+HEADER = '''schema_version = 3
 exchange = "isotropic"
 [structure]
 coordinates = "fractional"
@@ -136,7 +136,9 @@ def test_stored_symmetry_cannot_exchange_selected_and_unselected_sites(tmp_path)
     "field,value",
     [
         ("n_equivalent_pairs", "3"),
-        ("support_members", "[2]"),
+        # The half translation maps the bond onto its reverse, so the stored
+        # directed orbit holds four members and valid ordinals stop below 4.
+        ("support_members", "[4]"),
         ("support_members", "[1, 0]"),
         ("support_members", "[0, 0]"),
         ("support_members", "[-1]"),
@@ -146,7 +148,7 @@ def test_masks_and_multiplicity_use_the_full_centered_orbit(tmp_path, field, val
     source = tmp_path / "mask.shells.toml"
     source.write_text(
         centered_header()
-        + f'\n[[shell]]\nid = "1:2:0,0,0"\nJ = 0.7\n{field} = {value}\n'
+        + f'\n[[shell]]\nid = "1:2:-1,0,0"\nJ = 0.7\n{field} = {value}\n'
     )
     with pytest.raises(ValueError, match=field):
         read_shells(source)
@@ -160,7 +162,7 @@ def test_centered_sparse_comments_are_removable_and_unfilled_is_draft_only(tmp_p
         centered_header()
         + """
 [[shell]]
-id = "1:2:0,0,0"
+id = "1:2:-1,0,0"
 J = "unfilled"
 n_equivalent_pairs = 2
 support_members = [1]
@@ -210,12 +212,12 @@ def test_invalid_context_is_rejected_before_any_exchange_export(
         ("[structure]", '[structure]\ncell_unit = "bohr"', "cell_unit"),
         ("time_reversal = false", "", "time_reversal"),
         (
-            "schema_version = 2",
-            "schema_version = 2\nunknown_header = 7",
+            "schema_version = 3",
+            "schema_version = 3\nunknown_header = 7",
             "unknown_header",
         ),
-        ("schema_version = 2", "schema_version = 1", "schema_version"),
-        ("schema_version = 2", "schema_version = 2\nschema_version = 2", "TOML"),
+        ("schema_version = 3", "schema_version = 1", "schema_version"),
+        ("schema_version = 3", "schema_version = 3\nschema_version = 3", "TOML"),
     ],
 )
 def test_wire_schema_rejects_ignored_fields_and_missing_operation_flags(
@@ -356,7 +358,7 @@ def test_tensor_requires_explicit_representative_and_matrix(tmp_path):
 def test_id_must_be_full_direct_orbit_minimum_not_representative(tmp_path):
     source = tmp_path / "nonminimum.shells.toml"
     source.write_text(centered_header() + '\n[[shell]]\nid = "2:1:1,0,0"\nJ = 1.0\n')
-    with pytest.raises(ValueError, match="2:1:1,0,0.*1:2:0,0,0"):
+    with pytest.raises(ValueError, match="2:1:1,0,0.*1:2:-1,0,0"):
         read_shells(source)
 
 
@@ -372,7 +374,7 @@ def test_python_edits_reject_complex_exchange_values(tmp_path):
 def test_valid_primed_half_translation_snapshot_roundtrips(tmp_path, moments):
     source = tmp_path / "afm.shells.toml"
     source.write_text(
-        primed_header(moments) + '\n[[shell]]\nid = "1:2:0,0,0"\nJ = -2.0\n'
+        primed_header(moments) + '\n[[shell]]\nid = "1:2:-1,0,0"\nJ = -2.0\n'
     )
     document = read_shells(source)
     output = tmp_path / "afm-saved.shells.toml"
@@ -458,13 +460,18 @@ def test_primed_snapshot_requires_msg_context(tmp_path, with_shell):
 def test_explicit_representative_must_be_in_sparse_support(tmp_path):
     source = tmp_path / "sparse-tensor.shells.toml"
     header = centered_header().replace('exchange = "isotropic"', 'exchange = "tensor"')
-    entry = '\n[[shell]]\nid = "1:2:0,0,0"\nrepresentative = "Fe1 Fe2 0 0 0"\nJ = "unfilled"\nsupport_members = [1]\n'
+    # Directed orbit ordinals: 0 "Fe1 Fe2 -1 0 0", 1 "Fe1 Fe2 0 0 0",
+    # 2 "Fe2 Fe1 0 0 0", 3 "Fe2 Fe1 1 0 0".
+    entry = (
+        '\n[[shell]]\nid = "1:2:-1,0,0"\nrepresentative = "Fe1 Fe2 0 0 0"'
+        '\nJ = "unfilled"\nsupport_members = [3]\n'
+    )
     source.write_text(header + entry)
     with pytest.raises(ValueError, match="representative.*support"):
         read_shells(source)
     source.write_text(header + entry.replace("Fe1 Fe2 0 0 0", "Fe2 Fe1 1 0 0"))
     document = read_shells(source)
-    assert document.shells[0].id == "1:2:0,0,0"
+    assert document.shells[0].id == "1:2:-1,0,0"
     assert document.shells[0].representative == (2, 1, 1, 0, 0)
 
 
@@ -472,7 +479,7 @@ def test_empty_scalar_support_roundtrips_without_inventing_observed_pairs(tmp_pa
     path = tmp_path / "empty-support.shells.toml"
     path.write_text(
         centered_header()
-        + '\n[[shell]]\nid = "1:2:0,0,0"\nJ = 0\nsupport_members = []\n'
+        + '\n[[shell]]\nid = "1:2:-1,0,0"\nJ = 0\nsupport_members = []\n'
     )
     document = read_shells(path)
     write_shells(document, path)

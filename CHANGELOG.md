@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- Shell text schema v3 unites each bond and its reverse into one editable
+  shell: one value per symmetry-plus-reversal orbit, with Jiso even, DMI odd
+  and tensors transposed under reversal. Export writes both directions for
+  every supported pair/channel, creating a missing reverse entry without
+  inventing unrelated symmetry images or absent channels.
+  `n_equivalent_pairs` and the generated equivalent-pair comments count each
+  unique physical pair once, while sparse `*_members` masks keep indexing the
+  full sorted directed orbit. Shell files require an explicit
+  `schema_version = 3`: omitted versions and version 2 files are rejected
+  with regeneration advice instead of silently reinterpreting old
+  directed-orbit masks; regenerate with `TB2J_shell generate`.
 - `TB2J_shell` reports version, license and generation progress. Pickle
   generation symmetrizes exchange by default and reports the maximum change;
   Python callers can request strict checking with `project=False`.

@@ -1,4 +1,4 @@
-"""TOML v2 boundary: editable labeled rows, authoritative replay footer."""
+"""TOML v3 boundary: one editable shell per bond and its reverse."""
 
 import json
 import math
@@ -22,6 +22,7 @@ from .shells import (
     _expand_core,
     _freeze,
     _pair_id,
+    _physical_pairs,
     _shell_orbits,
     _template_distance,
     _template_number,
@@ -34,6 +35,7 @@ _REAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z
 _INTEGER = re.compile(r"[+-]?[0-9]+\Z")
 _LABEL = re.compile(r"([A-Z][a-z]?)[1-9][0-9]*\Z")
 _MASKS = ("support_members", "Jiso_members", "DMI_members", "Jani_members")
+_SCHEMA_VERSION = 3
 
 
 def _floats(value):
@@ -98,8 +100,28 @@ def _schema(data):
         ),
         "shell document",
     )
-    version = data.get("schema_version", 2)
-    if not isinstance(version, int) or isinstance(version, bool) or version != 2:
+    version = data.get("schema_version")
+    if version is None:
+        raise ValueError(
+            "schema_version: required; an omitted key described the superseded "
+            "version 2 format, whose directed-orbit masks are not reinterpreted. "
+            "Regenerate the file with 'TB2J_shell generate' from its original "
+            f"structure or trusted pickle, re-enter edited values, and declare "
+            f"schema_version = {_SCHEMA_VERSION}"
+        )
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ValueError(
+            f"schema_version: expected the integer {_SCHEMA_VERSION}, got {version!r}"
+        )
+    if version != _SCHEMA_VERSION:
+        if version == 2:
+            raise ValueError(
+                "schema_version: version 2 keeps each bond direction in a "
+                "separate shell and is not reinterpreted; regenerate the file "
+                "with 'TB2J_shell generate' from its original structure or "
+                "trusted pickle, re-enter edited values, and declare "
+                f"schema_version = {_SCHEMA_VERSION}"
+            )
         raise ValueError(f"schema_version: unsupported version {version!r}")
     if data["exchange"] not in {"isotropic", "tensor"}:
         raise ValueError("exchange: expected isotropic or tensor")
@@ -298,6 +320,7 @@ def loads(text):
     kwargs = dict(
         **structure,
         exchange_mode=data["exchange"],
+        schema_version=_SCHEMA_VERSION,
         energy_unit=data.get("energy_unit", "meV"),
         distance_unit=distance_unit,
         symmetry_mode=mode,
@@ -485,7 +508,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         + "\n",
     }
     header = {
-        "schema_version": 2,
+        "schema_version": _SCHEMA_VERSION,
         "exchange": document.exchange_mode,
         "energy_unit": document.energy_unit,
         "distance_unit": document.distance_unit,
@@ -530,9 +553,12 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
         "# Reference moments, when present, follow the complete atom order.\n"
         "# Shell representative: first label, second label, Rx Ry Rz; translation moves the second atom.\n"
+        "# Each shell unites a bond's symmetry orbit with its reversed orbit: Jiso is even,\n"
+        "# the DMI sign flips, and a tensor transposes when the bond direction reverses.\n"
         "# J is a scalar or Cartesian 3x3 tensor; replace 'unfilled'.\n"
         "# name, distance and n_equivalent_pairs are optional input summaries.\n"
-        "# n_equivalent_pairs counts the full ordered-pair symmetry orbit, not coordination.\n"
+        "# n_equivalent_pairs counts unique physical pairs (each bond and its reverse once),\n"
+        "# not the directed orbit that the *_members masks index.\n"
         + tomli_w.dumps(_rounded(header), multiline_strings=True)
     ]
     pair_sections = []
@@ -559,7 +585,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
             )
             / DISTANCE_TO_ANGSTROM[document.distance_unit]
         )
-        entry["n_equivalent_pairs"] = len(orbit)
+        entry["n_equivalent_pairs"] = len(_physical_pairs(orbit))
         entry["J"] = _wire_energy(
             shell.Jiso if document.exchange_mode == "isotropic" else shell.tensor, scale
         )
@@ -573,14 +599,15 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
             pair_sections.append(
                 f"# Shell {number}: {_pair_text(representative, document.site_labels)} (orbit {shell.id})\n"
             )
-            for pair in orbit:
+            for pair in _physical_pairs(orbit):
                 spins = tuple(document.index_spin[atom - 1] for atom in pair[:2])
                 pair_sections.append(
                     f"# {_pair_text(pair, document.site_labels)}; atoms {pair[:2]}, spins {spins}\n"
                 )
     if pair_sections:
         parts.append(
-            "# Equivalent ordered pairs (informational):\n" + "".join(pair_sections)
+            "# Equivalent physical pairs (informational; each reverse belongs to the shell):\n"
+            + "".join(pair_sections)
         )
     operation_sections = []
     for operation in document.operations:

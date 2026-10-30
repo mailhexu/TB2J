@@ -9,7 +9,8 @@ import pytest
 from TB2J.io_exchange import shells
 from TB2J.io_exchange.io_exchange import SpinIO
 
-HAND_FILE = '''exchange = "isotropic"
+HAND_FILE = '''schema_version = 3
+exchange = "isotropic"
 [structure]
 coordinates = "fractional"
 lattice = """
@@ -63,7 +64,9 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
     assert shell.n_equivalent_pairs == 1 and shell.name is None
     output = shells.expand(reloaded).spinio
     key = ((1, 0, -1), 1, 0)
-    assert output.exchange_Jdict == {key: 0.002}
+    # Each supported bond also emits its synthesized reverse: a model value,
+    # not an independent calculation.
+    assert output.exchange_Jdict == {key: 0.002, ((-1, 0, 1), 0, 1): 0.002}
     np.testing.assert_allclose(output.distance_dict[key][0], vector, atol=1e-14)
     output.write_pickle(path=tmp_path)
     native = SpinIO.load_pickle(path=tmp_path)
@@ -151,7 +154,8 @@ def test_snapshot_free_cubic_orbit_pins_full_count_and_replays(
     tmp_path, mode, symmetry
 ):
     path = tmp_path / "cubic.shells.toml"
-    path.write_text(f'''exchange = "{mode}"
+    path.write_text(f'''schema_version = 3
+exchange = "{mode}"
 [structure]
 coordinates = "fractional"
 lattice = """
@@ -172,8 +176,10 @@ J = "unfilled"
     shells.write_shells(document, path, equivalent_comments=False)
     canonical = shells.read_shells(path)
     assert canonical.shells[0].distance == 2.0
+    # Masks index the directed +/- orbit (six or two images); the count is the
+    # unique bonds left once each bond and its reverse are identified.
     assert canonical.shells[0].n_equivalent_pairs == (
-        6 if symmetry == "spacegroup" else 2
+        3 if symmetry == "spacegroup" else 1
     )
     assert canonical.shells[0].name is None
     assert canonical.operations == document.operations

@@ -91,7 +91,8 @@ def test_native_context_survives_relocation_and_rejects_tampering(tmp_path):
     document = shells.read_shells(relocated / original.name)
     base = load_context(relocated / original.name, document)
     result = shells.expand(document, base=base).spinio
-    assert result.exchange_Jdict == source.exchange_Jdict
+    # The model value is replayed for the bond and its synthesized reverse.
+    assert result.exchange_Jdict == {key: 0.002, ((-1, 0, 1), 0, 1): 0.002}
     assert result.biquadratic_Jdict == source.biquadratic_Jdict
     assert result.index_spin == source.index_spin
     np.testing.assert_array_equal(result.atoms.get_masses(), source.atoms.get_masses())
@@ -307,7 +308,7 @@ def test_public_base_update_changes_only_exchange_and_rebuilds_exact_derived_map
     document = shells.compress(source, mode="isotropic").document
     result = shells.expand(_edit(document, 0.003), base=source)
     output = result.spinio
-    assert output.exchange_Jdict == {key: 0.003}
+    assert output.exchange_Jdict == {key: 0.003, ((-1, 0, 1), 0, 1): 0.003}
     assert output.dmi_ddict is None and output.Jani_dict is None
     assert output.index_spin == [1, -2, 0]
     np.testing.assert_array_equal(output.spinat, source.spinat)
@@ -325,7 +326,8 @@ def test_public_base_update_changes_only_exchange_and_rebuilds_exact_derived_map
     )
     np.testing.assert_allclose(output.distance_dict[key][0], vector, atol=1e-14, rtol=0)
     assert output.distance_dict[key][1] == pytest.approx(np.linalg.norm(vector))
-    assert output.Rlist == [(0, 0, 0), key[0]]
+    # Rlist is rebuilt from the edited map including the synthesized reverse.
+    assert output.Rlist == [(-1, 0, 1), (0, 0, 0), (1, 0, -1)]
     assert (
         source.exchange_Jdict == {key: 0.002} and source.distance_dict[key][1] == -1.0
     )
@@ -372,7 +374,7 @@ def test_edited_values_require_named_drop_of_each_stale_derived_group():
     assert result.spinio.Jiso_orb is None and result.spinio.dJdx is None
     assert result.spinio.dJdx_orb is None
     assert {row[0] for row in result.report.losses} == {"orbital", "djdx"}
-    assert result.spinio.exchange_Jdict == {key: 0.003}
+    assert result.spinio.exchange_Jdict == {key: 0.003, ((-1, 0, 1), 0, 1): 0.003}
     assert source.Jiso_orb is not None and source.dJdx is not None
 
 
@@ -386,7 +388,7 @@ def test_charge_loss_is_explicit_and_does_not_fabricate_writer_context():
     result = shells.expand(document, allow_loss=("charges",))
     assert result.spinio.charges is None
     assert result.spinio.damping is None and result.spinio.gyro_ratio is None
-    assert result.spinio.exchange_Jdict == {key: 0.002}
+    assert result.spinio.exchange_Jdict == {key: 0.002, ((-1, 0, 1), 0, 1): 0.002}
     assert {row[0] for row in result.report.losses} == {"charges"}
     assert any(
         "charge" in message and "target" in message
@@ -453,7 +455,10 @@ def test_public_completion_preserves_sparse_support_unless_explicitly_requested(
     document = shells.compress(source, mode="isotropic").document
     partial = shells.expand(document)
     complete = shells.expand(document, complete_orbits=True)
-    assert partial.spinio.exchange_Jdict == {key: 0.002}
+    assert partial.spinio.exchange_Jdict == {
+        key: 0.002,
+        ((-1, 0, 0), 0, 0): 0.002,
+    }
     assert set(complete.spinio.exchange_Jdict) == {
         ((a, b, c), 0, 0)
         for a, b, c in [
@@ -491,7 +496,7 @@ def test_numpy_index_map_keeps_native_key_identity_through_base_update():
     document = shells.compress(source, mode="isotropic").document
     result = shells.expand(document, base=source)
     np.testing.assert_array_equal(result.spinio.index_spin, [1, -2, 0])
-    assert result.spinio.exchange_Jdict == {key: 0.002}
+    assert result.spinio.exchange_Jdict == {key: 0.002, ((-1, 0, 1), 0, 1): 0.002}
     assert result.spinio.ind_atoms == {1: 0, 0: 2}
 
 
@@ -545,7 +550,7 @@ def test_raw_site_images_keep_native_keys_and_bond_vectors(tmp_path, symmetry, m
     for base in (None, source):
         output = shells.expand(document, base=base).spinio
         assert output.index_spin == [1, -2, 0]
-        assert set(output.exchange_Jdict) == {key}
+        assert set(output.exchange_Jdict) == {key, ((-1, 0, 1), 0, 1)}
         assert output.exchange_Jdict[key] == pytest.approx(0.002, abs=1e-15)
         np.testing.assert_allclose(
             output.distance_dict[key][0], expected_vector, atol=1e-14, rtol=0

@@ -101,8 +101,10 @@ def test_rounded_tensor_must_still_obey_bond_fixpoint(tmp_path):
         shells.ShellOperation(rotation=np.eye(3, dtype=int), translation=(0, 0, 0)),
         shells.ShellOperation(rotation=np.diag([-1, 1, 1]), translation=(0, 0, 0)),
     )
+    # The stored group plus bond reversal closes on the pair {+z, -z}; the
+    # canonical minimum of that directed orbit is the -z image.
     entry = shells.ShellEntry(
-        id="1:1:0,0,1",
+        id="1:1:0,0,-1",
         representative=(1, 1, 0, 0, 1),
         tensor=np.array([[9, 12, 0], [12, 16, 0], [0, 0, 0]]) / 16384,
     )
@@ -294,7 +296,7 @@ def test_generated_shell_file_presents_readable_snapshot(tmp_path):
     result = generate_shells(source, path, magnetic_species=["Fe"], cutoff=4.3)
     text = path.read_text()
     assert f"TB2J {TB2J.__version__}" in text and str(source) in text
-    assert text.rfind("[[shell]]") < text.index("# Equivalent ordered pairs")
+    assert text.rfind("[[shell]]") < text.index("# Equivalent physical pairs")
     assert re.search(
         r"rotation = \[\n\s*\[[^\n]+\],\n\s*\[[^\n]+\],\n\s*\[[^\n]+\],\n\]", text
     )
@@ -309,10 +311,11 @@ def test_cubic_template_is_one_full_direct_neighbor_orbit(tmp_path):
     atoms = Atoms("Fe", cell=np.eye(3) * 2.0, scaled_positions=[(0, 0, 0)], pbc=True)
     document = shells.template(atoms, [1], 2.01, mode="tensor")
     assert document.index_spin == (0,)
+    # Six directed +/-x, +/-y, +/-z images collapse to three unique bonds.
     assert [
         (entry.id, entry.n_equivalent_pairs, entry.tensor, entry.representative)
         for entry in document.shells
-    ] == [("1:1:-1,0,0", 6, "unfilled", (1, 1, -1, 0, 0))]
+    ] == [("1:1:-1,0,0", 3, "unfilled", (1, 1, -1, 0, 0))]
     output = tmp_path / "fe.shells.toml"
     shells.write_shells(document, output)
     assert shells.read_shells(output) == document
@@ -330,9 +333,9 @@ def test_sg_joins_and_msg_splits_cubic_bond_orbits():
     )
 
     assert len(sg.shells) == 1
-    assert sg.shells[0].n_equivalent_pairs == 6
+    assert sg.shells[0].n_equivalent_pairs == 3
     assert len(msg.shells) == 2
-    assert sorted(entry.n_equivalent_pairs for entry in msg.shells) == [2, 4]
+    assert sorted(entry.n_equivalent_pairs for entry in msg.shells) == [1, 2]
     assert all(entry.representative is not None for entry in sg.shells + msg.shells)
     assert all(
         entry.tensor is None and entry.Jiso == "unfilled"
@@ -421,8 +424,10 @@ def test_skew_cell_images_match_independent_brute_force_oracle():
     cutoff = 0.46
     document = shells.template(atoms, [1], cutoff)
 
+    # One shell per physical bond: each within-cutoff image and its reverse
+    # share a shell, canonically named by the lexicographically smaller wire.
     expected = {
-        translation
+        min(translation, tuple(-image for image in translation))
         for translation in product(range(-8, 9), repeat=3)
         if translation != (0, 0, 0)
         and np.linalg.norm(np.asarray(translation) @ cell) <= cutoff

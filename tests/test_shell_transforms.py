@@ -29,18 +29,33 @@ def test_isotropic_sparse_support_roundtrip_preserves_absent_channels():
             entry.Jani_members,
         )
         for entry in result.document.shells
-    ] == [("1:1:-1,0,0", 6, (5,), (5,), (), ())]
+    ] == [("1:1:-1,0,0", 3, (5,), (5,), (), ())]
     replay = shells.expand(result.document, base=source)
-    assert replay.spinio.exchange_Jdict == source.exchange_Jdict
+    # The sparse forward support replays together with its synthesized reverse.
+    assert replay.spinio.exchange_Jdict == {
+        ((1, 0, 0), 0, 0): 0.1,
+        ((-1, 0, 0), 0, 0): 0.1,
+    }
     assert not replay.spinio.dmi_ddict
     assert not replay.spinio.Jani_dict
     assert replay.report.absent_channel_keys == (
+        ("DMI", ((-1, 0, 0), 0, 0)),
+        ("Jani", ((-1, 0, 0), 0, 0)),
         ("DMI", ((1, 0, 0), 0, 0)),
         ("Jani", ((1, 0, 0), 0, 0)),
     )
     assert replay.spinio.spinat is None and replay.spinio.charges is None
     again = shells.compress(replay.spinio, mode="tensor")
-    assert again.document == result.document
+    # Recompressing the export adopts the synthesized reverse into the
+    # observed directed support; values are unchanged and the next
+    # expand/compress cycle is a stable fixed point.
+    stable = again.document.shells[0]
+    assert stable.id == result.document.shells[0].id
+    assert stable.tensor == result.document.shells[0].tensor
+    assert stable.support_members == (0, 5)
+    assert stable.Jiso_members == (0, 5)
+    replayed = shells._expand_core(again.document)
+    assert replayed.spinio.exchange_Jdict == replay.spinio.exchange_Jdict
 
 
 def _cubic_source(**channels):
@@ -92,7 +107,8 @@ def test_tensor_transport_matches_independent_cubic_orbit_oracle():
 
     entry = result.document.shells[0]
     assert entry.id == "1:1:-1,0,0"
-    assert entry.n_equivalent_pairs == 6
+    # One value per physical bond: three unique pairs in the cubic orbit.
+    assert entry.n_equivalent_pairs == 3
     assert entry.support_members == tuple(range(6))
     np.testing.assert_allclose(entry.tensor, np.diag([1.0, -0.5, -0.5]), atol=1e-12)
     replay = shells._expand_core(result.document)
@@ -172,11 +188,11 @@ def test_sparse_channels_keep_independent_masks_and_reject_incomplete_values():
     assert entry.Jani_members == (orbit.index((1, 1, 0, 1, 0)),)
     assert entry.DMI_members == ()
     replay = shells._expand_core(result.document).spinio
-    assert set(replay.exchange_Jdict) == set(source.exchange_Jdict)
+    assert set(replay.exchange_Jdict) == {((1, 0, 0), 0, 0), ((-1, 0, 0), 0, 0)}
     np.testing.assert_allclose(
         replay.exchange_Jdict[((1, 0, 0), 0, 0)], 0.1, atol=1e-12
     )
-    assert set(replay.Jani_dict) == set(source.Jani_dict)
+    assert set(replay.Jani_dict) == {((0, 1, 0), 0, 0), ((0, -1, 0), 0, 0)}
     np.testing.assert_allclose(
         replay.Jani_dict[((0, 1, 0), 0, 0)],
         source.Jani_dict[((0, 1, 0), 0, 0)],
@@ -194,9 +210,13 @@ def test_bond_fixpoint_allows_site_stabilizer_anisotropy_and_rejects_bad_paths()
     document = shells.compress(source).document
 
     replay = shells._expand_core(document).spinio
-    assert set(replay.Jani_dict) == {((1, 0, 0), 0, 0)}
+    assert set(replay.Jani_dict) == {((1, 0, 0), 0, 0), ((-1, 0, 0), 0, 0)}
     np.testing.assert_allclose(
         replay.Jani_dict[((1, 0, 0), 0, 0)], np.diag([2.0, -1.0, -1.0])
+    )
+    # The synthesized reverse carries the transposed (here identical) tensor.
+    np.testing.assert_allclose(
+        replay.Jani_dict[((-1, 0, 0), 0, 0)], np.diag([2.0, -1.0, -1.0])
     )
 
     object.__setattr__(
@@ -211,7 +231,7 @@ def test_completion_reports_created_keys_and_reciprocity_is_present_only():
     document = shells.compress(source, mode="isotropic").document
 
     partial = shells._expand_core(document).spinio
-    assert set(partial.exchange_Jdict) == set(source.exchange_Jdict)
+    assert set(partial.exchange_Jdict) == {((1, 0, 0), 0, 0), ((-1, 0, 0), 0, 0)}
     completed = shells._expand_core(document, complete_orbits=True)
     expected = {
         ((x, y, z), 0, 0)
@@ -270,10 +290,9 @@ def test_present_reciprocity_projects_values_across_distinct_shells():
         shells.compress(source, mode="isotropic")
 
     projected = shells.compress(source, mode="isotropic", on_inconsistent="project")
-    assert {entry.id for entry in projected.document.shells} == {
-        "1:2:0,0,0",
-        "2:1:0,0,0",
-    }
+    # Schema v3 unites each bond and its reverse into one editable shell.
+    assert {entry.id for entry in projected.document.shells} == {"1:2:0,0,0"}
+    assert projected.document.shells[0].n_equivalent_pairs == 1
     assert all(entry.Jiso == pytest.approx(0.15) for entry in projected.document.shells)
 
 
@@ -444,10 +463,15 @@ def test_noncanonical_jani_is_normalized_before_sparse_channel_comparison():
         shells.compress(source)
     projected = shells.compress(source, on_inconsistent="project")
     replay = shells._expand_core(projected.document).spinio
-    assert set(replay.exchange_Jdict) == {((1, 0, 0), 0, 0), ((0, 1, 0), 0, 0)}
+    assert set(replay.exchange_Jdict) == {
+        ((1, 0, 0), 0, 0),
+        ((-1, 0, 0), 0, 0),
+        ((0, 1, 0), 0, 0),
+        ((0, -1, 0), 0, 0),
+    }
     for value in replay.exchange_Jdict.values():
         assert value == pytest.approx(0.15)
-    assert set(replay.Jani_dict) == {((0, 1, 0), 0, 0)}
+    assert set(replay.Jani_dict) == {((0, 1, 0), 0, 0), ((0, -1, 0), 0, 0)}
     np.testing.assert_allclose(replay.Jani_dict[((0, 1, 0), 0, 0)], 0, atol=1e-16)
     assert projected.report.encoding_changes
 
@@ -493,7 +517,7 @@ def test_hexagonal_tensor_transport_uses_cartesian_not_fractional_rotation():
         Jani_dict=values,
     )
     document = shells.compress(source).document
-    assert document.shells[0].n_equivalent_pairs == 6
+    assert document.shells[0].n_equivalent_pairs == 3
     assert document.shells[0].Jiso_members == ()
     assert document.shells[0].DMI_members == ()
     replay = shells._expand_core(document).spinio
@@ -521,7 +545,7 @@ def test_sparse_inversion_bond_requires_endpoint_transpose():
                 id="1:1:-1,0,0",
                 tensor=((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
                 representative=(1, 1, 1, 0, 0),
-                n_equivalent_pairs=2,
+                n_equivalent_pairs=1,
                 support_members=(1,),
                 Jiso_members=(),
                 DMI_members=(1,),
@@ -554,9 +578,16 @@ def test_identity_roundoff_preserves_p1_dmi(project):
     result = shells.compress(source, on_inconsistent="project" if project else "error")
     assert len(result.document.operations) == 1
     replay = shells._expand_core(result.document)
-    assert set(replay.spinio.dmi_ddict) == {key}
+    assert set(replay.spinio.dmi_ddict) == {key, ((0, 0, 0), 1, 0)}
     np.testing.assert_allclose(
         replay.spinio.dmi_ddict[key], [0.001, 0.0, 0.0], atol=1e-15, rtol=1e-12
+    )
+    # DMI is odd under bond reversal; the synthesized flip negates it.
+    np.testing.assert_allclose(
+        replay.spinio.dmi_ddict[((0, 0, 0), 1, 0)],
+        [-0.001, 0.0, 0.0],
+        atol=1e-15,
+        rtol=1e-12,
     )
     assert not replay.spinio.exchange_Jdict and not replay.spinio.Jani_dict
 
@@ -583,6 +614,11 @@ def test_compress_sparse_endpoint_constraint_projects_without_reverse_creation()
     assert len(result.document.operations) == 2
     assert result.document.shells[0].DMI_members == (1,)
     replay = shells._expand_core(result.document)
-    assert set(replay.spinio.dmi_ddict) == {key}
+    assert set(replay.spinio.dmi_ddict) == {key, ((-1, 0, 0), 0, 0)}
     np.testing.assert_array_equal(replay.spinio.dmi_ddict[key], [0.0, 0.0, 0.0])
+    np.testing.assert_array_equal(
+        replay.spinio.dmi_ddict[((-1, 0, 0), 0, 0)], [0.0, 0.0, 0.0]
+    )
+    # Compression itself reports no created pairs; only expansion synthesizes
+    # the reverse of each supported bond.
     assert result.report.created_pair_keys == ()

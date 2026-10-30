@@ -132,7 +132,7 @@ class ShellDocument:
     precision_profile: str | None = None
     context_sha256: str | None = None
     required_base_fields: tuple = ()
-    schema_version: int = 2
+    schema_version: int = 3
     site_labels: tuple | None = None
     metadata: Mapping = field(default_factory=dict)
     cutoff: float | None = None
@@ -248,8 +248,26 @@ def _core_key(pair):
     return pair[0] - 1, pair[1] - 1, tuple(pair[2:])
 
 
+def _reverse_core(key):
+    """Core-format reciprocal bond: endpoints swapped, translation negated."""
+    return key[1], key[0], tuple(-r for r in key[2])
+
+
 def _wire_key(key):
     return key[0] + 1, key[1] + 1, *key[2]
+
+
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_transpose_tensor
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_dmi_axial_vector_negated
+def _reverse_wire(pair):
+    """Return the reciprocal wire: endpoints swapped, translation negated."""
+    i, j, x, y, z = pair
+    return (j, i, -x, -y, -z)
+
+
+def _physical_pairs(orbit):
+    """Return sorted unique physical pairs; each bond and its reverse once."""
+    return tuple(sorted({min(pair, _reverse_wire(pair)) for pair in orbit}))
 
 
 def _operation_key(rotation, primed):
@@ -387,8 +405,15 @@ def _validated_operations(document, cell, positions):
 
 # MathDoc: tb2j/spacegroup-exchange-symmetrization#bond_map_image_shift
 # MathDoc: tb2j/spacegroup-exchange-symmetrization#hexagonal_cartesian_rotation
+# MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_transpose_tensor
 def _shell_orbits(document):
-    """Return full direct operation orbits; never add reciprocal partners."""
+    """Return each shell's full directed orbit: symmetry images plus reversals.
+
+    Bond reversal commutes with every site-map operation, so the union of the
+    direct orbit and its reversed orbit is the smallest set closed under the
+    stored group and reversal. Distinct SG/MSG orbits remain distinct; equal
+    distance alone never merges shells.
+    """
     cell = _numbers(document.cell_angstrom, (3, 3), "structure.cell_angstrom")
     if abs(np.linalg.det(cell)) < np.finfo(float).tiny:
         raise ValueError("structure.cell_angstrom: singular cell")
@@ -418,9 +443,11 @@ def _shell_orbits(document):
     # pair_images takes the column-basis matrix used by the MathDoc. ASE and
     # the wire format store rows; site-map distances above retain row vectors.
     images, _ = symmetry_core.pair_images(seeds, operations, maps, positions, cell.T)
-    return [
-        tuple(sorted({_wire_key(image[seed]) for image in images})) for seed in seeds
-    ]
+    orbits = []
+    for seed in seeds:
+        direct = {_wire_key(image[seed]) for image in images}
+        orbits.append(tuple(sorted(direct | {_reverse_wire(pair) for pair in direct})))
+    return orbits
 
 
 def _mask(value, default, size, field):
@@ -437,12 +464,19 @@ def _mask(value, default, size, field):
     return members
 
 
-def _channel_masks(shell, size):
+def _channel_masks(shell, orbit):
+    """Validate masks over the full directed orbit and the physical pair count.
+
+    Masks index the directed orbit; ``n_equivalent_pairs`` counts unique
+    physical pairs (each bond and its reverse once).
+    """
+    size = len(orbit)
+    physical = len(_physical_pairs(orbit))
     if shell.n_equivalent_pairs is not None and (
-        not _integer(shell.n_equivalent_pairs) or shell.n_equivalent_pairs != size
+        not _integer(shell.n_equivalent_pairs) or shell.n_equivalent_pairs != physical
     ):
         raise ValueError(
-            f"shell {shell.id}.n_equivalent_pairs: stored {shell.n_equivalent_pairs}, computed {size}"
+            f"shell {shell.id}.n_equivalent_pairs: stored {shell.n_equivalent_pairs}, computed {physical}"
         )
     support = _mask(
         shell.support_members,
@@ -589,9 +623,12 @@ def _validate_context(document):
 
 def validate_shells(document, *, for_export=False, check_producer_ops=False):
     """Validate the authored document without replacing its operation snapshot."""
-    if not _integer(document.schema_version) or document.schema_version != 2:
+    if not _integer(document.schema_version) or document.schema_version != 3:
         raise ValueError(
-            f"schema_version: unsupported version {document.schema_version!r}"
+            f"schema_version: unsupported version {document.schema_version!r}; "
+            "shell documents use schema_version 3 with one shell per bond and "
+            "its reverse. Regenerate directed-orbit v2 files with template or "
+            "compress; their masks and orbit sizes are never reinterpreted."
         )
     if document.exchange_mode not in {"isotropic", "tensor"}:
         raise ValueError("exchange_mode: expected isotropic or tensor")
@@ -611,7 +648,7 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
             raise ValueError(
                 f"shell {shell.id}: computed canonical minimum is {canonical}"
             )
-        masks = _channel_masks(shell, len(orbit))
+        masks = _channel_masks(shell, orbit)
         if shell.name is not None and not isinstance(shell.name, str):
             raise ValueError(f"shell {shell.id}.name: expected a display string")
         if shell.distance is not None:
@@ -739,7 +776,7 @@ def check_producer_ops(document):
 
 
 def read_shells(path):
-    """Read and validate a UTF-8 shells-v1 TOML document."""
+    """Read and validate a UTF-8 shells-v3 TOML document."""
     from .shell_text import load
 
     return load(path)
@@ -1066,32 +1103,26 @@ def _transform_project_observations(
         return means, (), []
     core_to_native = {native_to_core[key]: key for key in values}
     adjacency = {key: [] for key in values}
+    identity_rotation = np.eye(3)
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_transpose_tensor
+    # MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_dmi_axial_vector_negated
+    # Reversal commutes with each operation's tensor transport, so symmetry
+    # composed with reversal is the edge (rotation, True). It constrains
+    # observed values even when the intermediate reverse image was never
+    # observed; the required unprimed identity operation supplies the direct
+    # reversal edges between observed reciprocal keys. Each edge is a
+    # constraint on existing observations, never a synthesized entry.
     for key in sorted(values):
         source_core = native_to_core[key]
-        reverse_core = (
-            source_core[1],
-            source_core[0],
-            tuple(-r for r in source_core[2]),
-        )
         for op_index, image_map in enumerate(image_maps):
             image = image_map[source_core]
-            target = core_to_native.get(image)
             rotation = cartesian_rotations[op_index]
+            target = core_to_native.get(image)
             if target is not None:
                 adjacency[key].append((target, (rotation, False)))
-            # This is a constraint on an existing observation, not a
-            # calculated entry for the possibly absent reverse bond.
-            if image == reverse_core:
-                adjacency[key].append((key, (rotation, True)))
-    identity_rotation = np.eye(3)
-    for key in sorted(values):
-        R, i, j = key
-        reverse = (tuple(-component for component in R), j, i)
-        if reverse in values and key <= reverse:
-            edge = (identity_rotation, True)
-            adjacency[key].append((reverse, edge))
-            if reverse != key:
-                adjacency[reverse].append((key, edge))
+            composed = core_to_native.get(_reverse_core(image))
+            if composed is not None:
+                adjacency[key].append((composed, (rotation, True)))
 
     transforms = {}
     component_roots = {}
@@ -1166,19 +1197,29 @@ def _transform_project_observations(
             continue
         native_key = source_keys[0]
         root = component_roots[native_key]
-        paths = [
-            (op_index, cartesian_rotations[op_index])
+        source_core = native_to_core[native_key]
+        # The representative may sit in the reversed half of the directed
+        # orbit; transport through either a direct operation or one composed
+        # with reversal, preferring the direct image when both exist.
+        direct = [
+            cartesian_rotations[op_index]
             for op_index, image_map in enumerate(image_maps)
-            if image_map[native_to_core[native_key]] == representative_core
+            if image_map[source_core] == representative_core
         ]
-        if not paths:
+        composed = [
+            cartesian_rotations[op_index]
+            for op_index, image_map in enumerate(image_maps)
+            if _reverse_core(image_map[source_core]) == representative_core
+        ]
+        if direct:
+            edge = (direct[0], False)
+        elif composed:
+            edge = (composed[0], True)
+        else:
             raise ValueError(
                 f"shell {identifier}: no stored operation reaches its representative"
             )
-        rotation = paths[0][1]
-        root_to_representative = _transform_compose(
-            (rotation, False), transforms[native_key]
-        )
+        root_to_representative = _transform_compose(edge, transforms[native_key])
         means[identifier] = _transform_apply(
             channel, projected_roots[root], root_to_representative
         )
@@ -1218,7 +1259,11 @@ def compress(
     value_atol=1e-8,
     value_rtol=1e-6,
 ):
-    """Compress observed SpinIO channels over exact directed symmetry orbits."""
+    """Compress observed SpinIO channels over exact directed orbit unions.
+
+    Each emitted shell covers the union of a symmetry orbit and its reversed
+    orbit: one editable value per physical bond and its reciprocal direction.
+    """
     from TB2J.Jtensor import combine_J_tensor, decompose_J_tensor
 
     if symmetry not in {"sg", "msg"}:
@@ -1380,7 +1425,11 @@ def compress(
 
     orbit_groups = {}
     for seed in seeds:
-        orbit = tuple(sorted({_wire_key(image_map[seed]) for image_map in image_maps}))
+        direct = {_wire_key(image_map[seed]) for image_map in image_maps}
+        # One editable shell per bond direction pair: the directed union of
+        # the direct orbit and its reversed orbit, closed under the stored
+        # group and reversal. Distinct symmetry orbits never merge.
+        orbit = tuple(sorted(direct | {_reverse_wire(pair) for pair in direct}))
         orbit_groups.setdefault(orbit, set()).add(seed)
     ordered_groups = sorted(orbit_groups.items(), key=lambda item: min(item[0]))
     shell_by_wire = {}
@@ -1443,7 +1492,7 @@ def compress(
                     id=identifier,
                     Jiso=value,
                     representative=representative,
-                    n_equivalent_pairs=len(orbit),
+                    n_equivalent_pairs=len(_physical_pairs(orbit)),
                     distance=_template_distance(representative, positions, cell),
                     support_members=support_members,
                     Jiso_members=channel_members["Jiso"],
@@ -1471,7 +1520,7 @@ def compress(
                 id=identifier,
                 tensor=tuple(map(tuple, tensor)),
                 representative=representative,
-                n_equivalent_pairs=len(orbit),
+                n_equivalent_pairs=len(_physical_pairs(orbit)),
                 distance=_template_distance(representative, positions, cell),
                 support_members=support_members,
                 Jiso_members=tuple(sorted(jiso_members)),
@@ -1569,23 +1618,54 @@ def _expand_core(document, *, complete_orbits=False):
     created_channel_keys = set()
     potential_pairs = set()
     failure_messages = []
+    identity_rotation = np.eye(3)
     for shell_index, shell in enumerate(document.shells):
         representative_core = representative_keys[shell_index]
-        orbit = tuple(
-            sorted(
-                {_wire_key(image_map[representative_core]) for image_map in image_maps}
-            )
-        )
-        masks = _channel_masks(shell, len(orbit))
+        direct = {_wire_key(image_map[representative_core]) for image_map in image_maps}
+        # MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_transpose_tensor
+        # MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_dmi_axial_vector_negated
+        # The shell covers the directed union of the direct orbit and its
+        # reversed orbit; every member is reachable through a direct
+        # operation or one composed with reversal.
+        orbit = tuple(sorted(direct | {_reverse_wire(pair) for pair in direct}))
+        masks = _channel_masks(shell, orbit)
         support = _mask(
             shell.support_members,
             tuple(range(len(orbit))),
             len(orbit),
             f"shell {shell.id}.support_members",
         )
-        selected_members = tuple(range(len(orbit))) if complete_orbits else support
-        for member_index in selected_members:
-            potential_pairs.add(orbit[member_index])
+        orbit_index = {pair: index for index, pair in enumerate(orbit)}
+        reverse_index = {
+            index: orbit_index[_reverse_wire(orbit[index])]
+            for index in range(len(orbit))
+        }
+
+        def representative_transports(target_core):
+            # Direct operation transports, then symmetry composed with
+            # reversal; the identity transport covers the representative
+            # itself. Every candidate must agree before one is used.
+            transports = []
+            if target_core == representative_core:
+                transports.append((-1, identity_rotation, False))
+            for op_index, image_map in enumerate(image_maps):
+                image = image_map[representative_core]
+                if image == target_core:
+                    transports.append((op_index, cartesian_rotations[op_index], False))
+                if _reverse_core(image) == target_core:
+                    transports.append((op_index, cartesian_rotations[op_index], True))
+            return transports
+
+        if complete_orbits:
+            pair_emission = range(len(orbit))
+        else:
+            # Masked support stays exact; each supported member synthesizes
+            # only its own reverse, which always lies in this directed orbit.
+            # Unrelated symmetry images are never filled.
+            pair_emission = sorted(
+                set(support) | {reverse_index[index] for index in support}
+            )
+        potential_pairs.update(orbit[member] for member in pair_emission)
 
         if document.exchange_mode == "isotropic":
             jiso = float(_numbers(shell.Jiso, (), f"shell {shell.id}.Jiso"))
@@ -1600,47 +1680,62 @@ def _expand_core(document, *, complete_orbits=False):
                 jiso = float(tensor[0, 0])
             active_channels = ("Jiso", "DMI", "Jani")
 
+        reverse_representative = _reverse_core(representative_core)
         for member in orbit:
             target_core = _core_key(member)
-            paths = [
-                (op_index, cartesian_rotations[op_index])
-                for op_index, image_map in enumerate(image_maps)
-                if image_map[representative_core] == target_core
+            # Op transports only; the identity transport is the fill shortcut
+            # for the representative itself and never anchors a check.
+            op_transports = [
+                (op_index, rotation, reversed_bond)
+                for op_index, rotation, reversed_bond in representative_transports(
+                    target_core
+                )
+                if op_index >= 0
             ]
-            candidates = [
-                (op_index, rotation @ tensor @ rotation.T)
-                for op_index, rotation in paths
-            ]
-            if not candidates:
+            if not op_transports:
                 raise ValueError(
                     f"shell {shell.id}: no stored operation reaches image {_pair_id(member)}"
                 )
-            reference = candidates[0][1]
-            for op_index, candidate in candidates:
-                if not _transform_close(
-                    candidate, reference, document.value_atol, document.value_rtol
-                ):
-                    residual = _transform_max_deviation(candidate, reference)
-                    if target_core == representative_core:
-                        reason = "bond fixpoint"
-                    else:
-                        reason = "paths"
-                    failure_messages.append(
-                        f"shell {shell.id}: {reason} to image {_pair_id(member)} "
-                        f"disagree at operation {op_index}, deviation={residual:.8g}"
-                    )
-            if target_core == representative_core and not _transform_close(
-                reference, tensor, document.value_atol, document.value_rtol
-            ):
-                failure_messages.append(
-                    f"shell {shell.id}: bond fixpoint changes image {_pair_id(member)}"
+            # MathDoc: tb2j/spacegroup-exchange-symmetrization#reversal_transpose_tensor
+            # Full tensors transpose under reversal before the rotation acts;
+            # direct and reversal-composed transports must reach the same
+            # image value.
+            candidates = [
+                (
+                    op_index,
+                    rotation @ (tensor.T if reversed_bond else tensor) @ rotation.T,
                 )
-            reverse_core = (
-                representative_core[1],
-                representative_core[0],
-                tuple(-r for r in representative_core[2]),
-            )
-            if target_core == reverse_core:
+                for op_index, rotation, reversed_bond in op_transports
+            ]
+            if target_core == representative_core:
+                reference = candidates[0][1]
+                for op_index, candidate in candidates:
+                    if not _transform_close(
+                        candidate, reference, document.value_atol, document.value_rtol
+                    ):
+                        residual = _transform_max_deviation(candidate, reference)
+                        failure_messages.append(
+                            f"shell {shell.id}: bond fixpoint to image {_pair_id(member)} "
+                            f"disagree at operation {op_index}, deviation={residual:.8g}"
+                        )
+                if not _transform_close(
+                    reference, tensor, document.value_atol, document.value_rtol
+                ):
+                    failure_messages.append(
+                        f"shell {shell.id}: bond fixpoint changes image {_pair_id(member)}"
+                    )
+            else:
+                reference = candidates[0][1]
+                for op_index, candidate in candidates:
+                    if not _transform_close(
+                        candidate, reference, document.value_atol, document.value_rtol
+                    ):
+                        residual = _transform_max_deviation(candidate, reference)
+                        failure_messages.append(
+                            f"shell {shell.id}: paths to image {_pair_id(member)} "
+                            f"disagree at operation {op_index}, deviation={residual:.8g}"
+                        )
+            if target_core == reverse_representative:
                 for op_index, candidate in candidates:
                     if not _transform_close(
                         candidate, tensor.T, document.value_atol, document.value_rtol
@@ -1661,13 +1756,19 @@ def _expand_core(document, *, complete_orbits=False):
             representative_channels = {"Jiso": jiso}
         for channel in active_channels:
             channel_members = masks[channel]
-            active_members = (
-                tuple(range(len(orbit)))
-                if complete_orbits and channel_members
-                else channel_members
-            )
-
-            for member_index in active_members:
+            if complete_orbits:
+                channel_emission = range(len(orbit)) if channel_members else ()
+            elif not channel_members:
+                continue  # absent channel family; never invent one
+            else:
+                # Each observed channel member also emits its reversed key
+                # with the reversed value, even if that reverse was absent
+                # from the source; no other orbit member is filled.
+                channel_emission = sorted(
+                    set(channel_members)
+                    | {reverse_index[index] for index in channel_members}
+                )
+            for member_index in channel_emission:
                 member = orbit[member_index]
                 native_key = (
                     tuple(member[2:]),
@@ -1678,17 +1779,13 @@ def _expand_core(document, *, complete_orbits=False):
                     raise ValueError(
                         f"shell {shell.id}: image {_pair_id(member)} has a nonmagnetic endpoint"
                     )
-                target_core = _core_key(member)
-                paths = [
-                    (op_index, cartesian_rotations[op_index])
-                    for op_index, image_map in enumerate(image_maps)
-                    if image_map[representative_core] == target_core
-                ]
-                rotation = paths[0][1]
-                value = _transform_channel_value(
+                _, rotation, reversed_bond = representative_transports(
+                    _core_key(member)
+                )[0]
+                value = _transform_apply(
                     channel,
                     representative_channels[channel],
-                    rotation,
+                    (rotation, reversed_bond),
                 )
                 channel_values[channel][native_key] = value
                 if member_index not in channel_members:
@@ -1847,7 +1944,16 @@ def _base_exchange_equal(document, left, right):
     channels = ("exchange_Jdict", "dmi_ddict", "Jani_dict")
     left_keys = set().union(*(getattr(left, name, None) or {} for name in channels))
     right_keys = set().union(*(getattr(right, name, None) or {} for name in channels))
-    if left_keys != right_keys:
+    # Reciprocal entries synthesized from the base do not change its physical
+    # exchange. Other added or removed entries still invalidate derived data.
+    if not left_keys <= right_keys:
+        return False
+
+    def reverse_key(key):
+        r, i, j = key
+        return (tuple(-x for x in r), j, i)
+
+    if any(reverse_key(key) not in left_keys for key in right_keys - left_keys):
         return False
 
     # MathDoc: tb2j/spacegroup-exchange-symmetrization#pair_tensor_channel_isotropic
@@ -1868,6 +1974,14 @@ def _base_exchange_equal(document, left, right):
             document.value_rtol,
         )
         for key in left_keys
+    ) and all(
+        _transform_close(
+            total(left, reverse_key(key)).T,
+            total(right, key),
+            document.value_atol,
+            document.value_rtol,
+        )
+        for key in right_keys - left_keys
     )
 
 
@@ -2026,6 +2140,11 @@ def expand(document, *, base=None, complete_orbits=False, allow_loss=()):
     if output.spinat is None:
         messages.append(
             "Reference moments are absent; no dynamics-readiness is claimed."
+        )
+    if core.report.created_pair_keys:
+        messages.append(
+            "Synthesized reverse-direction pair keys complete each supported "
+            "bond; they are model values, not independent calculations."
         )
     if core.report.created_channel_keys:
         messages.append("Completed model channel keys are not calculated entries.")
@@ -2277,19 +2396,17 @@ def template(
         )
     else:
         image_maps = []
-    # The cutoff selects orbits; each emitted shell retains the full orbit.
-    candidate_wire = {_wire_key(key) for key in candidates}
+    # The cutoff selects orbits; each emitted shell retains the full directed
+    # orbit, including reversed bonds that the cutoff observation implies.
     remaining = set(candidates)
     orbits = {}
     while remaining:
         key = min(remaining)
-        full_orbit = tuple(
-            sorted({_wire_key(image_map[key]) for image_map in image_maps})
-        )
-        supported = candidate_wire.intersection(full_orbit)
+        direct = {_wire_key(image_map[key]) for image_map in image_maps}
+        full_orbit = tuple(sorted(direct | {_reverse_wire(pair) for pair in direct}))
         identifier = _pair_id(full_orbit[0])
         orbits[identifier] = full_orbit
-        remaining.difference_update(_core_key(member) for member in supported)
+        remaining.difference_update(_core_key(member) for member in full_orbit)
 
     entries = []
     for identifier, full_orbit in sorted(orbits.items()):
@@ -2303,7 +2420,7 @@ def template(
             ShellEntry(
                 id=identifier,
                 representative=representative,
-                n_equivalent_pairs=len(full_orbit),
+                n_equivalent_pairs=len(_physical_pairs(full_orbit)),
                 distance=_template_distance(representative, positions, cell),
                 **fields,
             )

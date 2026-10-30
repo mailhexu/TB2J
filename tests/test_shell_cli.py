@@ -358,7 +358,11 @@ def test_pickle_origin_export_survives_relocation_and_edit(tmp_path, inputs, cap
     assert _run("export", source, "-o", results) == 0
     loaded = SpinIO.load_pickle(results)
     assert loaded.index_spin == [0]
-    assert loaded.exchange_Jdict == {((1, 0, 0), 0, 0): pytest.approx(0.002)}
+    # Schema v3 export writes every supported bond in both directions.
+    assert loaded.exchange_Jdict == {
+        ((1, 0, 0), 0, 0): pytest.approx(0.002),
+        ((-1, 0, 0), 0, 0): pytest.approx(0.002),
+    }
     np.testing.assert_allclose(loaded.charges, [8.0])
     orphan = tmp_path / "orphan.toml"
     source.rename(orphan)
