@@ -14,6 +14,7 @@ from pickle import UnpicklingError
 import tomli
 
 from TB2J.io_exchange.shell_workflow import export_shells, generate_shells
+from TB2J.versioninfo import print_license
 
 
 def _moments(path):
@@ -86,6 +87,12 @@ def _parser():
 
 
 def _generate(args):
+    print(f"Source: {args.source}\nOutput: {args.output.resolve()}")
+    print(
+        f"Generating shells using {args.symmetry} symmetry "
+        f"({'projection enabled' if args.project else 'strict consistency'}).",
+        flush=True,
+    )
     reference_spins = _moments(args.reference_spins)
     kwargs = {}
     for name in ("magnetic_species", "magnetic_atoms", "cutoff", "mode"):
@@ -106,6 +113,10 @@ def _generate(args):
         equivalent_comments=not args.no_equivalent_comments,
         **kwargs,
     )
+    print(
+        f"Exchange mode: {result.document.exchange_mode}; "
+        f"symmetry: {result.document.symmetry_mode}"
+    )
     print(f"Wrote {len(result.document.shells)} shells to {args.output}")
     if result.document.context_sha256 is not None:
         print(
@@ -124,6 +135,7 @@ def _export(args):
 def main(argv=None):
     parser = _parser()
     args = parser.parse_args(argv)
+    print_license()
     try:
         if args.command == "generate":
             _generate(args)
@@ -138,7 +150,19 @@ def main(argv=None):
         UnpicklingError,
         AssertionError,
     ) as error:
-        print(f"TB2J_shell: {error or type(error).__name__}", file=sys.stderr)
+        message = str(error) or type(error).__name__
+        prefix = "inconsistent exchange data: "
+        if message.startswith(prefix):
+            details = message[len(prefix):]
+            count = details.count("; ") + 1
+            sample = details.split("; ", 3)[:3]
+            message = (
+                f"inconsistent exchange data: {count} inconsistencies; "
+                f"sample: {'; '.join(sample)}. "
+                "Use --project only if projection, which changes exchange values, "
+                "is appropriate."
+            )
+        print(f"TB2J_shell: {message}", file=sys.stderr)
         return 2
     return 0
 

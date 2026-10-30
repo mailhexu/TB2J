@@ -68,6 +68,38 @@ def _fill(path, value=0.00125):
     shells.write_shells(filled, path)
     return filled
 
+def test_generate_reports_identification_and_result(tmp_path, inputs, capsys):
+    import TB2J
+
+    output = tmp_path / "reported.toml"
+    assert _run(*_generate_args(inputs, output)) == 0
+    captured = capsys.readouterr()
+    assert f"TB2J version {TB2J.__version__}" in captured.out
+    assert "BSD" in captured.out and "warranty" in captured.out
+    assert str(inputs[1]) in captured.out and str(output) in captured.out
+    assert "isotropic" in captured.out and "sg" in captured.out
+    assert "1 shells" in captured.out and output.exists()
+
+def test_inconsistent_pickle_reports_bounded_actionable_failure(tmp_path, capsys):
+    atoms = Atoms("Fe", positions=[[0, 0, 0]], cell=[3, 3, 3], pbc=True)
+    source = SpinIO(
+        atoms, spinat=[[0, 0, 2]], charges=None, index_spin=[0],
+        exchange_Jdict={
+            ((1, 0, 0), 0, 0): 0.001, ((-1, 0, 0), 0, 0): 0.001,
+            ((0, 1, 0), 0, 0): 0.003, ((0, -1, 0), 0, 0): 0.003,
+            ((0, 0, 1), 0, 0): 0.002, ((0, 0, -1), 0, 0): 0.002,
+        },
+    )
+    source.write_pickle(path=tmp_path)
+    output = tmp_path / "inconsistent.toml"
+    assert _run("generate", tmp_path / "TB2J.pickle", "-o", output) == 2
+    captured = capsys.readouterr()
+    assert "inconsistent exchange data" in captured.err
+    assert "4 inconsistencies" in captured.err and "deviation=" in captured.err
+    assert "--project" in captured.err and "changes" in captured.err
+    assert "Wrote" not in captured.out
+    assert not output.exists()
+
 
 def test_structure_generate_matches_public_api_bytes(tmp_path, inputs):
     cli = tmp_path / "cli.toml"

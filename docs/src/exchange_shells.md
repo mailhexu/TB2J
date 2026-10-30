@@ -298,6 +298,14 @@ one-based atoms. A full atom-ordered `moments = [...]` TOML file supplied via
 `--reference-spins` supports magnetic symmetry. Export rejects unfilled values,
 incompatible context and output collisions before publishing results.
 
+The CLI prints the TB2J version and license, source, absolute output destination,
+and symmetry before processing. On success it reports the exchange mode, number
+of shells, and any context companion. If native exchange values violate the
+selected symmetry, generation stops with a count and sample of inconsistencies;
+no new shell file is published. `--project` explicitly changes those values to
+their symmetry projection and should be used only when that is scientifically
+appropriate.
+
 ## V2 document grammar and indexing
 
 The document is UTF-8 TOML. Scientific tables accept only their declared fields; unknown scientific keys and the superseded v1 array grammar/field names are rejected. There are no compatibility aliases for old names such as `exchange_mode`, `Jiso`, `tensor`, or `orbit_size`.
