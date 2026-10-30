@@ -25,7 +25,11 @@ from TB2J.projector_green import (
 
 ABINIT_SAVETB2J_SCHEMA_NAME = "abinit.savetb2j.projector"
 ABINIT_SAVETB2J_SCHEMA_VERSION = "1.0"
-ABINIT_SAVETB2J_SCHEMA_VERSIONS = ("1.0", "1.1")
+# 1.1 is additive (soc_pauli).  1.3 is non-additive: exports drop the
+# occupations array and add the bands attribute number_of_electrons
+# (producer dtset%nelect, valence electrons).
+ABINIT_SAVETB2J_SCHEMA_VERSIONS = ("1.0", "1.1", "1.2", "1.3")
+ABINIT_SAVETB2J_NUMBER_ELECTRONS_SCHEMA_VERSION = "1.3"
 ABINIT_PAULI_SPIN_TREATMENT = "pauli_2x2"
 ABINIT_SOC_PAULI_UNITS = "Hartree"
 ABINIT_OPERATOR_BASIS = "abinit_native_paw_projector"
@@ -33,6 +37,11 @@ ABINIT_COEFFICIENT_SOURCE = "abinit.cprj"
 ABINIT_SPIN_CHANNEL_ORDER = "up,down"
 ABINIT_NC_PAO_SCHEMA_NAME = "abinit.savetb2j.nc_pao"
 ABINIT_NC_PAO_SCHEMA_VERSION = "1.0"
+# The unified savetb2j writer emits norm-conserving exports inside the
+# projector wrapper schema (same schema_name as PAW); 1.2 predates the
+# occupation cutover, 1.3 carries bands:number_of_electrons and no occupations.
+ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_NAME = ABINIT_SAVETB2J_SCHEMA_NAME
+ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_VERSIONS = ("1.2", "1.3")
 ABINIT_NC_PAO_HS_SCHEMA_NAME = "abinit.nc_pao_hs"
 ABINIT_NC_PAO_HS_SCHEMA_VERSION = "2"
 ABINIT_NC_PAO_OPERATOR_BASIS = "abinit_nc_pao"
@@ -57,21 +66,23 @@ _NC_SCHEMA_NAMES = {
 def abinit_netcdf_kind(filename):
     """Classify an ABINIT NetCDF export as the PAW or NC-PAO backend.
 
-    Returns ``"paw_savetb2j"`` for the PAW ``abinit.savetb2j.projector``
-    schema and ``"nc_pao"`` for the norm-conserving PAO / spherical-window
-    schemas. Raises ``ValueError`` for anything else.
+    Returns ``"paw_savetb2j"`` for PAW projector files and ``"nc_pao"`` for
+    NC PAO schemas, including schema-1.2/1.3 projector wrappers identified by
+    their NC coefficient source or operator basis. Raises ``ValueError``
+    otherwise.
     """
     import netCDF4 as nc
 
     with nc.Dataset(filename, "r") as dataset:
         schema = str(getattr(dataset, "schema_name", "")).strip()
+        is_nc_pao_wrapper = _is_nc_pao_projector_wrapper(dataset)
     if schema == ABINIT_SAVETB2J_SCHEMA_NAME:
-        return "paw_savetb2j"
+        return "nc_pao" if is_nc_pao_wrapper else "paw_savetb2j"
     if schema in _NC_SCHEMA_NAMES:
         return "nc_pao"
     raise ValueError(
         f"Unrecognized ABINIT NetCDF schema_name {schema!r}; expected "
-        f"{ABINIT_SAVETB2J_SCHEMA_NAME!r} (PAW savetb2j) or one of "
+        f"{ABINIT_SAVETB2J_SCHEMA_NAME!r} (PAW or NC PAO savetb2j) or one of "
         f"{sorted(_NC_SCHEMA_NAMES)} (NC PAO)"
     )
 
@@ -133,7 +144,11 @@ def _population_contour(data, nz, smearing_eV):
 def compute_nc_pao_projected_charges_moments(data):
     """Compute NC PAO projected populations with a dual-basis Mulliken partition."""
     if data.occupations is None:
-        raise ValueError("ABINIT NC PAO projected populations require occupations")
+        raise ValueError(
+            "ABINIT NC PAO projected populations require occupations; ABINIT "
+            "savetb2j exports no longer provide them and TB2J never derives "
+            "occupations from eigenvalues"
+        )
     if data.overlap_k is None:
         raise ValueError("ABINIT NC PAO projected populations require overlap_k")
     density_by_spin = np.zeros((data.nspin, len(data.site_nproj)), dtype=float)
@@ -202,7 +217,11 @@ def _shell_map(data):
 def compute_nc_pao_shell_populations(data):
     """Compute NC PAO projected charge and moment by ``(site, n, l)`` shell."""
     if data.occupations is None:
-        raise ValueError("ABINIT NC PAO shell populations require occupations")
+        raise ValueError(
+            "ABINIT NC PAO shell populations require occupations; ABINIT "
+            "savetb2j exports no longer provide them and TB2J never derives "
+            "occupations from eigenvalues"
+        )
     if data.overlap_k is None:
         raise ValueError("ABINIT NC PAO shell populations require overlap_k")
     _require_shell_metadata(data, "ABINIT NC PAO")
@@ -235,7 +254,11 @@ def compute_nc_pao_shell_populations(data):
 def compute_projector_shell_populations(data):
     """Compute projector-space shell populations from occupations and a metric."""
     if data.occupations is None:
-        raise ValueError("projector shell populations require occupations")
+        raise ValueError(
+            "projector shell populations require occupations; ABINIT savetb2j "
+            "exports no longer provide them and TB2J never derives occupations "
+            "from eigenvalues"
+        )
     _require_shell_metadata(data, "projector")
     shell_map = _shell_map(data)
     shell_spin_density = {key: np.zeros(data.nspin, dtype=float) for key in shell_map}
@@ -347,7 +370,12 @@ def build_nc_pao_band_mask(
         mask = data.eigenvalues <= cutoff
     elif n_empty is not None:
         if data.occupations is None:
-            raise ValueError("Fixed empty-band windows require occupations")
+            raise ValueError(
+                "Fixed empty-band windows require occupations; ABINIT savetb2j "
+                "exports no longer provide them and TB2J never derives "
+                "occupations from eigenvalues. Use emax_eV or "
+                "emax_relative_to_fermi_eV instead"
+            )
         n_empty = int(n_empty)
         if n_empty < 0:
             raise ValueError("n_empty must be non-negative")
@@ -374,7 +402,9 @@ def build_nc_pao_band_mask(
 
     included = np.sum(mask, axis=2)
     if data.occupations is None:
-        included_unoccupied = np.zeros_like(included)
+        # Without occupations the occupied-state verification cannot run; the
+        # counts are unknown rather than zero.
+        included_unoccupied = None
     else:
         occupied = data.occupations > 1.0e-8
         if np.any(occupied & ~mask):
@@ -397,8 +427,12 @@ def build_nc_pao_band_mask(
         "n_empty": None if n_empty is None else int(n_empty),
         "included_band_count_min": int(np.min(included)),
         "included_band_count_max": int(np.max(included)),
-        "included_unoccupied_min": int(np.min(included_unoccupied)),
-        "included_unoccupied_max": int(np.max(included_unoccupied)),
+        "included_unoccupied_min": (
+            None if included_unoccupied is None else int(np.min(included_unoccupied))
+        ),
+        "included_unoccupied_max": (
+            None if included_unoccupied is None else int(np.max(included_unoccupied))
+        ),
         "highest_included_eigenvalue_eV": float(np.max(data.eigenvalues[mask])),
         "cutoff_eV": cutoff.tolist() if isinstance(cutoff, np.ndarray) else cutoff,
     }
@@ -454,6 +488,13 @@ def _format_nc_pao_diagnostics_report(
             "- assessment: at least one shell is excluded by the current threshold"
         )
     if band_window_metadata is not None:
+        unoccupied_min = band_window_metadata.get("included_unoccupied_min")
+        unoccupied_max = band_window_metadata.get("included_unoccupied_max")
+        unoccupied_text = (
+            "unavailable (occupations not exported)"
+            if unoccupied_min is None
+            else f"{unoccupied_min} to {unoccupied_max}"
+        )
         lines.extend(
             [
                 "",
@@ -464,8 +505,7 @@ def _format_nc_pao_diagnostics_report(
                 f"- n_empty: {band_window_metadata.get('n_empty')}",
                 f"- included_band_count_min: {band_window_metadata['included_band_count_min']}",
                 f"- included_band_count_max: {band_window_metadata['included_band_count_max']}",
-                f"- included_unoccupied_min: {band_window_metadata['included_unoccupied_min']}",
-                f"- included_unoccupied_max: {band_window_metadata['included_unoccupied_max']}",
+                f"- included_unoccupied: {unoccupied_text}",
                 f"- highest_included_eigenvalue_eV: {band_window_metadata['highest_included_eigenvalue_eV']:.6f}",
             ]
         )
@@ -496,6 +536,31 @@ def _optional_var(group, name):
     if name in group.variables:
         return group.variables[name][:]
     return None
+
+
+def _number_of_electrons(source, schema_version=None):
+    """Read the producer valence-electron count, or None when not exported.
+
+    The count is exposed exactly as supplied by the producer; it is never
+    inferred from band occupancies.  Schema 1.3 ABINIT savetb2j files must
+    carry it; older ABINIT savetb2j files predate the attribute and stay
+    unknown.  Occupation variables are never read to obtain it.
+    """
+    value = getattr(source, "number_of_electrons", None)
+    if value is None:
+        if schema_version == ABINIT_SAVETB2J_NUMBER_ELECTRONS_SCHEMA_VERSION:
+            raise ValueError(
+                "ABINIT savetb2j 1.3 bands group requires the "
+                "number_of_electrons attribute"
+            )
+        return None
+    number = float(value)
+    if not np.isfinite(number) or number <= 0.0:
+        raise ValueError(
+            "ABINIT savetb2j number_of_electrons must be a positive finite "
+            f"float; got {value!r}"
+        )
+    return number
 
 
 def _is_true(value):
@@ -605,6 +670,12 @@ def _root_metadata(nc):
         "units_json",
     ):
         metadata[name] = _require_attr(nc, name, "root")
+    usepawu = getattr(nc, "usepawu", None)
+    if usepawu is not None:
+        if not isinstance(usepawu, (int, np.integer)):
+            raise ValueError("ABINIT savetb2j usepawu must be an integer")
+        usepawu = int(usepawu)
+    metadata["usepawu"] = usepawu
 
     if metadata["schema_name"] != ABINIT_SAVETB2J_SCHEMA_NAME:
         raise ValueError("unsupported ABINIT savetb2j schema_name")
@@ -860,6 +931,27 @@ def _operator_data(operators, root_metadata=None):
     for name, variable in components_group.variables.items():
         values = _decode_complex_var(components_group, name, "operator_components")
         metadata = _component_metadata(variable)
+        if schema_version == "1.2":
+            included = metadata.get("hubbard_included")
+            if included is not None:
+                if not isinstance(included, str) or included.lower() not in {
+                    "true",
+                    "false",
+                }:
+                    raise ValueError(
+                        "ABINIT savetb2j hubbard_included must be true or false"
+                    )
+                included = included.lower()
+                metadata["hubbard_included"] = included
+                usepawu = (root_metadata or {}).get("usepawu")
+                if (
+                    name == "delta_total"
+                    and usepawu is not None
+                    and (included == "true") != (usepawu != 0)
+                ):
+                    raise ValueError(
+                        "ABINIT savetb2j Hubbard provenance contradicts usepawu"
+                    )
         if metadata["spin_treatment"] == ABINIT_PAULI_SPIN_TREATMENT:
             if schema_version == "1.0":
                 raise ValueError(
@@ -934,10 +1026,20 @@ def _nc_pao_root_metadata(nc):
         "operator_basis",
     ):
         metadata[name] = _require_attr(nc, name, "NC PAO root")
-    if metadata["schema_name"] != ABINIT_NC_PAO_SCHEMA_NAME:
-        raise ValueError("unsupported ABINIT NC PAO schema_name")
-    if metadata["schema_version"] != ABINIT_NC_PAO_SCHEMA_VERSION:
-        raise ValueError("unsupported ABINIT NC PAO schema_version")
+    schema_name = metadata["schema_name"]
+    schema_version = metadata["schema_version"]
+    if schema_name == ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_NAME:
+        if schema_version not in ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_VERSIONS:
+            raise ValueError(
+                "ABINIT NC PAO projector wrapper requires schema_version in "
+                f"{ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_VERSIONS}; got "
+                f"{schema_version!r}"
+            )
+    elif (
+        schema_name != ABINIT_NC_PAO_SCHEMA_NAME
+        or schema_version != ABINIT_NC_PAO_SCHEMA_VERSION
+    ):
+        raise ValueError("unsupported ABINIT NC PAO schema_name or schema_version")
     if metadata["source_code"] != "abinit":
         raise ValueError("ABINIT NC PAO source_code must be 'abinit'")
     if metadata["spin_mode"] != "collinear":
@@ -1051,11 +1153,8 @@ def _load_abinit_nc_pao_hs_v2(nc):
         )
         * HARTREE_TO_EV
     )
-    occupations = _optional_var(nc, "occupations")
-    if occupations is not None:
-        occupations = _array_in_dimension_order(
-            nc.variables["occupations"], ("nsppol", "nkpt_ibz", "nband")
-        )
+    # ABINIT savetb2j consumers never read the occupations variable, in any
+    # schema version, even when the file contains a malformed one.
     # abinao stores <psi|phi>; ProjectorGreen uses <phi|psi> like GPAW.
     coefficients = _decode_split_complex_var_ordered(
         nc, "coefficients_ibz", "NC PAO H/S", ("nsppol", "nkpt_ibz", "nband", "nproj")
@@ -1090,9 +1189,7 @@ def _load_abinit_nc_pao_hs_v2(nc):
         if np.any(bz_to_ibz < 0) or np.any(bz_to_ibz >= eigenvalues.shape[1]):
             raise ValueError("ABINIT NC PAO H/S bz_to_ibz contains invalid indices")
         eigenvalues = eigenvalues[:, bz_to_ibz, :]
-        if occupations is not None:
-            occupations = occupations[:, bz_to_ibz, :]
-        # Use BZ-resolved eigenvalues/occupations if available (needed when
+        # Use BZ-resolved eigenvalues if available (needed when
         # the IBZ-to-BZ expansion applies per-k transforms like spin-flip).
         if "eigenvalues_bz" in nc.variables:
             eigenvalues = (
@@ -1101,10 +1198,6 @@ def _load_abinit_nc_pao_hs_v2(nc):
                     ("nsppol", "nkpt_bz", "nband"),
                 )
                 * HARTREE_TO_EV
-            )
-        if occupations is not None and "occupations_bz" in nc.variables:
-            occupations = _array_in_dimension_order(
-                nc.variables["occupations_bz"], ("nsppol", "nkpt_bz", "nband")
             )
 
     component_sources = {
@@ -1195,7 +1288,7 @@ def _load_abinit_nc_pao_hs_v2(nc):
         kpoints=kpoints,
         weights=weights,
         eigenvalues=eigenvalues,
-        occupations=occupations,
+        number_of_electrons=_number_of_electrons(nc),
         coefficients=coefficients,
         efermi=efermi,
         projector_site=atom_index,
@@ -1299,11 +1392,7 @@ def _load_abinit_nc_spherical_window(nc):
         )
         * HARTREE_TO_EV
     )
-    occupations = _optional_var(nc, "occupations")
-    if occupations is not None:
-        occupations = _array_in_dimension_order(
-            nc.variables["occupations"], ("nsppol", "nkpt", "nband")
-        )
+    # Occupations variables are ignored in every ABINIT savetb2j schema.
 
     component_sources = {}
     delta_xc = _decode_split_complex_var(
@@ -1361,7 +1450,7 @@ def _load_abinit_nc_spherical_window(nc):
         ),
         weights=weights,
         eigenvalues=eigenvalues,
-        occupations=occupations,
+        number_of_electrons=_number_of_electrons(nc),
         coefficients=coefficients,
         efermi=efermi,
         projector_site=site_index,
@@ -1389,6 +1478,172 @@ def _load_abinit_nc_spherical_window(nc):
     return data
 
 
+def _nc_pao_projector_wrapper_metadata(projectors, root_metadata):
+    coefficient_source = _require_attr(
+        projectors, "coefficient_source", "NC PAO projectors"
+    )
+    coefficient_projector = _require_attr(
+        projectors, "coefficient_projector", "NC PAO projectors"
+    )
+    channel_interpretation = _require_attr(
+        projectors, "channel_interpretation", "NC PAO projectors"
+    )
+    operator_basis = _require_attr(projectors, "operator_basis", "NC PAO projectors")
+    index_base = _require_attr(projectors, "index_base", "NC PAO projectors")
+
+    if coefficient_source != root_metadata["coefficient_source"]:
+        raise ValueError("ABINIT NC PAO projector coefficient_source mismatch")
+    if coefficient_projector != "nc_pao_tphi":
+        raise ValueError("ABINIT NC PAO coefficient_projector must be nc_pao_tphi")
+    if channel_interpretation != "abinit_nc_pao_lmn_channel":
+        raise ValueError("ABINIT NC PAO channel_interpretation mismatch")
+    if operator_basis != root_metadata["operator_basis"]:
+        raise ValueError("ABINIT NC PAO projector operator_basis mismatch")
+    if int(index_base) != 0:
+        raise ValueError("ABINIT NC PAO projector index_base must be 0")
+    return (
+        coefficient_source,
+        coefficient_projector,
+        channel_interpretation,
+        operator_basis,
+    )
+
+
+def _is_nc_pao_projector_wrapper(nc):
+    if (
+        getattr(nc, "schema_name", None)
+        != ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_NAME
+    ):
+        return False
+    markers = [
+        getattr(nc, "coefficient_source", None),
+        getattr(nc, "operator_basis", None),
+    ]
+    projectors = nc.groups.get("projectors")
+    if projectors is not None:
+        markers.extend(
+            (
+                getattr(projectors, "coefficient_source", None),
+                getattr(projectors, "operator_basis", None),
+            )
+        )
+    markers = {str(value).strip().lower() for value in markers if value is not None}
+    return {
+        ABINIT_NC_PAO_COEFFICIENT_SOURCE,
+        ABINIT_NC_PAO_OPERATOR_BASIS,
+    }.intersection(markers) != set()
+
+
+def _load_abinit_nc_pao_projector_wrapper(nc):
+    _validate_required_dimensions(nc)
+    metadata = _nc_pao_root_metadata(nc)
+    schema_version = metadata["abinit_schema_version"]
+    nspinor = int(getattr(nc, "nspinor", 1))
+    if nspinor != 1 or (
+        "nspinor" in nc.dimensions and len(nc.dimensions["nspinor"]) != 1
+    ):
+        raise ValueError("ABINIT NC PAO projector wrapper does not support spinor data")
+
+    structure = _require_group(nc, "structure")
+    kpoints = _require_group(nc, "kpoints")
+    bands = _require_group(nc, "bands")
+    projectors = _require_group(nc, "projectors")
+    operators = _require_group(nc, "operators")
+    if not hasattr(bands, "efermi"):
+        raise ValueError("ABINIT NC PAO bands group requires efermi attribute")
+    (
+        coefficient_source,
+        coefficient_projector,
+        channel_interpretation,
+        operator_basis,
+    ) = _nc_pao_projector_wrapper_metadata(projectors, metadata)
+
+    overlap_var = _require_var(projectors, "overlap_k", "NC PAO projectors")
+    overlap_definition = getattr(overlap_var, "definition", None)
+    if not str(overlap_definition or "").strip():
+        overlap_definition = "k-dependent NC PAO overlap_k"
+    # Byte-level orientation (nctkarr_t reversal): the writer declares
+    # "complex, nproj, nproj, nkpt" in Fortran order (m_paw_savetb2j_netcdf.F90),
+    # and nctk reverses that list for nf90_def_var while nf90_put_var maps the
+    # Fortran logical array elementwise, so Python reads B[k, j, i, c] =
+    # A[c, i, j, k] -- the duplicate nproj row/column pair comes out swapped.
+    # swapaxes(-1, -2) restores the physical <p_i|p_j> rows=bra orientation.
+    overlap_k = np.ascontiguousarray(
+        _decode_complex_var(projectors, "overlap_k", "NC PAO projectors").swapaxes(
+            -1, -2
+        )
+    )
+    operator_components, operator_component_metadata = _nc_pao_operator_components(
+        operators
+    )
+    if any(value.ndim not in (2, 3) for value in operator_components.values()):
+        raise ValueError(
+            "ABINIT NC PAO operator components must not contain spinor/magnetic blocks"
+        )
+    # Same nctk reversal for the site-local vertices: delta_total is packed as
+    # (complex, npm, npm, nsite) in Fortran order, so the npm pair is stored
+    # swapped and is normalized here like overlap_k above.
+    operator_components = {
+        name: np.ascontiguousarray(values.swapaxes(-1, -2))
+        for name, values in operator_components.items()
+    }
+
+    data = ProjectorGreenData(
+        kpoints=_require_var(kpoints, "kpoints", "kpoints")[:],
+        weights=_require_var(kpoints, "weights", "kpoints")[:],
+        eigenvalues=_require_var(bands, "eigenvalues", "bands")[:],
+        # Wrapper 1.3 requires the producer electron count; 1.2 predates it.
+        # Occupation variables are never read, in any wrapper version.
+        number_of_electrons=_number_of_electrons(bands, schema_version),
+        # The wrapper producer exports <psi_nk|p_a(k)> (m_nc_savetb2j_netcdf.F90
+        # header; m_nc_pao_hamiltonian.F90 proj_coeff = sum_G conj(psi) phi =
+        # <psi|p>).  ProjectorGreen's convention is <p|psi> (cprj-style, which
+        # the collinear PAW savetb2j writer already stores directly), so the
+        # wrapper coefficients must be conjugated.  No axis swap is needed for
+        # the coefficients: their Fortran logical order (complex, nproj, nband,
+        # nkpt, nspin) reverses under the nctkarr_t declaration exactly into
+        # TB2J's (nspin, nkpt, nband, nproj, complex).  overlap_k and
+        # delta_total instead carry a duplicate npm row/column pair that the
+        # same reversal leaves swapped; that pair is normalized by swapaxes
+        # above (verified in the writer source and pinned by the
+        # serialized-byte oracle with non-real Hermitian matrices).
+        coefficients=_decode_complex_var(
+            projectors, "coefficients", "NC PAO projectors"
+        ).conj(),
+        efermi=float(bands.efermi),
+        projector_site=_require_var(projectors, "projector_site", "NC PAO projectors")[
+            :
+        ],
+        projector_atom=_require_var(projectors, "projector_atom", "NC PAO projectors")[
+            :
+        ],
+        cell=_require_var(structure, "cell", "structure")[:],
+        positions=_require_var(structure, "positions", "structure")[:],
+        atomic_numbers=_require_var(structure, "atomic_numbers", "structure")[:],
+        projector_l=_optional_var(projectors, "projector_l"),
+        projector_m=_optional_var(projectors, "projector_m"),
+        projector_radial=_optional_var(projectors, "projector_radial"),
+        overlap_k=overlap_k,
+        site_nproj=_require_var(projectors, "site_nproj", "NC PAO projectors")[:],
+        site_projector_indices=_require_var(
+            projectors, "site_projector_indices", "NC PAO projectors"
+        )[:],
+        operator_components=operator_components,
+        operator_component_metadata=operator_component_metadata,
+        coefficient_source=coefficient_source,
+        coefficient_projector=coefficient_projector,
+        channel_interpretation=channel_interpretation,
+        overlap_metric_definition=overlap_definition,
+        population_metric="k-dependent NC PAO overlap_k",
+        operator_basis=operator_basis,
+        metadata=metadata,
+    )
+    data.validate(exchange_ready=True)
+    if not np.isclose(np.sum(data.weights), 1.0):
+        raise ValueError("ABINIT NC PAO k-point weights must sum to one")
+    return data
+
+
 def load_abinit_nc_pao_savetb2j(filename):
     """Load and strictly validate an ABINIT norm-conserving PAO savetb2j file."""
     try:
@@ -1402,6 +1657,8 @@ def load_abinit_nc_pao_savetb2j(filename):
             return _load_abinit_nc_spherical_window(nc)
         if schema_name == ABINIT_NC_PAO_HS_SCHEMA_NAME:
             return _load_abinit_nc_pao_hs_v2(nc)
+        if schema_name == ABINIT_SAVETB2J_PROJECTOR_WRAPPER_SCHEMA_NAME:
+            return _load_abinit_nc_pao_projector_wrapper(nc)
         _validate_required_dimensions(nc)
         metadata = _nc_pao_root_metadata(nc)
         structure = _require_group(nc, "structure")
@@ -1437,7 +1694,7 @@ def load_abinit_nc_pao_savetb2j(filename):
             kpoints=_require_var(kpoints, "kpoints", "kpoints")[:],
             weights=_require_var(kpoints, "weights", "kpoints")[:],
             eigenvalues=_require_var(bands, "eigenvalues", "bands")[:],
-            occupations=_optional_var(bands, "occupations"),
+            number_of_electrons=_number_of_electrons(bands),
             coefficients=_decode_complex_var(
                 projectors, "coefficients", "NC PAO projectors"
             ),
@@ -1508,6 +1765,8 @@ def load_abinit_savetb2j(filename):
         raise ImportError("netCDF4 is required to load ABINIT savetb2j files") from exc
 
     with Dataset(Path(filename)) as nc:
+        if _is_nc_pao_projector_wrapper(nc):
+            return _load_abinit_nc_pao_projector_wrapper(nc)
         _validate_required_dimensions(nc)
         metadata = _root_metadata(nc)
         structure = _require_group(nc, "structure")
@@ -1537,7 +1796,9 @@ def load_abinit_savetb2j(filename):
             kpoints=_require_var(kpoints, "kpoints", "kpoints")[:],
             weights=_require_var(kpoints, "weights", "kpoints")[:],
             eigenvalues=_require_var(bands, "eigenvalues", "bands")[:],
-            occupations=_optional_var(bands, "occupations"),
+            number_of_electrons=_number_of_electrons(
+                bands, metadata["abinit_schema_version"]
+            ),
             coefficients=_decode_complex_var(projectors, "coefficients", "projectors"),
             efermi=float(bands.efermi),
             projector_site=_require_var(projectors, "projector_site", "projectors")[:],
@@ -1594,8 +1855,22 @@ def gen_exchange_abinit_projector(
 ):
     """Generate projector exchange output from an ABINIT ``savetb2j`` file."""
     data = load_abinit_savetb2j(filename)
+    if data.coefficient_source != ABINIT_COEFFICIENT_SOURCE:
+        raise ValueError(
+            "gen_exchange_abinit_projector is the collinear PAW exchange API; "
+            f"this file is an {data.coefficient_source} export. Use the NC PAO "
+            "exchange API instead: its projector populations require the "
+            "k-dependent overlap_k metric, which the PAW population path does "
+            "not apply."
+        )
     if population_mode not in {"none", "projector", "green"}:
         raise ValueError(f"unsupported population_mode: {population_mode}")
+    if population_mode == "projector":
+        raise ValueError(
+            "ABINIT savetb2j files do not export occupations; occupation-based "
+            "projector populations fail closed. Use population_mode='green' "
+            "(eigenvalue contour) or 'none'"
+        )
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
@@ -1626,6 +1901,8 @@ def gen_exchange_abinit_projector(
         "Projector Green workflow using ABINIT savetb2j PAW projections "
         f"({data.coefficient_source}) and operator component "
         f"{operator_component or 'delta_total'} in basis {data.operator_basis}. "
+        f"ABINIT usepawu: {data.metadata.get('usepawu')}; "
+        f"component Hubbard inclusion: {(data.operator_component_metadata or {}).get(operator_component or 'delta_total', {}).get('hubbard_included', 'unknown')}. "
         f"Shell charge threshold: {shell_charge_threshold}. "
         f"Shell moment threshold: {shell_moment_threshold}. "
         f"Population mode: {population_mode}; projector populations use the "
@@ -1633,7 +1910,9 @@ def gen_exchange_abinit_projector(
         "Values are from the controlled projector exchange-like trace. "
         f"ABINIT version: {data.metadata.get('abinit_version', 'unknown')}; "
         f"schema: {data.metadata.get('abinit_schema_name')} "
-        f"{data.metadata.get('abinit_schema_version')}.\n"
+        f"{data.metadata.get('abinit_schema_version')}; "
+        f"number_of_electrons: "
+        f"{data.number_of_electrons if data.number_of_electrons is not None else 'not exported by this schema version'}.\n"
     )
     charges = None
     spinat = None
@@ -1677,8 +1956,10 @@ def gen_exchange_abinit_nc_pao(
     index_magnetic_atoms=None,
     operator_component=ABINIT_NC_PAO_DEFAULT_OPERATOR_COMPONENT,
     population_mode="none",
-    shell_charge_threshold=0.01,
-    shell_moment_threshold=0.01,
+    # Occupation-based shell filtering fails closed for ABINIT savetb2j data
+    # (no occupations); the default exchange run does not attempt it.
+    shell_charge_threshold=None,
+    shell_moment_threshold=None,
     emax_eV=None,
     emax_relative_to_fermi_eV=None,
     n_empty=None,
@@ -1712,6 +1993,12 @@ def gen_exchange_abinit_nc_pao(
         )
     if population_mode not in {"none", "projector", "green"}:
         raise ValueError(f"unsupported population_mode: {population_mode}")
+    if population_mode == "projector":
+        raise ValueError(
+            "ABINIT savetb2j files do not export occupations; occupation-based "
+            "projector populations fail closed. Use population_mode='green' "
+            "(eigenvalue contour) or 'none'"
+        )
     sites = None
     if index_magnetic_atoms is not None:
         sites = [int(site) for site in index_magnetic_atoms]
@@ -1784,7 +2071,9 @@ def gen_exchange_abinit_nc_pao(
         f"Eigenvalue cutoff: {band_window_metadata}. "
         "Values are from the controlled projector exchange-like trace. "
         f"schema: {data.metadata.get('abinit_schema_name')} "
-        f"{data.metadata.get('abinit_schema_version')}.\n"
+        f"{data.metadata.get('abinit_schema_version')}; "
+        f"number_of_electrons: "
+        f"{data.number_of_electrons if data.number_of_electrons is not None else 'not exported by this schema version'}.\n"
     )
     result = write_projector_exchange_out(
         data,
@@ -1806,11 +2095,18 @@ def gen_exchange_abinit_nc_pao(
     if report_path is not None:
         if shell_records is None:
             if data.projector_l is not None and data.projector_radial is not None:
-                shell_records = select_nc_pao_shells(
-                    compute_nc_pao_shell_populations(data),
-                    charge_threshold=0.0,
-                    moment_threshold=None,
-                )
+                try:
+                    shell_records = select_nc_pao_shells(
+                        compute_nc_pao_shell_populations(data),
+                        charge_threshold=0.0,
+                        moment_threshold=None,
+                    )
+                except ValueError as exc:
+                    # The report is a passive diagnostic: record that shell
+                    # populations are unavailable instead of failing it.
+                    if "require occupations" not in str(exc):
+                        raise
+                    shell_records = []
             else:
                 shell_records = []
         Path(report_path).write_text(

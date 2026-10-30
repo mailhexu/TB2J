@@ -110,6 +110,24 @@ def make_bcc_fe_projector_data():
     )
 
 
+def test_projector_green_data_number_of_electrons_contract():
+    def build(number_of_electrons=None):
+        fields = make_bcc_fe_projector_data().__dict__
+        if number_of_electrons is not None:
+            fields["number_of_electrons"] = number_of_electrons
+        return ProjectorGreenData(**fields)
+
+    # Unknown stays unknown: old sources expose no count and none is invented.
+    assert make_bcc_fe_projector_data().number_of_electrons is None
+
+    data = build(8.0)
+    assert data.number_of_electrons == 8.0
+
+    for bad in (0.0, -2.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="number_of_electrons"):
+            build(bad)
+
+
 def make_overlap_k_projector_data():
     coefficients = np.array(
         [
@@ -1025,17 +1043,15 @@ def test_abinit_nc_pao_hs_v2_loader_prefers_full_bz_coefficients(tmp_path):
     np.testing.assert_allclose(loaded.overlap_k, source.overlap_k)
 
 
-def test_abinit_nc_pao_shell_populations_group_by_site_radial_and_l(tmp_path):
-    from TB2J.interfaces.abinit_savetb2j import (
-        compute_nc_pao_shell_populations,
-        load_abinit_nc_pao_savetb2j,
-    )
+def test_abinit_nc_pao_shell_populations_group_by_site_radial_and_l():
+    from TB2J.interfaces.abinit_savetb2j import compute_nc_pao_shell_populations
 
-    source = make_nc_pao_exchange_data()
-    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
-    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
-    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
-    data = load_abinit_nc_pao_savetb2j(filename)
+    # ABINIT savetb2j files no longer carry occupations; the grouping math
+    # runs on in-memory data.
+    data = make_nc_pao_exchange_data()
+    data.projector_l = np.array([0, 0])
+    data.projector_radial = np.array([1, 2])
+    data.overlap_k = np.eye(2, dtype=complex)[None, :, :]
 
     shells = compute_nc_pao_shell_populations(data)
 
@@ -1056,20 +1072,20 @@ def test_abinit_nc_pao_shell_populations_require_shell_metadata():
         compute_nc_pao_shell_populations(data)
 
 
-def test_abinit_nc_pao_shell_threshold_masks_local_operator(tmp_path):
+def test_abinit_nc_pao_shell_threshold_masks_local_operator():
     from TB2J.interfaces.abinit_savetb2j import (
         compute_nc_pao_shell_populations,
-        load_abinit_nc_pao_savetb2j,
         mask_local_operators_by_shell_selection,
         select_nc_pao_shells,
     )
 
-    source = make_nc_pao_exchange_data()
-    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
-    source.occupations = np.array([[[1.0, 0.0]], [[0.0, 0.005]]])
-    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
-    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
-    data = load_abinit_nc_pao_savetb2j(filename)
+    # Population records need occupations, which ABINIT savetb2j files no
+    # longer carry; the shell math is exercised on in-memory data.
+    data = make_nc_pao_exchange_data()
+    data.projector_l = np.array([2, 2])
+    data.projector_radial = np.array([0, 1])
+    data.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    data.occupations = np.array([[[1.0, 0.0]], [[0.0, 0.005]]])
     local_operators = {0: np.ones((2, 2), dtype=complex)}
 
     shells = select_nc_pao_shells(
@@ -1081,22 +1097,19 @@ def test_abinit_nc_pao_shell_threshold_masks_local_operator(tmp_path):
     np.testing.assert_allclose(masked[0], [[1.0, 0.0], [0.0, 0.0]])
 
 
-def test_abinit_nc_pao_shell_moment_threshold_masks_nonmagnetic_shell(tmp_path):
+def test_abinit_nc_pao_shell_moment_threshold_masks_nonmagnetic_shell():
     from TB2J.interfaces.abinit_savetb2j import (
         compute_nc_pao_shell_populations,
-        load_abinit_nc_pao_savetb2j,
         mask_local_operators_by_shell_selection,
         select_nc_pao_shells,
     )
 
-    source = make_nc_pao_exchange_data()
-    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
-    source.occupations = np.array([[[1.0, 1.0]], [[1.0, 0.0]]])
-    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
-    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
-    data = load_abinit_nc_pao_savetb2j(filename)
+    data = make_nc_pao_exchange_data()
+    data.projector_l = np.array([2, 2])
+    data.projector_radial = np.array([0, 1])
+    data.overlap_k = np.eye(2, dtype=complex)[None, :, :]
+    data.occupations = np.array([[[1.0, 1.0]], [[1.0, 0.0]]])
     local_operators = {0: np.ones((2, 2), dtype=complex)}
-
     shells = select_nc_pao_shells(
         compute_nc_pao_shell_populations(data),
         charge_threshold=0.01,
@@ -1113,21 +1126,25 @@ def test_abinit_nc_pao_diagnostics_report_summarizes_selection(tmp_path):
     from TB2J.interfaces.abinit_savetb2j import (
         compute_nc_pao_shell_populations,
         gen_exchange_abinit_nc_pao,
-        load_abinit_nc_pao_savetb2j,
         select_nc_pao_shells,
     )
 
-    source = make_nc_pao_exchange_data()
-    source.overlap_k = np.eye(2, dtype=complex)[None, :, :]
-    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
-    report_path = tmp_path / "report.md"
-    write_abinit_nc_pao_hs_v2_fixture(filename, source, full_bz=True)
-
-    data = load_abinit_nc_pao_savetb2j(filename)
+    # Shell-population math on in-memory data (ABINIT savetb2j files no
+    # longer carry occupations).
+    data = make_nc_pao_exchange_data()
+    data.projector_l = np.array([0, 0])
+    data.projector_radial = np.array([1, 2])
+    data.overlap_k = np.eye(2, dtype=complex)[None, :, :]
     shells = select_nc_pao_shells(
         compute_nc_pao_shell_populations(data), charge_threshold=0.01
     )
     assert all(shell["selected"] for shell in shells)
+
+    filename = tmp_path / "abinit_nc_pao_hs_v2.nc"
+    report_path = tmp_path / "report.md"
+    write_abinit_nc_pao_hs_v2_fixture(
+        filename, make_nc_pao_exchange_data(), full_bz=True
+    )
 
     gen_exchange_abinit_nc_pao(
         filename,
@@ -1138,8 +1155,9 @@ def test_abinit_nc_pao_diagnostics_report_summarizes_selection(tmp_path):
     )
 
     report = report_path.read_text(encoding="utf-8")
-    assert "excluded_shell_count: 0" in report
-    assert "all shells are selected by the current threshold" in report
+    # Loaded files carry no occupations, so the report records shell
+    # diagnostics as unavailable instead of fabricating populations.
+    assert "shell diagnostics unavailable" in report
 
     disabled_report_path = tmp_path / "disabled_report.md"
     gen_exchange_abinit_nc_pao(
@@ -1154,7 +1172,6 @@ def test_abinit_nc_pao_diagnostics_report_summarizes_selection(tmp_path):
 
     disabled_report = disabled_report_path.read_text(encoding="utf-8")
     assert "shell_filtering: disabled" in disabled_report
-    assert "shell filtering is disabled" in disabled_report
 
 
 def test_abinit_nc_pao_report_handles_disabled_filter_without_shell_metadata(tmp_path):
@@ -1345,23 +1362,22 @@ def test_abinit_nc_pao_exchange_api_writes_exchange_out(tmp_path):
     assert jdict
 
 
-def test_abinit_nc_pao_exchange_projector_population_uses_dual_metric(tmp_path):
+def test_abinit_nc_pao_exchange_projector_population_fails_closed(tmp_path):
     from TB2J.interfaces.abinit_savetb2j import gen_exchange_abinit_nc_pao
 
     filename = tmp_path / "abinit_nc_pao_savetb2j.nc"
     write_abinit_nc_pao_fixture(filename, make_nc_pao_exchange_data())
 
-    exchange_out, _ = gen_exchange_abinit_nc_pao(
-        filename,
-        output_path=tmp_path / "TB2J_results_projector_population",
-        Rpts=[(0, 0, 0)],
-        nz=2,
-        population_mode="projector",
-    )
-
-    text = exchange_out.read_text(encoding="utf-8")
-    assert "Fe1" in text
-    assert "0.0000    0.0000" not in text
+    # ABINIT savetb2j exports no occupations; the occupation-based projector
+    # population mode refuses instead of fabricating charges.
+    with pytest.raises(ValueError, match="do not export occupations"):
+        gen_exchange_abinit_nc_pao(
+            filename,
+            output_path=tmp_path / "TB2J_results_projector_population",
+            Rpts=[(0, 0, 0)],
+            nz=2,
+            population_mode="projector",
+        )
 
 
 def test_abinit_nc_pao_exchange_rejects_ibz_schema_v2(tmp_path):
@@ -1392,7 +1408,6 @@ def test_abinit_nc_pao_cli_writes_exchange_out(tmp_path, monkeypatch):
             str(output_path),
             "--nz",
             "2",
-            "--no_shell_filter",
             "--emax",
             "2.5",
         ],

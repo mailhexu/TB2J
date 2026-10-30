@@ -23,7 +23,10 @@ A valid projector Green dataset contains:
 * optional spin-resolved Fermi energies, ``efermi_spin[nspin]``;
 * projector-to-site and projector-to-atom maps;
 * optional structure data: cell, positions, and atomic numbers;
-* optional occupations with the same shape as eigenvalues.
+* optional occupations with the same shape as eigenvalues;
+* optional producer valence-electron count, ``number_of_electrons``:
+  exposed exactly as the source exports it (ABINIT savetb2j 1.3 and later),
+  never inferred, ``None`` when the source predates it.
 
 The coefficient convention is
 
@@ -335,9 +338,11 @@ ABINIT NC PAO Export (Experimental)
 ABINIT's norm-conserving PAO path currently writes an experimental NetCDF schema
 identified by ``schema_name = abinit.nc_pao_hs`` and ``schema_version = 2``.  It
 is separate from the PAW ``savetb2j`` schema above.  The file records PAO basis
-metadata, IBZ and optional full-BZ k-point maps, eigenvalues, optional
-``occupations``, PAO overlap matrices, diagnostic PAO Hamiltonian matrices, and
-TB2J-oriented spectral/operator arrays:
+metadata, IBZ and optional full-BZ k-point maps, eigenvalues, PAO overlap
+matrices, diagnostic PAO Hamiltonian matrices, and
+TB2J-oriented spectral/operator arrays (an ``occupations`` variable may still
+appear in files written by older producers; the TB2J reader ignores it in every
+version and never validates it):
 
 * ``coefficients_ibz_real`` and ``coefficients_ibz_imag`` store
   ``coefficients_ibz(nproj, nband, nkpt_ibz, nsppol)`` with convention
