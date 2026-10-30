@@ -7,6 +7,8 @@
 - Structure shell templates sort by distance; shell files support explicit
   Angstrom, Bohr or nm distance units. CLI options have short forms and help
   shows defaults.
+- Generated shell files include a source/version header, compact shell entries,
+  grouped equivalent-pair comments and readable symmetry matrices and vectors.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing

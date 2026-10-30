@@ -69,7 +69,10 @@ def _generate_native(
             result.document, context_sha256=digest, distance_unit=distance_unit
         )
         shells.write_shells(
-            document, stages[1], equivalent_comments=equivalent_comments
+            document,
+            stages[1],
+            equivalent_comments=equivalent_comments,
+            source_path=source,
         )
         os.replace(stages[0], companion)
         os.replace(stages[1], output)
@@ -184,7 +187,10 @@ def generate_shells(
         ) as stream:
             temporary = Path(stream.name)
         shells.write_shells(
-            document, temporary, equivalent_comments=equivalent_comments
+            document,
+            temporary,
+            equivalent_comments=equivalent_comments,
+            source_path=source,
         )
         os.replace(temporary, output)
     finally:

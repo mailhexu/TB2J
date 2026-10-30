@@ -126,31 +126,6 @@ def test_inconsistent_pickle_is_symmetrized_by_default(tmp_path, capsys):
     assert (tmp_path / "TB2J.pickle").read_bytes() == original
 
 
-def test_structure_generate_matches_public_api_bytes(tmp_path, inputs):
-    cli = tmp_path / "cli.toml"
-    assert (
-        _run(
-            "generate",
-            inputs[1],
-            "--magnetic-species",
-            "Fe",
-            "--cutoff",
-            "3.1",
-            "--reference-spins",
-            inputs[2],
-            "-o",
-            cli,
-        )
-        == 0
-    )
-    api = tmp_path / "api.toml"
-    shells.write_shells(
-        shells.template(inputs[0], [1], 3.1, reference_spins=[2.0], mode="isotropic"),
-        api,
-    )
-    assert cli.read_bytes() == api.read_bytes()
-
-
 def test_species_and_atom_selectors_produce_identical_documents(tmp_path, inputs):
     species = tmp_path / "species.toml"
     atoms = tmp_path / "atoms.toml"
@@ -268,9 +243,7 @@ def test_pickle_generate_rejects_structure_controls(tmp_path, inputs, capsys):
 
 
 @pytest.mark.parametrize("moments", ["[2.0]", "[[0.0, 0.0, 2.0]]"])
-def test_reference_moments_file_enables_msg_with_api_parity(
-    tmp_path, inputs, moments, capsys
-):
+def test_reference_moments_file_enables_msg(tmp_path, inputs, moments, capsys):
     inputs[2].write_text(f"moments = {moments}\n")
     output = tmp_path / "msg.toml"
     assert (
@@ -292,20 +265,6 @@ def test_reference_moments_file_enables_msg_with_api_parity(
     assert document.moment_source == "explicit"
     expected_moments = (2.0,) if moments == "[2.0]" else ((0.0, 0.0, 2.0),)
     assert document.moments == expected_moments
-    reference = tomli.loads(inputs[2].read_text())["moments"]
-    api = tmp_path / "api.toml"
-    shells.write_shells(
-        shells.template(
-            inputs[0],
-            [1],
-            3.1,
-            symmetry="msg",
-            reference_spins=reference,
-            mode="tensor",
-        ),
-        api,
-    )
-    assert output.read_bytes() == api.read_bytes()
     missing = tmp_path / "missing.toml"
     assert _run(*_generate_args(inputs, missing, "--symmetry", "msg")) != 0
     assert not missing.exists()

@@ -24,6 +24,7 @@ def test_structure_shells_are_ordered_by_distance():
 )
 def test_structure_distance_units_round_trip(tmp_path, unit, cutoff, expected):
     import tomli
+
     from TB2J.io_exchange.shell_workflow import generate_shells
 
     source = tmp_path / "POSCAR"
@@ -144,6 +145,33 @@ def test_shell_comments_explain_editing_and_can_be_removed(tmp_path):
     )
     assert shells.read_shells(with_pairs) == shells.read_shells(without_pairs)
     assert shells.read_shells(without_comments) == document
+
+
+def test_generated_shell_file_presents_readable_snapshot(tmp_path):
+    import re
+
+    import tomli
+
+    import TB2J
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    source = tmp_path / "Fe structure.vasp"
+    Atoms("Fe", cell=np.eye(3) * 3, scaled_positions=[[0, 0, 0]], pbc=True).write(
+        source, format="vasp"
+    )
+    path = tmp_path / "shells.toml"
+    result = generate_shells(source, path, magnetic_species=["Fe"], cutoff=4.3)
+    text = path.read_text()
+    assert f"TB2J {TB2J.__version__}" in text and str(source) in text
+    assert text.rfind("[[shell]]") < text.index("# Equivalent ordered pairs")
+    assert re.search(
+        r"rotation = \[\n\s*\[[^\n]+\],\n\s*\[[^\n]+\],\n\s*\[[^\n]+\],\n\]", text
+    )
+    assert re.search(r"translation = \[[^\n]+\]", text)
+    with path.open("rb") as stream:
+        parsed = tomli.load(stream)
+    assert len(parsed["symmetry"]["operations"]) == len(result.document.operations)
+    assert shells.read_shells(path) == result.document
 
 
 def test_cubic_template_is_one_full_direct_neighbor_orbit(tmp_path):

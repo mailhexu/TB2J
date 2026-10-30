@@ -745,12 +745,14 @@ def read_shells(path):
     return load(path)
 
 
-def write_shells(document, path, *, equivalent_comments=True):
-    """Write a validated document; informational pair comments are optional."""
+def write_shells(document, path, *, equivalent_comments=True, source_path=None):
+    """Write a validated document with optional pair comments and source header."""
     from .shell_text import dump
 
     validate_shells(document)
-    dump(document, path, equivalent_comments=equivalent_comments)
+    dump(
+        document, path, equivalent_comments=equivalent_comments, source_path=source_path
+    )
 
 
 @dataclass(frozen=True)

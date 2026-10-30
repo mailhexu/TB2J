@@ -23,9 +23,13 @@ space-group symmetry, pass `symmetry="msg"` and complete
 `reference_spins` in full atom order; `symprec` and `magnetic_tol` are configurable.
 Use `mode="tensor"` for 3×3 exchange values. Each shell remains `unfilled` until edited.
 
-Both this entry point and `write_shells` add format explanations. Set
-`equivalent_comments=False` to omit equivalent-pair lists without omitting
-the explanations. Comments are informational and can be deleted.
+Both this entry point and `write_shells` add format explanations. The header
+identifies the TB2J version and, for generation from a file, the input path;
+that path is informational and is never reopened during export. Equivalent
+ordered-pair comments are grouped by shell after the complete shell list.
+Set `equivalent_comments=False` to omit those lists without omitting format
+explanations. Rotation matrices use one row per line and translations use a
+single vector line. All comments are informational and can be deleted.
 
 ## Generate from a trusted TB2J pickle
 
