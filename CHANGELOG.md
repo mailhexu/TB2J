@@ -25,6 +25,19 @@
 - Shell numerical output uses eight fixed decimal places with aligned vector and
   tensor columns; validation tolerances retain their precision. Small exchange
   values can round to zero, and rounded output is validated before publication.
+- Validated complete-source QE DFT+U exchange on the declared nonzero-U Fe
+  collinear/spinor anchor and independent US/PAW SOC x/y/z references, with
+  every physical first-neighbor pair passing unchanged production tensor
+  gates. The PAW case uses an existing-input hard FFT quadrature refinement;
+  native solvers, defaults, functionals and accepted tolerances are unchanged.
+  Added a reproducible AFM-II NiO PBE/U=5 eV native-atomic/KB recipe and its
+  finite mesh/band/contour/range convergence evidence over all 640 selected
+  physical pairs. See [QE projector usage](docs/src/qe_projector.rst) for the
+  measured support matrix, exact inputs and retained evidence indexes.
+  Complete `delta_total` remains the default; diagnostic components are not
+  separately certified tensors. Earlier failed controls remain retained;
+  this does not certify universal convergence, atomic-wavefunction J accuracy,
+  FR-NC/mixed-family/atomic-spinor production, or native spinor-background U.
 - Fixed native QE beta-channel ownership for scalar and spinor KB dumps.
   QE concatenates beta rows by species, then atoms within each species;
   earlier readers assumed atom-major order. Inputs not grouped in increasing

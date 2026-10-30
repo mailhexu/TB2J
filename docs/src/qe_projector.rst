@@ -756,3 +756,286 @@ or any tensor gate. U=0 native controls omit the ``HUBBARD`` card. Executable
 ``docs/sympy/qe_hubbard_joint_frame.py`` and
 ``docs/sympy/qe_hubbard_cartesian_tangents.py`` have paired reports; symbolic
 checks do not replace native action, rotation or production certification.
+
+Measured nonzero-U evidence and limits
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The source-format table above describes native producer capability, not
+physical tensor or material convergence. The earlier KB family benchmarks
+without Hubbard U do not certify the following nonzero-U cases. All rows
+below refer to complete ``delta_total`` with the native XC+U source; the
+XC-only and U-only selections remain diagnostics.
+
+.. list-table:: Exact-case DFT+U validation
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Case
+     - Measured result
+   * - Fe, no SOC
+     - Eight transverse pairs: worst 0.00318146 meV.
+   * - Fe, US SOC
+     - Eight tensors, rank nine.
+
+       Repeated-row spread: 2.34057e-9 eV.
+
+       Reciprocity residual: 1.38778e-17 eV.
+   * - Fe, PAW SOC
+     - Eight tensors, rank nine.
+
+       Repeated-row spread: 3.52738e-9 eV.
+
+       Reciprocity residual: 1.38778e-17 eV.
+   * - AFM-II NiO
+     - All 640 physical pairs: finite checks pass.
+
+       Bands 64-to-80: 0.01130507 meV.
+
+       Bands 80-to-96: 0.04187819 meV.
+
+       Direct 64-to-96: 0.03057347 meV.
+   * - Excluded tensors
+     - Atomic-spinor, FR-NC and mixed-family: refused.
+
+**Fe conditions.** All three rows use bcc Fe, PBE, U=4 eV on Fe 3d,
+ortho-atomic Hubbard projectors and KB exchange. The no-SOC comparison
+uses the same scalar US UPF bytes, geometry, U/subspace/state, full
+12-cubed mesh, 24 bands per spin versus 48 spinor bands, 30 CFR poles,
+0.05 eV contour and 2.6 Angstrom range; every transverse pair meets the
+unchanged 0.01 meV limit.
+
+The SOC rows use fully relativistic US or PAW UPFs and three independent
+native x/y/z references per family. Every physical first-neighbor API/CLI
+tensor passes the unchanged default repeated-row bound 5e-8 eV and
+absolute maximum 1e-7 eV. Native action, occupation, frame, source tangent,
+finite-difference and restoration checks pass independently.
+The measured PAW case requires hard FFT ``nr1=nr2=nr3=90``; cutoffs,
+G-vector counts and the 27-cubed smooth grid are unchanged.
+PAW evidence is not inferred from US; failed unrefined SCFs remain retained.
+
+**NiO conditions.** PBE, scalar NC, U=5 eV on both Ni 3d subspaces,
+atomic Hubbard projectors and KB exchange. Each tabulated band change is
+the maximum over all physical Ni--Ni pairs, below the unchanged
+0.06 meV per-pair limit. Worst inversion difference is
+4.012007792653094e-7 meV; pair reversal is 1.7763568394002505e-15 meV.
+Failed 48-to-64-band and 7-to-9-Angstrom results remain retained.
+Selected production uses 64 bands, 11 Angstrom and 50 CFR poles.
+This is a finite declared-convergence example, not a continuum-limit result.
+
+**Unmeasured and excluded.** Native collinear atomic source checks are
+distinct from a quantitative J benchmark. Existing production refusals
+are not weakened. No atomic-wavefunction J-accuracy, universal cross-code,
+continuum-limit or unsupported-family certification is claimed.
+
+Local retained evidence is under
+``/STORAGE1/hexu/projects_bak/TB2J/qe_dftu/``. Original corrected-reader
+results use ``b76ef28c6c192eec402ef3ae74a197aca80b39da``; new 64/80/96-band
+API/CLI analysis uses actual ``ec1348f60179d8a541e6e93461950960dbe6fac8``
+with identical reader/Green/projector/CLI bytes and changed shared IO.
+Its recomputed 64-band output matches all 642 retained dictionary entries
+(640 physical pairs) exactly, 0 eV. A separate actual canonical
+``a0786635b423eff920fffc1fb1e3e414e0a71931`` reader/API/CLI exercise
+also reproduces every retained entry exactly; it does not repin the band study.
+Original NiO/US native data retains source
+``0ad4b695fc6a105ac1a97171a60fad54ef844fdc`` and executable SHA-256
+``3c26aa1374e833ea9a9dede4d7dd7552e9adcc9c8737e8396d7a721ddb7ac46a``.
+The new PAW cases use restored identical production source and the separately
+pinned relinked executable
+``6cd3e043474ee5d9362b36f39b0ccff818126c015995cda837ce1a5e50f54103``;
+no native default, solver or functional patch is delivered.
+New G5 and PAW consumer exercises identify actual
+``a9de29164046d6d82385262ed569d7eb49b8e2c0`` and seven runtime module
+fingerprints. Each evidence report retains its actual runtime rather than
+repinning older results to the latest checkout.
+The ``story008-evidence-index.json``,
+``story008-paw-fft90-soc-certification.json``,
+``story008-current-matched-a9de2916.json`` and
+``story011-evidence-index.json`` retain the new physical source/tensor checks.
+The original corrected-reader ``story010-matched-exchange.json``,
+``story010-us-soc-certification.json``,
+``story010-beta-ownership-proof.json``,
+``story010-zero-noU-legacy-proof.json`` and
+``story010-inversion-allpairs.json`` retain actual corrected-source
+results. ``story010-nio-exchange-rebuild/analysis.json`` remains failed
+on the lower-band comparison; the separately declared finite refinement
+passes in ``story009-band-refinement-comparison/analysis.json``, with
+both full new native oracles retained there. No old buggy-reader
+numerical pass replaces the failure. Original failed runs and original
+evidence are retained separately.
+``story009-evidence-index.json`` binds the accepted finite NiO series,
+native/source checks and actual canonical reader/API/CLI outputs.
+The SOC benchmarks here are one-site Fe; a multisite SOC material and
+the optional SrMnO3 oxide are not benchmarked by this example.
+
+AFM-II NiO input and execution recipe
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This example fixes PBE, the four-atom AFM-II cell at a=4.17 Angstrom,
+scalar NC pseudopotentials, and Dudarev U=5 eV on both Ni 3d subspaces.
+``HUBBARD (atomic)`` is the native correlated subspace; the exchange
+representation remains KB. ``Ni1`` and ``Ni2`` use identical Ni UPF bytes
+but opposite initial moments. Do not replace this state with FM or no-U
+to obtain convergence.
+
+Place the retained UPFs in ``pseudo/``. The measured local inputs use
+``TBUpy_triqs/examples/triqs_dmft/nio_dp/Ni_nc_dftu.upf`` and
+``O_nc_dftu.upf`` in the TB2J development workspace; the exact source
+paths are retained in each native manifest. Their SHA-256 checksums are:
+
+* ``Ni_nc_dftu.upf``:
+  ``f83c9ee8062152d26e736c0ff9c0af7c86936f0642f3ab66ffb2eda42bd46a64``
+* ``O_nc_dftu.upf``:
+  ``2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11``
+
+Save the following as ``nio-scf.in``. It uses 48 bands **per spin**
+and the denser 10-cubed SCF density from the declared convergence series.
+
+.. code-block:: text
+
+   ! Story009 AFM-II rocksalt NiO; stage scf10.
+   ! Matched 4-atom cell; Ni1/Ni2 use identical scalar NC Ni bytes.
+   &CONTROL
+    calculation='scf', restart_mode='from_scratch', prefix='story009-nio',
+    pseudo_dir='./pseudo',
+    outdir='./scf_work',
+   /
+   &SYSTEM
+    ibrav=0, nat=4, ntyp=3, ecutwfc=80.0, ecutrho=320.0,
+    input_dft='PBE', nspin=2, nbnd=48,
+    occupations='smearing', smearing='fd', degauss=0.01,
+    starting_magnetization(1)=0.6, starting_magnetization(2)=-0.6, starting_magnetization(3)=0.0,
+   /
+   &ELECTRONS
+    conv_thr=1.0d-12,
+    electron_maxstep=600,
+    mixing_beta=0.25,
+    diagonalization='cg',
+    diago_full_acc=.true.,
+    diago_cg_maxiter=600,
+    startingpot='atomic',
+    startingwfc='atomic'
+   /
+   ATOMIC_SPECIES
+   Ni1 58.6934 Ni_nc_dftu.upf
+   Ni2 58.6934 Ni_nc_dftu.upf
+   O 15.999 O_nc_dftu.upf
+   ATOMIC_POSITIONS crystal
+   Ni1 0.0 0.0 0.0
+   O 0.5 0.5 0.25
+   Ni2 0.0 0.0 0.5
+   O 0.5 0.5 0.75
+   CELL_PARAMETERS angstrom
+   0.0 2.085 2.085
+   2.085 0.0 2.085
+   4.17 4.17 0.0
+   K_POINTS automatic
+   10 10 10 0 0 0
+   HUBBARD (atomic)
+   U Ni1-3d 5.0
+   U Ni2-3d 5.0
+
+Save the following as ``nio-nscf.in``. The frozen-density full-BZ
+14-cubed calculation uses 64 bands per spin. Different SCF and NSCF
+k meshes initialize wavefunctions atomically; copied SCF wavefunctions
+are provenance, not a claim of same-mesh file initialization.
+
+.. code-block:: text
+
+   ! Story009 AFM-II rocksalt NiO; stage nscf14-b64-scf10.
+   ! Matched 4-atom cell; Ni1/Ni2 use identical scalar NC Ni bytes.
+   &CONTROL
+    calculation='nscf', restart_mode='from_scratch', prefix='story009-nio',
+    pseudo_dir='./pseudo',
+    outdir='./nscf_work',
+   /
+   &SYSTEM
+    ibrav=0, nat=4, ntyp=3, ecutwfc=80.0, ecutrho=320.0,
+    input_dft='PBE', nspin=2, nbnd=64,
+    occupations='smearing', smearing='fd', degauss=0.01,
+    starting_magnetization(1)=0.6, starting_magnetization(2)=-0.6, starting_magnetization(3)=0.0,
+    nosym=.true., noinv=.true.,
+   /
+   &ELECTRONS
+    conv_thr=1.0d-12,
+    electron_maxstep=600,
+    mixing_beta=0.25,
+    diagonalization='cg',
+    diago_full_acc=.true.,
+    diago_cg_maxiter=600,
+    diago_thr_init=1.0d-12,
+    startingpot='file',
+    startingwfc='atomic'
+   /
+   ATOMIC_SPECIES
+   Ni1 58.6934 Ni_nc_dftu.upf
+   Ni2 58.6934 Ni_nc_dftu.upf
+   O 15.999 O_nc_dftu.upf
+   ATOMIC_POSITIONS crystal
+   Ni1 0.0 0.0 0.0
+   O 0.5 0.5 0.25
+   Ni2 0.0 0.0 0.5
+   O 0.5 0.5 0.75
+   CELL_PARAMETERS angstrom
+   0.0 2.085 2.085
+   2.085 0.0 2.085
+   4.17 4.17 0.0
+   K_POINTS automatic
+   14 14 14 0 0 0
+   HUBBARD (atomic)
+   U Ni1-3d 5.0
+   U Ni2-3d 5.0
+
+Run in a fresh directory, selecting the instrumented executable rather
+than an unrelated QE installation on PATH. For the local canonical build:
+
+.. code-block:: bash
+
+   QE_PW="$HOME/.local/src/q-e/bin/pw.x"
+   export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 TB2J_PROJECTORS=kb
+   env -u TB2J_DUMP "$QE_PW" -in nio-scf.in > nio-scf.log
+   cp -a scf_work nscf_work
+   TB2J_DUMP="$PWD/nio-nscf.bin" "$QE_PW" -in nio-nscf.in > nio-nscf.log
+   python -m TB2J.scripts.qe2J --input nio-nscf.bin \
+       --elements Ni --Rcut 11 --nz 50 --smearing 0.05 \
+       --output_path TB2J_NiO
+
+The symmetry-reduced SCF density calculation intentionally disables
+export. Only the full-BZ NSCF dump enters the exchange calculation.
+
+Require actual SCF convergence and clean final NSCF eigenvalues;
+``JOB DONE`` alone is insufficient. Retain the independent frozen SCF
+parent, both input/log files, UPF and executable hashes, native-source
+oracle, and standard ``TB2J_NiO/exchange.out`` output. The two Ni moments
+must retain opposite signs with zero net cell magnetization. Native
+Hubbard-subspace moments and QE real-space integration moments need not
+have equal magnitudes.
+
+The declared convergence series separately compares SCF densities 8 to
+10 cubed, NSCF meshes 10 to 14 cubed, CFR poles 30 to 40 to 50 at
+0.05 eV, and Rcut 7 to 9 to 11 to 13 Angstrom. The original 48 to
+64 bands-per-spin comparison fails on the corrected reader:
+0.07277956135662045 meV exceeds the unchanged 0.06 meV budget.
+The separately declared 64-to-80-to-96 band-tail study passes on the same
+final frozen 10-cubed SCF state and full 14-cubed NSCF mesh:
+the maximum changes are 0.011305069745914054 and
+0.04187818771884011 meV, respectively, over all 640 common physical
+pairs. The direct selected 64-to-96 comparison also passes at
+0.030573471115467044 meV. The displayed production recipe remains
+64 bands, 11 Angstrom and 50 CFR poles. Preserve the failed lower-band
+result rather than claiming the original series converged.
+
+Common physical Ni--Ni pairs use the predeclared maximum absolute
+change of 0.06 meV, not a shell-average difference. Rcut does not
+change common-pair values: each range extension instead bounds,
+for every magnetic origin, the sum of absolute newly added couplings
+by 0.06 meV. The 7-to-9 Angstrom extension fails; the final
+9-to-11 and 11-to-13 tails pass at 0.04240854 and 0.02322439 meV.
+These finite checks do not certify all cutoffs, the continuum limit,
+a Curie temperature, or cross-code equivalence. The new band analysis
+uses actual consumer ``ec1348f60179d8a541e6e93461950960dbe6fac8``;
+its 64-band API/CLI results reproduce retained corrected-reader
+``b76ef28c6c192eec402ef3ae74a197aca80b39da`` output exactly across
+642 dictionary entries, including all 640 physical pairs. The separate
+current canonical reader/API/CLI exercise also matches every retained
+entry exactly; its own runtime fingerprints and output hashes remain in
+``story009-current-canonical-nio-smoke.json``.
