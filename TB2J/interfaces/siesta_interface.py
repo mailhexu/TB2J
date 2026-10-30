@@ -1,4 +1,11 @@
+import hashlib
+import json
 import os
+import sys
+import time
+from contextlib import contextmanager
+from functools import wraps
+from pathlib import Path
 
 import numpy as np
 
@@ -20,6 +27,40 @@ except ImportError:
 
 def siesta_anisotropy(**kwargs):
     pass
+
+
+def _require_wfsx_exchange_operations(path, operation, params):
+    from HamiltonIO.siesta.wfsx import UnsupportedOperatorMode
+
+    bool_options = (
+        "read_H_soc",
+        "orth",
+        "use_gpu",
+        "ibz",
+        "split_soc",
+        "spin_spiral",
+        "dmft",
+        "skip",
+        "vectorize_energy",
+    )
+    operator_options = (
+        "mae_angles",
+        "so_strength",
+        "qspiral",
+        "self_energy",
+        "e_batch_size",
+    )
+    if (
+        operation != "exchange"
+        or any(params.get(key, False) for key in bool_options)
+        or any(params.get(key) is not None for key in operator_options)
+        or params.get("nproc", 1) != 1
+    ):
+        raise UnsupportedOperatorMode(
+            f"file {path}: plain WFSX supports single-process CPU full-operator exchange; "
+            "remove split-SOC/MAE/rescaling, spiral/GBT, GPU batching, IBZ, "
+            "orthogonalization, DMFT or split-SOC skip options"
+        )
 
 
 def prepare_exchange_siesta_wfsx(
@@ -49,26 +90,7 @@ def prepare_exchange_siesta_wfsx(
 
     if not isinstance(source, SiestaWFSXParser):
         raise MissingMetadata("source: supply a validated SiestaWFSXParser")
-    bool_options = (
-        "read_H_soc",
-        "orth",
-        "use_gpu",
-        "ibz",
-        "split_soc",
-        "spin_spiral",
-        "dmft",
-    )
-    operator_options = ("mae_angles", "so_strength", "qspiral", "self_energy")
-    if (
-        operation != "exchange"
-        or any(params.get(key, False) for key in bool_options)
-        or any(key in params and params[key] is not None for key in operator_options)
-        or params.get("nproc", 1) != 1
-    ):
-        raise UnsupportedOperatorMode(
-            f"file {source.wfsx_path}: plain WFSX supports single-process CPU full-operator "
-            "exchange, not split-SOC/MAE/rescaling, spiral/GBT, GPU or DMFT operations"
-        )
+    _require_wfsx_exchange_operations(source.wfsx_path, operation, params)
     metadata = source.metadata
     if metadata.nspin not in (2, 4, 8):
         raise UnsupportedSpinMode(
@@ -141,8 +163,277 @@ def prepare_exchange_siesta_wfsx(
     return exchange
 
 
+@contextmanager
+def _measure_wfsx_eigensolvers():
+    """Measure actual public electronic solver calls for single-process runs."""
+    import scipy.linalg
+    from HamiltonIO import lcao_hamiltonian
+    from HamiltonIO.siesta import sisl_wrapper
+
+    stats = {
+        "calls": 0,
+        "seconds": 0.0,
+        "method": "NumPy/SciPy eig/eigh/eigvals/eigvalsh and HamiltonIO SIESTA/LCAO eigh bindings; outermost calls",
+    }
+    originals = []
+    depth = 0
+
+    def instrument(original):
+        @wraps(original)
+        def measured(*args, **kwargs):
+            nonlocal depth
+            outermost = depth == 0
+            if outermost:
+                stats["calls"] += 1
+                start = time.perf_counter()
+            depth += 1
+            try:
+                return original(*args, **kwargs)
+            finally:
+                depth -= 1
+                if outermost:
+                    stats["seconds"] += time.perf_counter() - start
+
+        return measured
+
+    try:
+        for module, names in (
+            (np.linalg, ("eig", "eigh", "eigvals", "eigvalsh")),
+            (scipy.linalg, ("eig", "eigh", "eigvals", "eigvalsh")),
+            (sisl_wrapper, ("eigh",)),
+            (lcao_hamiltonian, ("eigh",)),
+        ):
+            for name in names:
+                original = getattr(module, name)
+                originals.append((module, name, original))
+                setattr(module, name, instrument(original))
+        yield stats
+    finally:
+        for module, name, original in reversed(originals):
+            setattr(module, name, original)
+
+
+def _run_exchange_siesta_wfsx(wfsx_file, wfsx_metadata, **params):
+    """Execute the existing kernel, publish measured provenance, and clean up."""
+    from collections.abc import Mapping
+
+    from HamiltonIO.siesta.wfsx import (
+        IncompleteSpectrum,
+        InconsistentMetadata,
+        MissingMetadata,
+        SiestaWFSXParser,
+        UnsupportedOperatorMode,
+    )
+
+    started = time.perf_counter()
+    _require_wfsx_exchange_operations(
+        wfsx_file, params.get("operation", "exchange"), params
+    )
+    try:
+        import resource
+    except ImportError as exc:
+        raise UnsupportedOperatorMode(
+            "WFSX peak RSS measurement requires the Unix resource module; "
+            "run on a supported Unix platform; ordinary H/S imports remain available"
+        ) from exc
+    if wfsx_file is None or wfsx_metadata is None:
+        raise MissingMetadata(
+            "wfsx_file/wfsx_metadata: supply complete states and explicit metadata"
+        )
+    metadata_path = None
+    if isinstance(wfsx_metadata, (str, os.PathLike)):
+        metadata_path = Path(wfsx_metadata)
+        try:
+            metadata = json.loads(metadata_path.read_text())
+        except OSError as exc:
+            raise MissingMetadata(
+                f"file {metadata_path}: supply readable metadata JSON"
+            ) from exc
+        except (ValueError, UnicodeError) as exc:
+            raise InconsistentMetadata(
+                f"file {metadata_path}: correct malformed metadata JSON"
+            ) from exc
+    elif isinstance(wfsx_metadata, Mapping):
+        metadata = dict(wfsx_metadata)
+    else:
+        raise MissingMetadata(
+            "wfsx_metadata: supply a metadata mapping or readable JSON path"
+        )
+    source = SiestaWFSXParser(wfsx_file, metadata)
+    inputs = []
+    for role, path in (("wavefunctions", Path(wfsx_file)), ("metadata", metadata_path)):
+        if path is not None:
+            digest = hashlib.sha256()
+            try:
+                with path.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError as exc:
+                category = (
+                    IncompleteSpectrum if role == "wavefunctions" else MissingMetadata
+                )
+                raise category(
+                    f"file {path}: supply readable complete {role} input"
+                ) from exc
+            inputs.append(
+                {
+                    "role": role,
+                    "path": str(path.resolve()),
+                    "sha256": digest.hexdigest(),
+                }
+            )
+    if metadata_path is None:
+        inputs.append(
+            {
+                "role": "metadata",
+                "path": None,
+                "sha256": hashlib.sha256(
+                    json.dumps(
+                        metadata,
+                        sort_keys=True,
+                        allow_nan=False,
+                        default=lambda value: value.tolist(),
+                    ).encode()
+                ).hexdigest(),
+                "method": "canonical JSON mapping, sorted keys",
+            }
+        )
+    output_path = Path(params.get("output_path", "TB2J_results"))
+    write_density_matrix = params.pop("write_density_matrix", False)
+    with _measure_wfsx_eigensolvers() as solvers:
+        exchange = prepare_exchange_siesta_wfsx(source, **params)
+        try:
+            greens = (
+                [exchange.G] if hasattr(exchange, "G") else [exchange.Gup, exchange.Gdn]
+            )
+            stats = [green.spectral_stats for green in greens]
+            first = greens[0]
+            before_integration = time.perf_counter()
+            exchange.calculate_all()
+            integration_seconds = time.perf_counter() - before_integration
+            before_output = time.perf_counter()
+            exchange.write_output(path=output_path)
+            if write_density_matrix:
+                filenames = (
+                    ["rhoR.pickle"]
+                    if len(greens) == 1
+                    else ["rho_up.pickle", "rho_dn.pickle"]
+                )
+                for green, filename in zip(greens, filenames):
+                    green.write_rho_R(exchange.Rlist, fname=output_path / filename)
+            output_seconds = time.perf_counter() - before_output
+            channels = 2 if source.metadata.nspin == 2 else 1
+            supplied = len(first._spectral_map.record_representatives)
+            summary = {
+                "schema_version": 1,
+                "input_mode": "wfsx",
+                "timing_seconds": {
+                    "import": sum(item["import_seconds"] for item in stats),
+                    "preparation": sum(item["preparation_seconds"] for item in stats),
+                    "integration": integration_seconds,
+                    "output": output_seconds,
+                },
+                "electronic_eigensolver": solvers,
+                "inputs": inputs,
+                "metadata": {
+                    **{
+                        key: getattr(source.metadata, key)
+                        for key in (
+                            "source_provenance",
+                            "fermi_source",
+                            "electron_source",
+                            "electron_count",
+                            "occupation_convention",
+                            "electronic_temperature_k",
+                            "weight_semantics",
+                            "gauge",
+                        )
+                    },
+                    "scalar_symmetry": dict(source.metadata.scalar_symmetry),
+                },
+                "symmetry": [
+                    {
+                        "provenance": green._spectral_map.symmetry_provenance,
+                        "operator_validation_required": bool(
+                            green._spectral_map.requires_operator_validation
+                        ),
+                        "partner_expansion_events": green.spectral_stats[
+                            "scalar_partner_expansions"
+                        ],
+                    }
+                    for green in greens
+                ],
+                "spin_mode": source.metadata.nspin,
+                "source_precision": sorted(
+                    {tuple(pair) for item in stats for pair in item["source_precision"]}
+                ),
+                "matrix_sizes": {
+                    "basis": first.nbasis,
+                    "orbitals": first.norb,
+                    "channels": channels,
+                },
+                "states": {
+                    "supplied": supplied * channels * first.nbasis,
+                    "requested": first.nkpts * channels * first.nbasis,
+                    "per_record": first.nbasis,
+                },
+                "kpoints": {
+                    "supplied": supplied,
+                    "requested": first.nkpts,
+                    "representatives_per_channel": [
+                        item["representative_kpoints"] for item in stats
+                    ],
+                    "requested_fractional": first.kpts.tolist(),
+                    "weights": first.kweights.tolist(),
+                    "rlist_mesh": [int(value) for value in exchange.kmesh],
+                },
+                "energy_reference": {
+                    "shifted_fermi_ev": first.efermi,
+                    "source_absolute_fermi_ev": source.metadata.fermi_energy_ev,
+                },
+                "integration_width_ev": float(exchange.smearing),
+                "green_mode": (
+                    "contravariant"
+                    if os.environ.get("TB2J_SIESTA_GREEN_MODE") == "contravariant"
+                    else "default"
+                ),
+                "cache": {
+                    "mode": "disk-spectral",
+                    "owned_children_removed": False,
+                    "spectral_disk_bytes": sum(
+                        item["spectral_disk_bytes"] for item in stats
+                    ),
+                },
+                "nproc": 1,
+            }
+        finally:
+            exchange.finalize()
+    summary["cache"]["owned_children_removed"] = all(
+        not Path(green.cache_path).exists() for green in greens
+    )
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    summary["peak_rss"] = {
+        "value": int(rss * (1 if sys.platform == "darwin" else 1024)),
+        "unit": "bytes",
+        "method": "resource.getrusage(RUSAGE_SELF).ru_maxrss; process-lifetime high-water; macOS bytes, Linux KiB converted; no children",
+    }
+    summary["timing_seconds"]["total"] = time.perf_counter() - started
+    (output_path / "wfsx_run.json").write_text(
+        json.dumps(summary, indent=2, allow_nan=False) + "\n"
+    )
+    return summary
+
+
 def gen_exchange_siesta(
-    fdf_fname, read_H_soc=False, use_gpu=False, skip=False, **kwargs
+    fdf_fname=None,
+    read_H_soc=False,
+    use_gpu=False,
+    skip=False,
+    *,
+    input_mode="hs",
+    wfsx_file=None,
+    wfsx_metadata=None,
+    **kwargs,
 ):
     """
     parameters:
@@ -152,6 +443,11 @@ def gen_exchange_siesta(
             Whether to read the SOC Hamiltonian. Default is False.
         use_gpu: bool
             Whether to use GPU acceleration for MAE calculation. Default is False.
+        input_mode: str
+            "hs" (ordinary default) or "wfsx" (complete wavefunctions, no H/S).
+        wfsx_file, wfsx_metadata:
+            Complete WFSX and explicit metadata mapping or user-authored JSON path.
+            WFSX mode returns a measured summary and writes wfsx_run.json.
 
     parameters in **kwargs:
         magnetic_elements: list of str
@@ -185,6 +481,21 @@ def gen_exchange_siesta(
         description: str
             The description for the calculation. Default is "".
     """
+    if input_mode == "wfsx":
+        return _run_exchange_siesta_wfsx(
+            wfsx_file,
+            wfsx_metadata,
+            read_H_soc=read_H_soc,
+            use_gpu=use_gpu,
+            skip=skip,
+            **kwargs,
+        )
+    if input_mode != "hs" or wfsx_file is not None or wfsx_metadata is not None:
+        from HamiltonIO.siesta.wfsx import UnsupportedOperatorMode
+
+        raise UnsupportedOperatorMode(
+            "input_mode: select 'wfsx' with wavefunction/metadata inputs, or 'hs' without them"
+        )
 
     exargs = dict(
         magnetic_elements=[],

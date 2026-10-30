@@ -158,6 +158,137 @@ tensor, nonzero R, and both metric modes. This does not establish SOC8
 producer coverage or a performance improvement.
 
 
+WFSX command-line and Python runs
+---------------------------------
+
+The ordinary H/S mode remains the default. Opt in explicitly; an FDF,
+HSX, or NetCDF file is neither required nor read in WFSX mode::
+
+   siesta2J.py --input-mode wfsx --wfsx-file states.WFSX \
+       --wfsx-metadata wfsx_metadata.json --elements O \
+       --kmesh 1 1 5 --nz 100 --rcut 4.3 --output_path TB2J_results
+
+Use a mesh actually covered by the complete export. The example mesh and
+element are not universal settings. The CLI retains the common integration
+width default of 600 K; ``--smearing 100K`` or ``--smearing 0.02eV`` selects an
+explicit width. The full-SCF electron check always uses the metadata
+temperature. Python preparation defaults to that metadata temperature when
+``smearing`` is omitted::
+
+   from TB2J.interfaces import gen_exchange_siesta
+
+   summary = gen_exchange_siesta(
+       input_mode="wfsx", wfsx_file="states.WFSX",
+       wfsx_metadata="wfsx_metadata.json", magnetic_elements=["O"],
+       kmesh=[1, 1, 5], nz=100, Rcut=4.3,
+       reduce_scalar=True, cache_path="spectral_cache",
+       output_path="TB2J_results",
+   )
+
+``wfsx_metadata`` also accepts the corresponding Python mapping. The entry
+owns finalization on success and failure; unlike the preparation-only API,
+the caller does not manage an exchange object's lifetime. Standard exchange
+outputs and ``wfsx_run.json`` are written together. The Python entry returns
+the summary; the console entry exits normally, not with that mapping.
+
+``--write_dm`` (Python ``write_density_matrix=True``) writes the existing
+covariant real-space density matrices over the full exchange R list after
+creating the output directory: ``rho_up.pickle``/``rho_dn.pickle`` for
+collinear channels, or ``rhoR.pickle`` for full spinors. These files retain
+the existing ``Rlist``/``rhoR`` pickle format.
+
+Required metadata fields
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+This is a user-authored mapping, not a new SIESTA exporter or generated
+sidecar. Preserve data from the same calculation:
+
+* ``schema_version``: integer 1.
+* ``cell_angstrom``: nonsingular 3x3 lattice; ``positions_angstrom``:
+  ordered atom positions; ``atom_symbols``: ordered species.
+* ``orbital_names_by_atom``: exact ordered spatial AO labels for each atom,
+  matching the exported basis, without invented normalization or reordered rows.
+* ``nspin``: 1, 2, 4 or 8. Full spinors additionally require
+  ``spinor_layout="interleaved"``; scalar channels have no spinor layout.
+* ``fermi_energy_ev``: absolute eV; ``fermi_source``: nonempty provenance.
+  ``eigenvalue_reference="absolute-eV"`` declares raw producer energies.
+* ``electron_count`` and nonempty ``electron_source``;
+  ``occupation_convention="Fermi-Dirac"``;
+  ``electronic_temperature_k``: finite, nonnegative temperature in kelvin.
+* ``source_provenance``: nonempty calculation/export provenance;
+  ``gauge="orbital"``: raw SIESTA orbital-gauge coefficients.
+* ``weight_semantics``: ``"selected-list"`` or ``"scf-folded"``.
+* ``scf_mesh``: original full fractional reciprocal coordinates in
+  ``kpoints`` and explicit positive uniform ``weights`` summing to one.
+  Preserve the actual origin/shift in those coordinates. Reduced representatives
+  alone are not the provenance mesh.
+* Scalar partner completion/internal reduction additionally requires
+  ``scalar_symmetry`` with true boolean ``real_hamiltonian``, ``no_soc``,
+  ``no_orbital_field`` and ``no_spin_spiral``.
+
+Export every AO-space state in every required channel. No energy/band
+filter, partial-spectrum approximation, H/S metadata fallback or hidden
+diagonalization is offered.
+
+Measured summary and resource lifetime
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``wfsx_run.json`` records wall times in seconds for import, spectral
+preparation, integration, output and total entry execution (through cleanup,
+excluding summary serialization). Electronic eigensolver call/time figures
+instrument actual NumPy/SciPy entrypoints, the HamiltonIO SIESTA binding and
+the ``LCAOHamiltonian`` binding actually used by SIESTA ``HSE_k``/``solve``.
+CFR's small auxiliary pole-matrix eigensolve is not an electronic
+Hamiltonian solve. The single-process monitor restores entrypoints even on
+failure. It is not a general concurrent-process profiler.
+
+Peak RSS uses ``resource.getrusage(RUSAGE_SELF).ru_maxrss``: the process-lifetime
+high-water mark, in bytes after Linux KiB conversion (macOS already uses bytes).
+It is not incremental stage memory and excludes child processes. The supported
+WFSX run uses one process. The report also records input SHA-256 hashes,
+metadata provenance, spin mode, source coefficient/energy precision, supplied
+and requested state counts, supplied/requested/representative k counts, matrix
+sizes, Fermi reference, actual Green mode, requested coordinates/weights,
+R-list mesh, integration width, spectral cache mode and measured disk bytes.
+These fields alone establish no speedup or memory saving.
+The metadata section retains the explicit scalar symmetry declarations.
+Per-channel ``symmetry`` entries retain the existing map's provenance and
+operator-validation requirement, distinguishing declaration-only partner
+completion from supplied partners requiring operator validation. Counts do
+not replace these assumptions.
+
+The current WFSX RSS measurement requires the Unix ``resource`` module.
+When it is unavailable, WFSX mode explicitly raises
+``UnsupportedOperatorMode`` before input access; ordinary H/S imports and
+entries remain available. No missing measurement is replaced with zero.
+
+Spectral staging uses owned temporary children. Python ``cache_path`` selects
+their parent; otherwise the system temporary directory is used. The CLI can
+select a real disk location through ``TMPDIR``. Readers and internal memmaps
+close on success or failure; owned children are removed without deleting
+their parent or user inputs. An ordinary uncached run does not own or delete
+a supplied cache parent.
+
+Stable failures and supported operations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The spin/operation restrictions in the preparation section apply equally to
+both entries. Explicit ``--split_soc``, ``--orth``, ``--ibz``, ``--mae_angles``,
+GPU/batching options and multiprocess requests are refused before metadata or
+wavefunction parsing. Python split-SOC skip/spiral/GBT/DMFT/rescaling requests
+are likewise refused. There is no ordinary fallback.
+
+HamiltonIO categories propagate unchanged: ``MissingMetadata``,
+``InconsistentMetadata``, ``IncompleteSpectrum``, ``MissingKPoint``,
+``AmbiguousKPoint``, ``InvalidKWeights``, ``UnsupportedSpinMode``,
+``UnsupportedOperatorMode``, ``UnknownGauge`` and ``SingularEigenbasis``.
+Correct the named field, coordinate/channel/state record, gauge or complete
+export described by the exception; do not normalize invalid weights,
+regularize a singular coefficient basis, or broaden a contour automatically.
+Malformed metadata JSON raises ``InconsistentMetadata``; unreadable metadata
+raises ``MissingMetadata``, with the original cause chained.
+
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 

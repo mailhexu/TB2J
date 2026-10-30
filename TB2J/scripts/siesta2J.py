@@ -2,7 +2,7 @@
 import argparse
 import sys
 
-from TB2J.exchange_params import add_exchange_args_to_parser
+from TB2J.exchange_params import add_exchange_args_to_parser, parser_argument_to_dict
 from TB2J.interfaces import gen_exchange_siesta
 from TB2J.versioninfo import print_license
 
@@ -28,15 +28,39 @@ def run_siesta2J():
         action="store_true",
         default=False,
     )
+    parser.add_argument(
+        "--input-mode",
+        choices=("hs", "wfsx"),
+        default="hs",
+        help="ordinary H/S (default) or complete WFSX states",
+    )
+    parser.add_argument(
+        "--wfsx-file", help="complete SIESTA WFSX file, without band filters"
+    )
+    parser.add_argument("--wfsx-metadata", help="explicit user-authored metadata JSON")
 
     # Add common exchange arguments
     parser = add_exchange_args_to_parser(parser)
+    # Ordinary dispatch ignores this option; distinguish explicit WFSX MAE requests.
+    parser.set_defaults(mae_angles=None)
 
     args = parser.parse_args()
 
     if args.elements is None:
         print("Please input the magnetic elements, e.g. --elements Fe Ni")
         sys.exit()
+    if args.input_mode == "wfsx":
+        params = parser_argument_to_dict(args)
+        params.update(
+            read_H_soc=args.split_soc, ibz=args.ibz, mae_angles=args.mae_angles
+        )
+        gen_exchange_siesta(
+            input_mode="wfsx",
+            wfsx_file=args.wfsx_file,
+            wfsx_metadata=args.wfsx_metadata,
+            **params,
+        )
+        return
 
     # include_orbs = {}
     # for element in args.elements:
@@ -53,6 +77,9 @@ def run_siesta2J():
 
     gen_exchange_siesta(
         fdf_fname=args.fdf_fname,
+        input_mode=args.input_mode,
+        wfsx_file=args.wfsx_file,
+        wfsx_metadata=args.wfsx_metadata,
         kmesh=args.kmesh,
         # magnetic_elements=list(include_orbs.keys()),
         # include_orbs=include_orbs,
