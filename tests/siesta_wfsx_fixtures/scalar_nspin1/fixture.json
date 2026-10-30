@@ -1,0 +1,689 @@
+{
+  "electrons": {
+    "electronic_temperature_k": 100.0,
+    "fermi_energy_ev": -5.03963234,
+    "fermi_energy_source": "first record of same-run EIG (absolute eV)",
+    "occupation_convention": "Fermi-Dirac",
+    "occupation_count_from_eig_and_kp": 11.99999985993557,
+    "occupation_count_method": "sisl EIG relative to E_F, same-run KP integration weights, 100 K Fermi-Dirac; scalar nspin=1 includes spin degeneracy 2",
+    "temperature_source": "ElectronicTemperature from same-run FDF",
+    "total_electrons": 12.0,
+    "total_electrons_source": "same-run SIESTA stdout: Total number of electrons"
+  },
+  "energy_conventions": {
+    "eig_eigenvalues": "relative to E_F (sisl EIG read_data convention)",
+    "ordinary_hsx_hamiltonian": "sisl HSX H(k) energies relative to E_F",
+    "wfsx_eigenvalues": "absolute eV",
+    "wfsx_minus_fermi_matches_eig": true
+  },
+  "files": {
+    "eig": "o2.EIG",
+    "fdf": "o2_scalar.fdf",
+    "hsx": "o2.HSX",
+    "kp": "o2.KP",
+    "orb_indx": "o2.ORB_INDX",
+    "pseudo": "../O.psf",
+    "stdout": "o2.out",
+    "wfsx": "o2.fullBZ.WFSX"
+  },
+  "fixture_id": "scalar_nspin1",
+  "independent_checks": {
+    "max_generalized_eigenpair_residual_ev": 1.4257195948192165e-06,
+    "max_s_orthogonality_error": 1.0602218503130724e-07,
+    "max_wfsx_vs_eig_relative_energy_difference_ev": 4.892125460287389e-08
+  },
+  "kpoints": {
+    "coordinate_system": "fractional reciprocal-lattice coordinates from sisl; WFSX binary values converted once using the same-run cell",
+    "fold_map": [],
+    "integration_mesh": {
+      "normalized": true,
+      "points": [
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            -0.4000001832899072
+          ],
+          "weight": 0.2
+        },
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            -0.2000000916449536
+          ],
+          "weight": 0.2
+        },
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "weight": 0.2
+        },
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.2000000916449536
+          ],
+          "weight": 0.2
+        },
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.4000001832899072
+          ],
+          "weight": 0.2
+        }
+      ],
+      "source": "same-run KP file"
+    },
+    "points": [
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          -0.4
+        ],
+        "source_weight": 0.2
+      },
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          -0.2
+        ],
+        "source_weight": 0.2
+      },
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "source_weight": 0.2
+      },
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          0.2
+        ],
+        "source_weight": 0.2
+      },
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          0.4
+        ],
+        "source_weight": 0.2
+      }
+    ],
+    "source_weight_note": "selected-list weights are raw WFSX values 1.0 and are not Brillouin-zone integration weights; scf-folded weights come from the SCF export and sum to one over distinct k-points",
+    "weight_semantics": "scf-folded"
+  },
+  "mesh": {
+    "dimensions": [
+      1,
+      1,
+      5
+    ],
+    "scf_kpoint_count": 5,
+    "time_reversal_symmetry_for_kpoints": false
+  },
+  "producer": {
+    "architecture": "x86_64",
+    "argv": [
+      "/home/hexu/projects/siesta_dev/siesta/_build/build/Src/siesta"
+    ],
+    "binary_version_revision_abbreviation": "fc8b48876",
+    "compiler": "GNU-15.2.0",
+    "compiler_flags": "-fallow-argument-mismatch -O3 -march=native",
+    "environment": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "executable": "/home/hexu/projects/siesta_dev/siesta/_build/build/Src/siesta",
+    "executable_sha256": "865ab6f1db3619ec53033e5d2eba40174f6b106360196ce6329bbc7872ec9dbf",
+    "mpi_ranks": 1,
+    "parallelizations": "MPI",
+    "python_version": "3.11.11",
+    "siesta_version": "5.2.0-46-gfc8b48876",
+    "sisl_version": "0.16.2",
+    "source_checkout": {
+      "head": "f564b96d5fd1aaa8e7c190d9040eae39c9c07f8e",
+      "head_is_not_claimed_as_binary_build_commit": true,
+      "root": "/home/hexu/projects/siesta_dev/siesta",
+      "source_sha256": {
+        "Src/kpoint_t.F90": "2cf53843bb721d023c4db8711bef8282efdd873070c5a6f62e30a5f011aba444",
+        "Src/read_options.F90": "91f4a018750d6cca9d8332180146390966dacf79c269afda99a72763a6fccfde",
+        "Src/siesta_analysis.F90": "498fcf8b2fe259b8c2e896f31618ccbe642115b9c9b2a4e15a3e3699bc9db2c1",
+        "Src/writewave.F": "5708c41350addc78a75f80cecb49bb224e60fee35481c0e03c0ec24dd22f3f97"
+      }
+    },
+    "stdin_fdf": "o2_scalar.fdf",
+    "stdout_file": "o2.out",
+    "working_directory": "/home/hexu/projects/TB2J_dev/worktrees/siesta-wfsx-vault/.tmp/kosmic/runs/20261030T070052Z-siesta-wfsx-fixtures-3d221ea09c8169799b05dfa426f43a0a/scratch/runs/siesta-wfsx-generate-5eo4t_su/runs/o2_scalar"
+  },
+  "producer_run_id": "20261030T073812044051Z-scalar_nspin1",
+  "scf": {
+    "converged": true,
+    "convergence_criterion": "FreeE criterion",
+    "fermi_energy_printed_ev": -5.039632,
+    "final_spin_moment_mu_b": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "free_energy_only_convergence": true,
+    "iteration_count": 9,
+    "total_energy_ev": -866.929887
+  },
+  "schema": "tb2j.siesta_wfsx_fixture/1",
+  "spin": {
+    "channel_index_origin": 0,
+    "kind": "scalar",
+    "magnetic": false,
+    "mode": "non-polarized",
+    "nspin": 1,
+    "scalar_reduction": true,
+    "scalar_symmetry": {
+      "no_orbital_field": true,
+      "no_soc": true,
+      "no_spin_spiral": true,
+      "real_hamiltonian": true
+    },
+    "soc": false,
+    "spinor_components": 1
+  },
+  "states": {
+    "all_states_retained": true,
+    "gamma_only": false,
+    "groups": [
+      {
+        "coefficient_dtype": "complex64",
+        "coefficient_shape": [
+          18,
+          18
+        ],
+        "energy_dtype": "float64",
+        "gauge": "orbital",
+        "group_index": 0,
+        "kpoint_index": 0,
+        "spin_id": null,
+        "state_count": 18,
+        "state_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      },
+      {
+        "coefficient_dtype": "complex64",
+        "coefficient_shape": [
+          18,
+          18
+        ],
+        "energy_dtype": "float64",
+        "gauge": "orbital",
+        "group_index": 1,
+        "kpoint_index": 1,
+        "spin_id": null,
+        "state_count": 18,
+        "state_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      },
+      {
+        "coefficient_dtype": "complex64",
+        "coefficient_shape": [
+          18,
+          18
+        ],
+        "energy_dtype": "float64",
+        "gauge": "orbital",
+        "group_index": 2,
+        "kpoint_index": 2,
+        "spin_id": null,
+        "state_count": 18,
+        "state_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      },
+      {
+        "coefficient_dtype": "complex64",
+        "coefficient_shape": [
+          18,
+          18
+        ],
+        "energy_dtype": "float64",
+        "gauge": "orbital",
+        "group_index": 3,
+        "kpoint_index": 3,
+        "spin_id": null,
+        "state_count": 18,
+        "state_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      },
+      {
+        "coefficient_dtype": "complex64",
+        "coefficient_shape": [
+          18,
+          18
+        ],
+        "energy_dtype": "float64",
+        "gauge": "orbital",
+        "group_index": 4,
+        "kpoint_index": 4,
+        "spin_id": null,
+        "state_count": 18,
+        "state_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      }
+    ],
+    "nk": 5,
+    "no_u": 18,
+    "state_ids_zero_based": true
+  },
+  "structure": {
+    "atom_symbols": [
+      "O",
+      "O"
+    ],
+    "basis_orbitals_by_atom": [
+      [
+        "2sZ1",
+        "2pyZ1",
+        "2pzZ1",
+        "2pxZ1",
+        "3dxyZ1",
+        "3dyzZ1",
+        "3dz2Z1",
+        "3dxzZ1",
+        "3dx2-y2Z1"
+      ],
+      [
+        "2sZ1",
+        "2pyZ1",
+        "2pzZ1",
+        "2pxZ1",
+        "3dxyZ1",
+        "3dyzZ1",
+        "3dz2Z1",
+        "3dxzZ1",
+        "3dx2-y2Z1"
+      ]
+    ],
+    "basis_quantum_numbers_by_atom": [
+      [
+        {
+          "l": 0,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": -1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -2,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 0,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 2,
+          "n": 3,
+          "zeta": 1
+        }
+      ],
+      [
+        {
+          "l": 0,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": -1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -2,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 0,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 2,
+          "n": 3,
+          "zeta": 1
+        }
+      ]
+    ],
+    "basis_size": 18,
+    "cell_angstrom": [
+      [
+        6.999999999999999,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        6.999999999999999,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        4.0
+      ]
+    ],
+    "positions_angstrom": [
+      [
+        2.895,
+        3.4999999999999996,
+        2.0
+      ],
+      [
+        4.105,
+        3.4999999999999996,
+        2.0
+      ]
+    ],
+    "wfsx_basis_orbitals_by_atom": [
+      [
+        "2sZ1",
+        "2pyZ1",
+        "2pzZ1",
+        "2pxZ1",
+        "3dxyZ1P",
+        "3dyzZ1P",
+        "3dz2Z1P",
+        "3dxzZ1P",
+        "3dx2-y2Z1P"
+      ],
+      [
+        "2sZ1",
+        "2pyZ1",
+        "2pzZ1",
+        "2pxZ1",
+        "3dxyZ1P",
+        "3dyzZ1P",
+        "3dz2Z1P",
+        "3dxzZ1P",
+        "3dx2-y2Z1P"
+      ]
+    ],
+    "wfsx_basis_quantum_numbers_by_atom": [
+      [
+        {
+          "l": 0,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": -1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -2,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 0,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 2,
+          "n": 3,
+          "zeta": 1
+        }
+      ],
+      [
+        {
+          "l": 0,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": -1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 0,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 1,
+          "m": 1,
+          "n": 2,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -2,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": -1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 0,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 1,
+          "n": 3,
+          "zeta": 1
+        },
+        {
+          "l": 2,
+          "m": 2,
+          "n": 3,
+          "zeta": 1
+        }
+      ]
+    ]
+  }
+}
