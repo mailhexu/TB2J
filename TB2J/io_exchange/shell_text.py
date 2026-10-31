@@ -596,14 +596,44 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
                 entry[key] = getattr(shell, key)
         parts.append(f"# Shell {number}\n[[shell]]\n" + _shell_entry_text(entry))
         if equivalent_comments:
-            pair_sections.append(
-                f"# Shell {number}: {_pair_text(representative, document.site_labels)} (orbit {shell.id})\n"
-            )
-            for pair in _physical_pairs(orbit):
-                spins = tuple(document.index_spin[atom - 1] for atom in pair[:2])
-                pair_sections.append(
-                    f"# {_pair_text(pair, document.site_labels)}; atoms {pair[:2]}, spins {spins}\n"
+            pairs = _physical_pairs(orbit)
+            rows = [
+                (
+                    document.site_labels[pair[0] - 1],
+                    document.site_labels[pair[1] - 1],
+                    *(str(component) for component in pair[2:]),
+                    str(pair[:2]),
+                    str(tuple(document.index_spin[atom - 1] for atom in pair[:2])),
                 )
+                for pair in pairs
+            ]
+            headings = (
+                "atom1",
+                "atom2",
+                "Rx",
+                "Ry",
+                "Rz",
+                "atom indices",
+                "spin indices",
+            )
+            widths = [
+                max(len(value) for value in column) for column in zip(headings, *rows)
+            ]
+
+            def comment_row(row):
+                return (
+                    "# "
+                    + "  ".join(
+                        f"{value:>{width}}" for value, width in zip(row, widths)
+                    )
+                    + "\n"
+                )
+
+            pair_sections.append(
+                f"#\n# Shell {number}: {_pair_text(representative, document.site_labels)} (orbit {shell.id})\n"
+            )
+            pair_sections.append(comment_row(headings))
+            pair_sections.extend(comment_row(row) for row in rows)
     if pair_sections:
         parts.append(
             "# Equivalent physical pairs (informational; each reverse belongs to the shell):\n"

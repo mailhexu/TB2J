@@ -89,7 +89,7 @@ def test_self_reversing_cubic_orbit_counts_unique_physical_bonds(tmp_path):
     pair_lines = [
         line
         for line in text.splitlines()
-        if line.startswith("# Fe1 Fe1 ") and "; atoms" in line
+        if line.startswith("# ") and line[2:].split()[:2] == ["Fe1", "Fe1"]
     ]
     assert len(pair_lines) == 3
     filled = replace(document, shells=(replace(document.shells[0], Jiso=0.1),))

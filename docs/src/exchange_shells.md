@@ -27,7 +27,8 @@ Both this entry point and `write_shells` add format explanations. The header
 identifies the TB2J version and, for generation from a file, the input path;
 that path is informational and is never reopened during export. Equivalent
 physical-pair comments (each bond listed once; its reverse shares the shell)
-are grouped by shell after the complete shell list.
+are grouped by shell after the complete shell list. Each group has aligned atom
+labels, translation components, one-based atom indices and zero-based spin indices.
 Set `equivalent_comments=False` to omit those lists without omitting format
 explanations. The atom block has column and magnetic-index comments immediately
 above its rows. Rotation matrices use one row per line and translations use a
