@@ -1,4 +1,4 @@
-"""TOML v3 boundary: one editable shell per bond and its reverse."""
+"""Compact TOML v4 boundary: one representative and value per shell."""
 
 import json
 import math
@@ -21,6 +21,7 @@ from .shells import (
     ShellOperation,
     _expand_core,
     _freeze,
+    _pair_from_id,
     _pair_id,
     _physical_pairs,
     _shell_orbits,
@@ -28,14 +29,14 @@ from .shells import (
     _template_number,
     _template_operations,
     _thaw,
+    _validated_operations,
     _validate_context,
 )
 
 _REAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z")
 _INTEGER = re.compile(r"[+-]?[0-9]+\Z")
 _LABEL = re.compile(r"([A-Z][a-z]?)[1-9][0-9]*\Z")
-_MASKS = ("support_members", "Jiso_members", "DMI_members", "Jani_members")
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 def _floats(value):
@@ -86,9 +87,8 @@ def _keys(table, required, optional, field):
 def _schema(data):
     _keys(
         data,
-        ("exchange", "structure", "symmetry"),
+        ("schema_version", "exchange", "structure", "symmetry"),
         (
-            "schema_version",
             "energy_unit",
             "distance_unit",
             "cutoff",
@@ -100,28 +100,12 @@ def _schema(data):
         ),
         "shell document",
     )
-    version = data.get("schema_version")
-    if version is None:
-        raise ValueError(
-            "schema_version: required; an omitted key described the superseded "
-            "version 2 format, whose directed-orbit masks are not reinterpreted. "
-            "Regenerate the file with 'TB2J_shell generate' from its original "
-            f"structure or trusted pickle, re-enter edited values, and declare "
-            f"schema_version = {_SCHEMA_VERSION}"
-        )
+    version = data["schema_version"]
     if not isinstance(version, int) or isinstance(version, bool):
         raise ValueError(
             f"schema_version: expected the integer {_SCHEMA_VERSION}, got {version!r}"
         )
     if version != _SCHEMA_VERSION:
-        if version == 2:
-            raise ValueError(
-                "schema_version: version 2 keeps each bond direction in a "
-                "separate shell and is not reinterpreted; regenerate the file "
-                "with 'TB2J_shell generate' from its original structure or "
-                "trusted pickle, re-enter edited values, and declare "
-                f"schema_version = {_SCHEMA_VERSION}"
-            )
         raise ValueError(f"schema_version: unsupported version {version!r}")
     if data["exchange"] not in {"isotropic", "tensor"}:
         raise ValueError("exchange: expected isotropic or tensor")
@@ -159,6 +143,13 @@ def _schema(data):
             ("format", "precision_profile", "required_base_fields", "context_sha256"),
             "source",
         )
+    if (
+        data.get("source", {}).get("format") == "pickle"
+        and "operations" not in data["symmetry"]
+    ):
+        raise ValueError(
+            "native shell documents require their explicit symmetry.operations snapshot"
+        )
     if "operations" in data["symmetry"]:
         operations = data["symmetry"]["operations"]
         if not isinstance(operations, list):
@@ -178,20 +169,10 @@ def _schema(data):
     for index, entry in enumerate(entries):
         _keys(
             entry,
-            ("J",),
-            ("id", "representative", "name", "distance", "n_equivalent_pairs", *_MASKS),
+            ("representative", "J"),
+            ("name", "distance", "n_equivalent_pairs"),
             f"shell[{index}]",
         )
-        if "representative" not in entry and (
-            data["exchange"] == "tensor" or "id" not in entry
-        ):
-            raise ValueError(
-                f"shell[{index}].representative: required without isotropic id"
-            )
-        if "operations" not in data["symmetry"] and any(key in entry for key in _MASKS):
-            raise ValueError(
-                f"shell[{index}]: ordinal masks require an explicit symmetry.operations snapshot"
-            )
 
 
 def _rows(block, field):
@@ -229,12 +210,11 @@ def _structure(table):
     if abs(np.linalg.det(cell)) < np.finfo(float).tiny:
         raise ValueError("structure.lattice: singular cell")
     species, labels, positions, selected, indices = [], [], [], [], []
+    next_spin = 0
     for i, row in enumerate(_rows(table["atoms"], "structure.atoms"), 1):
         field = f"structure.atoms row {i}"
-        if len(row) != 7:
-            raise ValueError(
-                f"{field}: expected atom-index label x y z magnetic spin-index"
-            )
+        if len(row) != 6:
+            raise ValueError(f"{field}: expected atom-index label x y z magnetic")
         if _integer(row[0], field) != i:
             raise ValueError(
                 f"{field}: atom indices must be sequential one-based source order"
@@ -246,15 +226,15 @@ def _structure(table):
             )
         if row[5] not in {"Y", "N"}:
             raise ValueError(f"{field}: magnetic flag must be Y or N")
-        spin = -1 if row[6] == "-" else _integer(row[6], field)
-        if (row[5] == "Y") != (spin >= 0):
-            raise ValueError(f"{field}: magnetic flag contradicts spin-index")
         species.append(label[1])
         labels.append(row[1])
         positions.append(tuple(_real(token, field) for token in row[2:5]))
-        indices.append(spin)
-        if spin >= 0:
+        if row[5] == "Y":
+            indices.append(next_spin)
             selected.append(i)
+            next_spin += 1
+        else:
+            indices.append(-1)
     return dict(
         cell_angstrom=cell,
         species=tuple(species),
@@ -385,22 +365,15 @@ def loads(text):
     scale = Decimal(1000) if kwargs["energy_unit"] == "meV" else Decimal(1)
     entries = []
     for index, entry in enumerate(data.get("shell", [])):
-        representative = (
-            _representative(
-                entry["representative"],
-                structure["site_labels"],
-                f"shell[{index}].representative",
-            )
-            if "representative" in entry
-            else None
-        )
-        identifier = entry.get(
-            "id", _pair_id(representative) if representative else None
+        representative = _representative(
+            entry["representative"],
+            structure["site_labels"],
+            f"shell[{index}].representative",
         )
         value = _energy(entry["J"], scale, f"shell[{index}].J")
         extras = {
             key: _floats(entry[key])
-            for key in ("name", "distance", "n_equivalent_pairs", *_MASKS)
+            for key in ("name", "distance", "n_equivalent_pairs")
             if key in entry
         }
         if "distance" in extras:
@@ -410,7 +383,7 @@ def loads(text):
             )
         entries.append(
             ShellEntry(
-                id=identifier,
+                id=_pair_id(representative),
                 representative=representative,
                 **{("Jiso" if data["exchange"] == "isotropic" else "tensor"): value},
                 **extras,
@@ -418,9 +391,9 @@ def loads(text):
         )
     context = SimpleNamespace(**kwargs, operations=operations, shells=tuple(entries))
     orbits = _shell_orbits(context)
-    for index, (entry, orbit) in enumerate(zip(entries, orbits)):
-        if "id" not in data["shell"][index]:
-            entries[index] = replace(entry, id=_pair_id(min(orbit)))
+    entries = [
+        replace(entry, id=_pair_id(min(orbit))) for entry, orbit in zip(entries, orbits)
+    ]
     return ShellDocument(**kwargs, operations=operations, shells=tuple(entries))
 
 
@@ -464,16 +437,7 @@ def _rounded(value):
 def _shell_entry_text(entry):
     parts = []
     for key, value in entry.items():
-        if key in _MASKS:
-            if len(value) <= 12:
-                parts.append(f"{key} = [{', '.join(map(str, value))}]\n")
-            else:
-                rows = (
-                    "    " + ", ".join(map(str, value[i : i + 12])) + ",\n"
-                    for i in range(0, len(value), 12)
-                )
-                parts.append(f"{key} = [\n{''.join(rows)}]\n")
-        elif key == "J" and isinstance(value, (list, tuple)):
+        if key == "J" and isinstance(value, (list, tuple)):
             rows = "".join(
                 "    [" + ", ".join(_number_text(item) for item in row) + "],\n"
                 for row in value
@@ -494,12 +458,12 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
             for row in document.cell_angstrom
         )
         + "\n",
-        "atoms": "# atom-index (1-based)  element-label  fractional-x  fractional-y  fractional-z  magnetic  spin-index\n"
-        "# magnetic: Y = magnetic, N = nonmagnetic; spin-index: zero-based for Y, negative for N.\n"
+        "atoms": "# atom-index (1-based)  element-label  fractional-x  fractional-y  fractional-z  magnetic\n"
+        "# magnetic: Y = magnetic, N = nonmagnetic.\n"
         + "\n".join(
             f"{atom:>{atom_width}} {label:<{label_width}} "
             + " ".join(_number_text(value) for value in position)
-            + f" {'Y' if spin >= 0 else 'N'} {spin}"
+            + f" {'Y' if spin >= 0 else 'N'}"
             for atom, (label, position, spin) in enumerate(
                 zip(document.site_labels, document.positions_frac, document.index_spin),
                 1,
@@ -551,32 +515,33 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         "# Validation tolerances retain additional decimal places as needed.\n"
         "# Exchange values use energy_unit; cutoff and distance use distance_unit.\n"
         "# Lattice rows are Cartesian vectors in Angstrom; atom positions are fractional.\n"
-        "# Reference moments, when present, follow the complete atom order.\n"
-        "# Shell representative: first label, second label, Rx Ry Rz; translation moves the second atom.\n"
-        "# Each shell unites a bond's symmetry orbit with its reversed orbit: Jiso is even,\n"
-        "# the DMI sign flips, and a tensor transposes when the bond direction reverses.\n"
+        "# representative: first label, second label, Rx Ry Rz; translation moves the second atom.\n"
+        "# Each representative is any directed bond in its full symmetry-and-reversal orbit.\n"
+        "# Values use its Cartesian frame; reversal flips DMI and transposes tensors.\n"
         "# J is a scalar or Cartesian 3x3 tensor; replace 'unfilled'.\n"
         "# name, distance and n_equivalent_pairs are optional input summaries.\n"
-        "# n_equivalent_pairs counts unique physical pairs (each bond and its reverse once),\n"
-        "# not the directed orbit that the *_members masks index.\n"
+        "# n_equivalent_pairs counts unique physical pairs, with each bond and reverse once.\n"
+        "# Native sparse key/channel support, including present zeros, is retained by the companion.\n"
         + tomli_w.dumps(_rounded(header), multiline_strings=True)
     ]
     pair_sections = []
+    validated = None
+    if equivalent_comments and document.shells:
+        validated = _validated_operations(
+            document,
+            np.asarray(document.cell_angstrom),
+            np.asarray(document.positions_frac),
+        )
     scale = Decimal(1000) if document.energy_unit == "meV" else Decimal(1)
     for number, (shell, orbit) in enumerate(
         zip(document.shells, _shell_orbits(document)), 1
     ):
-        representative = (
-            shell.representative
-            or orbit[shell.support_members[0] if shell.support_members else 0]
-        )
-        entry = {}
+        representative = shell.representative or _pair_from_id(shell.id)
+        entry = {
+            "representative": _pair_text(representative, document.site_labels),
+        }
         if shell.name is not None:
             entry["name"] = shell.name
-        # Scalar ID-only entries can explicitly carry no observed support.
-        # Do not invent a representative outside that empty support.
-        if shell.support_members != ():
-            entry["representative"] = _pair_text(representative, document.site_labels)
         entry["distance"] = (
             _template_distance(
                 representative,
@@ -589,58 +554,26 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         entry["J"] = _wire_energy(
             shell.Jiso if document.exchange_mode == "isotropic" else shell.tensor, scale
         )
-        if any(getattr(shell, key) is not None for key in _MASKS):
-            entry["id"] = shell.id
-        for key in _MASKS:
-            if getattr(shell, key) is not None:
-                entry[key] = getattr(shell, key)
         parts.append(f"# Shell {number}\n[[shell]]\n" + _shell_entry_text(entry))
         if equivalent_comments:
-            pairs = _physical_pairs(orbit)
-            rows = [
-                (
-                    document.site_labels[pair[0] - 1],
-                    document.site_labels[pair[1] - 1],
-                    *(str(component) for component in pair[2:]),
-                    str(pair[:2]),
-                    str(tuple(document.index_spin[atom - 1] for atom in pair[:2])),
-                )
-                for pair in pairs
-            ]
-            headings = (
-                "atom1",
-                "atom2",
-                "Rx",
-                "Ry",
-                "Rz",
-                "atom indices",
-                "spin indices",
-            )
-            widths = [
-                max(len(value) for value in column) for column in zip(headings, *rows)
-            ]
+            from .shell_witness import pair_comment_sections
 
-            def comment_row(row):
-                return (
-                    "# "
-                    + "  ".join(
-                        f"{value:>{width}}" for value, width in zip(row, widths)
-                    )
-                    + "\n"
-                )
-
+            pair_sections.append(f"#\n# Shell {number}\n")
             pair_sections.append(
-                f"#\n# Shell {number}: {_pair_text(representative, document.site_labels)} (orbit {shell.id})\n"
+                pair_comment_sections(
+                    document, shell, orbit, representative, validated=validated
+                )
             )
-            pair_sections.append(comment_row(headings))
-            pair_sections.extend(comment_row(row) for row in rows)
     if pair_sections:
         parts.append(
-            "# Equivalent physical pairs (informational; each reverse belongs to the shell):\n"
+            "# Stored symmetry witnesses for each generated representative:\n"
+            "# operation is the 1-based number of a stored symmetry.operations entry.\n"
+            "# reversed=true means that operation's image is reversed to form the pair.\n"
+            "# time_reversal belongs to that stored operation.\n"
             + "".join(pair_sections)
         )
     operation_sections = []
-    for operation in document.operations:
+    for number, operation in enumerate(document.operations, 1):
         rows = "".join(
             "    [" + ", ".join(str(value) for value in row) + "],\n"
             for row in operation.rotation
@@ -648,7 +581,7 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
         translation = ", ".join(_number_text(value) for value in operation.translation)
         prime = "true" if operation.time_reversal else "false"
         operation_sections.append(
-            f"[[symmetry.operations]]\nrotation = [\n{rows}]\n"
+            f"# Operation {number}\n[[symmetry.operations]]\nrotation = [\n{rows}]\n"
             f"translation = [{translation}]\ntime_reversal = {prime}\n"
         )
     footer = {}
@@ -675,6 +608,25 @@ def dump(document, path, *, equivalent_comments=True, source_path=None):
     text = "\n".join(parts)
     try:
         parsed = loads(text)
+        source_shells = {shell.id: shell for shell in document.shells}
+        parsed = replace(
+            parsed,
+            shells=tuple(
+                replace(
+                    shell,
+                    **{
+                        name: getattr(source_shells[shell.id], name)
+                        for name in (
+                            "support_members",
+                            "Jiso_members",
+                            "DMI_members",
+                            "Jani_members",
+                        )
+                    },
+                )
+                for shell in parsed.shells
+            ),
+        )
         filled = tuple(
             shell
             for shell in parsed.shells

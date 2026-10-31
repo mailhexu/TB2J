@@ -139,6 +139,9 @@ def test_atom_and_moment_vectors_align_after_different_labels(tmp_path):
         if row.strip() and not row.lstrip().startswith("#")
     ]
     moment_rows = data["reference_spins"]["moments"].strip("\n").splitlines()
+    atom_fields = [row.split() for row in atom_rows]
+    assert all(len(fields) == 6 for fields in atom_fields)
+    assert [fields[-1] for fields in atom_fields] == ["Y", "N", "Y"]
     assert len({list(re.finditer(r"\S+", row))[2].end() for row in atom_rows}) == 1
     assert len({list(re.finditer(r"\S+", row))[1].end() for row in moment_rows}) == 1
 
@@ -296,7 +299,6 @@ def test_generated_shell_file_presents_readable_snapshot(tmp_path):
     result = generate_shells(source, path, magnetic_species=["Fe"], cutoff=4.3)
     text = path.read_text()
     assert f"TB2J {TB2J.__version__}" in text and str(source) in text
-    assert text.rfind("[[shell]]") < text.index("# Equivalent physical pairs")
     assert re.search(
         r"rotation = \[\n\s*\[[^\n]+\],\n\s*\[[^\n]+\],\n\s*\[[^\n]+\],\n\]", text
     )

@@ -132,7 +132,7 @@ class ShellDocument:
     precision_profile: str | None = None
     context_sha256: str | None = None
     required_base_fields: tuple = ()
-    schema_version: int = 3
+    schema_version: int = 4
     site_labels: tuple | None = None
     metadata: Mapping = field(default_factory=dict)
     cutoff: float | None = None
@@ -623,13 +623,33 @@ def _validate_context(document):
 
 def validate_shells(document, *, for_export=False, check_producer_ops=False):
     """Validate the authored document without replacing its operation snapshot."""
-    if not _integer(document.schema_version) or document.schema_version != 3:
+    if not _integer(document.schema_version) or document.schema_version != 4:
         raise ValueError(
             f"schema_version: unsupported version {document.schema_version!r}; "
-            "shell documents use schema_version 3 with one shell per bond and "
-            "its reverse. Regenerate directed-orbit v2 files with template or "
-            "compress; their masks and orbit sizes are never reinterpreted."
+            "shell documents use compact schema_version 4"
         )
+    if document.source_format == "pickle":
+        unresolved = [
+            shell
+            for shell in document.shells
+            if all(
+                getattr(shell, name) is None
+                for name in (
+                    "support_members",
+                    "Jiso_members",
+                    "DMI_members",
+                    "Jani_members",
+                )
+            )
+        ]
+        if unresolved and len(unresolved) != len(document.shells):
+            raise ValueError(
+                "native shell support: all shell rows must be resolved together "
+                "from the companion context"
+            )
+        unresolved_support = bool(unresolved)
+    else:
+        unresolved_support = False
     if document.exchange_mode not in {"isotropic", "tensor"}:
         raise ValueError("exchange_mode: expected isotropic or tensor")
     if document.energy_unit not in {"meV", "eV"}:
@@ -648,7 +668,11 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
             raise ValueError(
                 f"shell {shell.id}: computed canonical minimum is {canonical}"
             )
-        masks = _channel_masks(shell, orbit)
+        if unresolved_support:
+            _channel_masks(shell, orbit)
+            masks = None
+        else:
+            masks = _channel_masks(shell, orbit)
         if shell.name is not None and not isinstance(shell.name, str):
             raise ValueError(f"shell {shell.id}.name: expected a display string")
         if shell.distance is not None:
@@ -662,17 +686,6 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
             if distance < 0 or abs(float(distance) - computed) > document.symprec:
                 raise ValueError(
                     f"shell {shell.id}.distance: stored {shell.distance}, computed {computed}"
-                )
-        if shell.representative is not None:
-            support = _mask(
-                shell.support_members,
-                tuple(range(len(orbit))),
-                len(orbit),
-                f"shell {shell.id}.support_members",
-            )
-            if orbit.index(shell.representative) not in support:
-                raise ValueError(
-                    f"shell {shell.id}.representative: must belong to support_members"
                 )
         if document.exchange_mode == "isotropic":
             if (
@@ -706,7 +719,7 @@ def validate_shells(document, *, for_export=False, check_producer_ops=False):
             raise ValueError(
                 f"shell {shell.id}.{field}: unfilled exchange value cannot be exported"
             )
-        if value != "unfilled":
+        if value != "unfilled" and masks is not None:
             for channel, nonzero in channels.items():
                 if not masks[channel] and nonzero:
                     raise ValueError(
@@ -776,19 +789,65 @@ def check_producer_ops(document):
 
 
 def read_shells(path):
-    """Read and validate a UTF-8 shells-v3 TOML document."""
+    """Read compact schema-v4 TOML and recover native support from its companion."""
     from .shell_text import load
 
-    return load(path)
+    document = load(path)
+    if document.source_format == "pickle" or document.context_sha256 is not None:
+        from .shell_context import load_context
+
+        base = load_context(path, document)
+        from dataclasses import replace
+
+        document = replace(document, index_spin=tuple(base.index_spin))
+        document = _restore_sparse_support(document, base)
+    return document
 
 
 def write_shells(document, path, *, equivalent_comments=True, source_path=None):
-    """Write a validated document with optional pair comments and source header."""
+    """Write compact schema-v4 TOML without discarding sparse native support."""
+    validate_shells(document)
+    serial_document = document
+    if document.source_format == "pickle" or document.context_sha256 is not None:
+        from .shell_context import load_context
+
+        base = load_context(path, document)
+        from dataclasses import replace
+
+        document = replace(document, index_spin=tuple(base.index_spin))
+        recovered = _restore_sparse_support(document, base)
+        if not _native_support_unresolved(document) and not _same_shell_support(
+            document, recovered
+        ):
+            raise ValueError(
+                "shell support differs from the native companion; compact TOML "
+                "cannot serialize edited sparse support"
+            )
+        serial_document = recovered
+    else:
+        spin_by_atom = {
+            atom: spin for spin, atom in enumerate(sorted(document.magnetic_atoms))
+        }
+        if document.index_spin != tuple(
+            spin_by_atom.get(atom, -1)
+            for atom in range(1, len(document.index_spin) + 1)
+        ):
+            raise ValueError(
+                "compact schema 4 cannot serialize a noncanonical spin mapping "
+                "without a native context companion"
+            )
+        if not _complete_shell_support(document):
+            raise ValueError(
+                "compact schema 4 does not serialize sparse support; provide a "
+                "matching native context companion"
+            )
     from .shell_text import dump
 
-    validate_shells(document)
     dump(
-        document, path, equivalent_comments=equivalent_comments, source_path=source_path
+        serial_document,
+        path,
+        equivalent_comments=equivalent_comments,
+        source_path=source_path,
     )
 
 
@@ -1591,6 +1650,11 @@ def _expand_core(document, *, complete_orbits=False):
     if not isinstance(complete_orbits, bool):
         raise ValueError("complete_orbits: expected a boolean")
     validate_shells(document, for_export=True)
+    if _native_support_unresolved(document):
+        raise ValueError(
+            "native sparse shell support is unresolved; load the matching "
+            "context companion or supply a compatible base"
+        )
     cell = _numbers(document.cell_angstrom, (3, 3), "structure.cell_angstrom")
     positions = _numbers(
         document.positions_frac,
@@ -1938,6 +2002,148 @@ def _validate_compatible_base(document, base):
             )
 
 
+def _native_support_unresolved(document):
+    return (
+        document.source_format == "pickle"
+        and bool(document.shells)
+        and all(
+            all(
+                getattr(shell, name) is None
+                for name in (
+                    "support_members",
+                    "Jiso_members",
+                    "DMI_members",
+                    "Jani_members",
+                )
+            )
+            for shell in document.shells
+        )
+    )
+
+
+def _restore_sparse_support(document, base):
+    """Recover exact directed support and channel presence from native keys."""
+    from dataclasses import replace
+
+    _validate_compatible_base(document, base)
+    if document.exchange_mode == "isotropic" and any(
+        getattr(base, name, None) for name in ("dmi_ddict", "Jani_dict")
+    ):
+        raise ValueError(
+            "exchange_mode isotropic cannot discard native DMI or Jani channels"
+        )
+    spin_to_atom = {
+        spin: atom for atom, spin in enumerate(document.index_spin) if spin >= 0
+    }
+    channel_wires = {"Jiso": set(), "DMI": set(), "Jani": set()}
+    source_names = {
+        "Jiso": "exchange_Jdict",
+        "DMI": "dmi_ddict",
+        "Jani": "Jani_dict",
+    }
+    source_values = {}
+    source_wires = {}
+    for channel, name in source_names.items():
+        values, _, wires = _transform_source_values(
+            channel,
+            getattr(base, name, None),
+            spin_to_atom,
+            document.zero_tol,
+            False,
+        )
+        source_values[channel] = values
+        source_wires[channel] = wires
+        channel_wires[channel].update(wires.values())
+    for native_key, value in source_values["Jani"].items():
+        predicates = _nonzero_tensor_channels(np.asarray(value))
+        wire = source_wires["Jani"][native_key]
+        if predicates["Jiso"]:
+            channel_wires["Jiso"].add(wire)
+        if predicates["DMI"]:
+            channel_wires["DMI"].add(wire)
+
+    observed_wires = set().union(*channel_wires.values())
+
+    orbits = _shell_orbits(document)
+    restored = []
+    for shell, orbit in zip(document.shells, orbits):
+        orbit_indices = {pair: index for index, pair in enumerate(orbit)}
+        support = tuple(
+            sorted(
+                orbit_indices[pair] for pair in observed_wires if pair in orbit_indices
+            )
+        )
+        if not support:
+            raise ValueError(
+                f"shell {shell.id}: no native exchange key belongs to this "
+                "representative orbit; sparse support cannot be inferred"
+            )
+        masks = {
+            channel: tuple(
+                sorted(
+                    orbit_indices[pair]
+                    for pair in channel_wires[channel]
+                    if pair in orbit_indices
+                )
+            )
+            for channel in ("Jiso", "DMI", "Jani")
+        }
+        restored.append(
+            replace(
+                shell,
+                support_members=support,
+                Jiso_members=masks["Jiso"],
+                DMI_members=(
+                    masks["DMI"] if document.exchange_mode == "tensor" else None
+                ),
+                Jani_members=(
+                    masks["Jani"] if document.exchange_mode == "tensor" else None
+                ),
+            )
+        )
+    return replace(document, shells=tuple(restored))
+
+
+def _same_shell_support(left, right):
+    left_shells = {shell.id: shell for shell in left.shells}
+    right_shells = {shell.id: shell for shell in right.shells}
+    if left_shells.keys() != right_shells.keys():
+        return False
+    left_orbits = dict(zip(left_shells, _shell_orbits(left)))
+    right_orbits = dict(zip(right_shells, _shell_orbits(right)))
+    if left_orbits.keys() != right_orbits.keys():
+        return False
+    for identifier, orbit in left_orbits.items():
+        if _channel_masks(left_shells[identifier], orbit) != _channel_masks(
+            right_shells[identifier], right_orbits[identifier]
+        ):
+            return False
+    return True
+
+
+def _complete_shell_support(document):
+    for shell, orbit in zip(document.shells, _shell_orbits(document)):
+        full = tuple(range(len(orbit)))
+        masks = _channel_masks(shell, orbit)
+        if masks["Jiso"] != full:
+            return False
+        if document.exchange_mode == "tensor" and any(
+            masks[channel] != full for channel in ("DMI", "Jani")
+        ):
+            return False
+        if (
+            _mask(
+                shell.support_members,
+                full,
+                len(orbit),
+                f"shell {shell.id}.support_members",
+            )
+            != full
+        ):
+            return False
+    return True
+
+
 def _base_exchange_equal(document, left, right):
     from TB2J.Jtensor import combine_J_tensor
 
@@ -2036,7 +2242,15 @@ def expand(document, *, base=None, complete_orbits=False, allow_loss=()):
         raise ValueError("allow_loss: unknown expansion loss group")
     allowed = set(allow_loss)
     if base is not None:
-        _validate_compatible_base(document, base)
+        if document.source_format == "pickle":
+            document = _restore_sparse_support(document, base)
+        else:
+            _validate_compatible_base(document, base)
+    elif _native_support_unresolved(document):
+        raise ValueError(
+            "native sparse shell support is unresolved; supply its context "
+            "companion as a compatible base"
+        )
     available = set(_required_base_fields(base)) if base is not None else set()
     missing = set(document.required_base_fields) - available
     denied = sorted(missing - allowed)

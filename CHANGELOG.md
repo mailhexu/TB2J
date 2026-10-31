@@ -1,17 +1,16 @@
 # Changelog
 
 ## Unreleased
-- Shell text schema v3 unites each bond and its reverse into one editable
-  shell: one value per symmetry-plus-reversal orbit, with Jiso even, DMI odd
-  and tensors transposed under reversal. Export writes both directions for
-  every supported pair/channel, creating a missing reverse entry without
-  inventing unrelated symmetry images or absent channels.
-  `n_equivalent_pairs` and the generated equivalent-pair comments count each
-  unique physical pair once, while sparse `*_members` masks keep indexing the
-  full sorted directed orbit. Shell files require an explicit
-  `schema_version = 3`: omitted versions and version 2 files are rejected
-  with regeneration advice instead of silently reinterpreting old
-  directed-orbit masks; regenerate with `TB2J_shell generate`.
+- Shell text schema v4 stores one representative pair and J per symmetry-plus-
+  reversal orbit. Any symmetry-equivalent pair may be chosen, including an
+  unobserved pair; J applies to that pair in the global Cartesian frame.
+  Generated pair comments include deterministic operation witnesses and
+  reversal relative to the generated representative, with the usual warning
+  that edits to the representative can make those comments stale. Shell blocks
+  contain no IDs or ordinal masks: digest-protected companion context preserves
+  sparse pair support, channel presence (including absent versus zero), and
+  native spin-index mapping. Earlier shell schemas and the former seven-column
+  atom-row grammar are unsupported; regenerate with `TB2J_shell generate`.
 - `TB2J_shell` reports version, license and generation progress. Pickle
   generation symmetrizes exchange by default and reports the maximum change;
   Python callers can request strict checking with `project=False`.
@@ -20,8 +19,10 @@
   shows defaults.
 - Generated shell files include a source/version header, compact shell entries,
   aligned equivalent-pair tables and readable symmetry matrices and vectors.
-- Generated atom blocks explain the row columns and magnetic/spin indices next
-  to the atom data.
+- Atom rows use six fields (`atom-index label x y z magnetic`), with no
+  user-supplied spin index. Structure-derived mappings are assigned from `Y`
+  rows in atom order; pickle imports preserve the exact native mapping,
+  including permutations and negative nonmagnetic sentinels, in the companion.
 - Shell numerical output uses eight fixed decimal places with aligned vector and
   tensor columns; validation tolerances retain their precision. Small exchange
   values can round to zero, and rounded output is validated before publication.

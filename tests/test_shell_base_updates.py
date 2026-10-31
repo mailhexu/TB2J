@@ -99,7 +99,8 @@ def test_native_context_survives_relocation_and_rejects_tampering(tmp_path):
     np.testing.assert_array_equal(result.charges, source.charges)
     context = relocated / companion.name
     context.write_bytes(context.read_bytes() + b"corrupt")
-    assert shells.read_shells(relocated / original.name) == document
+    with pytest.raises(ValueError, match="digest"):
+        shells.read_shells(relocated / original.name)
     with pytest.raises(ValueError, match="digest"):
         load_context(relocated / original.name, document)
 
@@ -526,6 +527,8 @@ def test_scalar_reference_never_relabels_a_transverse_base_as_collinear():
 @pytest.mark.parametrize("symmetry", ["sg", "msg"])
 @pytest.mark.parametrize("mode", ["isotropic", "tensor"])
 def test_raw_site_images_keep_native_keys_and_bond_vectors(tmp_path, symmetry, mode):
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
     source, key = _source(ancillary=False)
     offsets = np.array([[-1, 0, 2], [0, 1, -1], [2, -1, 0]])
     source.atoms.positions += offsets @ source.atoms.cell.array
@@ -537,10 +540,17 @@ def test_raw_site_images_keep_native_keys_and_bond_vectors(tmp_path, symmetry, m
         + np.array(key[0]) @ source.atoms.cell.array
         - source.atoms.positions[0]
     )
-    document = shells.compress(source, symmetry=symmetry, mode=mode).document
+
     path = tmp_path / "raw.shells.toml"
-    shells.write_shells(document, path)
+    source.write_pickle(path=tmp_path)
+    generated = generate_shells(
+        tmp_path / "TB2J.pickle",
+        path,
+        symmetry=symmetry,
+        mode=mode,
+    )
     document = shells.read_shells(path)
+    assert document == generated.document
     np.testing.assert_allclose(
         document.positions_frac,
         source.atoms.get_scaled_positions(wrap=False),

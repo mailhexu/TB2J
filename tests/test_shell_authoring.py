@@ -9,7 +9,7 @@ import pytest
 from TB2J.io_exchange import shells
 from TB2J.io_exchange.io_exchange import SpinIO
 
-HAND_FILE = '''schema_version = 3
+HAND_FILE = '''schema_version = 4
 exchange = "isotropic"
 [structure]
 coordinates = "fractional"
@@ -19,9 +19,9 @@ lattice = """
 0.2 0.4 6
 """
 atoms = """
-1 Fe7 -0.87 0.21 0.17 Y 1
-2 O2 0.27 1.11 0.41 N -2
-3 Co4 1.39 0.36 0.23 Y 0
+1 Fe7 -0.87 0.21 0.17 Y
+2 O2 0.27 1.11 0.41 N
+3 Co4 1.39 0.36 0.23 Y
 """
 [reference_spins]
 moments = """
@@ -47,7 +47,7 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
     path.write_text(HAND_FILE)
     document = shells.read_shells(path)
     assert document.site_labels == ("Fe7", "O2", "Co4")
-    assert document.index_spin == (1, -2, 0)
+    assert document.index_spin == (0, -1, 1)
     assert document.moments == (2.0, 0.03, -1.0)
     assert document.shells[0].name is None
     assert document.metadata["date"] == date(2026, 10, 25)
@@ -63,10 +63,11 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
     assert shell.distance == pytest.approx(np.linalg.norm(vector))
     assert shell.n_equivalent_pairs == 1 and shell.name is None
     output = shells.expand(reloaded).spinio
-    key = ((1, 0, -1), 1, 0)
+    assert output.index_spin == [0, -1, 1]
+    key = ((1, 0, -1), 0, 1)
     # Each supported bond also emits its synthesized reverse: a model value,
     # not an independent calculation.
-    assert output.exchange_Jdict == {key: 0.002, ((-1, 0, 1), 0, 1): 0.002}
+    assert output.exchange_Jdict == {key: 0.002, ((-1, 0, 1), 1, 0): 0.002}
     np.testing.assert_allclose(output.distance_dict[key][0], vector, atol=1e-14)
     output.write_pickle(path=tmp_path)
     native = SpinIO.load_pickle(path=tmp_path)
@@ -79,8 +80,6 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
 @pytest.mark.parametrize(
     "before,after,field",
     [
-        ("2 O2 0.27 1.11 0.41 N -2", "2 O2 0.27 1.11 0.41 N -", None),
-        ("2 O2 0.27 1.11 0.41 N -2", "2 O2 0.27 1.11 0.41 N 0", "structure.atoms"),
         ("3 Co4", "4 Co4", "structure.atoms"),
         ("3 Co4", "3 Fe7", "structure.atoms"),
         ("-0.87", "nan", "structure.atoms"),
@@ -91,7 +90,6 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
         ("Co4 -1", "Fe7 -1", "moments"),
         ("J = 2", "J = 2\ndistance = 1", "distance"),
         ("J = 2", "J = 2\nn_equivalent_pairs = 2", "n_equivalent_pairs"),
-        ("J = 2", "J = 2\nsupport_members = [0]", "snapshot"),
         ('exchange = "isotropic"', 'exchange_mode = "isotropic"', "exchange"),
         ("J = 2", "Jiso = 2", "Jiso"),
         ("J = 2", "J = 2\norbit_size = 1", "orbit_size"),
@@ -101,11 +99,8 @@ def test_hand_file_raw_frame_annotations_and_generated_summaries(tmp_path):
 def test_hand_authoring_boundaries(tmp_path, before, after, field):
     path = tmp_path / "hand.shells.toml"
     path.write_text(HAND_FILE.replace(before, after))
-    if field is None:
-        assert shells.read_shells(path).index_spin == (1, -1, 0)
-    else:
-        with pytest.raises(ValueError, match=field):
-            shells.read_shells(path)
+    with pytest.raises(ValueError, match=field):
+        shells.read_shells(path)
 
 
 def test_tensor_name_metadata_and_snapshot_replay(tmp_path):
@@ -128,7 +123,7 @@ def test_tensor_name_metadata_and_snapshot_replay(tmp_path):
     assert saved.shells[0].name == "nearest interspecies"
     np.testing.assert_array_equal(saved.shells[0].tensor, document.shells[0].tensor)
     result = shells.expand(saved)
-    assert result.spinio.index_spin == [1, -2, 0]
+    assert result.spinio.index_spin == [0, -1, 1]
     base = result.spinio
     base._shell_user_metadata = {"stale": True}
     base._shell_site_labels = ["Fe1", "O1", "Co1"]
@@ -154,7 +149,7 @@ def test_snapshot_free_cubic_orbit_pins_full_count_and_replays(
     tmp_path, mode, symmetry
 ):
     path = tmp_path / "cubic.shells.toml"
-    path.write_text(f'''schema_version = 3
+    path.write_text(f'''schema_version = 4
 exchange = "{mode}"
 [structure]
 coordinates = "fractional"
@@ -163,7 +158,7 @@ lattice = """
 0 2 0
 0 0 2
 """
-atoms = "1 Fe1 1 0 -1 Y 0"
+atoms = "1 Fe1 1 0 -1 Y"
 [reference_spins]
 moments = "Fe1 0 0 2"
 [symmetry]
@@ -176,8 +171,8 @@ J = "unfilled"
     shells.write_shells(document, path, equivalent_comments=False)
     canonical = shells.read_shells(path)
     assert canonical.shells[0].distance == 2.0
-    # Masks index the directed +/- orbit (six or two images); the count is the
-    # unique bonds left once each bond and its reverse are identified.
+    # The symmetry orbit has six or two directed images; counts identify the
+    # unique physical bonds after each bond and its reverse are identified.
     assert canonical.shells[0].n_equivalent_pairs == (
         3 if symmetry == "spacegroup" else 1
     )

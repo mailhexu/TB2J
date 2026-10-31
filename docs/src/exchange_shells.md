@@ -23,16 +23,36 @@ space-group symmetry, pass `symmetry="msg"` and complete
 `reference_spins` in full atom order; `symprec` and `magnetic_tol` are configurable.
 Use `mode="tensor"` for 3×3 exchange values. Each shell remains `unfilled` until edited.
 
+For structure input, spin indices are not entered: `Y` rows receive contiguous
+zero-based indices in atom order, and `N` rows are excluded from the spin map.
+Pickle-based generation preserves its native mapping in the companion, as
+described below.
+
 Both this entry point and `write_shells` add format explanations. The header
 identifies the TB2J version and, for generation from a file, the input path;
 that path is informational and is never reopened during export. Equivalent
 physical-pair comments (each bond listed once; its reverse shares the shell)
-are grouped by shell after the complete shell list. Each group has aligned atom
-labels, translation components, one-based atom indices and zero-based spin indices.
-Set `equivalent_comments=False` to omit those lists without omitting format
-explanations. The atom block has column and magnetic-index comments immediately
-above its rows. Rotation matrices use one row per line and translations use a
-single vector line. All comments are informational and can be deleted.
+are grouped by shell after the complete shell list. Each group has
+aligned atom labels, translation components, a deterministic stored
+symmetry-operation number, and whether the listed pair is reversed relative
+to the generated representative.
+These witnesses describe the generated representatives: editing a
+representative can make the comments stale. Refresh them without replacing
+edited exchange values by reading and rewriting the existing document (do not
+generate a new file from the source structure). For a pickle-derived document,
+keep its context companion beside the TOML:
+
+```python
+from TB2J.io_exchange.shells import read_shells, write_shells
+doc = read_shells('exchange.shells.toml')
+write_shells(doc, 'exchange.shells.toml')
+```
+
+Set `equivalent_comments=False` to omit the pair lists without omitting format
+explanations. The atom block describes its six columns and Y/N magnetic marker
+immediately above the rows; spin mapping is not an atom-row field. Rotation
+matrices use one row per line and translations use a single vector line. All
+comments are informational and can be deleted.
 
 Generated floating-point values use fixed notation with eight digits after the
 decimal point, including exchange and structural/symmetry data. This is a lossy
@@ -68,10 +88,9 @@ requiring unsupported objects, constraints, or a calculator is rejected.
 
 The following file is complete and independent: copy it, edit the `J` values,
 and export it. It describes one Fe atom in the primitive cell of body-centered
-cubic iron (a = 2.87 Å), hand-written as TOML schema v3 (an explicit
-`schema_version = 3` is required; an omitted version and an explicit
-`schema_version = 2` are rejected as the superseded format) with space-group
-symmetry. Every explanatory comment may be deleted without changing the physics.
+cubic iron (a = 2.87 Å), hand-written as TOML schema v4 (an explicit
+`schema_version = 4` is required; earlier schemas are not supported). Every
+explanatory comment may be deleted without changing the physics.
 
 ```toml
 # Complete hand-authored scalar (isotropic) example: one Fe atom in the
@@ -82,10 +101,8 @@ symmetry. Every explanatory comment may be deleted without changing the physics.
 # centering) with the orbit of its reversed direction, and Jiso is even under
 # reversal. Equal bond lengths alone never merge shells.
 
-# Format version. Version 3 is the only accepted version; a missing key, or
-# an explicit 2 (the old one-shell-per-bond-direction format), is rejected
-# with regeneration advice instead of reinterpreting old masks.
-schema_version = 3
+# Format version. Version 4 is required; earlier schemas are not supported.
+schema_version = 4
 
 # Exchange model of this file: "isotropic" = one scalar J per shell.
 # (The alternative is "tensor" = one Cartesian 3x3 matrix per shell.)
@@ -111,19 +128,18 @@ lattice = """
 1.435 1.435 -1.435
 """
 
-# Atom rows, exactly seven whitespace-separated columns:
-#   atom-index label x y z magnetic spin-index
+# Atom rows, exactly six whitespace-separated columns:
+#   atom-index label x y z magnetic
 # atom-index  sequential one-based index in row order (1, 2, ...).
 # label       unique element symbol + positive integer (Fe1); gives the species.
 # x y z       finite raw fractional coordinates; values outside [0, 1) are kept,
 #             never wrapped, so native fixed-R bonds keep their geometry.
 # magnetic    "Y" for a selected magnetic site, "N" otherwise.
-# spin-index  zero-based index into the native spin map: every Y row together
-#             must map exactly onto 0..nspin-1; an N row carries a negative
-#             sentinel, "-" spelling -1. This mapping is never reordered.
+# Spin indices are not supplied here: Y rows receive contiguous zero-based
+# indices in atom order; N rows are excluded from the spin map.
 # Blank lines and '#' comments are ignored inside row blocks.
 atoms = """
-1 Fe1 0.0 0.0 0.0 Y 0
+1 Fe1 0.0 0.0 0.0 Y
 """
 
 [reference_spins]
@@ -145,9 +161,9 @@ mode = "spacegroup"
 # Structural symmetry tolerance in Angstrom (default 1e-5).
 symprec = 1e-5
 
-# One [[shell]] per bond-and-reverse orbit. The representative
-# names ONE member: "label-first label-second Rx Ry Rz", where (Rx Ry Rz) is
-# the lattice translation moving the SECOND atom into its bonded image.
+# One [[shell]] stores one J for the chosen representative pair and its reverse.
+# Any member of the symmetry-equivalent orbit, including an unobserved pair,
+# may be chosen. J is expressed in the global Cartesian frame.
 [[shell]]
 representative = "Fe1 Fe1 1 0 0"
 # Editable exchange of this orbit, in the wire unit above (meV).
@@ -165,10 +181,12 @@ J = 15.0
 # Optional free-form metadata; never affects exchange or symmetry.
 source_note = "hand-edited scalar example"
 
-# Generator/writer comments, including the per-shell equivalent-pair lists with
-# atom/spin cross-references, are informational: pass --no-equivalent-comments
-# (or equivalent_comments=False in Python) to suppress them, or delete any
-# comment; identity, support, and values never depend on comments.
+# Generator/writer comments, including per-shell equivalent-pair lists with
+# symmetry witnesses, are informational. They
+# describe the generated representative; editing it can make the witness comments
+# stale. Pass --no-equivalent-comments (or equivalent_comments=False in Python)
+# to suppress generated lists, or delete any comments; values and native sparse
+# context do not depend on comments.
 ```
 
 No `name`, `distance`, or `n_equivalent_pairs` is supplied here: all three are
@@ -178,9 +196,9 @@ and its reverse once) for every shell when the document is canonicalized or
 written. No `name` is invented. With the geometry above, the first shell
 covers 4 physical pairs at 2.4855 Å (an 8-member directed orbit that already
 contains every reverse) and the second covers 3 physical pairs at 2.87 Å (a
-6-member directed orbit). A row
-flagged `N` carries a negative spin sentinel, and marking an atom nonmagnetic
-does not imply a physical zero moment: moment rows stay complete for every
+6-member directed orbit).
+A row flagged `N` is excluded from the automatically derived spin mapping; it
+does not imply a physical zero moment. Moment rows remain complete for every
 atom, magnetic or not.
 
 ## A complete hand-authored tensor document
@@ -204,10 +222,8 @@ appear for other magnetic configurations.
 # transposed (DMI sign flipped, isotropic trace unchanged). Equal bond
 # lengths alone never merge shells.
 
-# Format version. Version 3 is the only accepted version; a missing key, or
-# an explicit 2 (the old one-shell-per-bond-direction format), is rejected
-# with regeneration advice instead of reinterpreting old masks.
-schema_version = 3
+# Format version. Version 4 is required; earlier schemas are not supported.
+schema_version = 4
 
 # Exchange model of this file: "tensor" = one Cartesian 3x3 matrix J per shell.
 # (The alternative is "isotropic" = one scalar per shell. There is no implicit
@@ -230,18 +246,18 @@ lattice = """
 1.435 1.435 -1.435
 """
 
-# Atom rows, exactly seven whitespace-separated columns:
-#   atom-index label x y z magnetic spin-index
+# Atom rows, exactly six whitespace-separated columns:
+#   atom-index label x y z magnetic
 # atom-index  sequential one-based index in row order (1, 2, ...).
 # label       unique element symbol + positive integer (Fe1); gives the species.
 # x y z       finite raw fractional coordinates; values outside [0, 1) are kept,
 #             never wrapped, so native fixed-R bonds keep their geometry.
 # magnetic    "Y" for a selected magnetic site, "N" otherwise.
-# spin-index  zero-based index into the native spin map: every Y row together
-#             must map exactly onto 0..nspin-1; an N row carries a negative
-#             sentinel, "-" spelling -1. This mapping is never reordered.
+# Spin indices are not supplied here: Y rows receive contiguous zero-based
+# indices in atom order; N rows are excluded from the spin map.
+# Blank lines and '#' comments are ignored inside row blocks.
 atoms = """
-1 Fe1 0.0 0.0 0.0 Y 0
+1 Fe1 0.0 0.0 0.0 Y
 """
 
 [reference_spins]
@@ -269,20 +285,18 @@ mode = "magnetic"
 symprec = 1e-5
 magnetic_tol = 1e-5
 
-# One [[shell]] per bond-and-reverse orbit. The representative
-# names ONE member: "label-first label-second Rx Ry Rz", where (Rx Ry Rz) is
-# the lattice translation moving the SECOND atom into its bonded image.
+# One [[shell]] stores one J for the chosen representative pair and its reverse.
+# Any member of the symmetry-equivalent orbit, including an unobserved pair,
+# may be chosen. J is expressed in the global Cartesian frame.
 [[shell]]
 # Optional display name; never used as identity, never generated when absent.
 name = "1NN"
 representative = "Fe1 Fe1 1 0 0"
-# Editable exchange tensor, in the wire unit above (meV): rows/columns are the
-# Cartesian spin components, J transforms as an axial matrix, and the
-# representative bond's stabilizer decides which entries are allowed.
-# Cubic symmetry does not force every bond tensor to be isotropic; equivalent
-# bonds have tensors related by their Cartesian symmetry rotations.
-# Use J = "unfilled" while editing; export rejects unfilled shells.
-J = [[45.0, 0.0, 0.0], [0.0, 45.0, 0.0], [0.0, 0.0, 45.0]]
+# Editable exchange tensor, in the wire unit above (meV): rows and columns are
+# global Cartesian spin components. J applies to the chosen representative pair;
+# symmetry relates values on equivalent pairs; reversal transposes the tensor
+# and flips DMI. Choose any pair in the orbit, including one not observed.
+J = [[20.0, 0.0, 0.0], [0.0, 20.0, 0.0], [0.0, 0.0, 20.0]]
 
 [[shell]]
 # Second-nearest neighbors: R = (0, 1, 1) is the Cartesian vector a2 + a3 =
@@ -299,17 +313,17 @@ distance = 2.87
 n_equivalent_pairs = 3
 J = [[16.0, 0.0, 0.0], [0.0, 15.0, 0.0], [0.0, 0.0, 15.0]]
 
-# Generator/writer comments, including the per-shell equivalent-pair lists with
-# atom/spin cross-references, are informational: pass --no-equivalent-comments
-# (or equivalent_comments=False in Python) to suppress them, or delete any
-# comment; identity, support, and values never depend on comments.
+# Generator/writer comments include equivalent-pair lists and symmetry
+# witnesses. They are informational and can become
+# stale if the representative is edited. Pass --no-equivalent-comments (or
+# equivalent_comments=False in Python) to suppress them; values and native
+# sparse context do not depend on comments.
 ```
 
-The second-neighbor tensor is anisotropic along its representative bond; symmetry
-rotates that tensor onto equivalent bonds, and the reversed bond of each pair
-carries the transpose. Tensor mode always requires the
-representative. Scalar and tensor modes are explicit; no scalar-to-tensor or
-tensor-to-scalar conversion is implicit.
+The second-neighbor tensor is anisotropic in the global Cartesian frame for its
+chosen representative; symmetry maps it onto equivalent pairs, and the reversed
+bond of each pair carries the transpose. Tensor mode requires a representative.
+Scalar and tensor modes are explicit; no conversion between them is implicit.
 
 Export validates the file automatically and writes standard results:
 
@@ -340,18 +354,18 @@ reports the largest absolute component change in eV; the original pickle is not
 modified. Review that change before using the generated exchange values.
 
 Structure templates and pickle imports order shells by increasing geometric
-distance, using the shell ID to break exact ties without merging different orbits.
-For example, use `TB2J_shell generate POSCAR -s Fe -c 0.6 -d nm`; `TB2J_shell generate --help`
-lists every short option and its default or automatic behavior.
+distance. For example, use `TB2J_shell generate POSCAR -s Fe -c 0.6 -d nm`;
+`TB2J_shell generate --help` lists every short option and its default or
+automatic behavior.
 
-## V3 document grammar and indexing
+## V4 document grammar and indexing
 
-The document is UTF-8 TOML. Scientific tables accept only their declared fields; unknown scientific keys and the superseded v1 array grammar/field names are rejected. There are no compatibility aliases for old names such as `exchange_mode`, `Jiso`, `tensor`, or `orbit_size`. An explicit `schema_version = 3` is required: an omitted version and an explicit `schema_version = 2` are rejected as the superseded one-shell-per-bond-direction format, with regeneration advice, because old directed-orbit masks are never silently reinterpreted.
+The document is UTF-8 TOML. Scientific tables accept only their declared fields; unknown scientific keys and the superseded v1 array grammar/field names are rejected. There are no compatibility aliases for old names such as `exchange_mode`, `Jiso`, `tensor`, or `orbit_size`. An explicit `schema_version = 4` is required; earlier schemas and the former seven-column atom-row grammar are not supported.
 
-- Top-level `exchange` is required and is `"isotropic"` or `"tensor"`. An explicit `schema_version = 3` is required; omitted versions and `2` are rejected with regeneration advice, and canonical output writes `3`. `energy_unit` is `"meV"` (default) or `"eV"`. `distance_unit` is `"Angstrom"` (default), `"Bohr"`, or `"nm"`; it applies to `cutoff` and shell distances. Optional `cutoff` does not re-filter imported or existing shells.
+- Top-level `exchange` is required and is `"isotropic"` or `"tensor"`. An explicit `schema_version = 4` is required, and canonical output writes `4`. `energy_unit` is `"meV"` (default) or `"eV"`. `distance_unit` is `"Angstrom"` (default), `"Bohr"`, or `"nm"`; it applies to `cutoff` and shell distances. Optional `cutoff` does not re-filter imported or existing shells.
 - `[structure]` requires `coordinates = "fractional"`, `lattice`, and `atoms`. The lattice is exactly three rows of three Cartesian lattice-vector components in Angstrom. There is no POSCAR scale factor or selective-dynamics syntax.
-- Each atom row has exactly seven whitespace-separated fields: `atom-index label x y z magnetic spin-index`. Atom indices are sequential, one-based, in source row order. A label is a unique valid element symbol followed by a positive integer (for example `Fe7`); the element symbol provides species. Coordinates are finite raw fractional coordinates and may be outside `[0, 1)`. `Y` requires a unique nonnegative spin index; all selected rows map exactly onto `0..nspin-1`. `N` requires a negative index; `-` spells `-1`. Native negative sentinels are retained when written. Labels resolve to atom rows and never reorder or renumber spin indices.
-- Blank lines and `#` comments are ignored inside row blocks. Row numbers count data rows. The rows accept decimal/scientific real numbers, not Python expressions, complex numbers, NaN/Inf, booleans, or locale-formatted numbers.
+- Each atom row has exactly six whitespace-separated fields: `atom-index label x y z magnetic`. Atom indices are sequential, one-based, in source row order. A label is a unique valid element symbol followed by a positive integer (for example `Fe7`); the element symbol provides species. Coordinates are finite raw fractional coordinates and may be outside `[0, 1)`. `magnetic` is exactly `Y` or `N`. No spin index is supplied in the row: `Y` sites receive contiguous zero-based spin indices in atom order, and `N` sites are excluded from the derived mapping (internal sentinel `-1`). For structure-derived documents this mapping is automatic; native pickle mappings, including permutations and negative nonmagnetic sentinels, are preserved in the digest-protected companion context.
+- Blank lines and `#` comments are ignored inside row blocks. Row numbers count data rows. Coordinate values accept decimal/scientific real numbers, not Python expressions, complex numbers, NaN/Inf, booleans, or locale-formatted numbers.
 - Optional `[reference_spins]` contains `moments` as one label row per atom: either `label m` for signed collinear moments along z, or `label mx my mz` for Cartesian axial vectors. All rows must have the same width, labels must be unique and complete for every atom, and values are in μB. Missing atoms are not filled with zeros. `source` records `explicit`, `native:spinat`, or `model:unit-along-z` provenance.
 - `[symmetry]` requires `mode = "spacegroup"` or `"magnetic"`; these correspond to `sg` and `msg` in Python and CLI arguments. `symprec` defaults to `1e-5` Å. Magnetic mode requires complete reference moments and a positive `magnetic_tol` (default `1e-5` μB). Space-group mode may omit moments. Collinear scalar moments are valid for MSG even when operations are primed; Cartesian vectors use the axial-vector convention.
 - Optional `[metadata]` accepts finite TOML scalar/list/table data, including dates and times. Its values do not affect exchange or symmetry; floating-point values are rounded on writing.
@@ -359,19 +373,19 @@ The document is UTF-8 TOML. Scientific tables accept only their declared fields;
 - Optional `[tolerances]` records `value_atol` and `zero_tol` in eV and dimensionless `value_rtol`; defaults are `1e-8`, `1e-10`, and `1e-6`, and canonical writes emit all three.
 - Optional `[source]` records `format` (`template`, `pickle`, `text`, or `xml`), a nonempty source `precision_profile`, and/or the unique `required_base_fields` manifest. These fields record provenance and unencoded source context; they do not bypass scientific validation.
 
-Each `[[shell]]` has one `J` value: a finite scalar in isotropic mode, a finite Cartesian 3×3 tensor in tensor mode, or the template string `"unfilled"`. Tensor mode requires `representative`; the same label-based representative is emitted for generated scalar templates. An isotropic hand-authored shell may omit the representative only when it supplies an authoritative canonical `id`. A representative has the form `"Fe7 Co4 1 0 -1"`: two site labels followed by the three signed integer translation components `R`, which translates the second site in the raw site-image frame. Optional `id` must equal the canonical minimum directed member key `i:j:Rx,Ry,Rz` of the shell's full directed orbit (reversed members included); atom indices in that ID are one-based. Duplicate entries for the same orbit fail.
+Each `[[shell]]` has one `representative` and one `J` value: a finite scalar in isotropic mode, a finite Cartesian 3×3 tensor in tensor mode, or the template string `"unfilled"`. The representative has the form `"Fe7 Co4 1 0 -1"`: two site labels followed by the three signed integer translation components `R`, which translates the second site in the raw site-image frame. Any symmetry-equivalent directed pair may be selected, whether or not that pair was observed in the native data. Shell blocks have no `id` or ordinal support/channel masks. `J` is expressed for the chosen representative pair in the global Cartesian frame; symmetry operations map it to equivalent pairs, and reversal applies the native convention (isotropic even, DMI sign reversed, tensor transposed). Duplicate entries for the same orbit fail.
 
-`name` is optional display text, not identity, and is never generated if absent. Input may omit `distance` and `n_equivalent_pairs`; TB2J writes both computed summaries for every shell, even when equivalent-pair comments are suppressed. `distance` is the representative bond length in the declared `distance_unit`. `n_equivalent_pairs` counts the shell's unique physical pairs—each bond and its reverse counted once—not the directed orbit size that masks index, the sparse support size, or a coordination number. Both supplied summaries are validated against geometry and symmetry and never select or merge shells.
+`name` is optional display text, not identity, and is never generated if absent. Input may omit `distance` and `n_equivalent_pairs`; TB2J writes both computed summaries for every shell, even when equivalent-pair comments are suppressed. `distance` is the representative bond length in the declared `distance_unit`. `n_equivalent_pairs` counts the shell's unique physical pairs—each bond and its reverse counted once—not a directed-orbit size, sparse support size, or coordination number. Both supplied summaries are validated against geometry and symmetry and never select or merge shells.
 
-By default, equivalent-pair and atom/spin cross-reference comments are emitted. They are informational; deleting them does not change shell identity, support, or values. `--no-equivalent-comments` suppresses these generated comments without changing data. Rewriting canonicalizes TOML and regenerates its own comments; arbitrary comments, whitespace, and formatting are not preserved.
+By default, equivalent-pair comments are emitted. Pair comments include a deterministic operation witness and whether that pair is reversed relative to the generated representative. They describe the representative at generation time; editing the representative can make them stale. Comments are informational; deleting them does not change shell identity, support, or values. `--no-equivalent-comments` suppresses generated comments without changing data. Rewriting canonicalizes TOML and regenerates its own comments; arbitrary comments, whitespace, and formatting are not preserved.
 
 ## Symmetry snapshots, sparse support, and completion
 
-A shell is the union of the full orbit of an ordered key `(R, i, j)` under the declared space or magnetic group and the orbit of its reversed key `(j, i, -R)`; the canonical shell ID is the minimum directed member of that union. Equal distances are only geometry summaries; they never merge distinct orbits, and symmetry-inequivalent shells stay separate even at equal distance. Centering translations participate when they are operations of the group. The reversed bond always belongs to the same shell: it shares the isotropic value, flips the DMI sign, and carries the transposed tensor. Export to native results writes both directions for every supported pair and channel, creating a missing reverse entry from the observed channels; it never invents unrelated symmetry images or absent channel families.
+A shell is the union of the full orbit of a chosen ordered key `(R, i, j)` under the declared space or magnetic group and the orbit of its reversed key `(j, i, -R)`; each shell entry contains a representative that may be any member of this orbit, including an unobserved pair. Equal distances are only geometry summaries; they never merge distinct orbits, and symmetry-inequivalent shells stay separate even at equal distance. Centering translations participate when they are operations of the group. The reversed bond always belongs to the same shell: it shares the isotropic value, flips the DMI sign, and carries the transposed tensor. Export to native results writes both directions for supported pairs and channels, creating a missing reverse entry from the observed channels; it never invents unrelated symmetry images or absent channel families.
 
-A hand-authored **snapshot-free** file can omit `symmetry.operations` only for complete orbit entries without ordinal support/presence masks. Its first read constructs the group once from the declared structure, magnetic-site selection, symmetry mode, reference moments, and tolerances, then derives/validates canonical IDs. Writing that document records the detected operations. Thereafter the stored operation snapshot is authoritative and replayed; reading does not replace it with the current detector result. Python `validate_shells(..., check_producer_ops=True)` compares current detection with the snapshot without changing it.
+A hand-authored **snapshot-free** file can omit `symmetry.operations` only for complete orbit entries. Its first read constructs the group once from the declared structure, magnetic-site selection, symmetry mode, reference moments, and tolerances. Writing that document records the detected operations. Thereafter the stored operation snapshot is authoritative and replayed; reading does not replace it with the current detector result. Canonical operations are sorted and stable in the document. Python `validate_shells(..., check_producer_ops=True)` compares current detection with the snapshot without changing it.
 
-Canonical full directed orbits (reversed members included) are sorted. `support_members` and channel-presence masks are sorted, unique, **zero-based ordinals into that full directed orbit**; they require an explicit operation snapshot. `support_members` defaults to the full directed orbit. `Jiso_members`, `DMI_members`, and `Jani_members` record independently present channels within support (DMI/Jani are tensor-mode channels). Omitted channel masks mean present on the supported members. Empty masks distinguish absent channels from observed zeros; a nonzero authored channel cannot be hidden behind an empty mask. The representative must lie in declared support. Sparse support and masks survive ordinary export unchanged.
+For structure-derived documents, `Y` rows define the spin mapping automatically: selected sites receive contiguous zero-based indices in full atom order, and `N` rows are excluded. Native pickle mappings are different: the digest-protected companion retains the exact original atom-to-spin mapping, including permutations and negative nonmagnetic sentinels; that mapping is not encoded in shell rows. Before validating or using spin-indexed native pair keys, export restores the mapping from the verified companion. If the editable Y/N selection differs from the native context, export fails rather than silently remapping native keys. Keep the companion with its TOML to preserve sparse pair support, per-channel presence (including absent versus zero), and the native mapping.
 
 ## Units and tolerances
 

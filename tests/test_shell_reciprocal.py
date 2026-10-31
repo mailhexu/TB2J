@@ -22,6 +22,17 @@ def _asymmetric_source(**channels):
     )
 
 
+def _native_document(tmp_path, source, *, mode):
+    from TB2J.io_exchange.shell_workflow import generate_shells
+
+    source.write_pickle(path=tmp_path)
+    path = tmp_path / "shells.toml"
+    generated = generate_shells(tmp_path / "TB2J.pickle", path, mode=mode)
+    document = shells.read_shells(path)
+    assert document == generated.document
+    return document
+
+
 def test_sparse_scalar_is_one_editable_shell_and_exports_reverse():
     forward = ((1, 0, 0), 0, 1)
     reverse = ((-1, 0, 0), 1, 0)
@@ -47,11 +58,9 @@ def test_sparse_full_tensor_reverses_dmi_and_transposes(tmp_path):
         dmi_ddict={forward: dmi},
         Jani_dict={forward: anisotropy},
     )
-    document = shells.compress(source, mode="tensor").document
+    document = _native_document(tmp_path, source, mode="tensor")
     assert len(document.shells) == 1
-    path = tmp_path / "tensor.toml"
-    shells.write_shells(document, path)
-    replay = shells.expand(shells.read_shells(path), base=source).spinio
+    replay = shells.expand(document, base=source).spinio
     assert set(replay.exchange_Jdict) == {forward, reverse}
     assert set(replay.dmi_ddict) == {forward, reverse}
     assert set(replay.Jani_dict) == {forward, reverse}
@@ -61,14 +70,14 @@ def test_sparse_full_tensor_reverses_dmi_and_transposes(tmp_path):
     np.testing.assert_allclose(replay.Jani_dict[reverse], anisotropy.T, atol=1e-12)
 
 
-def test_sparse_channels_on_opposite_directions_remain_independent():
+def test_sparse_channels_on_opposite_directions_remain_independent(tmp_path):
     forward = ((1, 0, 0), 0, 1)
     reverse = ((-1, 0, 0), 1, 0)
     dmi = np.array([0.002, -0.003, 0.004])
     source = _asymmetric_source(
         exchange_Jdict={forward: 0.01}, dmi_ddict={reverse: dmi}
     )
-    document = shells.compress(source, mode="tensor").document
+    document = _native_document(tmp_path, source, mode="tensor")
     assert len(document.shells) == 1
     replay = shells.expand(document, base=source).spinio
     assert replay.exchange_Jdict == {forward: 0.01, reverse: 0.01}
@@ -76,6 +85,24 @@ def test_sparse_channels_on_opposite_directions_remain_independent():
     np.testing.assert_allclose(replay.dmi_ddict[reverse], dmi, atol=1e-12)
     np.testing.assert_allclose(replay.dmi_ddict[forward], -dmi, atol=1e-12)
     assert not replay.Jani_dict
+
+
+def test_zero_tensor_channel_remains_present_while_absent_channel_stays_absent(
+    tmp_path,
+):
+    forward = ((1, 0, 0), 0, 1)
+    reverse = ((-1, 0, 0), 1, 0)
+    source = _asymmetric_source(
+        exchange_Jdict={forward: 0.0},
+        Jani_dict={forward: np.zeros((3, 3))},
+    )
+    document = _native_document(tmp_path, source, mode="tensor")
+    replay = shells.expand(document, base=source).spinio
+    assert replay.exchange_Jdict == {forward: 0.0, reverse: 0.0}
+    assert set(replay.Jani_dict) == {forward, reverse}
+    np.testing.assert_array_equal(replay.Jani_dict[forward], np.zeros((3, 3)))
+    np.testing.assert_array_equal(replay.Jani_dict[reverse], np.zeros((3, 3)))
+    assert replay.dmi_ddict is None
 
 
 def test_self_reversing_cubic_orbit_counts_unique_physical_bonds(tmp_path):
@@ -104,14 +131,14 @@ def test_self_reversing_cubic_orbit_counts_unique_physical_bonds(tmp_path):
     }
 
 
-def test_version_2_file_is_rejected_without_reinterpreting_masks(tmp_path):
+def test_legacy_schema_version_is_rejected_without_reinterpreting_v4_entries(
+    tmp_path,
+):
     atoms = Atoms("Fe", cell=[2, 2, 2], scaled_positions=[[0, 0, 0]], pbc=True)
     path = tmp_path / "shell.toml"
     shells.write_shells(shells.template(atoms, [1], 2.01), path)
     text = path.read_text()
-    assert "schema_version = 3" in text
-    path.write_text(text.replace("schema_version = 3", "schema_version = 2", 1))
-    with pytest.raises(
-        ValueError, match=r"(?i)(version 2|schema_version.*2).*(regenerat|unsupported)"
-    ):
+    assert "schema_version = 4" in text
+    path.write_text(text.replace("schema_version = 4", "schema_version = 3", 1))
+    with pytest.raises(ValueError, match=r"schema_version: unsupported version 3"):
         shells.read_shells(path)

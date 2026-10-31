@@ -336,7 +336,6 @@ def test_snap_zero_is_reported_and_exact_index_spin_and_context_replay():
     [
         ("operations", "unprimed identity"),
         ("canonical_id", "canonical minimum"),
-        ("representative", "support_members"),
         ("presence_mask", "empty mask would discard"),
     ],
 )
@@ -360,8 +359,6 @@ def test_core_expansion_revalidates_mutated_documents_before_spinio(
         )
     elif mutation == "canonical_id":
         object.__setattr__(entry, "id", "1:1:0,0,0")
-    elif mutation == "representative":
-        object.__setattr__(entry, "representative", (1, 1, 0, 1, 0))
     else:
         object.__setattr__(entry, "Jani_members", ())
 

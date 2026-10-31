@@ -25,7 +25,7 @@ def _generate_native(
     distance_unit,
     equivalent_comments,
 ):
-    from .shell_context import write_context
+    from .shell_context import load_context, write_context
 
     companion = output.with_suffix(".context.npz")
     paths = (source, output, companion)
@@ -57,35 +57,37 @@ def _generate_native(
         magnetic_tol=magnetic_tol,
         on_inconsistent="project" if project else "error",
     )
-    stages = []
-    try:
-        for suffix in (".npz", ".toml"):
-            with NamedTemporaryFile(
-                dir=output.parent, prefix=".shell-", suffix=suffix, delete=False
-            ) as stream:
-                stages.append(Path(stream.name))
-        digest = write_context(spinio, stages[0])
+    with TemporaryDirectory(prefix=".shell-", dir=output.parent) as temporary:
+        stage = Path(temporary)
+        staged_output = stage / output.name
+        staged_context = staged_output.with_suffix(".context.npz")
+        digest = write_context(spinio, staged_context)
         document = replace(
             result.document, context_sha256=digest, distance_unit=distance_unit
         )
         shells.write_shells(
             document,
-            stages[1],
+            staged_output,
             equivalent_comments=equivalent_comments,
             source_path=source,
         )
-        document = shells.read_shells(stages[1])
+        # Check the rounded wire document against the digest-verified context
+        # before publication. Loading restores the exact native spin mapping,
+        # while this boundary preserves the precision-specific diagnostic.
+        from .shell_text import load
+
+        wire_document = load(staged_output)
         try:
-            shells._validate_compatible_base(document, spinio)
+            load_context(staged_output, wire_document)
         except ValueError as error:
+            if not str(error).startswith("base"):
+                raise
             raise ValueError(
                 f"eight-decimal-place precision is incompatible with the native context: {error}"
             ) from error
-        os.replace(stages[0], companion)
-        os.replace(stages[1], output)
-    finally:
-        for stage in stages:
-            stage.unlink(missing_ok=True)
+        document = shells.read_shells(staged_output)
+        os.replace(staged_context, companion)
+        os.replace(staged_output, output)
     return shells.ShellResult(document=document, report=result.report)
 
 

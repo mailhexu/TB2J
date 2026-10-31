@@ -6,6 +6,7 @@
 import hashlib
 import json
 import math
+from dataclasses import replace
 from datetime import date, datetime, time
 from pathlib import Path
 
@@ -68,6 +69,29 @@ def _encode(value, arrays, active, path):
         }
     finally:
         active.remove(identity)
+
+
+def _context_index_map(document, base):
+    raw = getattr(base, "index_spin", None)
+    try:
+        indices = tuple(raw)
+    except TypeError as error:
+        raise ValueError(
+            "native context index_spin: expected one integer per atom"
+        ) from error
+    if len(indices) != len(document.index_spin) or any(
+        not isinstance(index, (int, np.integer)) or isinstance(index, (bool, np.bool_))
+        for index in indices
+    ):
+        raise ValueError("native context index_spin: expected one integer per atom")
+    indices = tuple(int(index) for index in indices)
+    if tuple(index >= 0 for index in indices) != tuple(
+        index >= 0 for index in document.index_spin
+    ):
+        raise ValueError(
+            "native context magnetic selection does not match the shell document"
+        )
+    return indices
 
 
 def _validate_physical_state(spinio):
@@ -260,10 +284,12 @@ def load_context(shell_path, document):
     base.atoms = atoms
     if not hasattr(base, "index_spin"):
         raise ValueError("native context index_spin is missing")
+    document = replace(document, index_spin=_context_index_map(document, base))
     shells._validate_compatible_base(document, base)
     _validate_physical_state(base)
     base._build_Rlist()
     base._build_ind_atoms()
     if set(shells._required_base_fields(base)) != set(document.required_base_fields):
         raise ValueError("native context required fields do not match shell document")
+    shells._restore_sparse_support(document, base)
     return base
