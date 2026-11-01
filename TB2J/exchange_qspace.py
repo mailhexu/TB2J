@@ -68,7 +68,7 @@ class ExchangeCLQspace(ExchangeCL2):
         self.Kqe_list = np.zeros_like(self.Jqe_list)
         self.Xqe_list = np.zeros_like(self.Jqe_list)
         # Longitudinal-relaxation response (MathDoc:
-        # tb2j/bruno-renormalization-dimer): C = band longitudinal
+        # tb2j/bruno-renormalization-authority): C = band longitudinal
         # stiffness.  B (mixed transverse-longitudinal response) is zero
         # until the finite-q transverse vertex of story 009 lands; see
         # get_all_A and bruno_renormalize.
@@ -232,7 +232,7 @@ class ExchangeCLQspace(ExchangeCL2):
     def bruno_renormalize(self):
         """Bruno-renormalized exchange Jnorm = Jq + (B C^+ B^T) / 2 per q.
 
-        MathDoc: tb2j/bruno-renormalization-dimer.  With the pinned
+        MathDoc: tb2j/bruno-renormalization-authority.  With the pinned
         mapping J = -A_12/2, the exchange-space longitudinal-relaxation
         correction is +(B C^-1 B^T)_12 / 2: Delta A_12 = -(B C^-1 B^T)_12
         and Delta J = -Delta A_12/2 (CR-004).  C is complex Hermitian

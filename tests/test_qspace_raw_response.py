@@ -59,7 +59,7 @@ def test_raw_exchange_does_not_require_well_conditioned_bruno_matrix():
 def test_longitudinal_stiffness_matches_spectral_reference():
     # Metallic up channel (mu = 0 cuts through it), empty down channel:
     # the exact band longitudinal stiffness is the divided-difference sum
-    # over same-channel eigenpairs (MathDoc: tb2j/bruno-renormalization-dimer).
+    # over same-channel eigenpairs (MathDoc: tb2j/bruno-renormalization-authority).
     up = np.array([[-0.3, 0.5], [0.5, -0.25]])
     dn = np.array([[0.3, 0.12], [0.12, 0.25]])
     calc = calculator("semicircle", matrices=(up, dn))
@@ -91,7 +91,7 @@ def test_longitudinal_stiffness_matches_spectral_reference():
 
 def test_bruno_correction_vanishes_for_collinear_reference(tmp_path):
     # At a collinear reference the transverse-longitudinal cross response B
-    # vanishes identically (MathDoc: tb2j/bruno-renormalization-dimer, S4),
+    # vanishes identically (MathDoc: tb2j/bruno-renormalization-authority, S4),
     # so the renormalized exchange equals the raw one and no longitudinal
     # correction is applied.
     up = np.array([[-0.3, 0.5], [0.5, -0.25]])
