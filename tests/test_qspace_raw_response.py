@@ -56,6 +56,49 @@ def test_raw_exchange_does_not_require_well_conditioned_bruno_matrix():
     assert np.linalg.cond(calc.Xq[0]) > 1e12
 
 
+def test_longitudinal_stiffness_matches_spectral_reference():
+    # Metallic up channel (mu = 0 cuts through it), empty down channel:
+    # the exact band longitudinal stiffness is the divided-difference sum
+    # over same-channel eigenpairs (MathDoc: tb2j/bruno-renormalization-dimer).
+    up = np.array([[-0.3, 0.5], [0.5, -0.25]])
+    dn = np.array([[0.3, 0.12], [0.12, 0.25]])
+    calc = calculator("semicircle", matrices=(up, dn))
+    calc.calculate_raw()
+    calc.bruno_renormalize()
+
+    C = np.zeros((2, 2))
+    for h, f in ((up, None), (dn, None)):
+        w, v = np.linalg.eigh(h)
+        occ = (w < 0).astype(float)
+        for i in range(2):
+            for j in range(2):
+                for n in range(2):
+                    for m in range(2):
+                        if n == m:
+                            continue
+                        C[i, j] += (
+                            (occ[n] - occ[m])
+                            / (w[n] - w[m])
+                            * (v[n, i] * v[m, i] * v[m, j] * v[n, j])
+                        )
+    np.testing.assert_allclose(calc.Cq[0], C, atol=1e-10, rtol=0)
+
+
+def test_bruno_correction_vanishes_for_collinear_reference():
+    # At a collinear reference the transverse-longitudinal cross response B
+    # vanishes identically (MathDoc: tb2j/bruno-renormalization-dimer, S4),
+    # so the renormalized exchange equals the raw one and no longitudinal
+    # correction is applied.
+    up = np.array([[-0.3, 0.5], [0.5, -0.25]])
+    dn = np.array([[0.3, 0.12], [0.12, 0.25]])
+    calc = calculator("semicircle", matrices=(up, dn))
+    calc.calculate_raw()
+    calc.bruno_renormalize()
+    np.testing.assert_allclose(calc.Bq[0], 0.0, atol=1e-12, rtol=0)
+    np.testing.assert_allclose(calc.Jnorm_q[0], calc.Jq[0], atol=1e-12, rtol=0)
+    assert calc.longitudinal_correction_applied is False
+
+
 def test_raw_exchange_rejects_a_pole_on_the_contour():
     h = [[-0.5, 0.5], [0.5, -0.5]]
     calc = calculator("semicircle", matrices=(h, h), nz=64)

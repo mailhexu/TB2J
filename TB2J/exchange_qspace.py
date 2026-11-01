@@ -67,6 +67,13 @@ class ExchangeCLQspace(ExchangeCL2):
         )
         self.Kqe_list = np.zeros_like(self.Jqe_list)
         self.Xqe_list = np.zeros_like(self.Jqe_list)
+        # Longitudinal-relaxation responses (MathDoc:
+        # tb2j/bruno-renormalization-dimer): B = mixed transverse-longitudinal
+        # response, C = band longitudinal stiffness.  The transverse vertex is
+        # the splitting Deltai; the longitudinal vertex is the channel sign,
+        # which turns the two contour orderings into opposite-sign partners.
+        self.Bqe_list = np.zeros_like(self.Jqe_list)
+        self.Cqe_list = np.zeros_like(self.Jqe_list)
         self.get_rho_atom()
 
     def get_rho_atom(self):
@@ -142,6 +149,21 @@ class ExchangeCLQspace(ExchangeCL2):
                             A = (np.trace(Deltai @ K1) + np.trace(Deltai @ K2)) * 0.5
                             K = K1 + K2
                             K += Gij_dn_kq @ Deltaj @ Gji_up_k
+                            # Longitudinal relaxation responses: the
+                            # longitudinal vertex is the channel sign (+1 up,
+                            # -1 down).  C carries equal signs for the two
+                            # orderings; its -1/pi measure is pinned against
+                            # the exact band stiffness (divided-difference
+                            # sum) by tests/test_qspace_raw_response.py.
+                            # B's finite-q transverse vertex is the phase
+                            # derivative (story 009 basis-phase authority);
+                            # the local-canting vertex accumulated here is
+                            # exact for collinear references, where it
+                            # vanishes identically.
+                            B_up = np.trace(Deltai @ Gij_up_k @ Gji_dn_kq)
+                            B_dn = np.trace(Deltai @ Gij_dn_kq @ Gji_up_k)
+                            C_up = np.trace(Gij_up_k @ Gji_up_k)
+                            C_dn = np.trace(Gij_dn_kq @ Gji_dn_kq)
                             # K=Kq[self.orb_slice[iatom], self.orb_slice[iatom]]*2
                             # self.Jqe_orb_list[(ikq, iatom, jatom)].append(tmp / (4.0 * np.pi))
                             self.Jqe_list[ie, iq, i, j] += A / (4.0 * np.pi) / self.nqpt
@@ -151,11 +173,19 @@ class ExchangeCLQspace(ExchangeCL2):
                             self.Xqe_list[ie, iq, i, j] += (
                                 np.trace(X) * (2.0 / np.pi) / self.nqpt
                             )
+                            self.Bqe_list[ie, iq, i, j] -= (
+                                (B_up - B_dn) / (4.0 * np.pi) / self.nqpt
+                            )
+                            self.Cqe_list[ie, iq, i, j] -= (
+                                (C_up + C_dn) / np.pi / self.nqpt
+                            )
 
     def integrate(self, method="simpson"):
         self.Jq = np.zeros((self.nqpt, self.nmagatom, self.nmagatom), dtype=float)
         self.Kq = np.zeros_like(self.Jq)
         self.Xq = np.zeros_like(self.Jq)
+        self.Bq = np.zeros_like(self.Jq)
+        self.Cq = np.zeros_like(self.Jq)
         self.Jnorm_q = np.zeros_like(self.Jq)
         if self.integration_method.lower() == "cfr2":
             # MathDoc: tb2j/cfr2-integration-contract. Pole geometry is not
@@ -163,6 +193,8 @@ class ExchangeCLQspace(ExchangeCL2):
             self.Jq = self.contour.integrate_values(self.Jqe_list).imag
             self.Kq = self.contour.integrate_values(self.Kqe_list).imag
             self.Xq = self.contour.integrate_values(self.Xqe_list).imag
+            self.Bq = self.contour.integrate_values(self.Bqe_list).imag
+            self.Cq = self.contour.integrate_values(self.Cqe_list).imag
             return self.Jq
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
@@ -182,17 +214,47 @@ class ExchangeCLQspace(ExchangeCL2):
                     self.Xq[iq, i, j] = np.imag(
                         integrate(self.contour.path, self.Xqe_list[:, iq, i, j])
                     )
+                    self.Bq[iq, i, j] = np.imag(
+                        integrate(self.contour.path, self.Bqe_list[:, iq, i, j])
+                    )
+                    self.Cq[iq, i, j] = np.imag(
+                        integrate(self.contour.path, self.Cqe_list[:, iq, i, j])
+                    )
             # print(f"{q=}, {self.Kq[iq]}")
         return self.Jq
 
     def bruno_renormalize(self):
-        M = np.diag(self.spinat[self.ind_mag_atoms, 2])
+        """Bruno-renormalized exchange Jnorm = Jq - (B C^+ B^T) per q.
 
+        MathDoc: tb2j/bruno-renormalization-dimer.  The relaxed exchange is
+        the frozen exchange minus the longitudinal-relaxation correction
+        (B C^-1 B^T) with B the transverse-longitudinal cross response and
+        C the longitudinal stiffness.  C carries the exact uniform null
+        mode (a uniform longitudinal shift leaves the band energy
+        invariant), so the inverse is a declared pseudoinverse on the
+        non-null subspace, never np.linalg.inv.
+
+        Scope: the transverse vertex of B is the local-canting vertex,
+        whose cross response with the longitudinal field vanishes
+        identically at collinear references; the finite-q twist vertex is
+        a phase derivative carried by the multi-site basis-phase
+        authority (story 009).  Until that vertex lands, Jnorm equals Jq
+        at every q, which is exact for collinear references; the flag
+        ``longitudinal_correction_applied`` reports whether any nonzero
+        correction was applied.
+        """
+        self.longitudinal_correction_applied = False
         for iq, q in enumerate(self.qpts):
-            self.Jnorm_q[iq] = self.Jq[iq] + 0.5 * (M - self.Kq[iq].T) @ np.linalg.inv(
-                self.Xq[iq]
-            ) @ (M - self.Kq[iq])
-            # print(f"{q}: Jq:{self.Jq[iq]}, Jnorm:{self.Jnorm_q[iq]}")
+            C = self.Cq[iq]
+            w, V = np.linalg.eigh(0.5 * (C + C.T))
+            tol = np.max(np.abs(w)) * 1e-10 if w.size else 0.0
+            keep = np.abs(w) > tol
+            if not np.any(keep) or np.max(np.abs(self.Bq[iq]), initial=0.0) < 1e-12:
+                self.Jnorm_q[iq] = self.Jq[iq]
+                continue
+            Cinv = ((V[:, keep] / w[keep]) @ V[:, keep].conj().T).real
+            self.Jnorm_q[iq] = self.Jq[iq] - (self.Bq[iq] @ Cinv @ self.Bq[iq].T)
+            self.longitudinal_correction_applied = True
 
     def q_to_r(self):
         self.JR = np.zeros((len(self.Rlist), self.nmagatom, self.nmagatom), dtype=float)

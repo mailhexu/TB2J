@@ -22,12 +22,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SYMPY_DIR = REPO_ROOT / "docs" / "sympy"
 TIMEOUT_S = 600.0
 
-#: normative assertion-checked derivation scripts (story-002..005 set)
+#: normative assertion-checked derivation scripts (story-002..005 set,
+#: plus the story-008 Bruno-renormalization dimer authority)
 SCRIPTS = [
     "spin_spiral_generalized_bloch",
     "spiral_force_theorem_J",
     "spiral_green_function_mft",
     "spiral_state_mft",
+    "bruno_renormalization_dimer",
 ]
 
 
