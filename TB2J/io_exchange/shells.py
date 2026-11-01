@@ -1198,11 +1198,20 @@ def _base_field_present(value):
 
 
 def _required_base_fields(spinio):
-    return tuple(
-        group
-        for group, fields in _BASE_FIELDS.items()
-        if any(_base_field_present(getattr(spinio, field, None)) for field in fields)
-    )
+    groups = []
+    for group, fields in _BASE_FIELDS.items():
+        if group == "bruno":
+            # Route presence, not content: an EMPTY Bruno table is a
+            # valid zero-pair result whose availability status must
+            # survive compress→expand (R8-001).
+            present = getattr(spinio, "bruno_Jdict", None) is not None
+        else:
+            present = any(
+                _base_field_present(getattr(spinio, field, None)) for field in fields
+            )
+        if present:
+            groups.append(group)
+    return tuple(groups)
 
 
 def compress(

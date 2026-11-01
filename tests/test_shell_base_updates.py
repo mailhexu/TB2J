@@ -195,6 +195,28 @@ def test_xml_export_of_empty_bruno_table_requires_named_loss(tmp_path):
     assert (tmp_path / "exchange.xml").exists()
 
 
+def test_compress_expand_preserves_empty_bruno_route(tmp_path):
+    # R8-001: route presence in the shells manifest — an empty table
+    # with absent metadata still demands the named loss at expansion
+    # instead of silently becoming an absent route.
+    source, key = _source()
+    source.bruno_Jdict = {}
+    source.bruno_meta = None
+    document = shells.compress(source, mode="isotropic").document
+    assert "bruno" in document.required_base_fields
+
+    with pytest.raises(ValueError, match="(?i)bruno"):
+        shells.expand(document)
+    # Without a base the route cannot be reconstructed; the manifest
+    # requirement forces the loss to be NAMED rather than silent.
+    result = shells.expand(
+        document,
+        allow_loss=("bruno", "charges", "damping", "gyromag"),
+    )
+    assert result.spinio.bruno_Jdict is None
+    assert "bruno" in {row[0] for row in result.report.losses}
+
+
 def _write_document(tmp_path, document):
     from TB2J.io_exchange import shells
 
