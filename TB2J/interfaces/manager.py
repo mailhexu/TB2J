@@ -12,16 +12,18 @@ class Manager:
         # computing exchange
         print("Starting to calculate exchange.")
         use_gpu = kwargs.get("use_gpu", False)
-        ExchangeClass = self.select_exchange(colinear, use_gpu=use_gpu)
+        qspace = kwargs.get("qspace", False)
+        ExchangeClass = self.select_exchange(colinear, qspace=qspace, use_gpu=use_gpu)
         if use_gpu:
             # select_exchange may fall back to a CPU class when no GPU runtime
             # is usable; re-derive the effective flag from the selected class.
             # Imported lazily so the default CPU path stays JAX-free.
-            from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
             from TB2J.gpu.exchange_ncl_gpu import ExchangeNCLGPU
+            from TB2J.gpu.exchangeCL_gpu import ExchangeCL2GPU
 
             use_gpu = ExchangeClass in (ExchangeCL2GPU, ExchangeNCLGPU)
         kwargs["use_gpu"] = use_gpu
+        self.exchange_class = ExchangeClass
 
         output_path = kwargs.get("output_path", "TB2J_results")
         exchange = ExchangeClass(tbmodels=models, atoms=atoms, basis=basis, **kwargs)

@@ -383,4 +383,6 @@ def parser_argument_to_dict(args) -> dict:
         "use_gpu": args.use_gpu,
         "vectorize_energy": args.vectorize_energy,
         "e_batch_size": args.e_batch_size,
+        "qspace": getattr(args, "qspace", False),
+        "integration_method": getattr(args, "integration_method", None),
     }

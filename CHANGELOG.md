@@ -1,9 +1,22 @@
 # Changelog
 
 ## Unreleased
+- Merged the CFR2-weighted reciprocal-space integration (owner revision
+  `4355ca6`): J, K and X now contract the canonical CFR2 weights, including
+  the full moment sample, instead of geometrically integrating pole
+  positions. CFR2 is the default integration for `ExchangeCLQspace`; the
+  deprecated CFR contour is refused loudly by the q-space full driver
+  (pole geometry is not an integration measure). Geometric Simpson/trapezoid
+  rules and their controls are unchanged, and `calculate_raw()` keeps its
+  geometric-only contract.
+- The `qspace` selection is now wired end to end: `WannierManager` forwards
+  it to `Manager`, and `wann2J` gains public `--qspace` and
+  `--integration_method` flags (choices: cfr2, cfr, semicircle, legendre).
+  An explicit contour method picks the matching integration branch, so
+  unsupported combinations fail instead of changing defaults silently.
 - Added `ExchangeCLQspace.calculate_raw()` to return unrenormalized `Jq` without
-  Bruno inversion. It requires a geometric contour; CFR/CFR2 pole contours are
-  refused because this source revision does not integrate them correctly.
+  Bruno inversion. It requires a geometric contour; the pole contours (CFR/CFR2)
+  are refused because the raw route is defined only for geometric quadrature.
   Non-finite raw results are rejected, including a pole on the sampled path.
 - Added an independent zero-temperature dispersive-chain spectral and finite-grid
   regression for the raw reciprocal-space response; this is not material validation.

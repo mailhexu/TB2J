@@ -49,10 +49,24 @@ def run_wann2J():
         default="Wannier90",
     )
 
-    # parser.add_argument("--qspace",
-    #                    action="store_true",
-    #                    help="Whether to calculate J in qspace first and transform to real space.",
-    #                    default=False)
+    parser.add_argument(
+        "--qspace",
+        action="store_true",
+        help="Whether to calculate J in qspace first and transform to real space.",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--integration_method",
+        help=(
+            "Energy integration method: cfr2 (default for --qspace), "
+            "semicircle, or legendre. 'cfr' is deprecated and refused for "
+            "the q-space driver."
+        ),
+        type=str,
+        default=None,
+        choices=["cfr2", "cfr", "semicircle", "legendre"],
+    )
 
     add_exchange_args_to_parser(parser)
 
@@ -97,6 +111,8 @@ def run_wann2J():
         use_gpu=args.use_gpu,
         vectorize_energy=args.vectorize_energy,
         e_batch_size=args.e_batch_size,
+        qspace=args.qspace,
+        integration_method=args.integration_method,
     )
 
 

@@ -30,6 +30,16 @@ def find_index_k(kpts, q):
 
 
 class ExchangeCLQspace(ExchangeCL2):
+    def __init__(self, *args, **kwargs):
+        # CFR2 is the default integration for the reciprocal-space driver:
+        # its stored weights, not pole geometry, define the contour integral.
+        # An explicit contour `method` (e.g. "cfr") picks the matching
+        # integration branch so the deprecated CFR contour is refused loudly
+        # instead of being integrated geometrically.
+        if kwargs.get("integration_method") is None:
+            kwargs["integration_method"] = kwargs.get("method") or "cfr2"
+        super().__init__(*args, **kwargs)
+
     def _prepare(self):
         self.nmagatom = len(self.ind_mag_atoms)
         # self.qmesh=[3,3,3]
@@ -134,6 +144,13 @@ class ExchangeCLQspace(ExchangeCL2):
         self.Kq = np.zeros_like(self.Jq)
         self.Xq = np.zeros_like(self.Jq)
         self.Jnorm_q = np.zeros_like(self.Jq)
+        if self.integration_method.lower() == "cfr2":
+            # MathDoc: tb2j/cfr2-integration-contract. Pole geometry is not
+            # a geometric integration measure; kernel prefactors stay above.
+            self.Jq = self.contour.integrate_values(self.Jqe_list).imag
+            self.Kq = self.contour.integrate_values(self.Kqe_list).imag
+            self.Xq = self.contour.integrate_values(self.Xqe_list).imag
+            return self.Jq
         if method == "trapezoidal":
             integrate = trapezoidal_nonuniform
         elif method == "simpson":
@@ -210,6 +227,14 @@ class ExchangeCLQspace(ExchangeCL2):
         return raw
 
     def calculate_all(self):
+        if self.integration_method.lower() == "cfr":
+            raise ValueError(
+                "CFR is deprecated for the reciprocal-space driver: integrating "
+                "Matsubara pole positions with a geometric rule is meaningless. "
+                "Use integration_method='cfr2' (the default) or a geometric "
+                "contour ('semicircle'/'legendre'); the raw route is "
+                "`calculate_raw()`."
+            )
         self._prepare()
         self.get_all_A()
         self.integrate()
