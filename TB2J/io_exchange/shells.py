@@ -2385,6 +2385,10 @@ _EXPORT_PAIR_FIELDS = {
     "dJdx2": "djdx",
     "dJdx_orb": "djdx",
 }
+# Story 008: losses that only name an input-reader concession.  The export
+# writers emit the labeled section from the source object itself; the token
+# must pass this boundary so CLI conversions can permit it symmetrically.
+_INPUT_ONLY_LOSSES = frozenset({"bruno"})
 
 
 def _export_model(spinio, context):
@@ -2795,7 +2799,11 @@ def write_exchange(spinio, output_dir, format, context=None, allow_loss=()):
         allowed = tuple(allow_loss)
     except TypeError as error:
         raise ValueError("allow_loss: expected named physical loss groups") from error
-    if any(not isinstance(name, str) or name not in _EXPORT_FIELDS for name in allowed):
+    if any(
+        not isinstance(name, str)
+        or (name not in _EXPORT_FIELDS and name not in _INPUT_ONLY_LOSSES)
+        for name in allowed
+    ):
         raise ValueError("allow_loss: unknown export loss group")
     common, changes = _export_model(spinio, context)
     targets = ("pickle", "text", "xml") if format == "tb2j" else (format,)

@@ -845,10 +845,14 @@ _TEXT_PAIR = re.compile(
     r"\s+(\S+)\s+\(\s*(\S+)\s*,\s*(\S+)\s*,\s*(\S+)\s*\)\s+(\S+)\s*\Z"
 )
 # Bruno table row: label label (R) Jnorm Jraw distance with 5/5/3
-# printed decimals (io_txt.write_bruno_section).
+# printed decimals (io_txt.write_bruno_section); the Jraw column is the
+# declared "nan" sentinel for a Bruno-only pair absent from the raw
+# table, and the distance column is "nan" when no geometry row exists
+# on the plain writer path (R5-003).
 _TEXT_BRUNO_ROW = re.compile(
     r"\s*(\S+)\s+(\S+)\s+\(\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*\)"
-    r"\s+([+-]?[0-9]+\.[0-9]{5})\s+([+-]?[0-9]+\.[0-9]{5})\s+([+-]?[0-9]+\.[0-9]{3})\s*\Z"
+    r"\s+([+-]?[0-9]+\.[0-9]{5})\s+([+-]?(?:[0-9]+\.[0-9]{5}|nan))"
+    r"\s+([+-]?(?:[0-9]+\.[0-9]{3}|nan))\s*\Z"
 )
 _TEXT_ARRAY_TOKEN = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?[0-9]+)?\Z")
 _TEXT_JISO = re.compile(r"J_iso:\s*(\S+)\s*\Z")
@@ -1577,7 +1581,7 @@ def _text_parse_bruno_section(lines, index, losses):
             continue
         if stripped.startswith("longitudinal_correction_applied:"):
             value = stripped.split(":", 1)[1].strip()
-            if value not in ("True", "False"):
+            if value not in ("True", "False", "unknown"):
                 _text_error("Bruno exchange", f"unknown flag value {value!r}")
             if applied is not None:
                 _text_error("Bruno exchange", "duplicate availability flag")
@@ -1634,6 +1638,25 @@ def _text_parse_exchange(lines, marker, label_to_atom):
                 _text_error("Exchange", f"unknown exchange table header {stripped!r}")
             header_seen = True
             cursor += 1
+            continue
+
+        # Top-level section dispatch (R5-002): must precede the
+        # first-pair requirement so a genuine zero-pair qspace output
+        # (empty raw table AND empty Bruno table) is consumable.
+        if set(stripped) == {"="}:
+            # The writer frames the labeled block with a banner line
+            # (R4-001); only treat it as the Bruno section opener when
+            # the next line is the Bruno header.
+            if cursor + 1 < len(lines) and lines[cursor + 1].strip().startswith(
+                "Bruno-renormalized exchange"
+            ):
+                cursor = _text_parse_bruno_section(lines, cursor + 1, losses)
+                continue
+        if stripped.startswith("Bruno-renormalized exchange"):
+            # Labeled separate result appended by the qspace writer after
+            # the raw table (story 008, R4-001): consume as a declared
+            # loss instead of rejecting the writer's own output.
+            cursor = _text_parse_bruno_section(lines, cursor, losses)
             continue
 
         pair_match = _TEXT_PAIR.fullmatch(line)
@@ -1859,21 +1882,6 @@ def _text_parse_exchange(lines, marker, label_to_atom):
             )
         if stripped == "Exchange:" or stripped.startswith("Information:"):
             _text_error("Exchange", "duplicate top-level section")
-        if set(stripped) == {"="}:
-            # The writer frames the labeled block with a banner line
-            # (R4-001); only treat it as the Bruno section opener when
-            # the next line is the Bruno header.
-            if cursor + 1 < len(lines) and lines[cursor + 1].strip().startswith(
-                "Bruno-renormalized exchange"
-            ):
-                cursor = _text_parse_bruno_section(lines, cursor + 1, losses)
-                continue
-        if stripped.startswith("Bruno-renormalized exchange"):
-            # Labeled separate result appended by the qspace writer after
-            # the raw table (story 008, R4-001): consume as a declared
-            # loss instead of rejecting the writer's own output.
-            cursor = _text_parse_bruno_section(lines, cursor, losses)
-            continue
         _text_error(
             "Exchange", f"unknown meaningful exchange block or row {stripped!r}"
         )

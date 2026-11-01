@@ -308,7 +308,12 @@ def write_bruno_section(cls, myfile):
     myfile.write("Bruno-renormalized exchange (separate result; raw table above): \n")
     myfile.write("Jnorm = Jq + (B C^+ B^T)/2  [J = -A12/2 mapping]\n")
     applied = meta.get("longitudinal_correction_applied")
-    myfile.write(f"longitudinal_correction_applied: {applied}\n")
+    # Declared tri-state: True/False from the calculator, "unknown" when
+    # the object carries no metadata (SpinIO allows bruno_meta=None).
+    applied_str = (
+        "True" if applied is True else "False" if applied is False else "unknown"
+    )
+    myfile.write(f"longitudinal_correction_applied: {applied_str}\n")
     if "scope" in meta:
         myfile.write(f"scope: {meta['scope']}\n")
     myfile.write(
@@ -324,9 +329,17 @@ def write_bruno_section(cls, myfile):
     raw = cls.exchange_Jdict or {}
     symnum = symbol_number(cls.atoms)
     sns = list(symnum.keys())
-    for ll in sorted(bruno, key=lambda x: cls.distance_dict[x][1]):
+    # A Bruno-only pair (absent from the raw table) may also lack a
+    # distance row on the plain writer path: emit it with nan geometry
+    # instead of crashing (R5-003).
+    _no_geom = ((float("nan"),) * 3, float("nan"))
+
+    def _geometry(ll):
+        return cls.distance_dict.get(ll, _no_geom)
+
+    for ll in sorted(bruno, key=lambda x: _geometry(x)[1]):
         R, i, j = ll
-        vec, distance = cls.distance_dict[ll]
+        vec, distance = _geometry(ll)
         jn = bruno[ll] * 1e3
         jr = raw.get(ll)
         jr = jr * 1e3 if jr is not None else float("nan")

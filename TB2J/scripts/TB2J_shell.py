@@ -27,6 +27,9 @@ _LOSSES = (
     "damping",
     "gyromag",
     "charges",
+    # Story 008: input-only reader concession for the qspace writer's
+    # labeled Bruno-renormalized table.
+    "bruno",
 )
 # Expansion governs ancillary base data; pair-channel losses belong to native IO.
 _EXPANSION_LOSSES = {

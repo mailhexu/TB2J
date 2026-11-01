@@ -197,6 +197,87 @@ def test_text_bruno_empty_table_still_declares_named_loss(tmp_path):
     assert any("zero pairs" in row[1] for row in result.report.losses)
 
 
+def test_text_bruno_zero_pair_output_round_trips(tmp_path):
+    # R5-002: both the raw table and the Bruno table empty — the
+    # top-level section dispatch must not require a raw pair first.
+    atoms = Atoms("Fe", cell=3 * np.eye(3), scaled_positions=[(0, 0, 0)], pbc=True)
+    source = SpinIO(
+        atoms,
+        spinat=np.array([[0.0, 0.0, -2.0]]),
+        charges=np.array([8.0]),
+        index_spin=[0],
+        exchange_Jdict={},
+    )
+    source.bruno_Jdict = {}
+    source.bruno_meta = {"longitudinal_correction_applied": False, "scope": "none"}
+    _write_native_text(source, tmp_path)
+
+    # A zero-pair source cannot infer magnetic membership: explicit context.
+    context = shells.NativeContext(atoms=source.atoms, index_spin=[0])
+    with pytest.raises(ValueError, match="(?i)bruno"):
+        shells.read_exchange(tmp_path / "exchange.out", "text", context=context)
+
+    result = shells.read_exchange(
+        tmp_path / "exchange.out", "text", context=context, allow_loss=("bruno",)
+    )
+    assert result.spinio.exchange_Jdict in ({}, None)
+
+
+def test_text_bruno_nan_sentinel_and_unknown_status_round_trip(tmp_path):
+    # R5-003/R5-004: a Bruno-only pair (raw absent) writes the declared
+    # nan Jraw sentinel; missing bruno_meta writes the "unknown" status.
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    bruno_only = ((0, 1, 0), 0, 0)
+    source.bruno_Jdict = {key: 0.00123456, bruno_only: 0.002}
+    source.bruno_meta = None
+    _write_native_text(source, tmp_path)
+
+    result = shells.read_exchange(path, "text", allow_loss=("bruno",))
+    assert result.spinio.exchange_Jdict[key] == pytest.approx(0.0012346, abs=1e-16)
+    assert any("applied=unknown" in row[1] for row in result.report.losses)
+    assert any("2 pairs" in row[1] for row in result.report.losses)
+
+
+def test_cli_allow_loss_bruno_converts_qspace_text(tmp_path):
+    # R5-001: the TB2J_shell convert route must accept the bruno token
+    # at both the reader and the export boundary.
+    from TB2J.scripts.TB2J_shell import main
+
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    source.bruno_Jdict = {key: 0.00123456}
+    source.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "cli regression",
+    }
+    _write_native_text(source, tmp_path)
+
+    output = tmp_path / "converted"
+    try:
+        code = main(
+            [
+                "convert",
+                str(tmp_path / "exchange.out"),
+                "--to",
+                "text",
+                "-o",
+                str(output),
+                "--allow-loss",
+                "bruno",
+            ]
+        )
+    except SystemExit as error:
+        code = error.code
+    assert code == 0
+    # The bruno token is an INPUT-only reader concession: the sanitized
+    # export model has no bruno channel, so the converted output drops
+    # the labeled section while the raw table and flag-free values stay
+    # intact.  Conversion must succeed with the token (and fail without
+    # it, asserted by the reader-side tests above).
+    text = (output / "exchange.out").read_text()
+    assert "Exchange:" in text
+    assert "1.2346" in text
+
+
 def _current_xml(tmp_path, *, diagonal=False, dmi_only=False):
     from TB2J.io_exchange.io_multibinit import write_xml
 
