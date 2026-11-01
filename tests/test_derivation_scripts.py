@@ -23,13 +23,15 @@ SYMPY_DIR = REPO_ROOT / "docs" / "sympy"
 TIMEOUT_S = 600.0
 
 #: normative assertion-checked derivation scripts (story-002..005 set,
-#: plus the story-008 Bruno-renormalization dimer authority)
+#: plus the story-008 Bruno-renormalization dimer authority and the
+#: story-009 multi-site finite-grid transform authority)
 SCRIPTS = [
     "spin_spiral_generalized_bloch",
     "spiral_force_theorem_J",
     "spiral_green_function_mft",
     "spiral_state_mft",
     "bruno_renormalization_dimer",
+    "qspace_multisite_transform",
 ]
 
 

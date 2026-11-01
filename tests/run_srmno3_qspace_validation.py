@@ -107,8 +107,8 @@ campaign.
 """
 
 import hashlib
-import inspect
 import importlib.metadata
+import inspect
 import json
 import platform
 import subprocess
@@ -116,10 +116,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
 import ase
-import scipy
 import HamiltonIO
+import numpy as np
+import scipy
 import yaml
 from ase import Atoms
 from ase.dft.kpoints import monkhorst_pack
@@ -127,11 +127,12 @@ from ase.io import read as ase_read
 from HamiltonIO.lcao_hamiltonian import LCAOHamiltonian
 from HamiltonIO.wannier import WannierHam
 
-from TB2J.exchangeCL2 import ExchangeCL2
+from TB2J import __file__ as _TB2J_FILE
+from TB2J import __version__ as _TB2J_VERSION
 from TB2J.exchange_qspace import ExchangeCLQspace
+from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.utils import auto_assign_basis_name
 from TB2J.wannier import parse_atoms
-from TB2J import __version__ as _TB2J_VERSION, __file__ as _TB2J_FILE
 
 __all__ = ["run_case", "PreflightRefusal"]
 
@@ -1153,6 +1154,23 @@ def _report_text(run_id, status, manifest, summary):
         "no multi-sublattice, SOC, or AFM-reference claim.",
         "- Route consistency is not independent physical validation of SrMnO3 "
         "exchange, DFT/Wannier convergence, or a historical reproduction.",
+        "",
+        "## Multi-site boundary addendum (Story 009)",
+        "- The one-site evidence above is unchanged by Story 009: with the "
+        "multi-site convention corrections (plus-phase q -> R transform of the "
+        "complex per-q kernel, imaginary extraction after the transform; "
+        "authority `docs/sympy/qspace_multisite_transform.py`, S1/S2), every "
+        "R-even one-site quantity this runner validated is bit-identical, "
+        "because J(R) = J(-R) for the one-site class.",
+        "- Multi-sublattice models remain refused by this runner's preflight; "
+        "their convention authority and oracle coverage live in "
+        "`docs/sympy/qspace_multisite_transform.py` and "
+        "`tests/test_qspace_multisite_oracle.py` (two inequivalent sites, "
+        "asymmetric inter-cell hoppings, nontrivial q, inter-sublattice "
+        "pairs).",
+        "- The runner's forward transform phase is NOT updated to the Story 009 "
+        "convention: it stays pinned to this declared revision, where the "
+        "minus/plus distinction is unobservable for the one-site class.",
         "",
         "## Provenance",
         f"- source_commit (declared): {manifest['source']['declared_commit']}",

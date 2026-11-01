@@ -194,12 +194,25 @@ class ExchangeCLQspace(ExchangeCL2):
         # are genuine imaginary-part responses and stay real.
         self.Cq = np.zeros((self.nqpt, self.nmagatom, self.nmagatom), dtype=complex)
         self.Jnorm_q = np.zeros_like(self.Jq)
+        self.Jq_c = np.zeros_like(self.Cq)
+        self.Kq_c = np.zeros_like(self.Cq)
+        self.Xq_c = np.zeros_like(self.Cq)
+        self.Jnorm_c = np.zeros_like(self.Cq)
+        # Story 009 (MathDoc: tb2j/qspace-multisite-finite-grid-transform,
+        # S2): the per-q imaginary part does not commute with the q -> R
+        # phase transform on asymmetric inter-sublattice pairs, so the
+        # COMPLEX per-q kernel integrals are retained (Jq_c/Kq_c/Xq_c) for
+        # the transform in q_to_r; Jq/Kq/Xq stay the per-q imaginary
+        # responses (exact for even one-site kernels, diagnostics else).
         if self.integration_method.lower() == "cfr2":
             # MathDoc: tb2j/cfr2-integration-contract. Pole geometry is not
             # a geometric integration measure; kernel prefactors stay above.
-            self.Jq = self.contour.integrate_values(self.Jqe_list).imag
-            self.Kq = self.contour.integrate_values(self.Kqe_list).imag
-            self.Xq = self.contour.integrate_values(self.Xqe_list).imag
+            self.Jq_c = self.contour.integrate_values(self.Jqe_list)
+            self.Kq_c = self.contour.integrate_values(self.Kqe_list)
+            self.Xq_c = self.contour.integrate_values(self.Xqe_list)
+            self.Jq = self.Jq_c.imag
+            self.Kq = self.Kq_c.imag
+            self.Xq = self.Xq_c.imag
             Cq = -1j * self.contour.integrate_values(self.Cqe_list)
             self.Cq = 0.5 * (Cq + np.swapaxes(Cq, 1, 2).conj())
             return self.Jq
@@ -207,26 +220,26 @@ class ExchangeCLQspace(ExchangeCL2):
             integrate = trapezoidal_nonuniform
         elif method == "simpson":
             integrate = simpson_nonuniform
-        # self.rho_up = np.imag(integrate(self.contour.path, self.rho_up_list))
-        # self.rho_dn = np.imag(integrate(self.contour.path, self.rho_dn_list))
         for iq, q in enumerate(self.qpts):
             for i, iatom in enumerate(self.ind_mag_atoms):
                 for j, jatom in enumerate(self.ind_mag_atoms):
-                    self.Jq[iq, i, j] = np.imag(
-                        integrate(self.contour.path, self.Jqe_list[:, iq, i, j])
+                    self.Jq_c[iq, i, j] = integrate(
+                        self.contour.path, self.Jqe_list[:, iq, i, j]
                     )
-                    self.Kq[iq, i, j] = np.imag(
-                        integrate(self.contour.path, self.Kqe_list[:, iq, i, j])
+                    self.Kq_c[iq, i, j] = integrate(
+                        self.contour.path, self.Kqe_list[:, iq, i, j]
                     )
-                    self.Xq[iq, i, j] = np.imag(
-                        integrate(self.contour.path, self.Xqe_list[:, iq, i, j])
+                    self.Xq_c[iq, i, j] = integrate(
+                        self.contour.path, self.Xqe_list[:, iq, i, j]
                     )
                     self.Cq[iq, i, j] = integrate(
                         self.contour.path, self.Cqe_list[:, iq, i, j]
                     )
             Cq = -1j * self.Cq[iq]
             self.Cq[iq] = 0.5 * (Cq + Cq.conj().T)
-            # print(f"{q=}, {self.Kq[iq]}")
+        self.Jq = self.Jq_c.imag
+        self.Kq = self.Kq_c.imag
+        self.Xq = self.Xq_c.imag
         return self.Jq
 
     def bruno_renormalize(self):
@@ -250,6 +263,9 @@ class ExchangeCLQspace(ExchangeCL2):
         correction was applied.
         """
         self.longitudinal_correction_applied = False
+        # Complex per-q base for the q_to_r transform (Story 009 S1/S2):
+        # with B == 0 this is exactly the raw complex kernel.
+        self.Jnorm_c = self.Jq_c + 0.0
         for iq, q in enumerate(self.qpts):
             C = self.Cq[iq]
             w, V = np.linalg.eigh(0.5 * (C + C.conj().T))
@@ -260,23 +276,29 @@ class ExchangeCLQspace(ExchangeCL2):
                 continue
             # Declared pseudoinverse on the non-null subspace (FR-020).
             Cinv = (V[:, keep] / w[keep]) @ V[:, keep].conj().T
-            # The vertex authority guarantees a real correction; the
-            # .real drops the numerical zero imaginary part.
-            corr = 0.5 * (self.Bq[iq] @ Cinv @ self.Bq[iq].T).real
-            self.Jnorm_q[iq] = self.Jq[iq] + corr
+            corr = 0.5 * (self.Bq[iq] @ Cinv @ self.Bq[iq].T)
+            self.Jnorm_c[iq] = self.Jnorm_c[iq] + corr
+            self.Jnorm_q[iq] = self.Jq[iq] + corr.real
             self.longitudinal_correction_applied = True
 
     def q_to_r(self):
         self.JR = np.zeros((len(self.Rlist), self.nmagatom, self.nmagatom), dtype=float)
         self.Jnorm_R = np.zeros_like(self.JR)
         self.KR = np.zeros_like(self.JR)
+        # Story 009 (MathDoc:
+        # tb2j/qspace-multisite-finite-grid-transform, S1): the inverse
+        # transform of the complex per-q kernel carries the PLUS phase,
+        # pinned by the real-space Green convention G(R) = sum_k
+        # exp(-2 pi i R.k) G(k) (get_GR k2Rfactor = -2 pi i); the former
+        # minus phase produced the transposed pair table T_ji(R) for
+        # asymmetric inter-sublattice models.  The imaginary extraction
+        # follows the transform (S2).
         for iR, R in enumerate(self.Rlist):
             for iq, q in enumerate(self.qpts):
-                # MathDoc: tb2j/qspace-finite-grid-transform
-                phase = np.exp(-2.0j * np.pi * (R @ q))
-                self.JR[iR] += np.real(self.Jq[iq] * phase) / len(self.qpts)
-                self.Jnorm_R[iR] += np.real(self.Jnorm_q[iq] * phase) / len(self.qpts)
-                self.KR[iR] += np.real(self.Kq[iq] * phase) / len(self.qpts)
+                phase = np.exp(2.0j * np.pi * (R @ q))
+                self.JR[iR] += np.imag(self.Jq_c[iq] * phase) / len(self.qpts)
+                self.Jnorm_R[iR] += np.imag(self.Jnorm_c[iq] * phase) / len(self.qpts)
+                self.KR[iR] += np.imag(self.Kq_c[iq] * phase) / len(self.qpts)
             # print(f"{R}: J={self.JR[iR]}, Jnorm{self.Jnorm_R[iR]}")
             # print(f"{R}: {np.sum(self.KR, axis=0)}")
         return self.JR

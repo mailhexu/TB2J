@@ -1,6 +1,20 @@
 # Changelog
 
 ## Unreleased
+- Multi-site convention fix for the reciprocal-space driver (Story 009,
+  authority `docs/sympy/qspace_multisite_transform.py`): `q_to_r` now
+  transforms the complex per-q kernel integrals with the PLUS phase
+  exp(+2 pi i R.q) (pinned by the real-space Green convention
+  `G(R) = sum_k exp(-2 pi i R.k) G(k)`) and extracts the imaginary part
+  after the transform. The former minus-phase transform of the per-q
+  imaginary parts produced a transposed pair table (T_ji(R)) for
+  asymmetric inter-sublattice models while leaving every R-even entry and
+  the whole one-site case unchanged. `integrate` retains the complex per-q
+  integrals (`Jq_c`/`Kq_c`/`Xq_c`); the public per-q responses `Jq`, `Kq`,
+  `Xq` and `calculate_raw()` keep their semantics, and
+  `bruno_renormalize` follows the same transform through `Jnorm_c`.
+  An independent two-site oracle test (`tests/test_qspace_multisite_oracle.py`)
+  pins the real-space pair-table agreement to machine precision.
 - Merged the CFR2-weighted reciprocal-space integration (owner revision
   `4355ca6`): J, K and X now contract the canonical CFR2 weights, including
   the full moment sample, instead of geometrically integrating pole
