@@ -31,6 +31,9 @@ _LOSS_NAMES = frozenset(
         "gyromag",
         "dmi",
         "jani",
+        # Story 008: the qspace writer's separately labeled
+        # Bruno-renormalized table (io_txt.write_bruno_section).
+        "bruno",
     }
 )
 
@@ -841,6 +844,12 @@ _TEXT_PAIR = re.compile(
     r"\s*(\S+)\s+(\S+)\s+\(\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*\)"
     r"\s+(\S+)\s+\(\s*(\S+)\s*,\s*(\S+)\s*,\s*(\S+)\s*\)\s+(\S+)\s*\Z"
 )
+# Bruno table row: label label (R) Jnorm Jraw distance with 5/5/3
+# printed decimals (io_txt.write_bruno_section).
+_TEXT_BRUNO_ROW = re.compile(
+    r"\s*(\S+)\s+(\S+)\s+\(\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*,\s*(-?[0-9]+)\s*\)"
+    r"\s+([+-]?[0-9]+\.[0-9]{5})\s+([+-]?[0-9]+\.[0-9]{5})\s+([+-]?[0-9]+\.[0-9]{3})\s*\Z"
+)
 _TEXT_ARRAY_TOKEN = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?[0-9]+)?\Z")
 _TEXT_JISO = re.compile(r"J_iso:\s*(\S+)\s*\Z")
 _TEXT_DMI = re.compile(r"\[Testing!\]\s+DMI:\s*\(\s*(\S+)\s+(\S+)\s+(\S+)\s*\)\s*\Z")
@@ -1543,6 +1552,65 @@ def _text_parse_orbital_contributions(lines, index, losses, record_key):
     return cursor
 
 
+def _text_parse_bruno_section(lines, index, losses):
+    """Consume the writer's labeled Bruno-renormalized block (story 008).
+
+    The raw Exchange table above it stays authoritative; the Bruno block
+    is a declared loss carrying the availability flag and scope note, so
+    ``allow_loss=("bruno",)`` semantics apply like the other optional
+    extras.  (R4-001)
+    """
+    header = lines[index].strip()
+    if not header.startswith("Bruno-renormalized exchange"):
+        _text_error("Bruno exchange", f"unexpected banner {header!r}")
+    applied = None
+    scope = None
+    cursor = index + 1
+    rows = 0
+    while cursor < len(lines):
+        stripped = lines[cursor].strip()
+        if not stripped:
+            cursor += 1
+            break
+        if stripped.startswith("Jnorm ="):
+            cursor += 1
+            continue
+        if stripped.startswith("longitudinal_correction_applied:"):
+            value = stripped.split(":", 1)[1].strip()
+            if value not in ("True", "False"):
+                _text_error("Bruno exchange", f"unknown flag value {value!r}")
+            if applied is not None:
+                _text_error("Bruno exchange", "duplicate availability flag")
+            applied = value
+            cursor += 1
+            continue
+        if stripped.startswith("scope:"):
+            if scope is not None:
+                _text_error("Bruno exchange", "duplicate scope note")
+            scope = stripped.split(":", 1)[1].strip()
+            cursor += 1
+            continue
+        columns = stripped.split()
+        if columns[:2] == ["i", "j"] and "Jnorm(meV)" in columns:
+            cursor += 1
+            continue
+        row = _TEXT_BRUNO_ROW.match(lines[cursor])
+        if row is None:
+            _text_error("Bruno exchange", f"unknown row {stripped!r}")
+        rows += 1
+        cursor += 1
+    if applied is None:
+        _text_error("Bruno exchange", "missing availability flag")
+    description = f"applied={applied}"
+    if scope is not None:
+        description += f"; scope={scope}"
+    description += f"; {rows} pairs" if rows else "; zero pairs"
+    losses.append(
+        ("bruno", f"Bruno-renormalized table (separate result): {description}")
+    )
+    return cursor
+
+
 def _text_parse_exchange(lines, marker, label_to_atom):
     losses = []
     quanta = []
@@ -1791,6 +1859,21 @@ def _text_parse_exchange(lines, marker, label_to_atom):
             )
         if stripped == "Exchange:" or stripped.startswith("Information:"):
             _text_error("Exchange", "duplicate top-level section")
+        if set(stripped) == {"="}:
+            # The writer frames the labeled block with a banner line
+            # (R4-001); only treat it as the Bruno section opener when
+            # the next line is the Bruno header.
+            if cursor + 1 < len(lines) and lines[cursor + 1].strip().startswith(
+                "Bruno-renormalized exchange"
+            ):
+                cursor = _text_parse_bruno_section(lines, cursor + 1, losses)
+                continue
+        if stripped.startswith("Bruno-renormalized exchange"):
+            # Labeled separate result appended by the qspace writer after
+            # the raw table (story 008, R4-001): consume as a declared
+            # loss instead of rejecting the writer's own output.
+            cursor = _text_parse_bruno_section(lines, cursor, losses)
+            continue
         _text_error(
             "Exchange", f"unknown meaningful exchange block or row {stripped!r}"
         )

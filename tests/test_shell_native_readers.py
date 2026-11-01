@@ -160,6 +160,43 @@ def test_text_unsupported_njt_requires_named_loss_and_remains_absent(tmp_path):
     assert tuple(row[0] for row in result.report.losses) == ("njt",)
 
 
+def test_text_bruno_section_requires_named_loss_and_round_trips(tmp_path):
+    # R4-001: the writer's own labeled Bruno block must be consumable by
+    # the native text reader under named-loss semantics.
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    source.bruno_Jdict = {key: 0.00123456}
+    source.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "finite-q vertex deferred (story 009)",
+    }
+    _write_native_text(source, tmp_path)
+
+    with pytest.raises(ValueError, match="(?i)bruno"):
+        shells.read_exchange(path, "text")
+
+    result = shells.read_exchange(path, "text", allow_loss=("bruno",))
+    assert result.spinio.exchange_Jdict[key] == pytest.approx(0.0012346, abs=1e-16)
+    assert tuple(row[0] for row in result.report.losses) == ("bruno",)
+    assert any("story 009" in row[1] for row in result.report.losses)
+
+
+def test_text_bruno_empty_table_still_declares_named_loss(tmp_path):
+    path, source, key = _current_text(tmp_path, anisotropic=False)
+    source.bruno_Jdict = {}
+    source.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "zero pairs inside cutoff",
+    }
+    _write_native_text(source, tmp_path)
+
+    with pytest.raises(ValueError, match="(?i)bruno"):
+        shells.read_exchange(path, "text")
+
+    result = shells.read_exchange(path, "text", allow_loss=("bruno",))
+    assert result.spinio.exchange_Jdict[key] == pytest.approx(0.0012346, abs=1e-16)
+    assert any("zero pairs" in row[1] for row in result.report.losses)
+
+
 def _current_xml(tmp_path, *, diagonal=False, dmi_only=False):
     from TB2J.io_exchange.io_multibinit import write_xml
 
