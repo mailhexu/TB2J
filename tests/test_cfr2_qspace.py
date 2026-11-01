@@ -6,8 +6,6 @@ its GPU/JAX contexts are out of scope here. Oracle expressions, kernels and
 tolerances are the owner's, unchanged.
 """
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from ase import Atoms
@@ -330,20 +328,26 @@ def test_cli_python_parity_same_driver_and_j(tmp_path):
     assert ((0, 0, 0), 0, 1) in spi.exchange_Jdict
 
 
-_SRMNO3_FIXTURE = Path(
-    "/home/hexu/projects/TB2J_dev/TB2J/tests/data/data-repo/inputs/"
-    "2_SrMnO3_wannier/data"
-)
+@pytest.fixture()
+def srmno3_fixture():
+    from conftest import require_input
+
+    return require_input(
+        "inputs/2_SrMnO3_wannier/data",
+        capability="qspace_cli_python_parity",
+        description="SrMnO3 wannier fixture for CLI/Python J parity",
+    )
 
 
-@pytest.mark.skipif(not _SRMNO3_FIXTURE.exists(), reason="fixture not present")
-def test_cli_and_python_routes_produce_identical_j(tmp_path, monkeypatch):
+def test_cli_and_python_routes_produce_identical_j(
+    tmp_path, monkeypatch, srmno3_fixture
+):
     """Full production parity: run_wann2J vs WannierManager on the pinned
     fixture, same reduced settings, identical J dictionaries."""
     import TB2J.scripts.wann2J as w2j
 
     common = dict(
-        path=str(_SRMNO3_FIXTURE),
+        path=str(srmno3_fixture),
         posfile="abinit.in",
         prefix_up="abinito_w90_up",
         prefix_dn="abinito_w90_down",
@@ -361,7 +365,7 @@ def test_cli_and_python_routes_produce_identical_j(tmp_path, monkeypatch):
         [
             "wann2J",
             "--path",
-            str(_SRMNO3_FIXTURE),
+            str(srmno3_fixture),
             "--posfile",
             "abinit.in",
             "--prefix_up",
