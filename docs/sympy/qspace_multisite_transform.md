@@ -98,9 +98,10 @@ response R-asymmetric, which is what exposes both defects.
 `tests/test_qspace_multisite_oracle.py` reproduces the full pair table of
 the two-route comparison (real-space `ExchangeCL2` vs reciprocal-space
 `ExchangeCLQspace`) on this model class.  Failing-before record: with both
-defects active the inter-sublattice entries disagreed by 8.2e-4 eV
-(exact transposition signature); after the corrections the routes agree to
-1.7e-16.  Reciprocity J_ij(R) = J_ji(-R) asserted on the corrected table.
+defects active each inter-sublattice R != 0 entry was SYMMETRIZED to
+`[T_ij(R) + T_ji(R)]/2` (deviation 8.2e-4 eV, half the 1.6e-3 transposition
+gap of the single-channel kernel); after the corrections the routes agree
+to 1.7e-16.  Reciprocity J_ij(R) = J_ji(-R) asserted on the corrected table.
 
 ## Human Review
 

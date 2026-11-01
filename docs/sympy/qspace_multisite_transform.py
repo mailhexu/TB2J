@@ -154,7 +154,7 @@ def main() -> int:
     # ---- S1: plus-phase inverse reproduces the real-space pair kernel ----
     s1_diff = s.Integer(0)
     minus_counterexample = None
-    for i, j in ((0, 1), (1, 0)):
+    for i, j in ((0, 0), (0, 1), (1, 0), (1, 1)):
         for R in (0, 1, 2):
             T = real_space_T(w_mesh, hk, E, i, j, R).subs(E, E_val)
             plus = transform(
@@ -175,7 +175,7 @@ def main() -> int:
                 / N
             )
             s1_diff += s.simplify(T - plus)
-            if (i, j) != (1, 1) and i != j and R != 0:
+            if i != j and R != 0:
                 diff = s.simplify(T - minus)
                 if diff != 0:
                     minus_counterexample = diff
