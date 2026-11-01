@@ -72,7 +72,15 @@ def named_expressions():
     local_y = (annihilation - creation) / (sp.I * sp.sqrt(2 * S))
     x_q = (u + v) / sp.sqrt(2 * S)
     y_q = (u - v) / (sp.I * sp.sqrt(2 * S))
-    return {
+
+    # Native (Option-B local-axis) route: per-site unscaled lab quadratures
+    # consumed by the interleaved-spinor vertex, the local-axis half-splitting
+    # extracted from global channels, the frozen rotation-generator pair, and
+    # the site boson annihilation combination.
+    d_z = sp.symbols("D_z", real=True)
+    x_native = u + v
+    y_native = eta * (u - v)
+    expressions = {
         "afm_local_frame_lab_y_annihilation": sp.simplify(eta * y_q),
         "afm_local_frame_plus_nplus": sp.sqrt(2 / S) * annihilation,
         "afm_local_frame_minus_nplus": sp.sqrt(2 / S) * creation,
@@ -84,7 +92,18 @@ def named_expressions():
         "afm_nambu_operator_local_y": local_y,
         "afm_opposite_frame_lab_y_creation_reverse": sp.conjugate(eta * y_q),
         "fm_hp_nplus_annihilation": sp.sqrt(2 / S) * u,
+        "native_route_site_x_amplitude": x_native,
+        "native_route_site_y_amplitude": y_native,
+        "native_route_local_axis_half_splitting": eta * d_z,
+        "native_route_omega_x": -(u - v),
+        "native_route_omega_y": eta * (u + v),
+        "native_route_boson_annihilation": sp.simplify(
+            (x_native - sp.I * y_native) / sp.sqrt(2 * S)
+        ),
+        "native_route_reverse_creation_x": sp.conjugate(x_native),
+        "native_route_reverse_creation_y": sp.conjugate(y_native),
     }
+    return expressions
 
 
 def derive():
@@ -134,6 +153,54 @@ def _assert_symbolic_derivation():
     U_plus = sp.Matrix([1, sp.I, 0])
     U_minus = sp.Matrix([1, -sp.I, 0])
     assert U_minus == sp.conjugate(U_plus)
+
+
+def _assert_native_route_derivation():
+    """Certify the Option-B local-axis vertex against the frozen generator."""
+    u, v, d = sp.symbols("u v d", complex=True)
+    D_z = sp.symbols("D_z", real=True)
+    sigma_x = sp.Matrix([[0, 1], [1, 0]])
+    sigma_y = sp.Matrix([[0, -sp.I], [sp.I, 0]])
+    sigma_z = sp.Matrix([[1, 0], [0, -1]])
+
+    for eta_value in (1, -1):
+        eta = sp.Integer(eta_value)
+        x = u + v
+        y = eta * (u - v)
+        omega_x = -(u - v)
+        omega_y = eta * (u + v)
+        # Local-axis positive half-splitting d on frame (x, eta*y, eta*z)
+        # enters the lab Hamiltonian as eta*d*sigma_z.
+        lab_field = d * eta * sigma_z
+        generator = omega_x * sigma_x + omega_y * sigma_y
+        bridge = d * (x * sigma_x + y * sigma_y)
+        rotation = -sp.I / 2 * (generator * lab_field - lab_field * generator)
+        assert sp.simplify(bridge - rotation) == sp.zeros(2)
+
+        # The half-splitting extracted from global spin channels is D_z;
+        # the local-axis value is eta*D_z, whose lab coefficient is D_z.
+        local_d = eta * D_z
+        assert sp.simplify(local_d * eta - D_z) == 0
+
+        # Negative control: conjugating the hole amplitude changes both
+        # quadratures for generic complex u, v.
+        wrong_x = u + sp.conjugate(v)
+        wrong_y = eta * (u - sp.conjugate(v))
+        assert sp.simplify(x - wrong_x) != 0
+        assert sp.simplify(y - wrong_y) != 0
+
+        # Negative control: flipping eta flips only the y quadrature, and
+        # the difference is generically nonzero (free u, v symbols remain).
+        flipped_y = -eta * (u - v)
+        difference = sp.simplify(y - flipped_y)
+        assert difference != 0
+        assert difference.free_symbols == {u, v}
+
+    # The eta dependence itself is certified: substituting eta = -1 into the
+    # named y amplitude differs from eta = +1 for generic u, v.
+    eta = sp.symbols("eta", real=True)
+    y_named = eta * (u - v)
+    assert sp.simplify(y_named.subs(eta, -1) - y_named.subs(eta, 1)) != 0
 
 
 def _require_positive_semidefinite(hessian, tolerance=1e-10):
@@ -268,10 +335,18 @@ def _finite_angle_supercell_oracle(u, v):
         float(np.max(np.abs(observed_y - eta * wrong_y))),
     )
     assert wrong_component_mismatch > 1e-3
+
+    # Deliberately flip the second sublattice eta. The finite-angle Fourier
+    # response must reject the wrong lab-frame y target.
+    eta_wrong = eta.copy()
+    eta_wrong[1] = -eta_wrong[1]
+    wrong_eta_mismatch = float(np.max(np.abs(observed_y - eta_wrong * beta * y_mode)))
+    assert wrong_eta_mismatch > 1e-3
     return {
         "finite_angle_max_abs_error_by_quadrature": quadrature_errors,
         "q_minus_q_reverse_pair_max_abs_error": reverse_pair_error,
         "wrong_hole_conjugation_mismatch": wrong_component_mismatch,
+        "native_wrong_eta_mismatch": wrong_eta_mismatch,
         "spin_lengths": spin_lengths.tolist(),
     }
 
@@ -280,6 +355,7 @@ def run_checks():
     """Run all symbolic and numerical certificates and return observations."""
     assert_fm_and_cholesky()
     _assert_symbolic_derivation()
+    _assert_native_route_derivation()
 
     # This is a two-sublattice AFM Nambu Hessian in the TB2J block order
     # (a_A(q), a_B(q), a_A^dagger(-q), a_B^dagger(-q)). Its complex symmetric
@@ -420,6 +496,48 @@ def run_checks():
     )
     gap_limit = sp.limit(sp.sqrt(delta * (2 + delta)), delta, 0, dir="+")
     assert gap_limit == 0
+
+    # Native Option-B numeric bridge: per-site perturbation-operator form
+    # versus the frozen rotation-generator commutator, both sublattice signs,
+    # with the conjugated-hole negative control on the operator amplitudes.
+    rng = np.random.default_rng(20261101)
+    u_num = rng.normal(size=2) + 1j * rng.normal(size=2)
+    v_num = rng.normal(size=2) + 1j * rng.normal(size=2)
+    d_num = float(rng.uniform(0.5, 1.5))
+    sigma_x_num = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
+    sigma_y_num = np.array([[0.0, -1j], [1j, 0.0]], dtype=complex)
+    sigma_z_num = np.diag([1.0, -1.0]).astype(complex)
+    native_bridge_error = 0.0
+    native_wrong_hole_mismatch = 0.0
+    for eta_value in (1.0, -1.0):
+        eta_num = np.array([eta_value, -eta_value])
+        x_num = u_num + v_num
+        y_num = eta_num * (u_num - v_num)
+        omega_num = np.stack((-(u_num - v_num), eta_num * (u_num + v_num)))
+        for site in range(2):
+            field_num = d_num * eta_num[site] * sigma_z_num
+            generator_num = (
+                omega_num[0, site] * sigma_x_num + omega_num[1, site] * sigma_y_num
+            )
+            rotation_num = -0.5j * (
+                generator_num @ field_num - field_num @ generator_num
+            )
+            bridge_num = d_num * (x_num[site] * sigma_x_num + y_num[site] * sigma_y_num)
+            native_bridge_error = max(
+                native_bridge_error,
+                float(np.max(np.abs(bridge_num - rotation_num))),
+            )
+            wrong_x_num = u_num[site] + np.conjugate(v_num[site])
+            wrong_y_num = eta_num[site] * (u_num[site] - np.conjugate(v_num[site]))
+            wrong_bridge_num = d_num * (
+                wrong_x_num * sigma_x_num + wrong_y_num * sigma_y_num
+            )
+            native_wrong_hole_mismatch = max(
+                native_wrong_hole_mismatch,
+                float(np.max(np.abs(bridge_num - wrong_bridge_num))),
+            )
+    assert native_bridge_error < 1e-14
+    assert native_wrong_hole_mismatch > 1e-3
     return {
         "afm_positive_mode_energy_eV": energy,
         "afm_positive_mode_metric_norm": metric_norm,
@@ -431,6 +549,8 @@ def run_checks():
         "singular_finite_angle_max_abs_error": singular_angle_error,
         "singular_gap_limit_eV": float(gap_limit),
         "singular_boson_normalization_assigned": False,
+        "native_bridge_max_abs_error": native_bridge_error,
+        "native_wrong_hole_operator_mismatch": native_wrong_hole_mismatch,
         **oracle,
     }
 

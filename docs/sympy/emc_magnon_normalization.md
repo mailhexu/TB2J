@@ -196,12 +196,52 @@ is $\omega^2-\delta(2+\delta)$, so its positive gap tends to zero as
 $\delta\to0^+$. The singular calculation itself never inverts $K$,
 normalizes a zero mode as a boson, or assigns an eV/boson value.
 
+## Native-route convention (EMC Option-B local axis)
+
+The EMC native vertex consumes per-site lab-frame quadratures in an
+interleaved spinor basis with a local-axis field. This section certifies the
+exact convention that route must implement; the downstream consumption is
+EMC implementation scope, not this authority.
+
+For a site with local frame $(\mathbf x,\eta\mathbf y,\eta\mathbf z)$,
+positive local-axis half-splitting $d$, source-ordered Nambu halves
+$(u_i, v_i)$, and global-channel half-splitting $D_z$, the certified
+amplitudes and factors are:
+
+| Quantity | Certified value | Named result |
+|----------|-----------------|--------------|
+| $\sigma_x$ amplitude | $u+v$ | `native_route_site_x_amplitude` |
+| $\sigma_y$ amplitude | $\eta\,(u-v)$ | `native_route_site_y_amplitude` |
+| Local-axis half-splitting | $\eta\,D_z$ | `native_route_local_axis_half_splitting` |
+| Generator $\omega_x$ | $-(u-v)$ | `native_route_omega_x` |
+| Generator $\omega_y$ | $\eta\,(u+v)$ | `native_route_omega_y` |
+| Boson annihilation | $((u+v)-i\eta(u-v))/\sqrt{2S}$ | `native_route_boson_annihilation` |
+| Reverse creation $\sigma_x$ | $\overline{u+v}$ | `native_route_reverse_creation_x` |
+| Reverse creation $\sigma_y$ | $\overline{\eta\,(u-v)}$ | `native_route_reverse_creation_y` |
+
+The bridge identity certified for $\eta=+1$ and $\eta=-1$ is
+
+$$
+d\,\bigl(x\,\sigma_x + y\,\sigma_y\bigr)
+= -\frac{i}{2}\bigl[\omega_x\sigma_x+\omega_y\sigma_y,\; d\,\eta\,\sigma_z\bigr],
+\qquad x=u+v,\; y=\eta(u-v),
+$$
+
+with $d\,\eta\,\sigma_z$ the lab Hamiltonian coefficient of a local-axis
+positive field. The half-splitting relation $d=\eta D_z$ returns the lab
+coefficient $D_z$ extracted from global spin channels. Symbolic negative
+controls establish that conjugating the hole ($v\to\bar v$) changes both
+amplitudes and that flipping $\eta$ flips only the $y$ amplitude, each with
+generically nonzero difference.
+
 ## Evidence boundary
 
 The retained FM formulas are pre-existing pins. The AFM operator mapping,
 both local quadratures, opposite-frame lab rotation, nonzero-$v$ numerical
 case, finite-angle reverse pairing, wrong-conjugation control, and
 stable/unstable/singular controls are new executable assertions.
+The native-route amplitudes, bridge identity, half-splitting relation, and
+their negative controls are additional executable assertions.
 Executed in `mydev` with SymPy 1.14.0 using
 `python docs/sympy/emc_magnon_normalization.py`; all assertions passed.
 
@@ -215,6 +255,9 @@ Executed in `mydev` with SymPy 1.14.0 using
 | Sine finite-angle maximum absolute error | `3.651479119071155e-11` |
 | q/-q reverse-pair maximum absolute error | `0.0` |
 | Wrong-hole-conjugation mismatch | `0.057429891366605326` |
+| Native bridge maximum absolute error | `0.0` |
+| Native wrong-eta mismatch | `1.0108161033164496` |
+| Native wrong-hole operator mismatch | `0.793385508117839` |
 | Singular finite-angle maximum absolute error | `1.6666779067975313e-11` |
 | Singular angle-response magnitude | `1.0` |
 
