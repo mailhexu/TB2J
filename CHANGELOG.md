@@ -9,6 +9,10 @@
   (pole geometry is not an integration measure). Geometric Simpson/trapezoid
   rules and their controls are unchanged, and `calculate_raw()` keeps its
   geometric-only contract.
+- The q-space pair table now applies the distance cutoff when emitting
+  `exchange_Jdict`, matching the real-space route: the finite-grid transform
+  still uses every R representative, but self-excluded pairs beyond `Rcut`
+  are no longer written (previously a `KeyError` crash in `write_output`).
 - The `qspace` selection is now wired end to end: `WannierManager` forwards
   it to `Manager`, and `wann2J` gains public `--qspace` and
   `--integration_method` flags (choices: cfr2, cfr, semicircle, legendre).

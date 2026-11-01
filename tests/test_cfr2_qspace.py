@@ -97,6 +97,17 @@ def test_geometric_qspace_controls_against_zero_temperature_spectrum(rule):
         np.testing.assert_allclose(actual, expected, atol=2e-6, rtol=0)
 
 
+def test_pair_table_respects_distance_cutoff(tmp_path):
+    # R = (±2,0,0) images are 3 A apart, beyond Rcut=2: the finite-grid
+    # transform keeps them, but the emitted pair table must filter them,
+    # matching the real-space route's distance_dict keys.
+    calc = qspace_calculator(method="cfr2", nk=5)
+    calc.calculate_all()
+    calc.write_output(path=str(tmp_path / "results"))
+    assert set(calc.exchange_Jdict) <= set(calc.distance_dict)
+    assert ((2, 0, 0), 0, 1) not in calc.exchange_Jdict
+
+
 def test_cfr2_is_default_for_qspace_driver():
     calc = qspace_calculator(method=None)
     assert calc.integration_method.lower() == "cfr2"

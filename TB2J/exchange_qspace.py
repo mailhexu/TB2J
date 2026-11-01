@@ -206,12 +206,14 @@ class ExchangeCLQspace(ExchangeCL2):
                     jspin = self.ispin(jatom)
                     keyspin = (R, ispin, jspin)
                     is_nonself = not (R == (0, 0, 0) and iatom == jatom)
-                    Jij = val / np.sign(np.dot(self.spinat[iatom], self.spinat[jatom]))
-                    # Jorbij = np.imag(self.Jorb[key]) / np.sign(
-                    #    np.dot(self.spinat[iatom], self.spinat[jatom]))
-                    if is_nonself:
+                    # The finite-grid transform keeps every R representative;
+                    # only the emitted pair table applies the distance cutoff,
+                    # matching the real-space route's distance_dict keys.
+                    if is_nonself and keyspin in self.distance_dict:
+                        Jij = val / np.sign(
+                            np.dot(self.spinat[iatom], self.spinat[jatom])
+                        )
                         self.exchange_Jdict[keyspin] = Jij
-                        # self.exchange_Jdict_orb[keyspin] = Jorbij
 
     def calculate_raw(self):
         """Return unrenormalized J(q) using a geometric contour, without Bruno."""
