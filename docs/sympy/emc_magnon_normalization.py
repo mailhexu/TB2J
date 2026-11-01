@@ -337,16 +337,23 @@ def _finite_angle_supercell_oracle(u, v):
     assert wrong_component_mismatch > 1e-3
 
     # Deliberately flip the second sublattice eta. The finite-angle Fourier
-    # response must reject the wrong lab-frame y target.
+    # response must reject the wrong lab-frame y target. Compare at the
+    # cosine quadrature phase (beta = 1), not the leaked loop phase.
     eta_wrong = eta.copy()
     eta_wrong[1] = -eta_wrong[1]
-    wrong_eta_mismatch = float(np.max(np.abs(observed_y - eta_wrong * beta * y_mode)))
+    observed_y_cosine = response_by_quadrature["cosine"][1]
+    wrong_eta_mismatch = float(np.max(np.abs(observed_y_cosine - eta_wrong * y_mode)))
     assert wrong_eta_mismatch > 1e-3
+    # The correct eta leaves only the finite-angle tolerance, proving the
+    # mismatch above isolates the sign error rather than a tolerance miss.
+    correct_eta_residual = float(np.max(np.abs(observed_y_cosine - eta * y_mode)))
+    assert correct_eta_residual < 1e-8
     return {
         "finite_angle_max_abs_error_by_quadrature": quadrature_errors,
         "q_minus_q_reverse_pair_max_abs_error": reverse_pair_error,
         "wrong_hole_conjugation_mismatch": wrong_component_mismatch,
         "native_wrong_eta_mismatch": wrong_eta_mismatch,
+        "native_correct_eta_residual": correct_eta_residual,
         "spin_lengths": spin_lengths.tolist(),
     }
 

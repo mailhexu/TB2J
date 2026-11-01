@@ -232,7 +232,11 @@ positive field. The half-splitting relation $d=\eta D_z$ returns the lab
 coefficient $D_z$ extracted from global spin channels. Symbolic negative
 controls establish that conjugating the hole ($v\to\bar v$) changes both
 amplitudes and that flipping $\eta$ flips only the $y$ amplitude, each with
-generically nonzero difference.
+generically nonzero difference. The numerical wrong-$\eta$ control compares
+the cosine-quadrature response against the flipped-sign target; the correct
+sign leaves only the finite-angle tolerance (`native_correct_eta_residual`
+versus `native_wrong_eta_mismatch`), so the control isolates the sign error
+rather than a tolerance miss.
 
 ## Evidence boundary
 
@@ -256,7 +260,8 @@ Executed in `mydev` with SymPy 1.14.0 using
 | q/-q reverse-pair maximum absolute error | `0.0` |
 | Wrong-hole-conjugation mismatch | `0.057429891366605326` |
 | Native bridge maximum absolute error | `0.0` |
-| Native wrong-eta mismatch | `1.0108161033164496` |
+| Native wrong-eta mismatch | `0.14747608195888923` |
+| Native correct-eta residual | `1.8257395595408232e-11` |
 | Native wrong-hole operator mismatch | `0.793385508117839` |
 | Singular finite-angle maximum absolute error | `1.6666779067975313e-11` |
 | Singular angle-response magnitude | `1.0` |
