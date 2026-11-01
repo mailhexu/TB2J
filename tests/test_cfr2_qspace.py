@@ -6,6 +6,8 @@ its GPU/JAX contexts are out of scope here. Oracle expressions, kernels and
 tolerances are the owner's, unchanged.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -326,3 +328,80 @@ def test_cli_python_parity_same_driver_and_j(tmp_path):
 
     spi = SpinIO.load_pickle(path=str(tmp_path / "results"))
     assert ((0, 0, 0), 0, 1) in spi.exchange_Jdict
+
+
+_SRMNO3_FIXTURE = Path(
+    "/home/hexu/projects/TB2J_dev/TB2J/tests/data/data-repo/inputs/"
+    "2_SrMnO3_wannier/data"
+)
+
+
+@pytest.mark.skipif(not _SRMNO3_FIXTURE.exists(), reason="fixture not present")
+def test_cli_and_python_routes_produce_identical_j(tmp_path, monkeypatch):
+    """Full production parity: run_wann2J vs WannierManager on the pinned
+    fixture, same reduced settings, identical J dictionaries."""
+    import TB2J.scripts.wann2J as w2j
+
+    common = dict(
+        path=str(_SRMNO3_FIXTURE),
+        posfile="abinit.in",
+        prefix_up="abinito_w90_up",
+        prefix_dn="abinito_w90_down",
+        efermi=6.15,
+        kmesh=[3, 3, 3],
+        nz=40,
+        magnetic_elements=["Mn"],
+        Rcut=6.0,
+        nproc=1,
+        integration_method="cfr2",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wann2J",
+            "--path",
+            str(_SRMNO3_FIXTURE),
+            "--posfile",
+            "abinit.in",
+            "--prefix_up",
+            "abinito_w90_up",
+            "--prefix_down",
+            "abinito_w90_down",
+            "--efermi",
+            "6.15",
+            "--kmesh",
+            "3",
+            "3",
+            "3",
+            "--nz",
+            "40",
+            "--elements",
+            "Mn",
+            "--rcut",
+            "6.0",
+            "--qspace",
+            "--integration_method",
+            "cfr2",
+            "--output_path",
+            "cli_results",
+        ],
+    )
+    w2j.run_wann2J()
+
+    from TB2J.interfaces.wannier90_interface import WannierManager
+    from TB2J.io_exchange import SpinIO
+
+    WannierManager(
+        prefix_SOC="unused",
+        colinear=True,
+        qspace=True,
+        output_path="py_results",
+        **common,
+    )
+    cli = SpinIO.load_pickle(path=str(tmp_path / "cli_results"))
+    py = SpinIO.load_pickle(path=str(tmp_path / "py_results"))
+    assert cli.exchange_Jdict, "CLI run produced no exchange pairs"
+    assert set(cli.exchange_Jdict) == set(py.exchange_Jdict)
+    for key in sorted(cli.exchange_Jdict):
+        assert cli.exchange_Jdict[key] == py.exchange_Jdict[key], key
