@@ -41,6 +41,9 @@ _EXPANSION_LOSSES = {
     "damping",
     "gyromag",
     "charges",
+    # Story 008 (R7-001): the labeled Bruno table is derived base
+    # content; shell expansion names and drops it like orbital/djdx.
+    "bruno",
 }
 _HEADER_FLAGS = (
     "symmetry",

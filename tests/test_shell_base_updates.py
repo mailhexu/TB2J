@@ -183,6 +183,118 @@ def test_xml_export_of_bruno_pickle_requires_named_loss():
         assert (Path(tmp) / "exchange.xml").exists()
 
 
+def test_xml_export_of_empty_bruno_table_requires_named_loss(tmp_path):
+    # R7-002: an empty Bruno table still carries availability flag and
+    # scope; dropping it on XML is a declared loss.
+    source, key = _source()
+    source.bruno_Jdict = {}
+    source.bruno_meta = {"longitudinal_correction_applied": False, "scope": "none"}
+    with pytest.raises(ValueError, match="(?i)bruno"):
+        shells.write_exchange(source, "unused_dir_xml", "xml")
+    shells.write_exchange(source, tmp_path, "xml", allow_loss=("bruno", "charges"))
+    assert (tmp_path / "exchange.xml").exists()
+
+
+def _write_document(tmp_path, document):
+    from TB2J.io_exchange import shells
+
+    path = tmp_path / "doc.shells.toml"
+    shells.write_shells(document, path)
+    return path
+
+
+def test_cli_expansion_names_and_drops_stale_bruno(tmp_path, capsys):
+    # R7-001: the CLI expansion dispatch must forward --allow-loss
+    # bruno: preserve on an unchanged exchange, deny then drop on an
+    # edited one.
+    from TB2J.scripts.TB2J_shell import main
+
+    source, key = _source()
+    source.bruno_Jdict = {key: 0.002}
+    source.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "r7 cli",
+    }
+    base_dir = tmp_path / "base"
+    source.write_pickle(path=base_dir)
+    base = base_dir / "TB2J.pickle"
+
+    native = shells.read_exchange(base, "pickle")
+    document = shells.compress(native.spinio, mode="isotropic").document
+
+    def _run(*arguments):
+        try:
+            return main([str(argument) for argument in arguments])
+        except SystemExit as error:
+            return error.code
+
+    # preserve: unchanged exchange needs no bruno loss; text carries the
+    # block.  damping/gyromag are unrelated ancillary losses the text
+    # target always demands for this fixture.
+    out_preserve = tmp_path / "preserve"
+    doc_path = _write_document(tmp_path, document)
+    assert (
+        _run(
+            "convert",
+            doc_path,
+            "--to",
+            "text",
+            "-o",
+            out_preserve,
+            "--base",
+            base,
+            "--allow-loss",
+            "damping",
+            "gyromag",
+        )
+        == 0
+    )
+    assert "Bruno-renormalized exchange" in (out_preserve / "exchange.out").read_text()
+
+    # deny: an edited exchange names bruno
+    edited = replace(document, shells=(replace(document.shells[0], Jiso=0.003),))
+    edited_path = _write_document(tmp_path, edited)
+    out_deny = tmp_path / "deny"
+    assert (
+        _run(
+            "convert",
+            edited_path,
+            "--to",
+            "text",
+            "-o",
+            out_deny,
+            "--base",
+            base,
+            "--allow-loss",
+            "damping",
+            "gyromag",
+        )
+        == 2
+    )
+    assert "bruno" in capsys.readouterr().err
+
+    # drop: the named loss removes the stale table
+    out_drop = tmp_path / "drop"
+    assert (
+        _run(
+            "convert",
+            edited_path,
+            "--to",
+            "text",
+            "-o",
+            out_drop,
+            "--base",
+            base,
+            "--allow-loss",
+            "damping",
+            "gyromag",
+            "bruno",
+        )
+        == 0
+    )
+    assert "Bruno-renormalized exchange" not in (out_drop / "exchange.out").read_text()
+
+
 def test_bruno_writer_survives_missing_distance_dict(tmp_path):
     # R6-003: SpinIO.distance_dict is optional; a Bruno-only pair with
     # no geometry writes nan sentinels instead of raising.

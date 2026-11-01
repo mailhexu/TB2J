@@ -2604,9 +2604,14 @@ def _export_loss_rows(model, target):
                 )
                 drops.append(("dJdx_orb", None))
     bruno = getattr(model, "bruno_Jdict", None)
-    if _base_field_present(bruno) and target in ("xml", "shells"):
-        # Story 008 (R6-001): only the text and pickle targets carry the
-        # labeled Bruno table; XML and shells documents emit raw J only.
+    if bruno is not None and target == "xml":
+        # Story 008 (R6-001, R7-002/R7-003): XML emits raw J only.  The
+        # route-presence condition is `is not None`: an EMPTY table is a
+        # valid zero-pair result whose availability flag and scope would
+        # otherwise be dropped silently.  The shells conversion route is
+        # deliberately NOT a loss target: write_shells records bruno in
+        # the document's required_base_fields manifest and shells.expand
+        # enforces the named loss against the base at expansion time.
         rows.append(
             (
                 "bruno",
