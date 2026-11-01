@@ -81,7 +81,12 @@ def test_longitudinal_stiffness_matches_spectral_reference():
                             / (w[n] - w[m])
                             * (v[n, i] * v[m, i] * v[m, j] * v[n, j])
                         )
-    np.testing.assert_allclose(calc.Cq[0], C, atol=1e-10, rtol=0)
+    # CR-006: Cq stays complex Hermitian.  The -i*M extraction with
+    # Hermitian symmetrization reproduces the spectral stiffness here and
+    # preserves the complex phases a multi-site C(q) carries.
+    np.testing.assert_allclose(calc.Cq[0], calc.Cq[0].conj().T, atol=1e-12, rtol=0)
+    np.testing.assert_allclose(calc.Cq[0].imag, 0.0, atol=1e-8, rtol=0)
+    np.testing.assert_allclose(calc.Cq[0].real, C, atol=1e-10, rtol=0)
 
 
 def test_bruno_correction_vanishes_for_collinear_reference():
@@ -97,6 +102,18 @@ def test_bruno_correction_vanishes_for_collinear_reference():
     np.testing.assert_allclose(calc.Bq[0], 0.0, atol=1e-12, rtol=0)
     np.testing.assert_allclose(calc.Jnorm_q[0], calc.Jq[0], atol=1e-12, rtol=0)
     assert calc.longitudinal_correction_applied is False
+    # CR-007: the Bruno-renormalized table is emitted as a separate,
+    # labeled dict (never overwriting the raw one) and here coincides
+    # with it because the correction vanishes.
+    calc.q_to_r()
+    calc.get_Jdict()
+    assert set(calc.exchange_Jdict_bruno) == set(calc.exchange_Jdict)
+    np.testing.assert_allclose(
+        sorted(calc.exchange_Jdict_bruno.values()),
+        sorted(calc.exchange_Jdict.values()),
+        atol=1e-12,
+        rtol=0,
+    )
 
 
 def test_raw_exchange_rejects_a_pole_on_the_contour():

@@ -57,6 +57,8 @@ class SpinIO(object):
         standardize_Jani=False,
         sia_tensor=None,
         dJdx_orb=None,
+        bruno_Jdict=None,
+        bruno_meta=None,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -199,6 +201,12 @@ class SpinIO(object):
             self.damping = [damping] * natom
 
         self.debug_dict = debug_dict
+
+        # Bruno-renormalized exchange (qspace route, story 008): the
+        # separately labeled Jnorm pair table and its availability
+        # metadata (applied flag + scope note). None = route not applicable.
+        self.bruno_Jdict = bruno_Jdict
+        self.bruno_meta = bruno_meta
 
         self.write_experimental = write_experimental
 

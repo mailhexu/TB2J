@@ -468,7 +468,7 @@ class ExchangeCL2(ExchangeCL):
 
         self.A_to_Jtensor()
 
-    def write_output(self, path="TB2J_results"):
+    def write_output(self, path="TB2J_results", **spinio_kwargs):
         self._prepare_index_spin()
         output = SpinIO(
             atoms=self.atoms,
@@ -486,5 +486,6 @@ class ExchangeCL2(ExchangeCL):
             Jani_dict=None,
             biquadratic_Jdict=None,
             description=self.description,
+            **spinio_kwargs,
         )
         output.write_all(path=path)

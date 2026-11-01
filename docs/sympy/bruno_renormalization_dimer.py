@@ -156,6 +156,15 @@ def grand_curvatures(hu: s.Matrix, hd: s.Matrix, beta_val, mu_val):
         tot = s.Float(0, 30) if beta is not None else s.Integer(0)
         for el, l, fl in states:
             tot = tot + fl * (l.T * hxy * l)[0, 0]
+        if beta is not None:
+            # fixed-mu grand-potential diagonal (Fermi-derivative) term:
+            # d2 Omega carries -beta f(1-f) (h'_nn)^2 for every state,
+            # including n = m; skipping it fabricates a uniform null mode
+            # that the true C does not have at finite temperature.
+            for el, l, fl in states:
+                hxx_nn = (l.T * hx * l)[0, 0]
+                hyy_nn = (l.T * hy * l)[0, 0]
+                tot = tot + (-beta * fl * (1 - fl)) * hxx_nn * hyy_nn
         for el, l, fl in states:
             for em, m, fm in states:
                 if el == em:
@@ -197,13 +206,16 @@ def derive() -> list[dict[str, str]]:
     results.append({"two_site_staggered_kernel_and_band": str(jqs[0, 1])})
 
     # --- S4: B == 0 in-domain (T=0 and finite T), FM and staggered -------
+    # The mixed (transverse-longitudinal) diagonal Fermi term vanishes
+    # because the transverse vertex is off-diagonal (h'_theta,nn = 0), so
+    # B == 0 survives the CR-001 correction; the longitudinal stiffness C
+    # does not (see S6).
     for name, hu, hd in (("fm", hu_fm, hd_fm), ("staggered", hu_s, hd_s)):
         _a0, b0, _c0 = grand_curvatures(hu, hd, None, None)
         assert b0 == s.zeros(2, 2), (name, b0)
         _at, bt, ct = grand_curvatures(hu, hd, 1.0, 0.0)
         assert bt == s.zeros(2, 2), (name, bt)
-        assert s.N(ct.det(), 20) == 0, (name, ct)  # uniform null mode
-    results.append({"b_zero_and_c_null_mode": "verified(fm,staggered;T=0,beta=1)"})
+    results.append({"b_zero": "verified(fm,staggered;T=0,beta=1)"})
 
     # --- S5: implemented Jnorm fails in-domain ---------------------------
     m_spinat = s.diag(2, 2)
@@ -212,15 +224,29 @@ def derive() -> list[dict[str, str]]:
         corr = s.simplify(s.Rational(1, 2) * (m_mat - kq.T) * xq.inv() * (m_mat - kq))
         assert corr[0, 1] != 0, (m_name, corr)
         results.append({f"jnorm_correction_{m_name}": str(corr[0, 1])})
-    # --- S6: truth C has the uniform null mode; code Xq is invertible here
+    # --- S6: uniform null mode of C is exact only at T = 0 ----------------
+    # At T = 0 the Fermi-derivative diagonal terms vanish and the exact C
+    # carries the uniform null vector (1, 1).  At finite temperature the
+    # fixed-mu grand potential is NOT invariant under a uniform sigma_z
+    # shift (up and down levels move oppositely), and the diagonal
+    # -beta f(1-f) (h'_phi,nn)^2 terms make C generically invertible; the
+    # uniform-mode projection in the production pseudoinverse is therefore
+    # a declared gauge choice, not an exact symmetry at finite T.
     null_vec = s.Matrix([1, 1])
     _a0, _b0, c0 = grand_curvatures(hu_fm, hd_fm, None, None)
     assert s.simplify(c0 * null_vec) == s.zeros(2, 1), c0
+    _at, _bt, ct = grand_curvatures(hu_fm, hd_fm, 1.0, 0.0)
+    assert s.N((ct * null_vec)[0], 20) != 0, ct  # finite-T: not null
     assert s.simplify(xq.det()) != 0, xq
     # (Story 003's np.linalg.inv failures on real SrMnO3 models show the
     # code Xq becomes singular there; its structural cause is to be
     # characterized separately from this dimer class.)
-    results.append({"truth_c_null_mode": "span((1,1))", "xq_dimer": "invertible"})
+    results.append(
+        {
+            "truth_c_null_mode": "span((1,1)) exact at T=0; finite-T C invertible",
+            "xq_dimer": "invertible",
+        }
+    )
 
     # --- S7: variational identity (model-free, exact symbolic) -----------
     # Total energy expanded at a reference: E = E0 + A th^2/2 + b V + C V^2/2
@@ -266,33 +292,49 @@ def derive() -> list[dict[str, str]]:
         H[1, 3] = H[3, 1] = t_
         return H
 
-    def etot_stoner(th1, th2, p1=0, p2=0, Iv=mp.mpf("0.5")):
+    def grand_stoner(th1, th2, p1=0, p2=0, Iv=mp.mpf("0.5")):
+        """Fixed-mu grand potential plus Stoner -I/2 |m_loc|^2 per site.
+
+        CR-002/CR-003: the functional whose Hessian feeds the CFR2-style
+        divided-difference responses is the grand potential, and the
+        double-counting moment is the rotation-invariant LOCAL magnitude.
+        """
         w, v = mp.eigsy(H4s(th1, th2, p1, p2))
         bet = mp.mpf(1)
-        E = mp.mpf(0)
-        m = [mp.mpf(0), mp.mpf(0)]
+        omega = mp.mpf(0)
         for k in range(4):
-            fk = 1 / (1 + mp.exp(bet * w[k]))
-            E += fk * w[k]
-            for site in (0, 1):
+            omega += -mp.log(1 + mp.exp(-bet * w[k])) / bet
+        mloc = [mp.mpf(0), mp.mpf(0)]
+        for site in (0, 1):
+            th = th1 if site == 0 else th2
+            ct, st = mp.cos(th), mp.sin(th)
+            a = mp.mpf(0)
+            bdiff = mp.mpf(0)
+            coff = mp.mpf(0)
+            for k in range(4):
+                fk = 1 / (1 + mp.exp(bet * w[k]))
                 up = v[site * 2, k]
                 dn = v[site * 2 + 1, k]
-                m[site] += fk * (mp.re(up * mp.conj(up)) - mp.re(dn * mp.conj(dn)))
-        return E - Iv / 2 * (m[0] ** 2 + m[1] ** 2)
+                a += fk * mp.re(up * mp.conj(up))
+                bdiff += fk * (mp.re(up * mp.conj(up)) - mp.re(dn * mp.conj(dn)))
+                coff += fk * 2 * mp.re(up * mp.conj(dn))
+            # local sigma_z axis of the canted site: cos(th) sz + sin(th) sx
+            mloc[site] = ct * bdiff + st * coff
+        return omega - Iv / 2 * (mloc[0] ** 2 + mloc[1] ** 2)
 
     def scf_p(t1, t2):
         p = mp.mpf("0")
         hh = mp.mpf("1e-6")
         for _ in range(60):
-            E0 = etot_stoner(t1, t2, p, -p)
+            E0 = grand_stoner(t1, t2, p, -p)
             g = (
-                etot_stoner(t1, t2, p + hh, -p - hh)
-                - etot_stoner(t1, t2, p - hh, -p + hh)
+                grand_stoner(t1, t2, p + hh, -p - hh)
+                - grand_stoner(t1, t2, p - hh, -p + hh)
             ) / (2 * hh)
             Jl = (
-                etot_stoner(t1, t2, p + hh, -p - hh)
+                grand_stoner(t1, t2, p + hh, -p - hh)
                 - 2 * E0
-                + etot_stoner(t1, t2, p - hh, -p + hh)
+                + grand_stoner(t1, t2, p - hh, -p + hh)
             ) / (hh * hh)
             dp = -g / Jl
             p += dp
@@ -300,37 +342,77 @@ def derive() -> list[dict[str, str]]:
                 break
         return p
 
+    # Reference (th1, th2) = (al, be) is NOT mirror-antisymmetric: with
+    # the rotation-invariant |m| Stoner term a mirror pair would pin the
+    # antisymmetric longitudinal mode (B = 0 by symmetry); the asymmetric
+    # pair is the minimal nonzero-B reference.
     al = mp.mpf("0.4")
-    hh = mp.mpf("1e-4")
+    be = mp.mpf("0.1")
+    hh = mp.mpf("1e-6")
 
-    def Ef(d1, d2):
-        return etot_stoner(al + d1, -al + d2, 0, 0)
+    def A12_frozen(p):
+        return (
+            grand_stoner(al + hh, be + hh, p, -p)
+            - grand_stoner(al + hh, be - hh, p, -p)
+            - grand_stoner(al - hh, be + hh, p, -p)
+            + grand_stoner(al - hh, be - hh, p, -p)
+        ) / (4 * hh * hh)
 
-    J_frozen = (Ef(hh, hh) - Ef(hh, -hh) - Ef(-hh, hh) + Ef(-hh, -hh)) / (4 * hh * hh)
+    def A12_scf():
+        # Each stencil corner sits on ITS OWN self-consistent branch
+        # p*(theta): the mixed FD of the RELAXED energy surface.  (Using a
+        # single p for all corners would give the frozen-p curvature.)
+        vals = []
+        for d1, d2 in ((hh, hh), (hh, -hh), (-hh, hh), (-hh, -hh)):
+            ps = scf_p(al + d1, be + d2)
+            vals.append(grand_stoner(al + d1, be + d2, ps, -ps))
+        return (vals[0] - vals[1] - vals[2] + vals[3]) / (4 * hh * hh)
 
-    def Es(d1, d2):
-        p2s = scf_p(al + d1, -al + d2)
-        return etot_stoner(al + d1, -al + d2, p2s, -p2s)
+    # The Schur identity is a statement about the STATIONARY branch: the
+    # frozen A_12 and the B, C curvatures must all be taken at
+    # p = p*(theta_ref), not at p = 0.
+    p_ref = scf_p(al, be)
+    A_frozen = A12_frozen(p_ref)
+    A_scf = A12_scf()
+    J_frozen = -A_frozen / 2
 
-    J_scf = (Es(hh, hh) - Es(hh, -hh) - Es(-hh, hh) + Es(-hh, -hh)) / (4 * hh * hh)
-
-    # perturbative side: B, C of the total energy at the reference
+    # perturbative side: B, C of the same functional at the reference
     def E0f(d1, d2, p):
-        return etot_stoner(al + d1, -al + d2, p, -p)
+        return grand_stoner(al + d1, be + d2, p, -p)
 
-    B1 = (E0f(hh, 0, hh) - E0f(hh, 0, -hh) - E0f(-hh, 0, hh) + E0f(-hh, 0, -hh)) / (
-        4 * hh * hh
+    B1 = (
+        E0f(hh, 0, p_ref + hh)
+        - E0f(hh, 0, p_ref - hh)
+        - E0f(-hh, 0, p_ref + hh)
+        + E0f(-hh, 0, p_ref - hh)
+    ) / (4 * hh * hh)
+    B2 = (
+        E0f(0, hh, p_ref + hh)
+        - E0f(0, hh, p_ref - hh)
+        - E0f(0, -hh, p_ref + hh)
+        + E0f(0, -hh, p_ref - hh)
+    ) / (4 * hh * hh)
+    Csc = (E0f(0, 0, p_ref + hh) - 2 * E0f(0, 0, p_ref) + E0f(0, 0, p_ref - hh)) / (
+        hh * hh
     )
-    B2 = (E0f(0, hh, hh) - E0f(0, hh, -hh) - E0f(0, -hh, hh) + E0f(0, -hh, -hh)) / (
-        4 * hh * hh
+    # A-space Schur complement: Delta A_12 = -B1 B2 / C_sc (single mode).
+    # Exchange conversion (J = -A_12/2, the pinned kernel-authority
+    # mapping): Delta J = -Delta A_12 / 2 = +B1 B2 / (2 C_sc); the
+    # production formula is Jnorm = Jq + (B C^+ B^T)/2.
+    delta_A_pert = -B1 * B2 / Csc
+    J_scf = -A_scf / 2
+    delta_J_direct = J_scf - J_frozen
+    delta_J_pert = -delta_A_pert / 2
+    assert abs(delta_J_direct - delta_J_pert) < mp.mpf("1e-8"), (
+        delta_J_direct,
+        delta_J_pert,
     )
-    Csc = (E0f(0, 0, hh) - 2 * E0f(0, 0, 0) + E0f(0, 0, -hh)) / (hh * hh)
-    corr_pert = -(B1 * B2) / Csc
-    corr_direct = J_scf - J_frozen
-    assert abs(corr_direct - corr_pert) < mp.mpf("1e-8"), (corr_direct, corr_pert)
-    assert abs(corr_direct) > mp.mpf("1e-3")  # nonzero at the canted reference
-    results.append({"canted_reference_correction": mp.nstr(corr_direct, 12)})
-    results.append({"canted_reference_perturbative": mp.nstr(corr_pert, 12)})
+    assert abs(delta_J_direct) > mp.mpf("1e-3")  # nonzero at the canted reference
+    results.append({"canted_reference_deltaJ_direct": mp.nstr(delta_J_direct, 12)})
+    results.append({"canted_reference_deltaJ_perturbative": mp.nstr(delta_J_pert, 12)})
+    results.append(
+        {"exchange_conversion": "Jnorm = Jq + (B C^+ B^T)/2  [J = -A_12/2 mapping]"}
+    )
 
     return results
 
