@@ -25,11 +25,14 @@ satisfies, as rational functions of the energy,
 
     T_ij(R) = (1/N) sum_q exp(+2 pi i R.q) K1_ij(q),   K1_ij(q) = sum_k tr[D_i G^up_ij(k) D_j G^down_ji(k+q)] / N.
 
-The production `q_to_r` used the MINUS phase, which yields `T_ij(-R) =
-T_ji(R)`: for asymmetric inter-sublattice models the emitted pair table
-was exactly transposed at R != 0 while every R-even entry (diagonals,
-R = 0) was unaffected — invisible for the approved one-site evidence,
-where J(R) = J(-R).
+For the single-channel K1 kernel, the MINUS phase yields `T_ij(-R) =
+T_ji(R)`.  The production driver transforms the channel-AVERAGED kernel
+(K1 + K2)/2 with the per-q imaginary part, which under the former minus
+phase produced the SYMMETRIZATION `[T_ij(R) + T_ji(R)]/2`: every
+inter-sublattice R != 0 entry was the mean of the correct and transposed
+values (deviation half the transposition gap) while every R-even entry
+(diagonals, R = 0) was exact — invisible for the approved one-site
+evidence, where J(R) = J(-R).
 
 Verified result `multisite_plus_phase_identity = 0` (difference of the two
 sides over the ordered pairs (A,B), (B,A) and R = 0, 1, 2) and

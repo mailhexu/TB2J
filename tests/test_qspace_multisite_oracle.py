@@ -15,10 +15,14 @@ Authority: docs/sympy/qspace_multisite_transform.py
       per-q imaginary part does not commute with the phase transform on
       asymmetric inter-sublattice pairs.
 
-Failing-before record (both defects active): the inter-sublattice entries
-of the q-space pair table equal the real-space oracle TRANSPOSED at R != 0
-(max deviation 1.6e-3 eV on this fixture); diagonals (R-even entries) were
-already exact.
+Failing-before record (both defects active): each inter-sublattice R != 0
+entry of the q-space pair table was SYMMETRIZED to
+[T_ij(R) + T_ji(R)]/2 — the mean of the correct and transposed values
+(deviation 8.2e-4 eV on this fixture, half the 1.6e-3 transposition gap);
+R-even entries (diagonals, R = 0) were already exact.  The exact
+transposition T_ij(-R) = T_ji(R) is the S1 statement for the
+single-channel K1 kernel; production's channel-averaged kernel
+symmetrized instead.
 """
 
 import numpy as np

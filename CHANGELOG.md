@@ -7,9 +7,10 @@
   exp(+2 pi i R.q) (pinned by the real-space Green convention
   `G(R) = sum_k exp(-2 pi i R.k) G(k)`) and extracts the imaginary part
   after the transform. The former minus-phase transform of the per-q
-  imaginary parts produced a transposed pair table (T_ji(R)) for
-  asymmetric inter-sublattice models while leaving every R-even entry and
-  the whole one-site case unchanged. `integrate` retains the complex per-q
+  imaginary parts symmetrized every inter-sublattice R != 0 entry to
+  [T_ij(R) + T_ji(R)]/2 for asymmetric models while leaving every R-even
+  entry and the whole one-site case unchanged (the single-channel kernel
+  transforms exactly to the transposed pair T_ji(R)). `integrate` retains the complex per-q
   integrals (`Jq_c`/`Kq_c`/`Xq_c`); the public per-q responses `Jq`, `Kq`,
   `Xq` and `calculate_raw()` keep their semantics, and
   `bruno_renormalize` follows the same transform through `Jnorm_c`.

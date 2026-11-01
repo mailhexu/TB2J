@@ -16,8 +16,12 @@ S1  ordered-pair kernel identity.  With the production real-space Green
 
         K1_ij(q) = sum_k tr[D_i G^up_ij(k) D_j G^down_ji(k+q)] / N.
 
-    The production q_to_r minus phase instead yields T_ji(R) (= T_ij(-R)),
-    which differs from T_ij(R) for asymmetric inter-sublattice models.
+    For the single-channel K1 kernel the production q_to_r minus phase
+    instead yields T_ij(-R) = T_ji(R), which differs from T_ij(R) for
+    asymmetric inter-sublattice models.  (The production channel-AVERAGED
+    kernel with the former per-q imaginary part and minus-phase
+    cos-transform produced the symmetrization [T_ij(R) + T_ji(R)]/2 —
+    see the oracle failing-before record in the accompanying report.)
 
 S2  imaginary-extraction placement.  The per-q imaginary part does not
     commute with the phase transform on an asymmetric inter-sublattice
@@ -171,7 +175,7 @@ def main() -> int:
                 / N
             )
             s1_diff += s.simplify(T - plus)
-            if i != j and R != 0:
+            if (i, j) != (1, 1) and i != j and R != 0:
                 diff = s.simplify(T - minus)
                 if diff != 0:
                     minus_counterexample = diff
