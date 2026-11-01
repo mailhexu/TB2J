@@ -27,6 +27,9 @@ _BASE_FIELDS = {
     "njt": ("NJT_Jdict", "NJT_ddict"),
     "orbital": ("Jiso_orb", "DMI_orb", "Jani_orb"),
     "sia": ("sia_tensor", "k1", "k1dir"),
+    # Story 008: the labeled Bruno table is derived ancillary content
+    # keyed to the base exchange; shell edits invalidate it (R6-002).
+    "bruno": ("bruno_Jdict", "bruno_meta"),
 }
 
 
@@ -1940,7 +1943,7 @@ def expand(document, *, base=None, complete_orbits=False, allow_loss=()):
     if base is None:
         output = core.spinio
     else:
-        stale = set(available) & {"orbital", "djdx"}
+        stale = set(available) & {"orbital", "djdx", "bruno"}
         if stale and not _base_exchange_equal(document, base, core.spinio):
             denied = sorted(stale - allowed)
             if denied:
@@ -2600,6 +2603,19 @@ def _export_loss_rows(model, target):
                     )
                 )
                 drops.append(("dJdx_orb", None))
+    bruno = getattr(model, "bruno_Jdict", None)
+    if _base_field_present(bruno) and target in ("xml", "shells"):
+        # Story 008 (R6-001): only the text and pickle targets carry the
+        # labeled Bruno table; XML and shells documents emit raw J only.
+        rows.append(
+            (
+                "bruno",
+                target,
+                tuple(sorted(bruno)),
+                "Bruno-renormalized table not emitted by this target",
+            )
+        )
+        drops.extend([("bruno_Jdict", None), ("bruno_meta", None)])
     return rows, drops
 
 

@@ -1,5 +1,6 @@
 import os
 import sys
+from collections.abc import Mapping
 
 import numpy as np
 from numpy import array_str
@@ -331,11 +332,13 @@ def write_bruno_section(cls, myfile):
     sns = list(symnum.keys())
     # A Bruno-only pair (absent from the raw table) may also lack a
     # distance row on the plain writer path: emit it with nan geometry
-    # instead of crashing (R5-003).
+    # instead of crashing (R5-003, R6-003).  distance_dict is optional
+    # on SpinIO.
+    distances = cls.distance_dict if isinstance(cls.distance_dict, Mapping) else {}
     _no_geom = ((float("nan"),) * 3, float("nan"))
 
     def _geometry(ll):
-        return cls.distance_dict.get(ll, _no_geom)
+        return distances.get(ll, _no_geom)
 
     for ll in sorted(bruno, key=lambda x: _geometry(x)[1]):
         R, i, j = ll

@@ -1,6 +1,7 @@
 """Public shell expansion preserves context and never hides ancillary loss."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -134,6 +135,74 @@ def test_edited_values_require_named_drop_of_each_stale_derived_group():
     assert {row[0] for row in result.report.losses} == {"orbital", "djdx"}
     assert result.spinio.exchange_Jdict == {key: 0.003}
     assert source.Jiso_orb is not None and source.dJdx is not None
+
+
+def test_shell_edit_names_and_drops_stale_bruno():
+    # R6-002: the labeled Bruno table is derived ancillary content keyed
+    # to the base exchange: preserved when the exchange is unchanged,
+    # named-loss dropped when it is edited.
+    source, key = _source()
+    source.bruno_Jdict = {key: 0.002}
+    source.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "story-008",
+    }
+    document = shells.compress(source, mode="isotropic").document
+
+    equal = shells.expand(document, base=source)
+    assert equal.spinio.bruno_Jdict == {key: 0.002}
+    assert equal.spinio.bruno_meta == {
+        "longitudinal_correction_applied": False,
+        "scope": "story-008",
+    }
+
+    changed = _edit(document, 0.003)
+    with pytest.raises(ValueError, match="bruno"):
+        shells.expand(changed, base=source)
+    result = shells.expand(changed, base=source, allow_loss=("bruno",))
+    assert result.spinio.bruno_Jdict is None and result.spinio.bruno_meta is None
+    assert "bruno" in {row[0] for row in result.report.losses}
+    assert result.spinio.exchange_Jdict == {key: 0.003}
+    # the base object is untouched
+    assert source.bruno_Jdict == {key: 0.002}
+
+
+def test_xml_export_of_bruno_pickle_requires_named_loss():
+    # R6-001: XML emits raw J only; the labeled Bruno table is a
+    # declared loss for that target.
+    source, key = _source()
+    source.bruno_Jdict = {key: 0.002}
+    source.bruno_meta = {"longitudinal_correction_applied": False}
+    with pytest.raises(ValueError, match="(?i)bruno"):
+        shells.write_exchange(source, "unused_dir_xml", "xml")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # xml also drops charges; the bruno row must be named beside it.
+        shells.write_exchange(source, tmp, "xml", allow_loss=("bruno", "charges"))
+        assert (Path(tmp) / "exchange.xml").exists()
+
+
+def test_bruno_writer_survives_missing_distance_dict(tmp_path):
+    # R6-003: SpinIO.distance_dict is optional; a Bruno-only pair with
+    # no geometry writes nan sentinels instead of raising.
+    from TB2J.io_exchange.io_txt import write_txt
+
+    atoms = Atoms("Fe", cell=3 * np.eye(3), scaled_positions=[(0, 0, 0)], pbc=True)
+    spinio = SpinIO(
+        atoms,
+        spinat=np.array([[0.0, 0.0, -2.0]]),
+        charges=np.array([8.0]),
+        index_spin=[0],
+        exchange_Jdict={},
+    )
+    spinio.distance_dict = None
+    spinio.bruno_Jdict = {((0, 1, 0), 0, 0): 0.002}
+    spinio.bruno_meta = {"longitudinal_correction_applied": False}
+    write_txt(spinio, path=str(tmp_path))
+    text = (tmp_path / "exchange.out").read_text()
+    assert "Bruno-renormalized exchange" in text
+    assert "nan" in text
 
 
 def test_charge_loss_is_explicit_and_does_not_fabricate_writer_context():
