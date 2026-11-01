@@ -290,6 +290,57 @@ def to_str(arr):
     return " ".join([f"{x:8.5f}" for x in arr])
 
 
+def write_bruno_section(cls, myfile):
+    """Labeled Bruno-renormalized exchange block (story 008, R2-004).
+
+    Emitted only when the route provides ``bruno_Jdict``; the raw table
+    above is untouched for downstream formats.
+    """
+    bruno = getattr(cls, "bruno_Jdict", None)
+    if not bruno:
+        return
+    meta = getattr(cls, "bruno_meta", None) or {}
+    myfile.write("=" * 90 + "\n")
+    myfile.write("Bruno-renormalized exchange (separate result; raw table above): \n")
+    myfile.write("Jnorm = Jq + (B C^+ B^T)/2  [J = -A12/2 mapping]\n")
+    applied = meta.get("longitudinal_correction_applied")
+    myfile.write(f"longitudinal_correction_applied: {applied}\n")
+    if "scope" in meta:
+        myfile.write(f"scope: {meta['scope']}\n")
+    myfile.write(
+        "{:6s} {:5s} {:15s} {:14s} {:14s} {:11s} \n".format(
+            "    i",
+            "    j",
+            "         R",
+            "  Jnorm(meV)",
+            "   Jraw(meV)",
+            "distance(A)",
+        )
+    )
+    raw = cls.exchange_Jdict or {}
+    symnum = symbol_number(cls.atoms)
+    sns = list(symnum.keys())
+    for ll in sorted(bruno, key=lambda x: cls.distance_dict[x][1]):
+        R, i, j = ll
+        vec, distance = cls.distance_dict[ll]
+        jn = bruno[ll] * 1e3
+        jr = raw.get(ll)
+        jr = jr * 1e3 if jr is not None else float("nan")
+        myfile.write(
+            "   {:5s} {:5s} ({:3d}, {:3d}, {:3d}) {:10.5f} {:12.5f} {:9.3f} \n".format(
+                sns[cls.ind_atoms[i]],
+                sns[cls.ind_atoms[j]],
+                R[0],
+                R[1],
+                R[2],
+                jn,
+                jr,
+                distance,
+            )
+        )
+    myfile.write("\n")
+
+
 def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
     """
     kpts: the list of kpoints
@@ -413,3 +464,4 @@ def write_txt(
             write_experimental=write_experimental,
             write_orb_decomposition=write_orb_decomposition,
         )
+        write_bruno_section(cls, myfile)

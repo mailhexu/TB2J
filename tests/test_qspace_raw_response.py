@@ -89,7 +89,7 @@ def test_longitudinal_stiffness_matches_spectral_reference():
     np.testing.assert_allclose(calc.Cq[0].real, C, atol=1e-10, rtol=0)
 
 
-def test_bruno_correction_vanishes_for_collinear_reference():
+def test_bruno_correction_vanishes_for_collinear_reference(tmp_path):
     # At a collinear reference the transverse-longitudinal cross response B
     # vanishes identically (MathDoc: tb2j/bruno-renormalization-dimer, S4),
     # so the renormalized exchange equals the raw one and no longitudinal
@@ -114,6 +114,13 @@ def test_bruno_correction_vanishes_for_collinear_reference():
         atol=1e-12,
         rtol=0,
     )
+    # R2-004: the text output carries the labeled Bruno result and the
+    # availability/scope note next to the untouched raw table.
+    calc.write_output(path=str(tmp_path))
+    text = (tmp_path / "exchange.out").read_text()
+    assert "Bruno-renormalized exchange" in text
+    assert "longitudinal_correction_applied: False" in text
+    assert "scope:" in text
 
 
 def test_raw_exchange_rejects_a_pole_on_the_contour():

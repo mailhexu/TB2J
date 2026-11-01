@@ -273,6 +273,10 @@ def make_supercell(spinio, sc_matrix, center=False, map_optional=True):
     exchange_Jdict = _map_pair_dict(spinio.exchange_Jdict, scmaker, nspin)
     dmi_ddict = _map_pair_dict(spinio.dmi_ddict, scmaker, nspin)
     Jani_dict = _map_pair_dict(spinio.Jani_dict, scmaker, nspin)
+    # Story 008: keep the separately labeled Bruno result and its scope
+    # metadata through the supercell transformation (R2-005).
+    bruno_Jdict = _map_pair_dict(getattr(spinio, "bruno_Jdict", None), scmaker, nspin)
+    bruno_meta = deepcopy(getattr(spinio, "bruno_meta", None))
 
     optional_pair_names = (
         "dJdx",
@@ -333,6 +337,8 @@ def make_supercell(spinio, sc_matrix, center=False, map_optional=True):
             getattr(spinio, "sia_tensor", None), mapping["spin_mapping"]
         ),
         dJdx_orb=mapped_optional["dJdx_orb"],
+        bruno_Jdict=bruno_Jdict,
+        bruno_meta=bruno_meta,
     )
     sc_spinio.supercell_mapping = mapping
     sc_spinio.supercell_matrix = _as_supercell_matrix(sc_matrix)

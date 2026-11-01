@@ -49,30 +49,49 @@ splitting 4 eV; T = 0 (step occupations) and beta = 1/eV where stated.
    production formula is $J_{\rm norm} = J_q + \tfrac12 (B C^+ B^T)$
    with $C^+$ the declared pseudoinverse.
 
-## Functional and reference used by the canted loop (CR-002/CR-003)
+## Functional and reference used by the canted loop (CR-002/CR-003, R2)
 
-- **Functional**: the fixed-$\mu$ grand potential
-  $\Omega = -\beta^{-1}\sum_n \ln(1 + e^{-\beta\varepsilon_n})$ plus a
-  Stoner double-counting term $-\tfrac{I}{2}\sum_i |m_i|^2$ in the
-  rotation-invariant **local** moment magnitude
-  $|m_i| = \cos\theta_i\,(a_i-b_i) + \sin\theta_i\, 2\,{\rm Re}(c_i)$
-  (site density-matrix block $\begin{psmallmatrix} a & c \\ c^\ast &
-  b\end{psmallmatrix}$). The CFR2 responses are $\Omega$-Hessians;
-  energies of the $\sum f_n\varepsilon_n$ type validate a different
-  functional. The p-field itself is the local-z field
-  $p\,\sigma_z^{({\rm local})}$.
+- **Functional (R2-003 revision)**: the proper Stoner SCF energy
+  $E(m) = \Omega_{\rm band}(I\,m) + I\,m^2$ in the **uniform longitudinal
+  mode**: the field is *generated* by the moment ($p = I m$, the Legendre
+  structure of self-consistency).  An independent external field makes
+  the functional unbounded below along $(p,-p)$ and the stationary
+  branch a maximum — that parametrization was rejected in review round
+  2.  Here the quadratic double-counting dominates: $C > 0$ (asserted),
+  the branch is a minimizing branch, $m^\ast = 0.8194$ at the reference.
+  In the two-site dimer both sites carry identical local band moments,
+  so the uniform mode is the channel with a nonzero self-consistency
+  force; the antisymmetric mode is force-free.
 - **Reference**: $(\theta_1, \theta_2) = (0.4, 0.1)$ — **not**
-  mirror-antisymmetric. With the $|m|$ Stoner term a mirror pair
-  $(\alpha, -\alpha)$ pins the antisymmetric longitudinal mode ($B = 0$
-  by symmetry): the earlier nonzero corrections at mirror pairs were
+  mirror-antisymmetric.  With the rotation-invariant Stoner term a
+  mirror pair $(\alpha, -\alpha)$ pins the antisymmetric longitudinal
+  mode ($B = 0$ by symmetry): the earlier nonzero corrections were
   artifacts of a non-invariant $m_z$-type Stoner term.
-- **S8 result**: direct SCF relaxation ($\Delta J_{\rm direct} = 5.4877
-  \times 10^{-3}$) equals the perturbative $+\tfrac12 B_1 B_2 / C$ to 30
-  digits. All curvature stencils (frozen $A_{12}$, $B_1$, $B_2$, $C$)
-  are evaluated **on the self-consistent branch**
-  $p = p^\ast(\theta_{\rm ref})$; the Schur identity is a statement
-  about that stationary branch. The branch is a maximum here
-  ($C < 0$) — the identity holds for any smooth stationary branch.
+- **Angle convention (R2-002)**: the site exchange field points at the
+  polar angle $\theta_i$ — block $(D/2)(\cos\theta_i\,\sigma_z +
+  \sin\theta_i\,\sigma_x)$ — and the longitudinal field $p$ is the
+  local-z field rotating with the site block, matching
+  `grand_curvatures.site_block`.  (The half-angle/global-$\sigma_z$
+  variant was rotation-broken and rejected in review round 2.)
+- **Degenerate limit (R2-001)**: the spectral Hessian applies
+  $(f_n-f_m)/(\varepsilon_n-\varepsilon_m) \to -\beta f(1-f)$ for
+  *distinct* states with equal eigenvalues at finite $T$ (the
+  mirror-staggered dimer's cross-channel degeneracy); at $T = 0$ the
+  unequal-step-occupation case has no finite limit and stays excluded
+  (the pinned S3 double-pole convention).  $B \equiv 0$ survives
+  (the transverse-leg $\times$ longitudinal-leg structure kills the
+  new terms).
+- **S8 result**: direct SCF relaxation equals the perturbative
+  $+\tfrac12 B_1 B_2 / C$ to $1.2\times10^{-13}$ (30-digit arithmetic):
+  $\Delta J_{\rm direct} = -4.21884656697\times10^{-7}$, $\Delta
+  J_{\rm pert} = -4.21884656685\times10^{-7}$, $C = 0.9194 > 0$.  The
+  uniform-mode cross response is intrinsically $\sim10^{-3}$ in this
+  dimer, so the correction is small; the asserted content is the
+  identity, the minimizing branch, and the activation of the channel.
+  All curvature stencils (frozen $A_{12}$, $B_1$, $B_2$, $C$) are
+  evaluated **on the self-consistent branch**
+  $m = m^\ast(\theta_{\rm ref})$; the Schur identity is a statement
+  about that stationary branch.
 
 ## Code contract implemented in `TB2J/exchange_qspace.py`
 
@@ -122,10 +141,13 @@ limit for real metals with degenerate bands.
 ## Regressions
 
 - Collinear reference $\Rightarrow B_q = 0$, $J_{\rm norm} = J_q$
-  exactly, flag False, dual tables coincide
+  exactly, flag False, dual tables coincide, and `exchange.out` carries
+  the labeled Bruno block + availability note
   (`test_bruno_correction_vanishes_for_collinear_reference`).
 - $C_q$ matches the independent spectral divided-difference sum as a
   complex Hermitian matrix
   (`test_longitudinal_stiffness_matches_spectral_reference`).
-- S8 (authority): direct SCF equals $+\tfrac12(B C^{-1}B^T)_{12}$ at a
-  nonzero-B canted reference.
+- Supercell transformation maps `bruno_Jdict` and retains `bruno_meta`
+  (`test_make_supercell_maps_bruno_fields`).
+- S8 (authority): direct SCF equals $+\tfrac12(B C^{-1}B^T)_{12}$ on a
+  minimizing uniform-mode branch at a nonzero-B canted reference.

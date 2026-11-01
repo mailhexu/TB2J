@@ -167,11 +167,27 @@ def grand_curvatures(hu: s.Matrix, hd: s.Matrix, beta_val, mu_val):
                 tot = tot + (-beta * fl * (1 - fl)) * hxx_nn * hyy_nn
         for el, l, fl in states:
             for em, m, fm in states:
-                if el == em:
+                if l == m:
+                    # same-state pair: covered by the explicit Fermi-derivative
+                    # diagonal term above, never by the resolvent sum.
                     continue
-                tot = tot + (l.T * hx * m)[0, 0] * (m.T * hy * l)[0, 0] * (fl - fm) / (
-                    el - em
-                )
+                if el == em:
+                    if beta is None:
+                        # T = 0 with distinct states at equal energy (the
+                        # mirror-staggered double pole): the weight has no
+                        # finite limit for unequal step occupations; the
+                        # pinned S3 band reference fixes this convention.
+                        continue
+                    # Degenerate-limit rule: (f_n - f_m)/(eps_n - eps_m)
+                    # -> -beta f(1-f) for DISTINCT states with equal
+                    # eigenvalues (equal energies share the occupation at
+                    # fixed mu).  The transverse vertex connects such
+                    # states, so the limit carries an O(1) A contribution.
+                    # (R2-001)
+                    weight = -beta * fl * (1 - fl)
+                else:
+                    weight = (fl - fm) / (el - em)
+                tot = tot + (l.T * hx * m)[0, 0] * (m.T * hy * l)[0, 0] * weight
         return s.simplify(tot)
 
     a_mat = s.Matrix(2, 2, lambda i, j: d2((th1, th2)[i], (th1, th2)[j]))
@@ -269,7 +285,14 @@ def derive() -> list[dict[str, str]]:
     E_min = s.simplify(E_expr.subs(V_, V_star))
     curvature = s.simplify(s.diff(E_min, th_, 2))
     assert curvature == s.simplify(A_ - c_**2 / C_), curvature
-    results.append({"variational_identity": "J_scf = J_frozen - (B C^-1 B^T)"})
+    results.append(
+        {
+            "variational_identity": (
+                "A_scf = A_frozen - (B C^-1 B^T)  [A-curvature identity; "
+                "exchange conversion: Delta J = +1/2 (B C^-1 B^T)_12]"
+            )
+        }
+    )
 
     # --- S8: canted-reference loop (mpmath 30 digits, in-script) ---------
     import mpmath as mp
@@ -279,122 +302,127 @@ def derive() -> list[dict[str, str]]:
     Dv = mp.mpf(4)
 
     def H4s(th1, th2, p1=0, p2=0):
+        # Physical spin-angle convention (same as grand_curvatures'
+        # site_block): the exchange field of site i points at polar angle
+        # th_i, so its 2x2 block is (D/2)(cos th sz + sin th sx), and the
+        # longitudinal field p is the LOCAL-z field: it rotates with the
+        # site block, p (cos th sz + sin th sx).  (R2-002)
         H = mp.zeros(4, 4)
         for site in (0, 1):
             th = th1 if site == 0 else th2
             ph = p1 if site == 0 else p2
-            ct, sn = mp.cos(th / 2), mp.sin(th / 2)
+            ct, sn = mp.cos(th), mp.sin(th)
             bb = site * 2
-            H[bb, bb] = Dv / 2 * ct + ph
-            H[bb + 1, bb + 1] = -Dv / 2 * ct - ph
-            H[bb, bb + 1] = H[bb + 1, bb] = Dv / 2 * sn
+            H[bb, bb] = (Dv / 2 + ph) * ct
+            H[bb + 1, bb + 1] = -(Dv / 2 + ph) * ct
+            H[bb, bb + 1] = H[bb + 1, bb] = (Dv / 2 + ph) * sn
         H[0, 2] = H[2, 0] = t_
         H[1, 3] = H[3, 1] = t_
         return H
 
-    def grand_stoner(th1, th2, p1=0, p2=0, Iv=mp.mpf("0.5")):
-        """Fixed-mu grand potential plus Stoner -I/2 |m_loc|^2 per site.
-
-        CR-002/CR-003: the functional whose Hessian feeds the CFR2-style
-        divided-difference responses is the grand potential, and the
-        double-counting moment is the rotation-invariant LOCAL magnitude.
-        """
-        w, v = mp.eigsy(H4s(th1, th2, p1, p2))
+    def grand_band(th1, th2, p1=0, p2=0):
+        """Band grand potential Omega at the given local-z fields."""
+        w, _ = mp.eigsy(H4s(th1, th2, p1, p2))
         bet = mp.mpf(1)
         omega = mp.mpf(0)
         for k in range(4):
             omega += -mp.log(1 + mp.exp(-bet * w[k])) / bet
-        mloc = [mp.mpf(0), mp.mpf(0)]
-        for site in (0, 1):
-            th = th1 if site == 0 else th2
-            ct, st = mp.cos(th), mp.sin(th)
-            a = mp.mpf(0)
-            bdiff = mp.mpf(0)
-            coff = mp.mpf(0)
-            for k in range(4):
-                fk = 1 / (1 + mp.exp(bet * w[k]))
-                up = v[site * 2, k]
-                dn = v[site * 2 + 1, k]
-                a += fk * mp.re(up * mp.conj(up))
-                bdiff += fk * (mp.re(up * mp.conj(up)) - mp.re(dn * mp.conj(dn)))
-                coff += fk * 2 * mp.re(up * mp.conj(dn))
-            # local sigma_z axis of the canted site: cos(th) sz + sin(th) sx
-            mloc[site] = ct * bdiff + st * coff
-        return omega - Iv / 2 * (mloc[0] ** 2 + mloc[1] ** 2)
+        return omega
 
-    def scf_p(t1, t2):
-        p = mp.mpf("0")
-        hh = mp.mpf("1e-6")
-        for _ in range(60):
-            E0 = grand_stoner(t1, t2, p, -p)
-            g = (
-                grand_stoner(t1, t2, p + hh, -p - hh)
-                - grand_stoner(t1, t2, p - hh, -p + hh)
-            ) / (2 * hh)
-            Jl = (
-                grand_stoner(t1, t2, p + hh, -p - hh)
-                - 2 * E0
-                + grand_stoner(t1, t2, p - hh, -p + hh)
-            ) / (hh * hh)
+    Iv = mp.mpf("0.5")
+
+    def stoner_E(m, th1, th2):
+        """Proper Stoner SCF functional E(m) = Omega(I m) + I m^2.
+
+        The longitudinal field is GENERATED by the moment (p = I m): the
+        Legendre structure of the self-consistency; the mode is the
+        UNIFORM longitudinal mode (m, m), which is the channel with a
+        nonzero self-consistency force in the dimer (both sites carry
+        identical local band moments).  With an independent external
+        field the functional would be unbounded below (R2-003); here the
+        quadratic double-counting dominates and the stationary branch is
+        a minimizing branch for I below the Stoner threshold (asserted
+        via C > 0 below).
+        """
+        return grand_band(th1, th2, Iv * m, Iv * m) + Iv * m**2
+
+    def scf_m(t1, t2):
+        """Newton solve of the uniform-mode self-consistency.
+
+        Returns (m, g_final, Jl) with Jl the mode curvature at the
+        solution: Jl > 0 certifies a minimizing branch (R2-003).
+        """
+        m = mp.mpf("0")
+        hm = mp.mpf("1e-6")
+        g = Jl = mp.mpf(0)
+        for _ in range(80):
+            E0 = stoner_E(m, t1, t2)
+            g = (stoner_E(m + hm, t1, t2) - stoner_E(m - hm, t1, t2)) / (2 * hm)
+            Jl = (stoner_E(m + hm, t1, t2) - 2 * E0 + stoner_E(m - hm, t1, t2)) / (
+                hm * hm
+            )
             dp = -g / Jl
-            p += dp
-            if abs(dp) < mp.mpf("1e-14"):
+            m += dp
+            if abs(dp) < mp.mpf("1e-16"):
                 break
-        return p
+        return m, g, Jl
 
     # Reference (th1, th2) = (al, be) is NOT mirror-antisymmetric: with
-    # the rotation-invariant |m| Stoner term a mirror pair would pin the
+    # the rotation-invariant Stoner term a mirror pair would pin the
     # antisymmetric longitudinal mode (B = 0 by symmetry); the asymmetric
     # pair is the minimal nonzero-B reference.
     al = mp.mpf("0.4")
     be = mp.mpf("0.1")
     hh = mp.mpf("1e-6")
 
-    def A12_frozen(p):
+    def E_rel(d1, d2, m):
+        return stoner_E(m, al + d1, be + d2)
+
+    def A12_frozen(m):
         return (
-            grand_stoner(al + hh, be + hh, p, -p)
-            - grand_stoner(al + hh, be - hh, p, -p)
-            - grand_stoner(al - hh, be + hh, p, -p)
-            + grand_stoner(al - hh, be - hh, p, -p)
+            E_rel(hh, hh, m)
+            - E_rel(hh, -hh, m)
+            - E_rel(-hh, hh, m)
+            + E_rel(-hh, -hh, m)
         ) / (4 * hh * hh)
 
     def A12_scf():
         # Each stencil corner sits on ITS OWN self-consistent branch
-        # p*(theta): the mixed FD of the RELAXED energy surface.  (Using a
-        # single p for all corners would give the frozen-p curvature.)
+        # m*(theta): the mixed FD of the RELAXED energy surface.  (Using a
+        # single m for all corners would give the frozen-m curvature.)
         vals = []
         for d1, d2 in ((hh, hh), (hh, -hh), (-hh, hh), (-hh, -hh)):
-            ps = scf_p(al + d1, be + d2)
-            vals.append(grand_stoner(al + d1, be + d2, ps, -ps))
+            ms, _, _ = scf_m(al + d1, be + d2)
+            vals.append(stoner_E(ms, al + d1, be + d2))
         return (vals[0] - vals[1] - vals[2] + vals[3]) / (4 * hh * hh)
 
     # The Schur identity is a statement about the STATIONARY branch: the
     # frozen A_12 and the B, C curvatures must all be taken at
-    # p = p*(theta_ref), not at p = 0.
-    p_ref = scf_p(al, be)
-    A_frozen = A12_frozen(p_ref)
+    # m = m*(theta_ref), not at m = 0.
+    m_ref, g_ref, Jl_ref = scf_m(al, be)
+    assert abs(g_ref) < mp.mpf("1e-12")  # stationary
+    assert Jl_ref > 0  # minimizing branch, not a maximum (R2-003)
+    A_frozen = A12_frozen(m_ref)
     A_scf = A12_scf()
     J_frozen = -A_frozen / 2
 
     # perturbative side: B, C of the same functional at the reference
-    def E0f(d1, d2, p):
-        return grand_stoner(al + d1, be + d2, p, -p)
-
     B1 = (
-        E0f(hh, 0, p_ref + hh)
-        - E0f(hh, 0, p_ref - hh)
-        - E0f(-hh, 0, p_ref + hh)
-        + E0f(-hh, 0, p_ref - hh)
+        E_rel(hh, 0, m_ref + hh)
+        - E_rel(hh, 0, m_ref - hh)
+        - E_rel(-hh, 0, m_ref + hh)
+        + E_rel(-hh, 0, m_ref - hh)
     ) / (4 * hh * hh)
     B2 = (
-        E0f(0, hh, p_ref + hh)
-        - E0f(0, hh, p_ref - hh)
-        - E0f(0, -hh, p_ref + hh)
-        + E0f(0, -hh, p_ref - hh)
+        E_rel(0, hh, m_ref + hh)
+        - E_rel(0, hh, m_ref - hh)
+        - E_rel(0, -hh, m_ref + hh)
+        + E_rel(0, -hh, m_ref - hh)
     ) / (4 * hh * hh)
-    Csc = (E0f(0, 0, p_ref + hh) - 2 * E0f(0, 0, p_ref) + E0f(0, 0, p_ref - hh)) / (
-        hh * hh
-    )
+    Csc = (
+        E_rel(0, 0, m_ref + hh) - 2 * E_rel(0, 0, m_ref) + E_rel(0, 0, m_ref - hh)
+    ) / (hh * hh)
+    assert Csc > 0  # stable longitudinal mode
     # A-space Schur complement: Delta A_12 = -B1 B2 / C_sc (single mode).
     # Exchange conversion (J = -A_12/2, the pinned kernel-authority
     # mapping): Delta J = -Delta A_12 / 2 = +B1 B2 / (2 C_sc); the
@@ -407,9 +435,12 @@ def derive() -> list[dict[str, str]]:
         delta_J_direct,
         delta_J_pert,
     )
-    assert abs(delta_J_direct) > mp.mpf("1e-3")  # nonzero at the canted reference
+    assert abs(delta_J_direct) > mp.mpf("1e-7")  # channel activates (uniform
+    # mode B is intrinsically ~1e-3 in this dimer; the identity agreement
+    # below is the authority statement)
     results.append({"canted_reference_deltaJ_direct": mp.nstr(delta_J_direct, 12)})
     results.append({"canted_reference_deltaJ_perturbative": mp.nstr(delta_J_pert, 12)})
+    results.append({"canted_reference_mstar": mp.nstr(m_ref, 8)})
     results.append(
         {"exchange_conversion": "Jnorm = Jq + (B C^+ B^T)/2  [J = -A_12/2 mapping]"}
     )

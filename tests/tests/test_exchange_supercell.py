@@ -54,7 +54,6 @@ def test_make_supercell_keeps_atom_and_spin_indices_separate():
 
 def test_make_supercell_maps_pair_dictionaries_and_distances():
     sc_spinio = make_supercell(_simple_spinio(), [2, 1, 1])
-
     assert sc_spinio.exchange_Jdict == {
         ((0, 0, 0), 0, 0): 1.0,
         ((0, 0, 0), 0, 1): 2.0,
@@ -75,6 +74,26 @@ def test_make_supercell_maps_pair_dictionaries_and_distances():
     for vec, distance in sc_spinio.distance_dict.values():
         assert vec.shape == (3,)
         assert distance == pytest.approx(np.linalg.norm(vec))
+
+
+def test_make_supercell_maps_bruno_fields():
+    spinio = _simple_spinio()
+    spinio.bruno_Jdict = {((0, 0, 0), 0, 0): 1.1, ((1, 0, 0), 0, 0): 2.1}
+    spinio.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "story-008 test scope",
+    }
+
+    sc_spinio = make_supercell(spinio, [2, 1, 1])
+
+    assert sc_spinio.bruno_Jdict[((0, 0, 0), 0, 0)] == 1.1
+    assert sc_spinio.bruno_Jdict[((0, 0, 0), 0, 1)] == 2.1
+    assert sc_spinio.bruno_meta == {
+        "longitudinal_correction_applied": False,
+        "scope": "story-008 test scope",
+    }
+    # the source object is untouched
+    assert spinio.bruno_Jdict == {((0, 0, 0), 0, 0): 1.1, ((1, 0, 0), 0, 0): 2.1}
 
 
 def test_make_supercell_repeats_distinct_multi_spin_anisotropy():
