@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 from ase import Atoms
 
-from TB2J.io_exchange.edit import make_supercell, save
+from TB2J.io_exchange.edit import make_supercell, remove_sublattice, save
 from TB2J.io_exchange.io_exchange import SpinIO, gen_distance_dict
+from TB2J.io_exchange.io_txt import write_txt
 from TB2J.scripts.TB2J_edit import main as tb2j_edit_main
 
 
@@ -78,7 +79,13 @@ def test_make_supercell_maps_pair_dictionaries_and_distances():
 
 def test_make_supercell_maps_bruno_fields():
     spinio = _simple_spinio()
-    spinio.bruno_Jdict = {((0, 0, 0), 0, 0): 1.1, ((1, 0, 0), 0, 0): 2.1}
+    # ((0,1,0),0,0) is a Bruno-only pair: absent from the raw table but
+    # valid per the text writer (R3-002).
+    spinio.bruno_Jdict = {
+        ((0, 0, 0), 0, 0): 1.1,
+        ((1, 0, 0), 0, 0): 2.1,
+        ((0, 1, 0), 0, 0): 3.3,
+    }
     spinio.bruno_meta = {
         "longitudinal_correction_applied": False,
         "scope": "story-008 test scope",
@@ -88,12 +95,66 @@ def test_make_supercell_maps_bruno_fields():
 
     assert sc_spinio.bruno_Jdict[((0, 0, 0), 0, 0)] == 1.1
     assert sc_spinio.bruno_Jdict[((0, 0, 0), 0, 1)] == 2.1
+    assert sc_spinio.bruno_Jdict[((0, 1, 0), 0, 0)] == 3.3
+    # the Bruno-only pair has a distance row, so the text writer survives
+    assert ((0, 1, 0), 0, 0) in sc_spinio.distance_dict
     assert sc_spinio.bruno_meta == {
         "longitudinal_correction_applied": False,
         "scope": "story-008 test scope",
     }
     # the source object is untouched
-    assert spinio.bruno_Jdict == {((0, 0, 0), 0, 0): 1.1, ((1, 0, 0), 0, 0): 2.1}
+    assert set(spinio.bruno_Jdict) == {
+        ((0, 0, 0), 0, 0),
+        ((1, 0, 0), 0, 0),
+        ((0, 1, 0), 0, 0),
+    }
+
+
+def test_remove_sublattice_filters_bruno_and_writer_survives(tmp_path):
+    atoms = Atoms(
+        "FeTi",
+        cell=np.eye(3),
+        scaled_positions=[[0, 0, 0], [0.5, 0.5, 0.5]],
+        pbc=True,
+    )
+    spinio = SpinIO(
+        atoms=atoms,
+        spinat=np.array([[0.0, 0.0, 2.0], [0.0, 0.0, 1.0]]),
+        charges=np.array([6.0, 4.0]),
+        index_spin=[0, 1],
+        distance_dict=gen_distance_dict([0, 1], atoms, [(0, 0, 0)]),
+        exchange_Jdict={((0, 0, 0), 0, 0): 1.0, ((0, 0, 0), 0, 1): 0.5},
+    )
+    spinio.bruno_Jdict = {((0, 0, 0), 0, 0): 1.1, ((0, 0, 0), 0, 1): 0.55}
+    spinio.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "r3 regression",
+    }
+
+    remove_sublattice(spinio, "Ti")
+
+    assert ((0, 0, 0), 0, 0) in spinio.bruno_Jdict
+    assert ((0, 0, 0), 0, 1) not in spinio.bruno_Jdict
+    write_txt(spinio, path=str(tmp_path))
+    text = (tmp_path / "exchange.out").read_text()
+    assert "Bruno-renormalized exchange" in text
+    assert "longitudinal_correction_applied: False" in text
+
+
+def test_write_txt_emits_bruno_scope_for_empty_table(tmp_path):
+    spinio = _simple_spinio()
+    spinio.bruno_Jdict = {}
+    spinio.bruno_meta = {
+        "longitudinal_correction_applied": False,
+        "scope": "zero pairs inside cutoff",
+    }
+
+    write_txt(spinio, path=str(tmp_path))
+
+    text = (tmp_path / "exchange.out").read_text()
+    assert "Bruno-renormalized exchange" in text
+    assert "longitudinal_correction_applied: False" in text
+    assert "scope: zero pairs inside cutoff" in text
 
 
 def test_make_supercell_repeats_distinct_multi_spin_anisotropy():

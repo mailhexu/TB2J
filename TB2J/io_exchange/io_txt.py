@@ -297,7 +297,11 @@ def write_bruno_section(cls, myfile):
     above is untouched for downstream formats.
     """
     bruno = getattr(cls, "bruno_Jdict", None)
-    if not bruno:
+    if bruno is None:
+        # Route did not supply a Bruno result.  An EMPTY dictionary is a
+        # valid zero-pair result (e.g. no nonself pairs inside the
+        # cutoff): its availability flag and scope note are still
+        # emitted below.  (R3-003)
         return
     meta = getattr(cls, "bruno_meta", None) or {}
     myfile.write("=" * 90 + "\n")

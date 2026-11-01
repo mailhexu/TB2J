@@ -301,6 +301,9 @@ def make_supercell(spinio, sc_matrix, center=False, map_optional=True):
             exchange_Jdict,
             dmi_ddict,
             Jani_dict,
+            # Bruno-only pairs (valid per the text writer's raw.get)
+            # still need distance rows.  (R3-002)
+            bruno_Jdict,
             *mapped_optional.values(),
         ],
         sc_atoms,
@@ -749,6 +752,13 @@ def remove_sublattice(spinio, sublattice_name):
         spinio.exchange_Jdict = reindex_interaction(spinio.exchange_Jdict)
         spinio.distance_dict = filter_distance_dict(spinio.distance_dict)
         spinio.distance_dict = reindex_interaction(spinio.distance_dict)
+        # Story 008: the labeled Bruno table rides the raw exchange
+        # table through the same filter/reindex, else stale keys break
+        # the text writer's distance lookups.  (R3-001)
+        if getattr(spinio, "bruno_Jdict", None):
+            spinio.bruno_Jdict = reindex_interaction(
+                filter_interaction(spinio.bruno_Jdict)
+            )
         if hasattr(spinio, "Jiso_orb") and spinio.Jiso_orb:
             spinio.Jiso_orb = filter_interaction(spinio.Jiso_orb)
             spinio.Jiso_orb = reindex_interaction(spinio.Jiso_orb)
