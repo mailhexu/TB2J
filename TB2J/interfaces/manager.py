@@ -13,6 +13,16 @@ class Manager:
         print("Starting to calculate exchange.")
         use_gpu = kwargs.get("use_gpu", False)
         qspace = kwargs.get("qspace", False)
+        if qspace and not colinear:
+            raise ValueError(
+                "--qspace requires a collinear calculation: the noncollinear "
+                "driver has no reciprocal-space implementation."
+            )
+        if qspace and use_gpu:
+            raise ValueError(
+                "--qspace has no GPU implementation; refusing to silently "
+                "fall back to a different calculation than requested."
+            )
         ExchangeClass = self.select_exchange(colinear, qspace=qspace, use_gpu=use_gpu)
         if use_gpu:
             # select_exchange may fall back to a CPU class when no GPU runtime

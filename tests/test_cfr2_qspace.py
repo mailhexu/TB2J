@@ -109,8 +109,83 @@ def test_pair_table_respects_distance_cutoff(tmp_path):
 
 
 def test_cfr2_is_default_for_qspace_driver():
+    from TB2J.mycfr import CFR2
+
     calc = qspace_calculator(method=None)
     assert calc.integration_method.lower() == "cfr2"
+    # The default must build the CFR2 contour, not a CFR pole path that the
+    # CFR2 branch would then mis-contract.
+    assert isinstance(calc.contour, CFR2)
+
+
+def test_explicit_none_method_builds_cfr2_contour():
+    from TB2J.mycfr import CFR2
+
+    calc = qspace_calculator(method=None)
+    assert isinstance(calc.contour, CFR2)
+
+
+def test_conflicting_contour_selectors_refused():
+    from TB2J.exchange_qspace import ExchangeCLQspace
+
+    atoms = Atoms("Fe2", positions=[[0, 0, 0], [1, 0, 0]], cell=[10, 10, 10])
+    models = tuple(
+        LCAOHamiltonian(
+            HR=np.array([h]),
+            SR=np.array([np.eye(2)]),
+            Rlist=np.array([ORIGIN]),
+            nbasis=2,
+            atoms=atoms,
+            nspin=1,
+            orth=True,
+        )
+        for h in (UP, DOWN)
+    )
+    with pytest.raises(ValueError, match="conflicting"):
+        ExchangeCLQspace(
+            tbmodels=models,
+            atoms=atoms,
+            magnetic_elements=["Fe"],
+            basis=["Fe1|d", "Fe2|d"],
+            kmesh=[1, 1, 1],
+            efermi=0,
+            nz=8,
+            nproc=1,
+            Rcut=2,
+            method="cfr",
+            integration_method="semicircle",
+        )
+
+
+def test_manager_refuses_unsupported_qspace_combinations(tmp_path):
+    atoms, models = _toy_manager_models()
+    with pytest.raises(ValueError, match="collinear"):
+        Manager(
+            atoms,
+            models,
+            ["Fe1|d", "Fe2|d"],
+            colinear=False,
+            qspace=True,
+            efermi=0,
+            nz=8,
+            Rcut=2,
+            magnetic_elements=["Fe"],
+            output_path=str(tmp_path / "r1"),
+        )
+    with pytest.raises(ValueError, match="GPU"):
+        Manager(
+            atoms,
+            models,
+            ["Fe1|d", "Fe2|d"],
+            colinear=True,
+            qspace=True,
+            use_gpu=True,
+            efermi=0,
+            nz=8,
+            Rcut=2,
+            magnetic_elements=["Fe"],
+            output_path=str(tmp_path / "r2"),
+        )
 
 
 def test_deprecated_cfr_refused_for_qspace_full_driver():
@@ -183,20 +258,71 @@ def test_manager_qspace_flag_runs_qspace_driver(tmp_path, monkeypatch):
     assert selected["class"] is ExchangeCLQspace
 
 
-def test_wann2j_cli_accepts_qspace_and_method():
-    import argparse
+def test_production_cli_parses_and_dispatches_qspace(monkeypatch):
+    # The production parser and dispatch, exercised without wannier files:
+    # gen_exchange is replaced by a recorder so the test observes exactly
+    # what run_wann2J passes to the manager.
+    import TB2J.scripts.wann2J as w2j
 
-    from TB2J.exchange_params import add_exchange_args_to_parser
-    from TB2J.scripts.wann2J import run_wann2J  # noqa: F401  (import sanity)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--qspace", action="store_true", default=False)
-    parser.add_argument(
-        "--integration_method",
-        type=str,
-        default=None,
-        choices=["cfr2", "cfr", "semicircle", "legendre"],
+    received = {}
+    monkeypatch.setattr(w2j, "gen_exchange", lambda **kwargs: received.update(kwargs))
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wann2J",
+            "--efermi",
+            "0.0",
+            "--elements",
+            "Fe",
+            "--qspace",
+            "--integration-method",
+            "cfr2",
+        ],
     )
-    add_exchange_args_to_parser(parser)
-    args = parser.parse_args(["--qspace", "--integration_method", "cfr2"])
-    assert args.qspace and args.integration_method == "cfr2"
+    w2j.run_wann2J()
+    assert received["qspace"] is True
+    assert received["integration_method"] == "cfr2"
+    assert received["colinear"] is True
+
+    # The underscore spelling is accepted too (house convention alias).
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wann2J",
+            "--efermi",
+            "0.0",
+            "--elements",
+            "Fe",
+            "--qspace",
+            "--integration_method",
+            "semicircle",
+        ],
+    )
+    w2j.run_wann2J()
+    assert received["integration_method"] == "semicircle"
+
+
+def test_cli_python_parity_same_driver_and_j(tmp_path):
+    # Python API: qspace=True selects ExchangeCLQspace and produces J.
+    # The CLI test above proves the production parser dispatches the same
+    # kwargs; here the physics side of the parity chain is pinned.
+    atoms, models = _toy_manager_models()
+    m = Manager(
+        atoms,
+        models,
+        ["Fe1|d", "Fe2|d"],
+        colinear=True,
+        qspace=True,
+        magnetic_elements=["Fe"],
+        efermi=0,
+        nz=80,
+        Rcut=2,
+        nproc=1,
+        kmesh=[1, 1, 1],
+        output_path=str(tmp_path / "results"),
+    )
+    assert m.exchange_class is ExchangeCLQspace
+    from TB2J.io_exchange import SpinIO
+
+    spi = SpinIO.load_pickle(path=str(tmp_path / "results"))
+    assert ((0, 0, 0), 0, 1) in spi.exchange_Jdict

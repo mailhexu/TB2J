@@ -7,8 +7,8 @@ from TB2J.interfaces import gen_exchange
 from TB2J.versioninfo import print_license
 
 
-def run_wann2J():
-    print_license()
+def build_wann2j_parser():
+    """The production argument parser, factored out for CLI parity tests."""
     parser = argparse.ArgumentParser(
         description="wann2J: Using magnetic force theorem to calculate exchange parameter J from wannier functions"
     )
@@ -58,6 +58,8 @@ def run_wann2J():
 
     parser.add_argument(
         "--integration_method",
+        "--integration-method",
+        dest="integration_method",
         help=(
             "Energy integration method: cfr2 (default for --qspace), "
             "semicircle, or legendre. 'cfr' is deprecated and refused for "
@@ -69,6 +71,13 @@ def run_wann2J():
     )
 
     add_exchange_args_to_parser(parser)
+
+    return parser
+
+
+def run_wann2J():
+    print_license()
+    parser = build_wann2j_parser()
 
     args = parser.parse_args()
 

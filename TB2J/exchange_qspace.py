@@ -33,11 +33,24 @@ class ExchangeCLQspace(ExchangeCL2):
     def __init__(self, *args, **kwargs):
         # CFR2 is the default integration for the reciprocal-space driver:
         # its stored weights, not pole geometry, define the contour integral.
-        # An explicit contour `method` (e.g. "cfr") picks the matching
-        # integration branch so the deprecated CFR contour is refused loudly
-        # instead of being integrated geometrically.
+        # `method` (contour selector) and `integration_method` (integration
+        # branch) must select the same contour family: an explicit None is
+        # dropped so the base class does not silently build a CFR contour,
+        # and conflicting selectors are refused instead of, e.g., applying
+        # a geometric rule to CFR pole positions.
+        method = kwargs.get("method")
+        if method is None:
+            kwargs.pop("method", None)
         if kwargs.get("integration_method") is None:
-            kwargs["integration_method"] = kwargs.get("method") or "cfr2"
+            kwargs["integration_method"] = method or "cfr2"
+        if (
+            method is not None
+            and method.lower() != kwargs["integration_method"].lower()
+        ):
+            raise ValueError(
+                f"conflicting contour selectors: method={method!r} vs "
+                f"integration_method={kwargs['integration_method']!r}; pass one"
+            )
         super().__init__(*args, **kwargs)
 
     def _prepare(self):
