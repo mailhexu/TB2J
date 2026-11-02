@@ -11,15 +11,16 @@ import pytest
 pytest.importorskip("sisl")
 
 from ase.units import kB  # noqa: E402
-from HamiltonIO.siesta.wfsx import SiestaWFSXParser  # noqa: E402
 from HamiltonIO.siesta.sisl_wrapper import SislParser  # noqa: E402
+from HamiltonIO.siesta.wfsx import SiestaWFSXParser  # noqa: E402
+
 from TB2J.green import TBGreen  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "siesta_wfsx_fixtures"
 
 
-def fixture_case(name):
-    case = FIXTURES / name
+def fixture_case(name, fixture_root=FIXTURES):
+    case = Path(fixture_root) / name
     manifest = json.loads((case / "fixture.json").read_text())
     points = np.array([row["fractional"] for row in manifest["kpoints"]["points"]])
     return case, manifest, points
@@ -47,8 +48,10 @@ def test_opt_in_complete_spectrum_matches_full_hs_resolvent():
             )
 
 
-def source_model(tmp_path, name="scalar_nspin1", spin=0, reduce_scalar=False):
-    case, manifest, points = fixture_case(name)
+def source_model(
+    tmp_path, name="scalar_nspin1", spin=0, reduce_scalar=False, fixture_root=FIXTURES
+):
+    case, manifest, points = fixture_case(name, fixture_root=fixture_root)
     structure, electrons, spin_info = (
         manifest["structure"],
         manifest["electrons"],
@@ -198,7 +201,7 @@ def test_imported_scalar_serves_full_consumers_without_hs_or_eigensolve(
 
 
 def rewrite_test_records(path, update):
-    from scipy.io import FortranFile, FortranEOFError
+    from scipy.io import FortranEOFError, FortranFile
 
     records = []
     with FortranFile(path, "r") as stream:
@@ -595,8 +598,8 @@ def test_ordinary_jax_subclass_retains_density_and_green_consumers(
     tmp_path, monkeypatch, factory, cached
 ):
     jax = pytest.importorskip("jax")
-    from TB2J.GreenGPU import TBGreenGPU
     from TB2J.gpu import jax_utils
+    from TB2J.GreenGPU import TBGreenGPU
 
     # Exercise the real JAX numerical backend on CPU without requiring hardware.
     monkeypatch.setattr(jax_utils, "_require_jax_runtime", lambda: None)

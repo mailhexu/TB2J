@@ -1,0 +1,35 @@
+{
+  "pass": true,
+  "native_filtered_input": {
+    "source": "/home/hexu/projects/TB2J_dev/worktrees/siesta-wfsx-vault/.tmp/kosmic/runs/20261030T193117Z-siesta-wfsx-benchmark-co-899b70b05a3c3b45279d2c16dae6636a/scratch/truncation/truncation-mhi0kkta/input/states.WFSX",
+    "sha256": "a72f1110efa8e7d4087bf615ae9cd38e5c7e9381c7a46c68bb21664fa93fceab",
+    "basis_size": 18,
+    "retained_states_per_record": 17,
+    "records": 5,
+    "refusal": {
+      "category": "HamiltonIO.siesta.wfsx.IncompleteSpectrum",
+      "message": "header: require 18 states at every k/spin; remove band/energy filters"
+    },
+    "producer_run_id": "20261030T073812044051Z-scalar_nspin1",
+    "mutation": "omit last band in every native record and correct each state count; no H/S fallback"
+  },
+  "checked_incompleteness_authority": {
+    "script": "/home/hexu/projects/TB2J_dev/worktrees/siesta-wfsx-vault/memnotes/Projects/TB2J/mathdocs/siesta-wfsx-spectral.py",
+    "sha256": "b4a62424de04bf3e5d0f281b8d52b0953b1058e20bc9165f2a698dc3f9a8c8d1",
+    "command": [
+      "/home/hexu/projects/myenvs/mydev/bin/python",
+      "/home/hexu/projects/TB2J_dev/worktrees/siesta-wfsx-vault/memnotes/Projects/TB2J/mathdocs/siesta-wfsx-spectral.py",
+      "--kosmic-json"
+    ],
+    "returncode": 0,
+    "python_version": "3.11.11",
+    "sympy_version": "1.14.0",
+    "result": {
+      "latex": "H_{alt} - H_{obs} = \\left[\\begin{matrix}1 & -1 & -1\\\\-1 & 1 & 1\\\\-1 & 1 & 1\\end{matrix}\\right]",
+      "name": "incomplete_completion_difference",
+      "srepr": "Equality(MatAdd(MatrixSymbol(Str('H_alt'), Integer(3), Integer(3)), MatMul(Integer(-1), MatrixSymbol(Str('H_obs'), Integer(3), Integer(3)))), ImmutableDenseMatrix([[Integer(1), Integer(-1), Integer(-1)], [Integer(-1), Integer(1), Integer(1)], [Integer(-1), Integer(1), Integer(1)]]))"
+    },
+    "executed_assertions": "derive(): identical supplied partial generalized eigenpairs permit different full Hamiltonians and spin vertices; the truncated Green function differs from the full resolvent because a pole is omitted",
+    "limit": "A non-square coefficient spectrum cannot identify the missing operators. No partial-band exchange mode is offered."
+  }
+}

@@ -320,6 +320,103 @@ Original fixtures are read-only. These are same-mesh equivalence checks, not
 performance or mesh-convergence measurements.
 
 
+Performance, mesh refinement and incomplete spectra
+---------------------------------------------------
+
+The source tree provides opt-in scientific commands, not timing tests or a
+partial-band mode. Run them in an environment with the test dependencies and
+the matching HamiltonIO worktree. The following Linux recipe uses the SIESTA
+executable and source checkout used for the retained campaign; replace those
+two paths for another installation::
+
+   export PYTHONPATH="$PWD:../siesta-wfsx-hamiltonio"
+   export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg
+   DATA=$(mktemp -d /tmp/tb2j-wfsx-measurements.XXXXXX)
+   SIESTA=/home/hexu/projects/siesta_dev/siesta/_build/build/Src/siesta
+   SIESTA_SOURCE=/home/hexu/projects/siesta_dev/siesta
+
+   python tests/siesta_wfsx_fixtures/measurement_producer.py \
+       --siesta "$SIESTA" --source-root "$SIESTA_SOURCE" \
+       --output "$DATA/large" --mesh 1 1 81 --repeat-z 20
+   python tests/siesta_wfsx_fixtures/measurement_producer.py \
+       --siesta "$SIESTA" --source-root "$SIESTA_SOURCE" \
+       --output "$DATA/dense" --mesh 1 1 1001
+
+   python tests/siesta_wfsx_fixtures/run_benchmarks.py \
+       --case-dir tests/siesta_wfsx_fixtures/collinear_nspin2_full \
+       --case-dir tests/siesta_wfsx_fixtures/collinear_nspin2_reduced \
+       --case-dir tests/siesta_wfsx_fixtures/noncollinear_nspin4_full \
+       --case-dir "$DATA/large" --case-dir "$DATA/dense" \
+       --work-root "$DATA/benchmark" \
+       --output-json tests/siesta_wfsx_benchmark_observations.json \
+       --output-md tests/wfsx_benchmark_report.md
+
+   python tests/siesta_wfsx_fixtures/run_convergence.py \
+       --siesta "$SIESTA" --source-root "$SIESTA_SOURCE" \
+       --base-mesh 5 --work-root "$DATA/convergence" \
+       --output-json tests/siesta_wfsx_convergence_observations.json \
+       --output-md tests/wfsx_convergence_report.md
+
+   python tests/siesta_wfsx_fixtures/truncation_probe.py \
+       --work-root "$DATA/truncation" \
+       --math-script ../siesta-wfsx-vault/memnotes/Projects/TB2J/mathdocs/siesta-wfsx-spectral.py \
+       --output-json tests/siesta_wfsx_truncation_report.json \
+       --output-md tests/siesta_wfsx_truncation_report.md
+
+The measurement adapter calls the existing Story002 producer workflow.
+It does not replace the immutable, hash-pinned reference fixtures or their
+producer script. Mesh refinements retain the same O2 SZP/PBE/100 K physical
+template and SCF tolerances. The larger named case is an exact 20-fold
+periodic supercell, not a different basis or material.
+
+Native SCF coordinates and weights retain binary precision. Printed ``KP``
+coordinates have only six significant Cartesian digits in this producer.
+Their fractional rounding can exceed the strict matching tolerance in a long
+cell. The adapter certifies every original printed coordinate, weight and
+row ordinal against native values at the printed precision, then supplies
+a high-precision standard-KP supplement to the unchanged same-run oracle.
+It preserves the original file and records this provenance. It never widens
+the ``1e-8`` native coordinate tolerance to accommodate text rounding.
+
+On even meshes SIESTA's irreducible set keeps both time-reversal partners
+of a zone-boundary orbit as separate half-weight SCF rows and records. The
+retained fixture oracle requires one canonical class per match, so the
+adapter merges each exact partner pair into one row with summed weight in
+its certified KP, EIG and fold-map representative supplements. It verifies
+the partners' weights are equal and their EIG columns agree within the
+unchanged energy tolerance, checks the occupation sum is invariant, and
+retains and hashes every original SIESTA row. SIESTA's own SCF point count
+is reported unmerged.
+
+Benchmarks use fresh single-process workers and identical complete spectra,
+contours and Green modes. Cold-cache labels mean per-input
+``POSIX_FADV_DONTNEED`` advice where available, not guaranteed global eviction.
+Warm-cache labels mean an immediately repeated fresh process on the same
+inputs. Ordinary preparation retains its normal in-memory storage; WFSX
+uses mandatory disk-backed factors in owned native temporary storage outside
+the vault. The reports distinguish those policies. Peak RSS is the worker's
+process-lifetime high-water mark, including imports, in documented units;
+it is not an isolated matrix-allocation measurement. The committed JSON
+report keeps per-case timing, eigensolver, RSS, disk and equivalence
+verdicts with the requested quadrature summarized per case; full-precision
+exchange tensors and full point grids exist only in each pair's scratch
+``results.json``.
+
+Mesh refinement is separate from same-mesh equivalence. The convergence
+command generates ``5x5x5``, ``10x10x10`` and ``15x15x15`` native calculations,
+compares every aligned tensor element and reports both successive changes.
+The criteria remain a maximum change of ``0.01 meV`` and at most ``1%`` for
+elements above ``0.1 meV``. Actual quadratures are reported separately from
+the existing odd-coerced R-list mesh. An unconverged verdict remains
+unconverged and requires explicit decisions before changing the protocol.
+
+The truncation command creates valid native 17-state records for the
+18-orbital reference and observes ``IncompleteSpectrum`` before streaming.
+It also executes the unchanged symbolic authority's missing-pole and
+unobserved-operator counterexamples. A partial spectrum cannot identify the
+full magnetic operators; no partial-band exchange result is substituted.
+
+
 Collinear calculation without SOC
 --------------------------------------
 Let's start from the example of BCC Fe. The input files used can be found in the examples/Siesta/bccFe directory. 
