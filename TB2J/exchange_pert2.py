@@ -792,5 +792,6 @@ class ExchangePert2(ExchangeNCL):
             # NJT_ddict=None,
             # bilinear_Jdict=None,
             # biquadratic_Jdict=self.B,
+            description=getattr(self, "description", None),
         )
         output.write_all(path=path)

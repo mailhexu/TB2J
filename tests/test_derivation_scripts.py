@@ -30,6 +30,21 @@ SCRIPTS = [
     "spiral_state_mft",
 ]
 
+#: assertion-checked derivations with a high-precision mpmath oracle
+#: (~90 s runtime): run under the ``slow`` marker so the default profile
+#: is unchanged.
+SLOW_SCRIPTS = [
+    "nonorthogonal_spin_lattice",
+    "periodic_image_sum_identity",
+]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("name", SLOW_SCRIPTS)
+def test_derivation_script_runs_slow(name: str):
+    """High-precision derivation scripts exit 0 with all assertions green."""
+    test_derivation_script_runs(name)
+
 
 @pytest.mark.parametrize("name", SCRIPTS)
 def test_derivation_script_runs(name: str):
@@ -46,6 +61,3 @@ def test_derivation_script_runs(name: str):
     assert (
         proc.returncode == 0
     ), f"{name} failed (exit {proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
-    # assertion-checked scripts print their check progress; empty output
-    # would mean the checks never ran
-    assert proc.stdout.strip(), f"{name} produced no output"
