@@ -165,6 +165,7 @@ request a best-effort calculation.
       "allOf": [{"contains": {"const": "AC-003"}}, {"contains": {"const": "AC-005"}}, {"contains": {"const": "AC-007"}}]
     },
     "requires_plusu": {"type": "boolean"},
+    "raw_response_only": {"type": "boolean", "const": true},
     "gate_reports": {"type": "array", "items": {"type": "string"}},
     "displacement": {
       "type": "object",
@@ -459,7 +460,7 @@ API diagnostics retain their stable reason identifiers:
 | `incompatible_ensemble` | Use one matched producer ensemble across response and consumed verdicts. |
 | `uncertified_plusu` | Supply matching AC-008 XC+Hubbard certification through the supported Python API; this CLI cannot ingest it. |
 | `failed_gate` | Resolve and rerun the named gate; a supplied failure remains a refusal. |
-| `non_heisenberg_compatible_response` | Obtain an AC-007 compatible, identifiable mapping; the CLI has no raw-only exchange escape. |
+| `non_heisenberg_compatible_response` | Obtain an AC-007 compatible, identifiable mapping, or run `raw_response_only: true` for the uncertified-exchange diagnostic export. |
 | `uncertified_displacement` | Supply the matching executed AC-009 chain and supported displacement gauge. |
 
 When reached after earlier audits/verdicts, an explicitly failed AC-008 report
@@ -470,13 +471,26 @@ errors have actionable CLI diagnostics and need not be API refusal classes.
 Neither a missing report nor a boolean pass flag can stand in for the required
 producer-bound certification.
 
+## Diagnostic raw-response mode
+
+`raw_response_only: true` (optional, boolean-true only) publishes the preserved
+raw response, its convergence evidence, the executed gate verdicts and the
+mapping diagnostics **without a certified exchange object**: no `SpinIO` pickle
+is written and the export is labeled `uncertified_exchange_absent`. Fitted
+coefficients in the mapping are diagnostic, not certified exchange parameters.
+Use this mode when a single-reference mapping is structurally non-identifiable
+or when preserving an adverse gate result. Failed verdicts remain visible in
+provenance; they cannot certify exchange. Input-digest, operator-provenance and
+ensemble-consistency checks still apply. Omit the key for the certified chain,
+where failed consumed verdicts refuse publication; `false` is refused.
+
 ## Artifacts and reproducibility
 
 A successful directory contains:
 
 | Artifact | Meaning |
 | --- | --- |
-| `TB2J.pickle` | Actual `SpinIO.write_pickle` output, reloaded and validated before publication. Certified metadata travels in `debug_dict`. |
+| `TB2J.pickle` | Actual `SpinIO.write_pickle` output, reloaded and validated before publication. Certified metadata travels in `debug_dict`. Absent in `raw_response_only` mode, which publishes no exchange object. |
 | `provenance.json` | The API export metadata except tuple-keyed `spinio_kwargs`, plus the CLI identity record. Contains raw response, mapping conventions/residuals/identifiability, units, reference and vertex provenance, ensemble, convergence evidence and consumed verdicts; optional displacement records retain their gauge. |
 | `run.json` | Actual UTC run timestamp and the output-artifact SHA-256 record, separate from scientific reproducibility identity. |
 
@@ -501,7 +515,8 @@ Its additional `cli` object contains:
 Canonical JSON uses sorted keys, compact separators and no non-finite numbers.
 Actual timestamps are retained; they are not replaced by a fixed time to make
 hashes look stable. `run.json` contains `created_utc` and `output_sha256`, a
-filename-to-byte-digest mapping for `TB2J.pickle` and `provenance.json`.
+filename-to-byte-digest mapping for the published artifacts
+(`provenance.json` alone in `raw_response_only` mode).
 Artifact-byte hashes, including the timestamp-bearing pickle and provenance,
 are integrity checks, **not** the timestamp-independent scientific identity.
 

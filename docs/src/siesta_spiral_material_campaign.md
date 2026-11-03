@@ -60,15 +60,35 @@ tb2j-siesta-spiral MANIFEST --output NEW_DIR
 
 The CLI itself requires a new output directory and publishes a validated directory containing `TB2J.pickle`, `provenance.json`, and `run.json`. The driver additionally preserves each command's exact output streams as `<case>.stdout.txt` and `<case>.stderr.txt` under the output root and writes `campaign_report.json` only after all cases succeed and the provenance reports validate. CLI failures, missing outputs, invalid JSON, missing report fields, or absent source inputs fail closed; there is no fallback report or fabricated result.
 
+With `export_mode: "raw_response_only"` declared in `campaign_plan.json` (and
+`raw_response_only: true` in each manifest), the CLI publishes the diagnostic
+raw-response export instead: `provenance.json` and `run.json` labeled
+`uncertified_exchange_absent`, no `TB2J.pickle`. The driver accepts exactly the
+declared mode — a plan that does not declare it still requires
+`certified_chain` exports — and the report records the mode. This is the
+recorded path for the CrI3 anchor, whose 8-site single-reference mapping is
+structurally non-identifiable (28 pairs × 9 parameters exceed the 160
+single-reference equations); the campaign then demonstrates response
+convergence and derivative agreement without claiming exchange parameters.
+
 The aggregate report retains each manifest, producer declaration, input digest, settings digest, code revision and content digest, and CLI `reproducibility_sha256`. It builds numerical ladders using `TB2J.interfaces.siesta_spiral_campaign`; raw mapping residual records have a separate `mapping_residuals` section. Anchor AC-005 and AC-009 verdicts are grouped under `derivative_agreement`, outside the convergence ladders. Run outputs are immutable evidence; reproduce into a different output root to compare the CLI timestamp-independent scientific reproducibility hashes.
+
+If all four CLI directories and output streams exist but aggregate assembly
+failed, use `--collect-only --output-root EXISTING_ROOT`. This reads the saved
+outputs through the same manifest, input-digest, artifact-hash and export-mode
+checks, then writes only a missing `campaign_report.json`. It never reruns the
+CLI or replaces a report. Equivalent repeated AC-005 verdicts are accepted
+after completing a missing ensemble declaration from the raw response;
+conflicting records are refused. AC-009 may identify itself with
+`acceptance_criterion` rather than `gate`.
 
 ## Derivative evidence versus numerical convergence
 
-AC-005 is the response's finite-rotation cross-check against the analytic response. AC-009 is the declared central displacement/vertex-derivative validation. The campaign keeps both under the anchor's `derivative_agreement` section, with gate records retained as emitted by the CLI. Their agreement criteria and units are not basis, grid, k-mesh, or contour-convergence tolerances; one does not imply another. The displaced producer references move only atom 3 (I) in z by ±0.05 Angstrom (= ±0.094486306231288508 Bohr = ±0.0025 fractional z in the 20 Angstrom cell). The CLI records the manifest-declared `periodic-image-sum` gauge. This page makes no AC-005 or AC-009 pass claim.
+AC-005 is the response's finite-rotation cross-check against the analytic response. AC-009 is the declared central displacement/vertex-derivative validation. The campaign keeps both under the anchor's `derivative_agreement` section, with gate records retained as emitted by the CLI. Their agreement criteria and units are not basis, grid, k-mesh, or contour-convergence tolerances; one does not imply another. The displaced producer references move only atom 3 (I) in z by ±0.05 Angstrom (= ±0.094486306231288508 Bohr = ±0.0025 fractional z in the 20 Angstrom cell). The CLI records the manifest-declared `periodic-image-sum` gauge. The observed derivative verdicts are reported separately below.
 
 The response core's producer and rotated H(k) pencil checks use the H-only absolute tolerance `1e-5 eV`. Overlap S(k) remains at an absolute `1e-8` dimensionless limit, and response vertices/matrices remain at absolute `1e-8 eV`. Separately, the independent fixture eigenvalue-oracle pencil gate (`PENCIL_HERMITICITY_REL_TOL`) retains the scale-aware bound `1e-8 * max(1, max(abs(matrix)))`; this relative oracle gate does not govern response-core checks. No matrix is symmetrized to satisfy a gate; a violation is refused. These checks remain independent of campaign convergence budgets and derivative agreement.
 
-The contour/eigenbasis identity budget is the user-approved absolute `1e-6 eV`. The accepted raw-H asymmetry produces a small, node-independent representation mismatch between the eigenbasis and resolvent evaluations (measured `1.0e-7 eV/rad^2` on the anchor); it is recorded in every response as `contour_vs_band_max_abs` and refused only above `1e-6 eV`. The campaign manifests declare `margin_ev: 0.5` (below gap/2 in every case); the original 0.1 eV margin produced genuine flat-ellipse quadrature error (`1.86e-02 eV`) that is preserved as refusal diagnostics, not reinterpreted.
+The contour/eigenbasis identity budget is the user-approved absolute `1e-6 eV`. The accepted raw-H asymmetry produces a small, node-independent representation mismatch between the eigenbasis and resolvent evaluations (an earlier anchor diagnostic measured a `1.0e-7 eV/rad^2` floor); it is recorded in every response as `contour_vs_band_max_abs` and refused only above `1e-6 eV`. The campaign manifests declare `margin_ev: 0.5` (below gap/2 in every case); the original 0.1 eV margin produced genuine flat-ellipse quadrature error (`1.86e-02 eV`) that is preserved as refusal diagnostics, not reinterpreted.
 
 ## Story-006 partition sensitivity; Story-007 limitation
 
@@ -80,6 +100,31 @@ The contour/eigenbasis identity budget is the user-approved absolute `1e-6 eV`. 
 | `I1_per_atom_vs_grouped_ligands` | `per_atom_ligands`: 0.08678934250520073; `grouped_ligands`: 0.23366871700093303 | 0.2169531731327686 |
 
 These values document sensitivity to the declared spatial partition; they are neither response convergence errors nor evidence that the audit vertex is valid. The partition report states that its mapping residual is not computed there: AC-007 residuals belong to the CLI run and are retained separately as raw mapping diagnostics. The **Story-007 audit-vertex check was not invoked because Story 007 was user-skipped/unimplemented**. Do not infer vertex-audit availability, AC-007 success, material validation, or convergence from this report.
+
+## Observed campaign outcome
+
+The four raw-response CLI runs completed. Their immutable outputs and the
+assembled report are under `cli_outputs/` in the evidence directory.
+
+| Axis | Adjacent change | Fixed budget | Verdict |
+| --- | ---: | ---: | --- |
+| DZP → TZP basis | 0.26100980954812303 relative | 0.05 | Fail |
+| 200 → 300 Ry grid | 0.0005012254747102438 relative | 0.02 | Pass |
+| 4×4×1 → 8×8×1 k mesh | 0.0007786521084600407 relative | 0.02 | Pass |
+| 512 → 1024 contour nodes | 0.0003668451516096738 eV/rad² | 0.0001 eV/rad² | Fail |
+
+Anchor AC-005 passes with maximum curvature mismatch
+`7.386424854881161e-7 eV/rad²`; AC-009 passes with maximum vertex-derivative
+deviation `4.163336342344337e-16 eV/Angstrom` in the declared
+`periodic-image-sum` gauge. These are separate derivative/pipeline checks.
+All four mappings are fit-compatible but determine **zero of 28 pair J's**.
+Neither fit compatibility nor derivative agreement establishes material
+convergence or identifiable exchange.
+
+The campaign therefore does **not** provide the converged, validated material
+example required by AC-010. Basis and contour refinement remain necessary;
+no budget was relaxed, no failed rung was discarded, and Story 022 remains
+open rather than claiming material validation.
 
 ## Source records
 

@@ -365,6 +365,45 @@ def test_analytic_pencil_exports_known_ordered_pair_exchange(
     assert loaded.get_J(1, 0, (0, 0, 0)) == pytest.approx(-1 / 96, abs=1e-8)
 
 
+def test_raw_response_only_diagnostic_export_publishes_uncertified_response(
+    tmp_path, analytic_manifest
+):
+    analytic_manifest["raw_response_only"] = True
+    manifest_path = _write_manifest(tmp_path, analytic_manifest)
+    output = tmp_path / "diagnostic-result"
+    result = _run_cli(manifest_path, "--output", output)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in output.iterdir()) == [
+        "provenance.json",
+        "run.json",
+    ]
+    provenance = json.loads((output / "provenance.json").read_text())
+    run = json.loads((output / "run.json").read_text())
+    assert provenance["export_kind"] == "raw_response_only"
+    assert provenance["labels"]["uncertified_exchange_absent"] is True
+    assert "spinio_kwargs" not in provenance
+    assert provenance["raw_response"]["curvature"]
+    assert provenance["mapping"]["identifiability"]
+    assert provenance["convergence_evidence"]["finite_rotation_cross_check"]["passed"]
+    cli = provenance["cli"]
+    assert cli["manifest_sha256"] == _sha256(manifest_path)
+    _assert_digest(cli["reproducibility_sha256"])
+    assert run["output_sha256"] == {
+        "provenance.json": _sha256(output / "provenance.json")
+    }
+    assert "uncertified exchange absent" in result.stdout
+
+
+def test_raw_response_only_false_is_refused(tmp_path, analytic_manifest):
+    analytic_manifest["raw_response_only"] = False
+    manifest_path = _write_manifest(tmp_path, analytic_manifest)
+    output = tmp_path / "refused"
+    result = _run_cli(manifest_path, "--output", output)
+    assert result.returncode != 0
+    assert "raw_response_only" in result.stderr
+    assert not output.exists()
+
+
 def test_analytic_hsx_displacement_exports_periodic_image_sum_gauge(
     tmp_path, analytic_manifest
 ):

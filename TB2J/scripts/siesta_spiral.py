@@ -67,8 +67,13 @@ def _validate_manifest(manifest):
             "requires_plusu",
             "producer",
         ),
-        ("displacement", "gate_reports"),
+        ("displacement", "gate_reports", "raw_response_only"),
     )
+    if "raw_response_only" in manifest and manifest["raw_response_only"] is not True:
+        raise WorkflowRefusal(
+            "raw_response_only: supply true for the uncertified-exchange "
+            "diagnostic export, or omit the key for the certified chain"
+        )
     if manifest["version"] != 1:
         raise WorkflowRefusal("manifest version: only version 1 is supported")
     _keys(
@@ -533,7 +538,13 @@ def _pipeline(manifest, paths):
         ac009_verdict=ac009,
         gate_verdicts=gates,
         requires_plusu=manifest["requires_plusu"],
+        raw_response_only=manifest.get("raw_response_only", False),
     )
+    if manifest.get("raw_response_only", False):
+        # Diagnostic export: keep the mapping diagnostics that document
+        # identifiability; the export stays labeled uncertified_exchange_absent.
+        result["mapping"] = mapping.to_dict()
+        return result, atoms, spinat, charges, indices
     if not result["spinio_kwargs"]["exchange_Jdict"]:
         raise WorkflowRefusal(
             "AC-007: no identifiable signed exchange pairs; supply certified reference directions"
@@ -601,7 +612,9 @@ def _run(manifest_path, output):
     with tempfile.TemporaryDirectory(prefix="tb2j-spiral-inputs-") as input_directory:
         paths = _snapshot_inputs(manifest, manifest_path.parent, Path(input_directory))
         result, atoms, spinat, charges, indices = _pipeline(manifest, paths)
-    kwargs = result.pop("spinio_kwargs")
+    raw_only = manifest.get("raw_response_only", False)
+    if not raw_only:
+        kwargs = result.pop("spinio_kwargs")
     result["cli"] = {
         "manifest_sha256": _sha256(data),
         "input_digests": {
@@ -619,6 +632,27 @@ def _run(manifest_path, output):
     del stable["provenance"]["created_utc"]
     del stable["provenance"]["content_sha256"]
     result["cli"]["reproducibility_sha256"] = _sha256(_canonical(stable))
+    if raw_only:
+        with tempfile.TemporaryDirectory(
+            prefix=f".{output.name}-", dir=output.parent
+        ) as stage_name:
+            stage = Path(stage_name) / "publish"
+            stage.mkdir()
+            (stage / "provenance.json").write_bytes(_canonical(result) + b"\n")
+            run = {
+                "created_utc": datetime.now(timezone.utc).isoformat(),
+                "output_sha256": {
+                    name: _sha256((stage / name).read_bytes())
+                    for name in ("provenance.json",)
+                },
+            }
+            (stage / "run.json").write_bytes(_canonical(run) + b"\n")
+            _publish(stage, output)
+        print(
+            f"Raw response diagnostic export (uncertified exchange absent): {output} "
+            f"(reproducibility_sha256={result['cli']['reproducibility_sha256']})"
+        )
+        return
     kwargs["debug_dict"] = result
     spinio = SpinIO(
         atoms=atoms, spinat=spinat, charges=charges, index_spin=indices, **kwargs
