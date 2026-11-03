@@ -313,7 +313,7 @@ AC009_ENSEMBLE_BOOKKEEPING = {
     ),
     "electronic_branch": (
         "central finite differences (branch='central'); the derivative "
-        "ladder is the pinned +/-0.05 Bohr displaced-SCF pair"
+        "ladder step is the pattern-declared step_bohr"
     ),
     "perturbation_definition": (
         "displacement of the declared atom along the declared Cartesian "
@@ -485,6 +485,11 @@ def run_ac009_validation(
                 worst = (key, i)
     status = "pass" if max_deviation <= tolerance else "fail"
     geom = derivatives.reference_geometry
+    ensemble = dict(AC009_ENSEMBLE_BOOKKEEPING)
+    ensemble["electronic_branch"] = (
+        "central finite differences (branch='central'); the derivative "
+        f"ladder is the +/-{pattern.step_bohr:g} Bohr displaced-SCF pair"
+    )
     verdict = {
         "acceptance_criterion": "AC-009",
         "status": status,
@@ -514,7 +519,7 @@ def run_ac009_validation(
             "displaced_reference_route": route_b_gauge,
             "requested": gauge,
         },
-        "ensemble": dict(AC009_ENSEMBLE_BOOKKEEPING),
+        "ensemble": ensemble,
         "agreement": agreement,
         "geometry": {
             "reference_digests": tuple(derivatives.reference_digests),

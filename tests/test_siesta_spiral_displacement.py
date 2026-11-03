@@ -307,6 +307,43 @@ def test_sparse_pattern_mismatch_refused(synthetic_provider, synthetic_bundle):
         assemble_onto_bundle(synthetic_bundle, trim, pattern)
 
 
+def test_extra_key_nonzero_overlap_derivative_refused(
+    synthetic_provider, synthetic_bundle
+):
+    """An out-of-reference key with negligible dH but a genuine dS must
+    refuse: checking dH alone would let the restriction silently drop the
+    physical overlap response (story-022 STD-002)."""
+    pattern, derivatives = synthetic_provider
+    extra = (0, 1, (1, 0, 0))
+    assert extra not in synthetic_bundle.sparse
+    drifted = replace(
+        derivatives,
+        dH={**derivatives.dH, extra: (0.0, 0.0, 0.0, 0.0)},
+        dS={**derivatives.dS, extra: 0.5},
+    )
+    with pytest.raises(SparsePatternMismatch) as exc:
+        assemble_onto_bundle(synthetic_bundle, drifted, pattern)
+    msg = str(exc.value)
+    assert "overlap derivative" in msg and str(extra) in msg
+
+
+def test_extra_key_negligible_both_payloads_still_tolerated(
+    synthetic_provider, synthetic_bundle
+):
+    """Numerical-zero extra keys stay tolerated in BOTH payloads: only the
+    non-negligible dS extension is new."""
+    pattern, derivatives = synthetic_provider
+    extra = (0, 1, (1, 0, 0))
+    drifted = replace(
+        derivatives,
+        dH={**derivatives.dH, extra: (1e-13, 1e-13, 0.0, 0.0)},
+        dS={**derivatives.dS, extra: 1e-13},
+    )
+    assembled = assemble_onto_bundle(synthetic_bundle, drifted, pattern)
+    assert extra not in assembled.derivatives.dH
+    assert extra not in assembled.derivatives.dS
+
+
 def test_convention_drift_refused(synthetic_provider, synthetic_bundle):
     pattern, derivatives = synthetic_provider
     shifted_bundle = replace(synthetic_bundle, fermi_shift="sisl_-Ef")
@@ -462,6 +499,79 @@ def test_fd_provider_refuses_divergent_displaced_patterns(synthetic_bundle):
     )
     with pytest.raises(SparsePatternMismatch):
         provider.provide()
+
+
+def _variant_sile(z_atom1_bohr, *, missing=(), zeroed=()):
+    """A displaced fake sile omitting CSR keys or storing them as zeros."""
+    h, s = {}, {}
+    for key, base in _BASE_H.items():
+        if key in missing:
+            continue
+        if key in zeroed:
+            h[key] = (0.0, 0.0, 0.0, 0.0)
+            s[key] = (0.0, 0.0, 0.0, 0.0)
+            continue
+        h[key] = tuple(
+            -(base[i] + ALPHA[key][i] * z_atom1_bohr * BOHR_TO_ANG)
+            if i == 3
+            else (base[i] + ALPHA[key][i] * z_atom1_bohr * BOHR_TO_ANG)
+            for i in range(4)
+        )
+        s[key] = (
+            _BASE_S[key][0] + BETA[key] * z_atom1_bohr * BOHR_TO_ANG,
+            0.0,
+            0.0,
+            0.0,
+        )
+    return _FakeHsxFourComponent(CELL, _positions(z_atom1_bohr), SC_OFF, h, s, 0.0)
+
+
+def _loaded_bundle(sile):
+    from TB2J.interfaces.siesta_spiral_hubbard import _bundle_from_hs_geometry
+
+    b = _bundle_from_hs_geometry(sile, "synthetic", "")
+    return replace(
+        b, metadata=dict(b.metadata, displacement_gauge="periodic-image-sum")
+    )
+
+
+def test_fd_provider_completes_negligible_reference_only_keys():
+    """A reference key whose stored value is a numerical zero may be
+    omitted from BOTH displaced SCFs (SIESTA stores zeros by omitting the
+    CSR entry); the record must still span the reference pattern with
+    exact zeros so vertex consumers never see a missing key."""
+    key = (1, 1, (0, 0, 0))
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
+    ref = _loaded_bundle(_variant_sile(0.0, zeroed=(key,)))
+    provider = DisplacedReferenceFDProvider(
+        pattern=pattern,
+        plus_sile=_variant_sile(+0.05, missing=(key,)),
+        minus_sile=_variant_sile(-0.05, missing=(key,)),
+        reference_bundle=ref,
+        reference_fermi_ev=-4.5,
+    )
+    derivatives = provider.provide()
+    assert key in derivatives.dH and key in derivatives.dS
+    assert derivatives.dH[key] == (0.0, 0.0, 0.0, 0.0)
+    assert derivatives.dS[key] == 0.0
+
+
+def test_fd_provider_refuses_nonnegligible_reference_only_keys(synthetic_bundle):
+    """The same omission when the reference key carries real values is a
+    genuinely different setup and must keep refusing (drift gate)."""
+    key = (1, 1, (0, 0, 0))
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=0.05)
+    provider = DisplacedReferenceFDProvider(
+        pattern=pattern,
+        plus_sile=_variant_sile(+0.05, missing=(key,)),
+        minus_sile=_variant_sile(-0.05, missing=(key,)),
+        reference_bundle=synthetic_bundle,
+        reference_fermi_ev=-4.5,
+    )
+    with pytest.raises(SparsePatternMismatch) as exc:
+        provider.provide()
+    msg = str(exc.value)
+    assert str(key) in msg
 
 
 # ---------------------------------------------------------------------------

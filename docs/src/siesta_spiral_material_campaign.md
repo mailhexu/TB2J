@@ -68,19 +68,23 @@ declared mode — a plan that does not declare it still requires
 `certified_chain` exports — and the report records the mode. This is the
 recorded path for the CrI3 anchor, whose 8-site single-reference mapping is
 structurally non-identifiable (28 pairs × 9 parameters exceed the 160
-single-reference equations); the campaign then demonstrates response
-convergence and derivative agreement without claiming exchange parameters.
+single-reference equations); the campaign records response-convergence
+measurements and derivative checks without claiming validated exchange.
 
 The aggregate report retains each manifest, producer declaration, input digest, settings digest, code revision and content digest, and CLI `reproducibility_sha256`. It builds numerical ladders using `TB2J.interfaces.siesta_spiral_campaign`; raw mapping residual records have a separate `mapping_residuals` section. Anchor AC-005 and AC-009 verdicts are grouped under `derivative_agreement`, outside the convergence ladders. Run outputs are immutable evidence; reproduce into a different output root to compare the CLI timestamp-independent scientific reproducibility hashes.
 
 If all four CLI directories and output streams exist but aggregate assembly
 failed, use `--collect-only --output-root EXISTING_ROOT`. This reads the saved
-outputs through the same manifest, input-digest, artifact-hash and export-mode
-checks, then writes only a missing `campaign_report.json`. It never reruns the
-CLI or replaces a report. Equivalent repeated AC-005 verdicts are accepted
-after completing a missing ensemble declaration from the raw response;
-conflicting records are refused. AC-009 may identify itself with
-`acceptance_criterion` rather than `gate`.
+outputs through the same manifest, input-byte SHA-256, artifact-hash and
+export-mode checks, then atomically publishes only a missing
+`campaign_report.json` with no-replace semantics. It never reruns the CLI or
+replaces a report. Raw case directories must contain exactly `provenance.json`
+and `run.json`; the latter must declare exactly the provenance payload hash.
+Equivalent repeated AC-005 verdicts are accepted after completing a missing
+ensemble declaration from the raw response. Conflicting named verdicts are
+refused in every case, including refined cases. AC-009 may identify itself
+with `acceptance_criterion` rather than `gate`. Fresh execution reserves all
+stdout/stderr paths exclusively before starting the first CLI command.
 
 ## Derivative evidence versus numerical convergence
 
@@ -106,17 +110,29 @@ These values document sensitivity to the declared spatial partition; they are ne
 The four raw-response CLI runs completed. Their immutable outputs and the
 assembled report are under `cli_outputs/` in the evidence directory.
 
-| Axis | Adjacent change | Fixed budget | Verdict |
+| Axis | Adjacent change | Fixed budget | Stored report verdict |
 | --- | ---: | ---: | --- |
 | DZP → TZP basis | 0.26100980954812303 relative | 0.05 | Fail |
 | 200 → 300 Ry grid | 0.0005012254747102438 relative | 0.02 | Pass |
 | 4×4×1 → 8×8×1 k mesh | 0.0007786521084600407 relative | 0.02 | Pass |
 | 512 → 1024 contour nodes | 0.0003668451516096738 eV/rad² | 0.0001 eV/rad² | Fail |
 
+The relative values above use the implemented tensor-wide maximum
+normalization, not the maximum of component-relative changes. Its scientific
+acceptance interpretation remains unresolved. For example, k-mesh refinement
+changes `Cr1.x/Cr2.y` from `0.000821216236404866` to
+`0.0008600953772361354 eV/rad²` (4.520329% component-relative), despite the
+stored matrix-normalized `Pass`. Do not infer componentwise 2% convergence.
+
 Anchor AC-005 passes with maximum curvature mismatch
 `7.386424854881161e-7 eV/rad²`; AC-009 passes with maximum vertex-derivative
 deviation `4.163336342344337e-16 eV/Angstrom` in the declared
 `periodic-image-sum` gauge. These are separate derivative/pipeline checks.
+The original AC-009 `ensemble.electronic_branch` text incorrectly says
+`+/-0.05 Bohr`. The actual pattern, measured geometry and HSX input pair use
+`+/-0.09448630623128851 Bohr` (`+/-0.05 Angstrom`); this is stale descriptive
+wording, not the displacement used in the calculation. Original artifacts
+remain unchanged. Future AC-009 descriptions are generated from `step_bohr`.
 All four mappings are fit-compatible but determine **zero of 28 pair J's**.
 Neither fit compatibility nor derivative agreement establishes material
 convergence or identifiable exchange.

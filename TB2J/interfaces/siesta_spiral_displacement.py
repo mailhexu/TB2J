@@ -111,7 +111,7 @@ def validate_reference_pattern_drift(reference_bundle, displaced_bundle, label):
     for key in sorted(displaced_keys - reference_keys):
         if not _entry_within_drift(displaced_bundle, key):
             raise SparsePatternMismatch(
-                f"route (b): the {label} displaced HSX export stores key "
+                f"the {label} displaced HSX export stores key "
                 f"{key} outside the reference bundle's H/S pattern with a "
                 "non-negligible value; the pair is not the reference's "
                 "displacement"
@@ -119,7 +119,7 @@ def validate_reference_pattern_drift(reference_bundle, displaced_bundle, label):
     for key in sorted(reference_keys - displaced_keys):
         if not _entry_within_drift(reference_bundle, key):
             raise SparsePatternMismatch(
-                f"route (b): the {label} displaced HSX export is missing "
+                f"the {label} displaced HSX export is missing "
                 f"reference key {key}, which carries a non-negligible "
                 "value; the displaced export does not cover the reference"
             )
@@ -530,6 +530,14 @@ class DisplacedReferenceFDProvider:
             )
         self._check_signed_displacements(plus_bundle, minus_bundle)
         plus_bundle, minus_bundle = complete_displaced_pair(plus_bundle, minus_bundle)
+        # Complete validated reference zeros before vertex consumers index them.
+        reference_keys = set(self.reference_bundle.sparse)
+        for label, displaced_bundle in (("+h", plus_bundle), ("-h", minus_bundle)):
+            validate_reference_pattern_drift(
+                self.reference_bundle, displaced_bundle, label
+            )
+        plus_bundle = complete_to_keys(plus_bundle, reference_keys)
+        minus_bundle = complete_to_keys(minus_bundle, reference_keys)
         h_step_ang = self.pattern.step_bohr * BOHR_TO_ANG_
         dH = {
             key: tuple(
@@ -853,6 +861,13 @@ def assemble_onto_bundle(bundle, derivatives, pattern):
                 "the displaced data carry sparse keys outside the bundle's "
                 f"H/S pattern (e.g. {key}) with non-negligible derivative "
                 "values; refusing the union of mismatched patterns"
+            )
+        # Restriction must not silently drop a physical overlap response.
+        if abs(derivatives.dS.get(key, 0.0)) > SPARSITY_DRIFT_REL_TOL * 100.0:
+            raise SparsePatternMismatch(
+                "the displaced data carry sparse keys outside the bundle's "
+                f"H/S pattern (e.g. {key}) with a non-negligible overlap "
+                "derivative; refusing to silently drop the overlap response"
             )
     for key in sorted(bundle_keys - record_keys):
         if not _entry_within_drift(bundle, key):

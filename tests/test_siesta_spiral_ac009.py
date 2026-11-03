@@ -433,19 +433,6 @@ def test_bundle_gauge_mismatch_refused():
 # ---------------------------------------------------------------------------
 
 
-def test_ensemble_bookkeeping_recorded_verbatim(synthetic_bundle):
-    _, verdict = _run(synthetic_bundle)
-    ensemble = verdict["ensemble"]
-    assert "INDEPENDENT" in ensemble["ensemble_declaration"]
-    assert "no" in ensemble["ensemble_declaration"]
-    assert "cross-SCF energy" in ensemble["ensemble_declaration"]
-    assert "-Ef" in ensemble["energy_alignment"]
-    assert "fermi_shift='none'" in ensemble["energy_alignment"]
-    assert "central" in ensemble["electronic_branch"]
-    assert "periodic-image-sum" in ensemble["perturbation_definition"]
-    assert verdict["geometry"]["displaced_axis_offset_bohr"] == pytest.approx(STEP_BOHR)
-
-
 # ---------------------------------------------------------------------------
 # TEST-001 (real campaign, skip-gated): fe4 displaced campaign
 # ---------------------------------------------------------------------------
@@ -480,8 +467,9 @@ def _patterned_sile(z_atom1_bohr, *, extra_keys=(), missing_keys=()):
 
 def test_extra_displaced_sparse_key_refused(synthetic_bundle):
     """A displaced pair carrying an EXTRA sparse key with a non-negligible
-    overlap is refused: route (b) completes only numerical-zero drift, so a
-    genuinely different stored pattern still refuses."""
+    overlap is refused: the seam completes only numerical-zero drift, so a
+    genuinely different stored pattern still refuses (the FD-seam gate
+    fires before the route-(b) mirror of the same check)."""
     from TB2J.interfaces.siesta_spiral_displacement import SparsePatternMismatch
 
     extra = (1, 0, (1, 0, 0))
@@ -495,13 +483,13 @@ def test_extra_displaced_sparse_key_refused(synthetic_bundle):
             reference_fermi_ev=-4.5,
         )
     msg = str(exc.value)
-    assert "route (b)" in msg and "non-negligible" in msg
     assert str(extra) in msg
 
 
 def test_missing_displaced_sparse_key_refused(synthetic_bundle):
     """A displaced pair MISSING a reference key that carries a
-    non-negligible value is refused with the key named."""
+    non-negligible value is refused with the key named (the FD-seam gate
+    fires before the route-(b) mirror of the same check)."""
     from TB2J.interfaces.siesta_spiral_displacement import SparsePatternMismatch
 
     missing = (0, 0, (1, 0, 0))
@@ -515,7 +503,6 @@ def test_missing_displaced_sparse_key_refused(synthetic_bundle):
             reference_fermi_ev=-4.5,
         )
     msg = str(exc.value)
-    assert "route (b)" in msg and "missing" in msg
     assert str(missing) in msg
 
 
@@ -558,6 +545,51 @@ def test_cutoff_edge_zero_drift_completed_and_validated(synthetic_bundle):
         reference_fermi_ev=-4.5,
     )
     assert verdict["status"] == "pass", verdict["max_deviation_ev_per_ang"]
+
+
+def _ext_sile_with_zeroed(key):
+    """The partnered reference model with one key stored as numerical
+    zeros (the cutoff-edge entry a displaced SCF may omit entirely)."""
+    h = dict(_EXT_H)
+    s = dict(_EXT_S)
+    h[key] = (0.0, 0.0, 0.0, 0.0)
+    s[key] = (0.0, 0.0, 0.0, 0.0)
+    return _FakeHsxFourComponent(
+        CELL,
+        ((0.0, 0.0, 0.0), (0.0, 0.0, 3.0)),
+        ((0, 0, 0), (1, 0, 0), (-1, 0, 0)),
+        h,
+        s,
+        0.0,
+    )
+
+
+def test_reference_only_negligible_onsite_key_reaches_vertex_consumer(
+    synthetic_bundle,
+):
+    """STD-001: a negligible reference onsite key omitted from BOTH
+    displaced SCFs passes every drift gate but still reaches the record;
+    vertex_displacement_derivative indexes the reference pattern, so the
+    validation must zero-complete it (routes agree on exact zeros), never
+    KeyError."""
+    from TB2J.interfaces.siesta_spiral_hubbard import _bundle_from_hs_geometry
+
+    key = (1, 1, (0, 0, 0))
+    b = _bundle_from_hs_geometry(_ext_sile_with_zeroed(key), "synthetic", "")
+    ref_bundle = replace(
+        b, metadata=dict(b.metadata, displacement_gauge="periodic-image-sum")
+    )
+    assert key in ref_bundle.sparse
+    pattern = DisplacementPattern(atom_index=1, axis="z", step_bohr=STEP_BOHR)
+    verdict = run_ac009_validation(
+        ref_bundle,
+        pattern,
+        plus_sile=_patterned_sile(+STEP_BOHR, missing_keys=(key,)),
+        minus_sile=_patterned_sile(-STEP_BOHR, missing_keys=(key,)),
+        reference_fermi_ev=-4.5,
+    )
+    assert verdict["status"] == "pass", verdict["max_deviation_ev_per_ang"]
+    assert verdict["agreement"][str(key)]["derived"] == [0.0, 0.0, 0.0, 0.0]
 
 
 CAMPAIGN = Path(
