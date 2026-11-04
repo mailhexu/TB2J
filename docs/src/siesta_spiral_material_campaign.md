@@ -110,19 +110,24 @@ These values document sensitivity to the declared spatial partition; they are ne
 The four raw-response CLI runs completed. Their immutable outputs and the
 assembled report are under `cli_outputs/` in the evidence directory.
 
-| Axis | Adjacent change | Fixed budget | Stored report verdict |
+| Axis | Adjacent change | Original budget | Stored report verdict |
 | --- | ---: | ---: | --- |
 | DZP → TZP basis | 0.26100980954812303 relative | 0.05 | Fail |
 | 200 → 300 Ry grid | 0.0005012254747102438 relative | 0.02 | Pass |
 | 4×4×1 → 8×8×1 k mesh | 0.0007786521084600407 relative | 0.02 | Pass |
 | 512 → 1024 contour nodes | 0.0003668451516096738 eV/rad² | 0.0001 eV/rad² | Fail |
 
-The relative values above use the implemented tensor-wide maximum
-normalization, not the maximum of component-relative changes. Its scientific
-acceptance interpretation remains unresolved. For example, k-mesh refinement
-changes `Cr1.x/Cr2.y` from `0.000821216236404866` to
+The user explicitly selected tensor-wide maximum normalization on
+2026-11-04, retaining the existing `1e-12 eV/rad²` denominator floor. It is not
+the maximum of component-relative changes: k-mesh refinement changes
+`Cr1.x/Cr2.y` from `0.000821216236404866` to
 `0.0008600953772361354 eV/rad²` (4.520329% component-relative), despite the
-stored matrix-normalized `Pass`. Do not infer componentwise 2% convergence.
+approved tensor-normalized `Pass`. No componentwise 2% bound is claimed.
+
+The user also accepts the observed basis dependence without requiring
+further basis refinement. The original 5% comparison and failed verdict are
+preserved as diagnostics; this acceptance is not a numerical basis-convergence
+claim.
 
 Anchor AC-005 passes with maximum curvature mismatch
 `7.386424854881161e-7 eV/rad²`; AC-009 passes with maximum vertex-derivative
@@ -137,10 +142,10 @@ All four mappings are fit-compatible but determine **zero of 28 pair J's**.
 Neither fit compatibility nor derivative agreement establishes material
 convergence or identifiable exchange.
 
-The campaign therefore does **not** provide the converged, validated material
-example required by AC-010. Basis and contour refinement remain necessary;
-no budget was relaxed, no failed rung was discarded, and Story 022 remains
-open rather than claiming material validation.
+AC-010 remains open because the contour result still exceeds its absolute
+`0.0001 eV/rad²` budget. Further contour refinement or explicit acceptance of
+that remaining numerical limitation needs a separate scientific decision.
+No original artifact or numerical threshold has been rewritten.
 
 ## Source records
 
