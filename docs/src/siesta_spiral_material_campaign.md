@@ -83,8 +83,19 @@ and `run.json`; the latter must declare exactly the provenance payload hash.
 Equivalent repeated AC-005 verdicts are accepted after completing a missing
 ensemble declaration from the raw response. Conflicting named verdicts are
 refused in every case, including refined cases. AC-009 may identify itself
-with `acceptance_criterion` rather than `gate`. Fresh execution reserves all
-stdout/stderr paths exclusively before starting the first CLI command.
+with `acceptance_criterion` rather than `gate`. Fresh execution exclusively
+reserves sibling `<case>.<stream>.txt.pending` files before the first CLI
+command. Final log names publish atomically without replacement only after
+the CLI returns successfully and the captures are written. Failed captures
+remain as `.pending` diagnostics. Collection refuses any pending capture,
+even when all final log names also exist; reservations are not completion.
+
+Fresh execution and collection acquire an exclusive, nonblocking lock on the
+resolved output directory before inspecting case/log state and hold it through
+report publication. A busy root refuses; different roots remain independent.
+The kernel releases the lock when its descriptor closes, including on
+exceptions or process exit. No lock file or archive-format migration is
+needed. Final log/report publication still refuses competing files.
 
 ## Derivative evidence versus numerical convergence
 
@@ -142,10 +153,12 @@ All four mappings are fit-compatible but determine **zero of 28 pair J's**.
 Neither fit compatibility nor derivative agreement establishes material
 convergence or identifiable exchange.
 
-AC-010 remains open because the contour result still exceeds its absolute
-`0.0001 eV/rad²` budget. Further contour refinement or explicit acceptance of
-that remaining numerical limitation needs a separate scientific decision.
-No original artifact or numerical threshold has been rewritten.
+The user explicitly selected **Accept current accuracy** after being shown
+that the contour change exceeds its original `0.0001 eV/rad²` budget. Together
+with accepted basis dependence, this is campaign-only acceptance with
+disclosed limitations, not strict numerical convergence or a passing verdict
+against either original comparison. No further basis or contour runs are
+requested. Original artifacts and thresholds remain unchanged.
 
 ## Source records
 
