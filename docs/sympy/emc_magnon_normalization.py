@@ -80,6 +80,10 @@ def named_expressions():
     d_z = sp.symbols("D_z", real=True)
     x_native = u + v
     y_native = eta * (u - v)
+    global_spinor = d_z / sp.sqrt(2 * S) * sp.Matrix([
+        [0, (eta - 1) * u + (eta + 1) * v],
+        [(eta + 1) * u + (eta - 1) * v, 0],
+    ])
     expressions = {
         "afm_local_frame_lab_y_annihilation": sp.simplify(eta * y_q),
         "afm_local_frame_plus_nplus": sp.sqrt(2 / S) * annihilation,
@@ -92,6 +96,8 @@ def named_expressions():
         "afm_nambu_operator_local_y": local_y,
         "afm_opposite_frame_lab_y_creation_reverse": sp.conjugate(eta * y_q),
         "fm_hp_nplus_annihilation": sp.sqrt(2 / S) * u,
+        "global_spinor_q": global_spinor,
+        "global_spinor_reverse_adjoint": global_spinor.conjugate().T,
         "native_route_site_x_amplitude": x_native,
         "native_route_site_y_amplitude": y_native,
         "native_route_local_axis_half_splitting": eta * d_z,
@@ -201,6 +207,96 @@ def _assert_native_route_derivation():
     eta = sp.symbols("eta", real=True)
     y_named = eta * (u - v)
     assert sp.simplify(y_named.subs(eta, -1) - y_named.subs(eta, 1)) != 0
+
+
+def _assert_global_spinor():
+    """Check the complete global-basis matrix and its circular slots."""
+    S = sp.symbols("S", positive=True, real=True)
+    u, v = sp.symbols("u v", complex=True)
+    d = sp.symbols("D_z", real=True)
+    sx = sp.Matrix([[0, 1], [1, 0]])
+    sy = sp.Matrix([[0, -sp.I], [sp.I, 0]])
+    plus = sp.Matrix([[0, 1], [0, 0]])
+    minus = plus.T
+    beta, p, p_reverse = sp.symbols("beta p p_reverse", complex=True)
+    alpha = u * beta * p + sp.conjugate(v * beta) * p_reverse
+    alpha_star = sp.conjugate(u * beta) * p_reverse + v * beta * p
+    local_x = (alpha + alpha_star) / sp.sqrt(2 * S)
+    local_y = (alpha - alpha_star) / (sp.I * sp.sqrt(2 * S))
+    for eta in (1, -1):
+        field = d * (eta * (u + v) * sx + (u - v) * sy / sp.I) / sp.sqrt(2 * S)
+        named = named_expressions()["global_spinor_q"].subs({
+            sp.symbols("eta", real=True): eta,
+        })
+        assert sp.simplify(field - named) == sp.zeros(2)
+        coherent_field = d * (eta * local_x * sx + local_y * sy)
+        assert sp.simplify(coherent_field.diff(p) - beta * field) == sp.zeros(2)
+        assert sp.simplify(coherent_field.diff(p_reverse)
+                           - sp.conjugate(beta) * field.conjugate().T) == sp.zeros(2)
+        expected = (d * sp.sqrt(2 / S) * (v * plus + u * minus)
+                    if eta == 1 else
+                    -d * sp.sqrt(2 / S) * (u * plus + v * minus))
+        assert sp.simplify(field - expected) == sp.zeros(2)
+        assert sp.simplify(named_expressions()["global_spinor_reverse_adjoint"].subs({
+            sp.symbols("eta", real=True): eta,
+        }) - field.conjugate().T) == sp.zeros(2)
+
+
+def _finite_global_spinor_oracle():
+    """Fourier-extract exact polar HP rotations, independently of the target."""
+    sx = np.array([[0, 1], [1, 0]], dtype=complex)
+    sy = np.array([[0, -1j], [1j, 0]], dtype=complex)
+    sz = np.diag([1.0, -1.0]).astype(complex)
+    u, v, spin = 0.7 + 0.2j, -0.3 + 0.4j, 2.0
+    phase = np.exp(2j * np.pi * np.arange(8) / 8)
+    eps = 1e-6
+    max_error = max_reverse = max_self_inverse = 0.0
+    min_wrong = float("inf")
+    for eta, d in ((1, 0.7), (1, -0.7), (-1, 0.9), (-1, -0.9)):
+        target = d * (eta * (u + v) * sx + (u - v) * sy / 1j) / np.sqrt(2 * spin)
+        wrong = [
+            d * (eta * (u + v) * sx - (u - v) * sy / 1j) / np.sqrt(2 * spin),
+            d * (eta * u * sx + u * sy / 1j) / np.sqrt(2 * spin),
+            d * ((u + v) * sx + eta * (u - v) * sy / 1j) / np.sqrt(2 * spin),
+        ]
+        # The local/global negative control discriminates the opposite frame.
+        if eta == -1:
+            min_wrong = min(min_wrong, *(float(np.max(np.abs(target - w))) for w in wrong))
+        for beta in (1.0 + 0j, 1j):
+            def fields(sign):
+                matrices = []
+                for p in phase:
+                    alpha = sign * eps * (u * beta * p + np.conjugate(v * beta * p))
+                    radius = abs(alpha)
+                    theta = 2 * np.arcsin(radius / np.sqrt(2 * spin))
+                    x = np.sin(theta) * alpha.real / radius if radius else 0.0
+                    y = np.sin(theta) * alpha.imag / radius if radius else 0.0
+                    matrices.append(d * (eta * x * sx + y * sy + np.cos(theta) * sz))
+                return np.array(matrices)
+            derivative = (fields(1) - fields(-1)) / (2 * eps)
+            forward = np.einsum("r,rij->ij", phase.conj(), derivative) / len(phase)
+            reverse = np.einsum("r,rij->ij", phase, derivative) / len(phase)
+            max_error = max(max_error, float(np.max(np.abs(forward - beta * target))))
+            max_reverse = max(max_reverse, float(np.max(np.abs(reverse - forward.conj().T))))
+        phase = (-1.0) ** np.arange(8)
+        boundary = []
+        for beta in (1.0 + 0j, 1j):
+            derivative = (fields(1) - fields(-1)) / (2 * eps)
+            coefficient = np.einsum("r,rij->ij", phase, derivative) / len(phase)
+            expected = beta * target + beta.conjugate() * target.conj().T
+            max_self_inverse = max(max_self_inverse, float(np.max(np.abs(coefficient - expected))))
+            boundary.append(coefficient)
+        extracted = (boundary[0] - 1j * boundary[1]) / 2
+        max_self_inverse = max(max_self_inverse, float(np.max(np.abs(extracted - target))))
+        phase = np.exp(2j * np.pi * np.arange(8) / 8)
+    assert max_error < 2e-8
+    assert max_reverse < 2e-8
+    assert max_self_inverse < 2e-8
+    assert min_wrong > 1e-3
+    return {"global_spinor_finite_angle_max_error": max_error,
+            "global_spinor_reverse_adjoint_max_error": max_reverse,
+            "global_spinor_self_inverse_max_error": max_self_inverse,
+            "global_spinor_negative_control_min_mismatch": min_wrong}
 
 
 def _require_positive_semidefinite(hessian, tolerance=1e-10):
@@ -363,6 +459,8 @@ def run_checks():
     assert_fm_and_cholesky()
     _assert_symbolic_derivation()
     _assert_native_route_derivation()
+    _assert_global_spinor()
+    global_spinor_oracle = _finite_global_spinor_oracle()
 
     # This is a two-sublattice AFM Nambu Hessian in the TB2J block order
     # (a_A(q), a_B(q), a_A^dagger(-q), a_B^dagger(-q)). Its complex symmetric
@@ -559,6 +657,7 @@ def run_checks():
         "native_bridge_max_abs_error": native_bridge_error,
         "native_wrong_hole_operator_mismatch": native_wrong_hole_mismatch,
         **oracle,
+        **global_spinor_oracle,
     }
 
 

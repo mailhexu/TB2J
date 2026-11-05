@@ -198,10 +198,9 @@ normalizes a zero mode as a boson, or assigns an eV/boson value.
 
 ## Native-route convention (EMC Option-B local axis)
 
-The EMC native vertex consumes per-site lab-frame quadratures in an
-interleaved spinor basis with a local-axis field. This section certifies the
-exact convention that route must implement; the downstream consumption is
-EMC implementation scope, not this authority.
+The following is an algebraic convention and commutator identity. It does
+not by itself certify the coherent-HP global-spinor field derived below:
+its $y$ amplitude lacks the $1/i$ in that physical field.
 
 For a site with local frame $(\mathbf x,\eta\mathbf y,\eta\mathbf z)$,
 positive local-axis half-splitting $d$, source-ordered Nambu halves
@@ -237,6 +236,53 @@ the cosine-quadrature response against the flipped-sign target; the correct
 sign leaves only the finite-angle tolerance (`native_correct_eta_residual`
 versus `native_wrong_eta_mismatch`), so the control isolates the sign error
 rather than a tolerance miss.
+
+## Coherent HP field in the global electron-spinor basis
+
+For signed global half-splitting $D_z$, local coherent HP direction
+$(n_x,n_y,n_z)$ and $\eta=\pm1$, the field considered here is
+$H_R=D_z(\eta n_x\sigma_x+n_y\sigma_y+n_z\sigma_z)$. This has the
+source-ordered reference field $D_z\sigma_z$ for either sublattice; its
+validity for a particular DFT source remains a separate physical gate.
+With $\alpha_R=\epsilon[u\beta e^{iqR}+(v\beta)^*e^{-iqR}]$, where
+$qR$ includes $2\pi$ for fractional reciprocal coordinates, and the exact
+polar map $\theta=2\arcsin(|\alpha_R|/\sqrt{2S})$, the linear positive-$q$
+vertex per unit $\epsilon\beta$ is
+
+$$
+V_q=\frac{D_z}{\sqrt{2S}}\left[
+\eta(u+v)\sigma_x+\frac{u-v}{i}\sigma_y\right]
+=\frac{D_z}{\sqrt{2S}}
+\begin{pmatrix}
+0&(\eta-1)u+(\eta+1)v\\
+(\eta+1)u+(\eta-1)v&0
+\end{pmatrix}.
+$$
+
+The named results `global_spinor_q` and `global_spinor_reverse_adjoint`
+give this matrix and its adjoint. With $\sigma_\pm=(\sigma_x\pm i\sigma_y)/2$,
+the $\eta=+1$ branch is $D_z\sqrt{2/S}(v\sigma_++u\sigma_-)$;
+the $\eta=-1$ branch is $-D_z\sqrt{2/S}(u\sigma_++v\sigma_-)$.
+For distinct $q$ and $-q$ Fourier bins, the coefficients of the real-space
+coherent field are $\epsilon\beta V_q$ and $\epsilon\beta^*V_q^\dagger$,
+including the swap of circular slots. At self-inverse $q$ the bins coincide:
+their coefficient is $\epsilon(\beta V_q+\beta^*V_q^\dagger)$, not either
+term alone. The mode is already bosonic-metric normalized; $D_z$ carries
+energy units and $S$ is dimensionless. The singular-mode caveat above remains
+applicable.
+Both $\beta=1$ and $\beta=i$ boundary coefficients are separately
+computed by the finite-angle oracle; combining them recovers $V_q$ with
+maximum error `1.7859710272348438e-13`.
+
+An independent eight-cell polar-field oracle computes both coherent
+quadratures, central differences and both Fourier components. In the
+`mydev` execution the largest matrix residual was `8.440160216886577e-14`,
+the reverse-adjoint residual was `0.0`, and the smallest deliberately
+wrong-ladder, omitted-hole or local/global-frame mismatch was `0.45`.
+Both signed fields and both $\eta$ values were exercised. The retained
+Option-B identity above is not a proof of this matrix: its unscaled $y$
+channel differs by $1/i$, and the current native boson slot must be
+reconciled against the complete matrix before physical use.
 
 ## Evidence boundary
 
