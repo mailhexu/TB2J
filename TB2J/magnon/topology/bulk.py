@@ -179,16 +179,12 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
                 f"minimum {m.h_min_eigenvalue:.3e} < 0; no shift is applied."
             )
     n_pos = len(modes[0].energies)
-    energies = np.array([m.energies for m in modes])
-    if energies.shape[1] != n_pos:
-        failures.append("inconsistent positive-mode count across the mesh.")
-    energies = energies.reshape(nu, nv, -1)
-    if any(m.vectors is None for m in modes):
-        failures.append(
-            "complete metric-normalized mode vectors are unavailable on this "
-            "mesh (stable zero modes or instabilities present); the requested "
-            "bands cannot receive a validated invariant from this path."
-        )
+    lengths = {len(m.energies) for m in modes}
+    energies = None
+    if len(lengths) == 1:
+        energies = np.array([m.energies for m in modes]).reshape(nu, nv, n_pos)
+    else:
+        failures.append("inconsistent physical-mode count across the mesh.")
     diagnostics["solver"] = {
         "max_generalized_residual": max(
             m.residuals.get("max_generalized_residual", 0.0) for m in modes
@@ -198,11 +194,23 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
         ),
         "min_physical_energy": min(m.min_energy for m in modes),
         "min_hessian_eigenvalue": min(m.h_min_eigenvalue for m in modes),
+        "n_mesh_points_with_zero_modes": sum(
+            1 for m in modes if m.residuals.get("n_zero_modes", 0) > 0
+        ),
         "classifications": {
             c: sum(1 for m in modes if m.classification == c)
             for c in {m.classification for m in modes}
         },
     }
+    freq_chars = {
+        m.residuals.get("frequency_character")
+        for m in modes
+        if m.classification == "energetically_unstable"
+    }
+    if freq_chars - {None}:
+        diagnostics["solver"]["unstable_frequency_character"] = sorted(
+            freq_chars - {None}
+        )
     zero_points = [
         idx for idx, m in enumerate(modes) if m.classification == "zero_mode"
     ]
@@ -210,31 +218,50 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
         diagnostics["zero_mode_points"] = zero_points
 
     # --- band selection
-    bands = list(request.bands) if request.bands is not None else list(range(n_pos))
+    bands = (
+        list(request.bands)
+        if request.bands is not None
+        else [int(i) for i in modes[0].positive_indices]
+    )
     if bands and n_pos > 0 and max(bands) >= n_pos:
         raise ValueError(
-            f"band index {max(bands)} out of range for {n_pos} positive modes."
+            f"band index {max(bands)} out of range for {n_pos} physical modes."
         )
+    # a requested band touching the stable zero level on the mesh is
+    # unvalidated: a zero-energy mode is non-normalizable
+    if energies is not None and energies.shape[-1] > 0:
+        touching = []
+        for b in bands:
+            if float(energies[:, :, b].min()) <= 1e-8:
+                touching.append(b)
+        if touching:
+            failures.append(
+                f"requested band group touches stable zero modes on the mesh "
+                f"(band indices {sorted(set(touching))}); a validated invariant "
+                "needs a certified finite smooth projector, which a "
+                "zero-mode-touching group does not have."
+            )
 
     # --- isolation diagnostics: sorted-energy boundary gap of the band set
     band_set = set(bands)
     min_gap = np.inf
     gap_location = None
-    for idx in range(nu * nv):
-        w = np.sort(energies.reshape(nu * nv, -1)[idx])
-        for b in range(len(w) - 1):
-            inside_b = b in band_set
-            inside_b1 = (b + 1) in band_set
-            if inside_b != inside_b1:
-                gap = float(w[b + 1] - w[b])
-                if gap < min_gap:
-                    min_gap = gap
-                    gap_location = (idx, b, b + 1)
-    if min_gap <= request.gap_tol:
-        failures.append(
-            f"band group is not isolated: minimum external gap {min_gap:.3e} "
-            f"at mesh point {gap_location} within tolerance {request.gap_tol:.3e}."
-        )
+    if energies is not None:
+        for idx in range(nu * nv):
+            w = np.sort(energies.reshape(nu * nv, -1)[idx])
+            for b in range(len(w) - 1):
+                inside_b = b in band_set
+                inside_b1 = (b + 1) in band_set
+                if inside_b != inside_b1:
+                    gap = float(w[b + 1] - w[b])
+                    if gap < min_gap:
+                        min_gap = gap
+                        gap_location = (idx, b, b + 1)
+        if min_gap <= request.gap_tol:
+            failures.append(
+                f"band group is not isolated: minimum external gap {min_gap:.3e} "
+                f"at mesh point {gap_location} within tolerance {request.gap_tol:.3e}."
+            )
     diagnostics["gap"] = {
         "min_gap": None if not np.isfinite(min_gap) else float(min_gap),
         "gap_location": gap_location,
@@ -247,9 +274,14 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     vertex = None
     min_link = np.inf
     if not failures:
+        # map requested band indices to the normalized positive-mode columns
+        # per mesh point (zero-mode positions may vary across the mesh)
         psi = np.empty((nu * nv, modes[0].vectors.shape[0], len(bands)), dtype=complex)
         for idx in range(nu * nv):
-            psi[idx] = modes[idx].vectors[:, bands]
+            cols = modes[idx].positive_indices
+            psi[idx] = modes[idx].vectors[
+                :, [int(np.flatnonzero(cols == b)[0]) for b in bands]
+            ]
 
         def link(p, q) -> complex:
             # normalized determinant of the between-points Gram matrix

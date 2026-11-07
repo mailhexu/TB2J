@@ -85,11 +85,36 @@ measured minimum gap and a mesh-refinement note.
 
 A result is ``valid=False`` with explicit reasons (and no Chern value) when
 the reference is nonstationary on the retained bonds, the spectrum is
-energetically unstable (no diagonal shift is ever applied), stable zero modes
-make normalized vectors unavailable, the band group is not isolated within
+energetically unstable (no diagonal shift is ever applied), the requested
+band group touches a stable zero mode, the band group is not isolated within
 ``gap_tol``, or a plaquette link determinant vanishes within ``link_tol``.
 Requests and results serialize to versioned JSON
 (``tb2j-topology.bulk/1``).
+
+Mode solver and validity classes
+--------------------------------
+
+The shared solver ``solve_bosonic_modes`` (certified in
+``docs/sympy/magnon_topology_bosonic_modes.py``) classifies each mesh point:
+
+- ``positive_definite``: stable gapped set; metric-normalized positive modes
+  attached (generalized residual and metric-norm error reported).
+- ``zero_mode``: stable zero-frequency directions exist; they are reported as
+  a non-normalizable null space, never as invented normalized vectors.
+  Strictly positive modes still carry normalizable vectors, so a separated
+  band group (gap from the zero level above ``gap_tol``) can be validated;
+  a group touching zero is refused.
+- ``energetically_unstable``: the Hessian has a resolved negative direction.
+  The dynamical frequency character (``real`` or ``complex`` from ``gH``) is
+  reported as a diagnostic; a diagonal shift is refused because it would not
+  legitimize topology of the unshifted model. The legacy band/DOS shift
+  fallback is untouched.
+- ``dynamically_unstable``: the metric spectrum violates the +-pairing
+  structure of a bosonic BdG set.
+
+DMI never pairs a collinear ferromagnet (``u^T eps(D) u = 0``); genuine
+anomalous terms require symmetric anisotropic exchange, exercised by the
+Jani-paired honeycomb benchmark in ``tests/tests/test_magnon_topology_modes.py``.
 
 The opt-in CLI mode writes the same JSON record:
 

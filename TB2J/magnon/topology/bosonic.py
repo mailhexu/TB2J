@@ -39,7 +39,10 @@ class BosonicModes:
 
     energies: np.ndarray  # physical mode energies, ascending (n,)
     classification: str  # positive_definite | zero_mode | energetically_unstable | dynamically_unstable
-    vectors: Optional[np.ndarray] = None  # (2n, n) metric-normalized positive modes
+    vectors: Optional[np.ndarray] = None  # (2n, n_pos) metric-normalized positive modes
+    positive_indices: Optional[np.ndarray] = (
+        None  # indices of the positive modes within ``energies``
+    )
     null_space: Optional[np.ndarray] = None  # (2n, n_zero) non-normalizable null modes
     h_min_eigenvalue: float = 0.0  # min eigenvalue of the Hessian H itself
     min_energy: float = 0.0  # min physical energy (top-half metric eigenvalue)
@@ -91,22 +94,45 @@ def solve_bosonic_modes(
     g = np.diag(np.concatenate([np.ones(n), -np.ones(n)]))
 
     if h_min < -zero_tol:
+        # frequency character of the dynamical matrix gH (diagnostics only;
+        # no diagonal shift is applied and no vectors are provided)
+        g_diag = np.diag(np.concatenate([np.ones(n), -np.ones(n)]))
+        freq = np.linalg.eigvals(g_diag @ H)
+        scale = max(float(np.max(np.abs(freq))), 1.0)
+        freq_character = (
+            "real"
+            if float(np.max(np.abs(freq.imag))) <= hermiticity_tol * scale
+            else "complex"
+        )
         return BosonicModes(
             energies=np.array([]),
             classification="energetically_unstable",
             h_min_eigenvalue=h_min,
             residuals={
                 "hermiticity_asymmetry": asym,
+                "frequency_character": freq_character,
+                "max_imag_frequency": float(np.max(np.abs(freq.imag))),
                 "note": "Hessian has a resolved negative direction; a diagonal "
                 "shift is refused because it would not legitimize topology.",
             },
         )
     try:
         L = np.linalg.cholesky(H)  # lower, H = L L^dag
-    except np.linalg.LinAlgError as exc:
-        raise ModeSolverError(
-            f"Cholesky failed despite nonnegative Hessian minimum {h_min:.3e}: {exc}"
-        ) from exc
+    except np.linalg.LinAlgError:
+        if h_min < -zero_tol:
+            raise ModeSolverError(
+                f"Cholesky failed with negative Hessian minimum {h_min:.3e}."
+            ) from None
+        # exactly semidefinite H: build the psd square root from the
+        # eigendecomposition (clamping only |w| <= zero_tol numerical zeros).
+        # This is an exact factorization H = L L^dag, not an energy shift.
+        w_h, U_h = np.linalg.eigh(H)
+        w_clamped = np.where(np.abs(w_h) <= zero_tol, 0.0, w_h)
+        L = (U_h * np.sqrt(w_clamped)[None, :]) @ U_h.conj().T
+        if np.max(np.abs(L @ L.conj().T - H)) > zero_tol:
+            raise ModeSolverError(
+                f"Hessian not decomposable within tolerance (min {h_min:.3e})."
+            ) from None
     M = L.conj().T @ g @ L
     omega_all, u = np.linalg.eigh(M)
     omega = omega_all[n:]  # physical top half (legacy [:, n:] convention)
@@ -124,11 +150,15 @@ def solve_bosonic_modes(
             },
         )
 
-    zero_mask = omega <= zero_tol
+    pos_mask = omega > zero_tol
+    zero_mask = ~pos_mask
+    null_space = None
+    null_resid = 0.0
     if np.any(zero_mask):
-        zero_cols = np.abs(omega_all) <= zero_tol
-        null_space = np.linalg.solve(L.conj().T, u[:, zero_cols])
+        # stable zero modes: non-normalizable directions in Nambu coordinates
+        null_space = np.linalg.solve(L.conj().T, u[:, n:][:, zero_mask])
         null_resid = float(np.max(np.abs(H @ null_space))) if null_space.size else 0.0
+    if not np.any(pos_mask):
         return BosonicModes(
             energies=omega,
             classification="zero_mode",
@@ -138,27 +168,32 @@ def solve_bosonic_modes(
                 "hermiticity_asymmetry": asym,
                 "pairing_residual": pairing_residual,
                 "null_space_residual": null_resid,
-                "n_zero_modes": int(np.sum(zero_cols)),
+                "n_zero_modes": int(np.sum(zero_mask)),
             },
             null_space=null_space,
         )
-
-    v = np.linalg.solve(L.conj().T, u[:, n:])  # v = L^{-dag} u for positive modes
+    pos_u = u[:, n:][:, pos_mask]
+    pos = omega[pos_mask]
+    v = np.linalg.solve(L.conj().T, pos_u)  # v = L^{-dag} u for positive modes
     norm = np.real(np.sum(v.conj() * (g @ v), axis=0))
     if np.any(norm <= 0):
         raise ModeSolverError("Nonpositive metric norm in positive subspace.")
-    vectors = v * np.sqrt(omega)[None, :]
-    resid = H @ vectors - (g @ vectors) * omega[None, :]
+    vectors = v * np.sqrt(pos)[None, :]
+    resid = H @ vectors - (g @ vectors) * pos[None, :]
     return BosonicModes(
         energies=omega,
-        classification="positive_definite",
+        classification="zero_mode" if null_space is not None else "positive_definite",
         vectors=vectors,
+        positive_indices=np.flatnonzero(pos_mask),
+        null_space=null_space,
         h_min_eigenvalue=h_min,
         min_energy=float(omega[0]),
         residuals={
             "hermiticity_asymmetry": asym,
             "pairing_residual": pairing_residual,
             "max_generalized_residual": float(np.max(np.abs(resid))),
-            "max_metric_norm_error": float(np.max(np.abs(omega * norm - 1.0))),
+            "max_metric_norm_error": float(np.max(np.abs(pos * norm - 1.0))),
+            "null_space_residual": null_resid,
+            "n_zero_modes": int(np.sum(zero_mask)),
         },
     )

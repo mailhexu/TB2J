@@ -26,6 +26,17 @@ These are the new features and changes  not yet included in the official release
   `docs/sympy/magnon_topology_lswt_ferromagnet.py` (honeycomb benchmark:
   `C_lower = +sign(D_z)`, `C_upper = -sign(D_z)`).
 
+- Bosonic mode solver and validity diagnostics (draft, on the
+  `magnon_topology` branch): `solve_bosonic_modes` implements the certified
+  Colpa metric construction with per-point classification
+  (positive_definite / zero_mode / energetically_unstable with reported
+  real-or-complex frequency character / dynamically_unstable), nonshift
+  policy for topology, non-normalizable null-space reporting for stable zero
+  modes, and validation of separated band groups in the presence of zero
+  modes. New certificate `docs/sympy/magnon_topology_bosonic_modes.py`
+  (pairing contractions, dimer blocks, residuals, metric norms, signed
+  completeness, Cholesky-columns-are-not-modes).
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 
