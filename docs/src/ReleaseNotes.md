@@ -4,6 +4,17 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- Topological magnon calculations (draft, on the `magnon_topology` branch): a new
+  `TB2J.magnon.topology` package provides topology-ready model preparation
+  (`prepare_topology_model`) that validates exchange sources before topological
+  use. It builds translations from the union of all selected channels
+  (including DMI-only and anisotropic-only shells), preserves spin-ordered
+  positions, moments and the atom/spin map, canonicalizes single-ion
+  anisotropy exactly once, rejects nonzero unsupported interactions
+  (biquadratic, NJT) unless explicitly excluded, and pins an immutable
+  content digest. Existing band/DOS workflows are unchanged: the strict
+  policy applies only to topology preparation.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 
