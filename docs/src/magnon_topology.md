@@ -22,7 +22,7 @@ pickle:
 ::
 
    from TB2J.io_exchange import SpinIO
-   from TB2J.magnon.topology import prepare_topology_model
+   from TB2J.magnon.topology import expand_magnetic_cell, prepare_topology_model
 
    exc = SpinIO.load_pickle(path="TB2J_results")
    model = prepare_topology_model(exc, source_path="TB2J_results")
@@ -51,6 +51,24 @@ The returned ``TopologyModel`` carries a content digest of its effective
 physical content (geometry, mappings, moments, translations, canonical
 tensors). Changing any coupling changes the digest; file names and channel
 selection flags are provenance, not identity.
+
+
+Commensurate magnetic cells
+---------------------------
+
+For a rational single-Q reference, ``expand_magnetic_cell(model, Q, axis)``
+builds a real-space cell, rotates each moment by
+``2 pi Q dot (tau + image)`` about ``axis``, and rekeys every retained bond.
+``Q`` is in reciprocal coordinates of the input cell. The returned model
+represents the ordered state explicitly and must be solved with ``Q = 0``;
+applying the spiral rotation again double-counts the ordering. Components are
+approximated only within the explicit denominator and site limits; failure
+raises ``TopologyPreparationError`` instead of silently truncating the cell.
+
+::
+
+   from TB2J.magnon.topology import expand_magnetic_cell
+   magnetic_model = expand_magnetic_cell(model, Q=(1/3, 0, 0))
 
 Bulk and strip calculations
 ---------------------------

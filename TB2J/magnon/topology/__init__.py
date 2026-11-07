@@ -24,6 +24,7 @@ from TB2J.magnon.topology.bulk import (
     calculate_bulk,
 )
 from TB2J.magnon.topology.embedding import LatticeEmbedding, identity_embedding
+from TB2J.magnon.topology.magnetic_cell import expand_magnetic_cell
 from TB2J.magnon.topology.preparation import (
     CANONICALIZATION_VERSION,
     SUPPORTED_CHANNELS,
@@ -45,6 +46,7 @@ __all__ = [
     "TopologyModel",
     "TopologyPreparationError",
     "calculate_bulk",
+    "expand_magnetic_cell",
     "identity_embedding",
     "prepare_topology_model",
     "solve_bosonic_modes",

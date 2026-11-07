@@ -200,7 +200,21 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     kpoints = embedding.to_input_k(k_embed).reshape(nu, nv, 3)
     modes: List[BosonicModes] = []
     n_mesh = nu * nv
-    H_all = magnon.Hq(kpoints.reshape(n_mesh, 3))
+    # Noncollinear references use certificate-verified local-frame LSWT;
+    # collinear models retain the legacy Hq assembly unchanged.
+    directions = model.magmoms / np.linalg.norm(model.magmoms, axis=1)[:, None]
+    collinear = np.allclose(
+        np.abs(directions @ directions.T), 1.0, rtol=0.0, atol=1e-10
+    )
+    noncollinear = not collinear
+    if noncollinear:
+        from TB2J.magnon.topology.assembly import local_frame_bosonic_hamiltonian
+
+        H_all = local_frame_bosonic_hamiltonian(
+            model.JR, model.Rlist, model.magmoms, kpoints.reshape(n_mesh, 3)
+        )
+    else:
+        H_all = magnon.Hq(kpoints.reshape(n_mesh, 3))
     energies = np.empty((n_mesh, 0))
     n_pos = None
     for idx in range(n_mesh):

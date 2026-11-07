@@ -92,6 +92,20 @@ def create_parser() -> argparse.ArgumentParser:
         ),
     )
     topo_group.add_argument(
+        "--topology-q",
+        type=float,
+        nargs=3,
+        default=(0.0, 0.0, 0.0),
+        metavar=("Q1", "Q2", "Q3"),
+        help="Single-Q ordering vector in input-cell reciprocal coordinates.",
+    )
+    topo_group.add_argument(
+        "--topology-normal-k",
+        type=float,
+        default=0.0,
+        help="Fixed normal reciprocal coordinate for the bulk slice.",
+    )
+    topo_group.add_argument(
         "--topology-out",
         type=str,
         default="topology_bulk.json",
@@ -200,6 +214,8 @@ def run_topology(args, params: MagnonParameters) -> int:
 
     from TB2J.io_exchange import SpinIO
     from TB2J.magnon.topology.bulk import BulkRequest, calculate_bulk
+    from TB2J.magnon.topology.embedding import LatticeEmbedding
+    from TB2J.magnon.topology.magnetic_cell import expand_magnetic_cell
     from TB2J.magnon.topology.preparation import (
         TopologyPreparationError,
         prepare_topology_model,
@@ -214,6 +230,8 @@ def run_topology(args, params: MagnonParameters) -> int:
     }
     try:
         model = prepare_topology_model(exc, include=include, source_path=params.path)
+        if any(float(q) != 0.0 for q in args.topology_q):
+            model = expand_magnetic_cell(model, args.topology_q)
     except TopologyPreparationError as error:
         print(f"Topology preparation refused the input: {error}")
         return 2
@@ -226,7 +244,16 @@ def run_topology(args, params: MagnonParameters) -> int:
         ]
     elif args.topology_bands:
         bands = [int(b) for b in args.topology_bands.split(",")]
-    request = BulkRequest(mesh=tuple(args.topology_mesh), bands=bands, groups=groups)
+    embedding = LatticeEmbedding(
+        basis=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        normal_k=args.topology_normal_k,
+    )
+    request = BulkRequest(
+        mesh=tuple(args.topology_mesh),
+        bands=bands,
+        groups=groups,
+        embedding=embedding,
+    )
     result = calculate_bulk(model, request)
     record = result.to_json_dict()
     if args.topology_refine:

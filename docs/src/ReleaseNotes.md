@@ -46,6 +46,14 @@ These are the new features and changes  not yet included in the official release
   mesh-refinement report (integer agreement and measured gap change as
   convergence evidence, explicitly not a continuum-isolation certificate).
 
+- Commensurate magnetic-cell topology support: ``expand_magnetic_cell`` twists
+  magnetic moments in a bounded rational-Q supercell and remaps retained
+  exchange bonds; CLI flags ``--topology-q`` and ``--topology-normal-k`` select
+  the ordering vector and reciprocal slice. The expanded model is explicitly
+  Q=0; its twisted-frame bosonic assembly is certificate-checked.
+  ``LatticeEmbedding`` maps primitive embedding momenta and rejects
+  nonprimitive bases.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 
