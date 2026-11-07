@@ -1,6 +1,7 @@
 """Unified CLI for magnon band and DOS calculations."""
 
 import argparse
+import sys
 import warnings
 
 from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
@@ -42,6 +43,41 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     add_common_magnon_args(parser)
+
+    topo_group = parser.add_argument_group("Topology options (opt-in, draft)")
+    topo_group.add_argument(
+        "--topology",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the bulk magnon topology calculation (Berry-curvature flux "
+            "and band Chern numbers) instead of bands/DOS. Requires a "
+            "topology-ready model; unsupported interactions are refused."
+        ),
+    )
+    topo_group.add_argument(
+        "--topology-mesh",
+        type=int,
+        nargs=2,
+        default=[12, 12],
+        metavar=("NU", "NV"),
+        help="Endpoint-exclusive reciprocal mesh for --topology (default: 12 12).",
+    )
+    topo_group.add_argument(
+        "--topology-bands",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated zero-based band indices for --topology "
+            "(default: all positive bands as one group)."
+        ),
+    )
+    topo_group.add_argument(
+        "--topology-out",
+        type=str,
+        default="topology_bulk.json",
+        help="Output JSON path for --topology (default: topology_bulk.json).",
+    )
 
     band_group = parser.add_argument_group("Band structure options")
     add_band_specific_args_to_group(band_group)
@@ -139,6 +175,48 @@ def add_dos_specific_args_to_group(group) -> None:
     )
 
 
+def run_topology(args, params: MagnonParameters) -> int:
+    """Opt-in bulk topology mode. Returns a process exit code."""
+    import json
+
+    from TB2J.io_exchange import SpinIO
+    from TB2J.magnon.topology.bulk import BulkRequest, calculate_bulk
+    from TB2J.magnon.topology.preparation import (
+        TopologyPreparationError,
+        prepare_topology_model,
+    )
+
+    exc = SpinIO.load_pickle(path=params.path)
+    include = {
+        "Jiso": params.Jiso,
+        "Jani": params.Jani,
+        "DMI": params.DMI,
+        "SIA": params.SIA,
+    }
+    try:
+        model = prepare_topology_model(exc, include=include, source_path=params.path)
+    except TopologyPreparationError as error:
+        print(f"Topology preparation refused the input: {error}")
+        return 2
+    bands = None
+    if args.topology_bands:
+        bands = [int(b) for b in args.topology_bands.split(",")]
+    request = BulkRequest(mesh=tuple(args.topology_mesh), bands=bands)
+    result = calculate_bulk(model, request)
+    with open(args.topology_out, "w") as f:
+        json.dump(result.to_json_dict(), f, indent=1)
+    print(f"Topology result written to {args.topology_out}")
+    diag = result.diagnostics
+    if result.valid:
+        print(f"Chern number for bands {result.band_indices}: {result.chern}")
+        print(f"Minimum external gap: {diag['gap']['min_gap']:.6e} eV")
+        return 0
+    print("Topology result is INVALID; no Chern value emitted. Reasons:")
+    for reason in diag.get("failures", []):
+        print(f"  - {reason}")
+    return 1
+
+
 def main():
     """Main entry point for the unified magnon CLI."""
     parser = create_parser()
@@ -150,8 +228,8 @@ def main():
         print(f"Saved default configuration to {args.save_config}")
         return
 
-    if not args.bands and not args.dos:
-        parser.error("Please specify at least one of --bands or --dos")
+    if not args.bands and not args.dos and not args.topology:
+        parser.error("Please specify at least one of --bands, --dos or --topology")
 
     window = None
     if args.config:
@@ -162,6 +240,9 @@ def main():
         if args.window is not None:
             window = tuple(args.window)
         params = parse_common_args(args)
+
+    if args.topology:
+        sys.exit(run_topology(args, params))
 
     if args.bands:
         warnings.warn(

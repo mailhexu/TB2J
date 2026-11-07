@@ -12,10 +12,13 @@ passed in the `mydev` environment). Pinned statements:
    z-axis DMI NNN tensors; `u^T eps(D_z) u* = -2i` carries the DMI phase.
 4. Honeycomb FM: site blocks real under reverse-bond DMI antisymmetry
    `D_ji(-R) = -D_ij(R)`; certificate bands match a direct numeric build.
-5. Valley structure: `chi_K = +1`, `chi_K' = -1`, common mass `m ∝ D_z`;
-   pinned Chern numbers (48x48 winding, plaquette order
-   `(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)` on the `(a1,a2)` torus):
-   see the PINNED line in the console output below.
+5. Valley structure (site-space displacement-phase map): `chi_K = +1`,
+   `chi_K' = -1`, common mass `m ∝ D_z`. EXECUTABLE cell-phase convention
+   (Magnon.Hq + Colpa modes, the authoritative pin): `chi_K = -1`,
+   `chi_K' = +1`, same masses, and pinned band Chern numbers (24x24 FHS
+   winding, plaquette order `(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)` on the
+   `(a1,a2)` torus): `C_lower = +sign(D_z)`, `C_upper = -sign(D_z)`;
+   the displacement-phase site map carries the negated labels.
 6. FHS link construction is gauge invariant (phase telescoping; unitary group
    mixing cancels in determinant links).
 
@@ -58,13 +61,19 @@ passed in the `mydev` environment). Pinned statements:
   [OK] valley masses are equal in magnitude and nonzero (staggered Dirac masses)
   [OK] valley masses have opposite signs: m(K) = -6*sqrt(3)*D_z, m(K') = +6*sqrt(3)*D_z
   [OK] mass is linear in D_z
-  pinned valley rule: per-cone C = -chi*sign(m)/2; C_upper = +sign(D_z), C_lower = -sign(D_z)
+  pinned (executable convention): per-cone C = -chi*sign(m)/2 with chi_K=-1, chi_K'=+1 and m(K)=-6*sqrt(3)*D_z; C_lower = +sign(D_z), C_upper = -sign(D_z). The displacement-phase site map has the opposite chirality labels and therefore the negated band Chern labels.
   [OK] omega_minus(Gamma) = 2 K S (gapped Goldstone with easy-axis SIA, S=1)
   [OK] omega_plus(Gamma) = 12 J1 S + 2 K S (S=1)
-  numeric winding (upper band of h(k)): D=+0.05 -> C=1 (raw +1.000000); D=-0.05 -> C=-1 (raw -1.000000)
+4b. Executable-convention anchor: Colpa modes of Magnon.Hq + FHS winding
+  [OK] executable honeycomb FM has exactly zero pairing blocks (z-DMI, collinear)
+  [OK] executable valley masses: m(K) = -6*sqrt(3)*D_z, m(K') = +6*sqrt(3)*D_z
+  [OK] executable in-plane windings: chi_K = -1, chi_K' = +1 (opposite of the displacement-phase site map)
+  [OK] executable FHS winding: C_lower = {1: 1, -1: -1}, C_upper = {1: -1, -1: 1} match the pin C_lower = +sign(D_z), C_upper = -sign(D_z)
+4c. Site-space (displacement-phase) winding: negated labels
+  numeric winding (upper band of the displacement-phase site map h(k)): D=+0.05 -> C=1 (raw +1.000000); D=-0.05 -> C=-1 (raw -1.000000)
   [OK] DMI reversal flips the Chern sign; |C| = 1 for the gapped honeycomb FM
-  [OK] numeric winding agrees with the valley-rule pin C_upper = +sign(D_z)
-  PINNED: upper-band C = +1 * sign(D_z); lower-band C = -1 * sign(D_z) for plaquette order (i,j)->(i+1,j)->(i+1,j+1)->(i,j+1) on the (a1,a2) torus
+  [OK] site-map upper-band winding is the NEGATION of the executable pin (opposite chirality labels; executable convention is authoritative)
+  PINNED (executable convention): lower-band C = +1 * sign(D_z); upper-band C = -1 * sign(D_z) for plaquette order (i,j)->(i+1,j)->(i+1,j+1)->(i,j+1) on the (a1,a2) torus; the displacement-phase site map carries the negated labels.
 5. FHS link construction: gauge invariance (symbolic)
   [OK] plaquette product of gauge phases telescopes to 1
   [OK] det-overlap link product invariant under group unitary mixing

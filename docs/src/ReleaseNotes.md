@@ -15,6 +15,17 @@ These are the new features and changes  not yet included in the official release
   content digest. Existing band/DOS workflows are unchanged: the strict
   policy applies only to topology preparation.
 
+- Bulk magnon topology (draft, on the `magnon_topology` branch):
+  `calculate_bulk(model, BulkRequest)` computes Berry-curvature plaquette
+  fluxes, gauge-safe vertex curvature and band Chern numbers from the
+  certified Colpa metric construction, with validity refusals (nonstationary
+  reference, unstable spectrum without shifts, unresolved gaps, vanishing
+  links) and versioned JSON output. The opt-in `TB2J_magnon --topology`
+  CLI mode writes the same record (exit 1 for refused results). Conventions
+  are pinned by the executed sympy certificate
+  `docs/sympy/magnon_topology_lswt_ferromagnet.py` (honeycomb benchmark:
+  `C_lower = +sign(D_z)`, `C_upper = -sign(D_z)`).
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

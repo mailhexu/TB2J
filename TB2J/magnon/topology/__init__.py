@@ -13,6 +13,17 @@ Names and contracts follow the approved architecture document; they are not
 present on ``main``.
 """
 
+from TB2J.magnon.topology.bosonic import (
+    BosonicModes,
+    ModeSolverError,
+    solve_bosonic_modes,
+)
+from TB2J.magnon.topology.bulk import (
+    BulkRequest,
+    BulkTopologyResult,
+    calculate_bulk,
+)
+from TB2J.magnon.topology.embedding import LatticeEmbedding, identity_embedding
 from TB2J.magnon.topology.preparation import (
     CANONICALIZATION_VERSION,
     SUPPORTED_CHANNELS,
@@ -26,7 +37,15 @@ __all__ = [
     "CANONICALIZATION_VERSION",
     "SUPPORTED_CHANNELS",
     "UNSUPPORTED_CHANNELS",
+    "BosonicModes",
+    "BulkRequest",
+    "BulkTopologyResult",
+    "LatticeEmbedding",
+    "ModeSolverError",
     "TopologyModel",
     "TopologyPreparationError",
+    "calculate_bulk",
+    "identity_embedding",
     "prepare_topology_model",
+    "solve_bosonic_modes",
 ]

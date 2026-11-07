@@ -39,10 +39,13 @@ from pathlib import Path
 
 import numpy as np
 import sympy as sp
-from ase import Atoms as _Atoms
 
-from TB2J.io_exchange import SpinIO as _SpinIO
-from TB2J.magnon.magnon3 import Magnon as _Magnon
+_np = np
+
+from ase import Atoms as _Atoms  # noqa: E402
+
+from TB2J.io_exchange import SpinIO as _SpinIO  # noqa: E402
+from TB2J.magnon.magnon3 import Magnon as _Magnon  # noqa: E402
 
 REPORT: list[str] = []
 
@@ -459,17 +462,29 @@ check(
 check(abs(massK_d2 - 2 * massK) < 1e-12, "mass is linear in D_z")
 
 
-# Valley Chern rule anchored to the executed winding below: with the
-# certificate's d-vector d = (Re Q, Im Q, (P_AA-P_BB)/2) and the +d-aligned
-# (upper-band) spinor, each gapped cone contributes C = -chi * sign(m) / 2:
-#   C_upper = -[chi_K sign(m_K) + chi_K' sign(m_K')] / 2
-#           = -[(+1)(-sgn D) + (-1)(+sgn D)] / 2 = +sgn(D_z)
-def pinned_C_upper_formula(sgnD):
+# Valley Chern rule. In the executable cell-phase convention the in-plane
+# windings at the named valleys are chi_K = -1, chi_K' = +1 (measured below
+# on the actual Magnon.Hq block); with masses m(K) = -6*sqrt(3)*D_z,
+# m(K') = +6*sqrt(3)*D_z and the per-cone rule C_band(cone) = -chi*sign(m)/2:
+#   C_upper = -[(-1)(-sgn D) + (+1)(+sgn D)]/2 = -sgn(D_z)
+#   C_lower = +sgn(D_z)
+# NOTE: the site-space displacement-phase map built symbolically above has
+# the OPPOSITE chirality labels (chi_K = +1, chi_K' = -1), so its band Chern
+# labels are the negation of the executable ones; the executable convention
+# is authoritative for the pipeline.
+def pinned_C_lower_formula(sgnD):
     return sgnD
 
 
+def pinned_C_upper_formula(sgnD):
+    return -sgnD
+
+
 note(
-    "  pinned valley rule: per-cone C = -chi*sign(m)/2; C_upper = +sign(D_z), C_lower = -sign(D_z)"
+    "  pinned (executable convention): per-cone C = -chi*sign(m)/2 with "
+    "chi_K=-1, chi_K'=+1 and m(K)=-6*sqrt(3)*D_z; C_lower = +sign(D_z), "
+    "C_upper = -sign(D_z). The displacement-phase site map has the opposite "
+    "chirality labels and therefore the negated band Chern labels."
 )
 
 # Gamma sanity at S = 1 (executable convention): Goldstone gap = 2 K, optic = 12 J1 + 2 K (J2 = 0)
@@ -487,8 +502,160 @@ check(
 )
 
 
-# Independent numeric winding (FHS on the site-space d-vector), anchored by the
-# numeric build validated above.
+# ---------------------------------------------------------------------------
+# 4b. Executable-convention anchor: FHS on the actual Magnon.Hq modes
+# ---------------------------------------------------------------------------
+note("4b. Executable-convention anchor: Colpa modes of Magnon.Hq + FHS winding")
+
+
+def honeycomb_exc_spinio(Dv, J1v=1.0, J2v=0.2, Kv=0.1):
+    """Honeycomb FM SpinIO in the executable convention (mu = 2 muB, S = 1)."""
+    _basis = _np.array([[1.0, 0.0, 0.0], [0.5, _np.sqrt(3) / 2, 0.0], [0.0, 0.0, 10.0]])
+    _atoms = _Atoms(
+        "Cr2",
+        scaled_positions=[[0.0, 0.0, 0.0], [2.0 / 3.0, -1.0 / 3.0, 0.0]],
+        cell=_basis,
+        pbc=True,
+    )
+    _mag = [[0.0, 0.0, 2.0], [0.0, 0.0, 2.0]]
+    _exc_d, _dmi_d = {}, {}
+    for _R in [(0, 0, 0), (-1, 0, 0), (0, -1, 0)]:
+        _rev = tuple(-_np.array(_R))
+        _exc_d[(_R, 0, 1)] = J1v
+        _exc_d[(_rev, 1, 0)] = J1v
+    for _R in [(1, 0, 0), (-1, 1, 0), (0, -1, 0)]:
+        _rev = tuple(-_np.array(_R))
+        _exc_d[(_R, 0, 0)] = J2v
+        _exc_d[(_rev, 0, 0)] = J2v
+        _exc_d[(_R, 1, 1)] = J2v
+        _exc_d[(_rev, 1, 1)] = J2v
+        _dmi_d[(_R, 0, 0)] = _np.array([0.0, 0.0, Dv])
+        _dmi_d[(_rev, 0, 0)] = _np.array([0.0, 0.0, -Dv])
+        _dmi_d[(_R, 1, 1)] = _np.array([0.0, 0.0, -Dv])
+        _dmi_d[(_rev, 1, 1)] = _np.array([0.0, 0.0, Dv])
+    _sia = {
+        0: _np.diag([0.0, 0.0, Kv]),
+        1: _np.diag([0.0, 0.0, Kv]),
+    }
+    _exc_io = _SpinIO(
+        atoms=_atoms,
+        spinat=_np.array(_mag, dtype=float),
+        charges=[0.0, 0.0],
+        index_spin=[0, 1],
+        colinear=False,
+        exchange_Jdict=_exc_d,
+        dmi_ddict=_dmi_d,
+        sia_tensor=_sia,
+    )
+    _exc_io._build_Rlist()
+    return _exc_io
+
+
+def colpa_modes(mgn_obj, kpt):
+    """Colpa metric-normalized positive modes at one k (legacy Hq path)."""
+    Hk = mgn_obj.Hq(_np.array([kpt]))[0]
+    n = Hk.shape[0] // 2
+    L = _np.linalg.cholesky(Hk)
+    g = _np.diag([1.0] * n + [-1.0] * n)
+    w, uu = _np.linalg.eigh(L.conj().T @ g @ L)
+    vv = _np.linalg.solve(L.conj().T, uu[:, n:])
+    return vv * _np.sqrt(w[n:])[None, :], Hk
+
+
+def fhs_band_chern(mgn_obj, band, nmesh=24):
+    """Full-torus FHS Chern of one positive band via Colpa modes."""
+    psi = _np.empty(
+        (nmesh * nmesh, 2 * mgn_obj.Hq(_np.zeros((1, 3))).shape[-1] // 2, 1),
+        dtype=complex,
+    )
+    idx = 0
+    for i in range(nmesh):
+        for j in range(nmesh):
+            vecs, _ = colpa_modes(mgn_obj, [i / nmesh, j / nmesh, 0.0])
+            psi[idx] = vecs[:, [band]]
+            idx += 1
+
+    def link(p, q):
+        d = _np.linalg.det(psi[p].conj().T @ psi[q])
+        return d / abs(d)
+
+    total = 0.0
+    for i in range(nmesh):
+        for j in range(nmesh):
+            p0 = i * nmesh + j
+            p1 = ((i + 1) % nmesh) * nmesh + j
+            p2 = ((i + 1) % nmesh) * nmesh + (j + 1) % nmesh
+            p3 = i * nmesh + (j + 1) % nmesh
+            total += _np.angle(
+                link(p0, p1) * link(p1, p2) * link(p2, p3) * link(p3, p0)
+            ) / (2 * _np.pi)
+    return int(_np.rint(total)), total
+
+
+# pairing blocks vanish for a collinear z-FM with z-DMI (certified above)
+_mgn_exe = _Magnon.load_from_io(honeycomb_exc_spinio(+0.05))
+_mgn_exe.set_reference(
+    (0, 0, 0), [[0, 0, 1]], (1, 0, 0), magmoms=[[0, 0, 2.0], [0, 0, 2.0]]
+)
+_Hg = _mgn_exe.Hq(_np.array([[0.11, 0.23, 0.0]]))[0]
+check(
+    _np.max(_np.abs(_Hg[:2, 2:])) < 1e-12,
+    "executable honeycomb FM has exactly zero pairing blocks (z-DMI, collinear)",
+)
+
+# executable valley masses from the positive-mode site block P = Hq[:2, :2]
+_mass_exe = {}
+for _name, _kv in (("K=(1/3,2/3)", (1 / 3, 2 / 3)), ("K'=(2/3,1/3)", (2 / 3, 1 / 3))):
+    _P = _mgn_exe.Hq(_np.array([[_kv[0], _kv[1], 0.0]]))[0][:2, :2]
+    _mass_exe[_name] = (_P[0, 0] - _P[1, 1]).real / 2
+check(
+    abs(_mass_exe["K=(1/3,2/3)"] + 6 * _np.sqrt(3) * 0.05) < 1e-9
+    and abs(_mass_exe["K'=(2/3,1/3)"] - 6 * _np.sqrt(3) * 0.05) < 1e-9,
+    "executable valley masses: m(K) = -6*sqrt(3)*D_z, m(K') = +6*sqrt(3)*D_z",
+)
+
+# executable in-plane windings at the named valleys (chirality labels)
+_chi_exe = {}
+for _name, _kv in (("K", (1 / 3, 2 / 3)), ("K'", (2 / 3, 1 / 3))):
+    _Q0 = _mgn_exe.Hq(_np.array([[_kv[0], _kv[1], 0.0]]))[0][:2, :2][0, 1]
+    _angs = []
+    _r = 0.04
+    for _t in _np.linspace(0, 2 * _np.pi, 49)[:-1]:
+        _k = [_kv[0] + _r * _np.cos(_t), _kv[1] + _r * _np.sin(_t), 0.0]
+        _Q = _mgn_exe.Hq(_np.array([_k]))[0][:2, :2][0, 1]
+        _angs.append(_np.angle(_Q * _np.conj(_Q0)))
+    _chi_exe[_name] = _np.sum(_np.diff(_np.unwrap(_angs))) / (2 * _np.pi)
+check(
+    abs(_chi_exe["K"] + 1) < 0.15 and abs(_chi_exe["K'"] - 1) < 0.15,
+    "executable in-plane windings: chi_K = -1, chi_K' = +1 (opposite of the "
+    "displacement-phase site map)",
+)
+
+# full-band executable Chern numbers for both DMI signs
+_exe_lower = {}
+_exe_upper = {}
+for _sgn in (+1, -1):
+    _mg = _Magnon.load_from_io(honeycomb_exc_spinio(_sgn * 0.05))
+    _mg.set_reference(
+        (0, 0, 0), [[0, 0, 1]], (1, 0, 0), magmoms=[[0, 0, 2.0], [0, 0, 2.0]]
+    )
+    _exe_lower[_sgn], _ = fhs_band_chern(_mg, band=0, nmesh=24)
+    _exe_upper[_sgn], _ = fhs_band_chern(_mg, band=1, nmesh=24)
+check(
+    _exe_lower[+1] == pinned_C_lower_formula(1)
+    and _exe_lower[-1] == pinned_C_lower_formula(-1)
+    and _exe_upper[+1] == pinned_C_upper_formula(1)
+    and _exe_upper[-1] == pinned_C_upper_formula(-1),
+    f"executable FHS winding: C_lower = {_exe_lower}, C_upper = {_exe_upper} "
+    "match the pin C_lower = +sign(D_z), C_upper = -sign(D_z)",
+)
+
+# ---------------------------------------------------------------------------
+# 4c. Site-space displacement-phase winding: convention-flip documentation
+# ---------------------------------------------------------------------------
+note("4c. Site-space (displacement-phase) winding: negated labels")
+
+
 def chern_numeric(Dv, nmesh=48):
     def dvec(kpt):
         hn = numeric_Hq(kpt, 1.0, 0.2, Dv, 0.1, 1.0)
@@ -524,7 +691,8 @@ def chern_numeric(Dv, nmesh=48):
 c_plus, raw_plus = chern_numeric(+0.05)
 c_minus, raw_minus = chern_numeric(-0.05)
 note(
-    f"  numeric winding (upper band of h(k)): D=+0.05 -> C={c_plus} (raw {raw_plus:+.6f}); "
+    f"  numeric winding (upper band of the displacement-phase site map h(k)): "
+    f"D=+0.05 -> C={c_plus} (raw {raw_plus:+.6f}); "
     f"D=-0.05 -> C={c_minus} (raw {raw_minus:+.6f})"
 )
 check(
@@ -532,14 +700,16 @@ check(
     "DMI reversal flips the Chern sign; |C| = 1 for the gapped honeycomb FM",
 )
 check(
-    c_plus == pinned_C_upper_formula(1),
-    "numeric winding agrees with the valley-rule pin C_upper = +sign(D_z)",
+    c_plus == -pinned_C_upper_formula(1),
+    "site-map upper-band winding is the NEGATION of the executable pin "
+    "(opposite chirality labels; executable convention is authoritative)",
 )
 
-c_pinned = c_plus
 note(
-    f"  PINNED: upper-band C = {c_pinned:+d} * sign(D_z); lower-band C = {-c_pinned:+d} * sign(D_z) "
-    "for plaquette order (i,j)->(i+1,j)->(i+1,j+1)->(i,j+1) on the (a1,a2) torus"
+    f"  PINNED (executable convention): lower-band C = {_exe_lower[+1]:+d} * sign(D_z); "
+    f"upper-band C = {_exe_upper[+1]:+d} * sign(D_z) "
+    "for plaquette order (i,j)->(i+1,j)->(i+1,j+1)->(i,j+1) on the (a1,a2) torus; "
+    "the displacement-phase site map carries the negated labels."
 )
 
 # ---------------------------------------------------------------------------
@@ -593,10 +763,13 @@ passed in the `mydev` environment). Pinned statements:
    z-axis DMI NNN tensors; `u^T eps(D_z) u* = -2i` carries the DMI phase.
 4. Honeycomb FM: site blocks real under reverse-bond DMI antisymmetry
    `D_ji(-R) = -D_ij(R)`; certificate bands match a direct numeric build.
-5. Valley structure: `chi_K = +1`, `chi_K' = -1`, common mass `m ∝ D_z`;
-   pinned Chern numbers (48x48 winding, plaquette order
-   `(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)` on the `(a1,a2)` torus):
-   see the PINNED line in the console output below.
+5. Valley structure (site-space displacement-phase map): `chi_K = +1`,
+   `chi_K' = -1`, common mass `m ∝ D_z`. EXECUTABLE cell-phase convention
+   (Magnon.Hq + Colpa modes, the authoritative pin): `chi_K = -1`,
+   `chi_K' = +1`, same masses, and pinned band Chern numbers (24x24 FHS
+   winding, plaquette order `(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)` on the
+   `(a1,a2)` torus): `C_lower = +sign(D_z)`, `C_upper = -sign(D_z)`;
+   the displacement-phase site map carries the negated labels.
 6. FHS link construction is gauge invariant (phase telescoping; unitary group
    mixing cancels in determinant links).
 
