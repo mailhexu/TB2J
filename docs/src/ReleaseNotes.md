@@ -37,6 +37,15 @@ These are the new features and changes  not yet included in the official release
   (pairing contractions, dimer blocks, residuals, metric norms, signed
   completeness, Cholesky-columns-are-not-modes).
 
+- Isolated band groups and refinement policy (draft, on the
+  `magnon_topology` branch): `BulkRequest` now accepts several independent
+  band groups (`groups`, CLI `--topology-groups "0;1"`) with per-group
+  Chern values, curvature arrays and validity records in the JSON;
+  internal degeneracies are allowed while a single band touching another
+  band is refused; `refine_bulk` / `--topology-refine` add an inspectable
+  mesh-refinement report (integer agreement and measured gap change as
+  convergence evidence, explicitly not a continuum-isolation certificate).
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

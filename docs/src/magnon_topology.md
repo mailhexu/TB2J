@@ -64,15 +64,36 @@ The public calculation seam (implemented incrementally on this branch):
    compare_bulk_edge(bulk, strip, gap, edge) -> BulkEdgeComparison
 
 ``calculate_bulk`` (implemented) runs the endpoint-exclusive periodic mesh of
-a ``BulkRequest(mesh=(nu, nv), bands=..., embedding=..., gap_tol=..., link_tol=...)``
-over a topology-ready model. Each mesh point is solved with the certified
-Colpa metric construction (``docs/sympy/magnon_topology_lswt_ferromagnet.py``):
-with ``H = L L^dag`` the physical energies are the ascending top half of
-``eig(L^dag g L)``, and the mode vectors ``sqrt(omega) L^{-dag} u`` carry unit
-metric norm. The Berry flux uses Fukui-Hatsugai-Suzuki links
-``det[Psi(k)^dag Psi(k')] / |...|`` over the pinned plaquette order
-``(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)`` on the ``(a1,a2)`` torus; vertex
-curvature is the gauge-safe average of adjacent plaquette fluxes.
+a ``BulkRequest(mesh=(nu, nv), bands=..., groups=..., embedding=...,
+gap_tol=..., link_tol=...)`` over a topology-ready model. A request carries
+ONE band group (``bands``) or several independent groups (``groups``,
+mutually exclusive); groups may hold internal degeneracies, and their
+invariant is basis-independent under unitary mixing within the group
+(certified symbolically). A single-band group is refused when that band
+touches another band anywhere on the mesh, while the full group of all
+positive bands remains valid with its exactly vanishing total Chern number.
+Per-group records (Chern value, plaquette flux, vertex curvature, minimum
+external gap, minimum link overlap, failures) appear under ``groups`` in the
+JSON; the group-curvature convention is documented in the record
+(``vertex value = average of the four adjacent plaquette fluxes``).
+
+Each mesh point is solved with the certified Colpa metric construction
+(``docs/sympy/magnon_topology_lswt_ferromagnet.py``): with ``H = L L^dag`` the
+physical energies are the ascending top half of ``eig(L^dag g L)``, and the
+mode vectors ``sqrt(omega) L^{-dag} u`` carry unit metric norm. The Berry flux
+uses Fukui-Hatsugai-Suzuki links ``det[Psi(k)^dag Psi(k')] / |...|`` over the
+pinned plaquette order ``(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)`` on the
+``(a1,a2)`` torus; vertex curvature is the gauge-safe average of adjacent
+plaquette fluxes.
+
+Refinement policy: ``refine_bulk(model, request, factor=2)`` reruns the
+request on the factor-refined mesh and reports band Chern values, measured
+minimum external gaps and their agreement as convergence EVIDENCE. The
+measured minimum gap converges downward toward the continuum minimum; integer
+agreement on one or two meshes is never a certificate of continuous
+isolation, and non-finite data or vanishing links always invalidate the
+affected groups. The CLI flags ``--topology-groups "0;1"`` and
+``--topology-refine`` expose both.
 
 Pinned executable conventions (certificate-verified): for the gapped
 honeycomb ferromagnet with NNN Kane-Mele DMI ``D_z`` and easy-axis SIA,

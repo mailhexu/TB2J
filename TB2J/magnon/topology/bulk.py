@@ -26,6 +26,7 @@ __all__ = [
     "BulkRequest",
     "BulkTopologyResult",
     "calculate_bulk",
+    "refine_bulk",
 ]
 
 SCHEMA_VERSION = "tb2j-topology.bulk/1"
@@ -37,12 +38,16 @@ class BulkRequest:
 
     ``mesh`` is ``(nu, nv)``: the endpoint-exclusive periodic sampling of the
     embedding-basis reciprocal torus. ``bands`` are explicit zero-based
-    indices into the ascending positive-mode energies; ``None`` selects all
-    positive bands (only sensible when they form one isolated group).
+    indices into the ascending physical-mode energies forming ONE requested
+    group; ``None`` selects all positive bands. ``groups`` requests several
+    independent groups at once (mutually exclusive with ``bands``). Internal
+    degeneracies inside a group are allowed; a single-band group is refused
+    when that band touches any other band on the mesh.
     """
 
     mesh: Tuple[int, int]
     bands: Optional[Sequence[int]] = None
+    groups: Optional[Sequence[Sequence[int]]] = None
     embedding: Optional[LatticeEmbedding] = None
     gap_tol: float = 1e-8  # eV; resolved isolation of the band group
     link_tol: float = 1e-8  # minimum |det S| on plaquette links
@@ -52,7 +57,20 @@ class BulkRequest:
         nu, nv = int(self.mesh[0]), int(self.mesh[1])
         if nu < 2 or nv < 2:
             raise ValueError("mesh must be at least 2x2 for plaquette fluxes.")
-        if self.bands is not None:
+        if self.groups is not None:
+            if self.bands is not None:
+                raise ValueError("bands and groups are mutually exclusive.")
+            groups = [[int(b) for b in g] for g in self.groups]
+            for g in groups:
+                if not g or len(set(g)) != len(g) or any(b < 0 for b in g):
+                    raise ValueError(
+                        "each group must be nonempty distinct nonnegative integers."
+                    )
+            flat = [b for g in groups for b in g]
+            if len(set(flat)) != len(flat):
+                raise ValueError("groups must not share band indices.")
+            object.__setattr__(self, "groups", groups)
+        elif self.bands is not None:
             bands = [int(b) for b in self.bands]
             if len(set(bands)) != len(bands) or any(b < 0 for b in bands):
                 raise ValueError("bands must be distinct nonnegative integers.")
@@ -67,19 +85,32 @@ class BulkTopologyResult:
     model: TopologyModel
     embedding: LatticeEmbedding
     kpoints: np.ndarray  # (nu, nv, 3) input-basis fractional momenta
-    energies: np.ndarray  # (nu, nv, n_pos) positive-mode energies in eV
+    energies: Optional[np.ndarray]  # (nu, nv, n) physical-mode energies in eV
     band_indices: List[int]
     plaquette_flux: Optional[np.ndarray]  # (nu, nv) total flux of the band set
     vertex_curvature: Optional[np.ndarray]  # (nu, nv) gauge-safe vertex sum
     chern: Optional[int]
     valid: bool
     diagnostics: Dict[str, Any] = field(default_factory=dict)
+    groups: Optional[List[Dict[str, Any]]] = None  # per-group records
 
     def to_json_dict(self) -> Dict[str, Any]:
         """Versioned JSON-serializable record (ADR-005)."""
 
         def _arr(a: Optional[np.ndarray]) -> Optional[Any]:
             return None if a is None else np.asarray(a).tolist()
+
+        def _group(g: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "bands": g["bands"],
+                "chern": g["chern"],
+                "valid": bool(g["valid"]),
+                "plaquette_flux": _arr(g["plaquette_flux"]),
+                "vertex_curvature": _arr(g["vertex_curvature"]),
+                "min_external_gap_eV": g["min_external_gap"],
+                "min_det_overlap": g["min_det_overlap"],
+                "failures": g["failures"],
+            }
 
         return {
             "kind": "bulk",
@@ -100,12 +131,14 @@ class BulkTopologyResult:
             "vertex_curvature": _arr(self.vertex_curvature),
             "chern": None if self.chern is None else int(self.chern),
             "valid": bool(self.valid),
+            "groups": None if self.groups is None else [_group(g) for g in self.groups],
             "diagnostics": self.diagnostics,
             "conventions": {
                 "fourier_phase": "J(k) = sum_R J(R) exp(-2 pi i k.R)",
                 "plaquette_order": "(i,j)->(i+1,j)->(i+1,j+1)->(i,j+1)",
                 "energy_unit": "eV",
                 "flux_chart": "FHS link flux per endpoint-exclusive plaquette (dimensionless, rad units in sum)",
+                "group_curvature": "vertex value = average of the four adjacent plaquette fluxes",
                 "certificate": "docs/sympy/magnon_topology_lswt_ferromagnet.py",
             },
         }
@@ -183,6 +216,12 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     energies = None
     if len(lengths) == 1:
         energies = np.array([m.energies for m in modes]).reshape(nu, nv, n_pos)
+        if not np.isfinite(energies).all():
+            energies = None
+            failures.append(
+                "non-finite physical-mode energies on the mesh; no validated "
+                "invariant can be emitted from non-finite data."
+            )
     else:
         failures.append("inconsistent physical-mode count across the mesh.")
     diagnostics["solver"] = {
@@ -217,130 +256,215 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     if zero_points:
         diagnostics["zero_mode_points"] = zero_points
 
-    # --- band selection
-    bands = (
-        list(request.bands)
-        if request.bands is not None
-        else [int(i) for i in modes[0].positive_indices]
+    # --- group requests
+    requested_groups: List[List[int]] = (
+        [list(g) for g in request.groups]
+        if request.groups is not None
+        else [
+            list(request.bands)
+            if request.bands is not None
+            else [int(i) for i in modes[0].positive_indices]
+        ]
     )
-    if bands and n_pos > 0 and max(bands) >= n_pos:
-        raise ValueError(
-            f"band index {max(bands)} out of range for {n_pos} physical modes."
-        )
-    # a requested band touching the stable zero level on the mesh is
-    # unvalidated: a zero-energy mode is non-normalizable
-    if energies is not None and energies.shape[-1] > 0:
-        touching = []
-        for b in bands:
-            if float(energies[:, :, b].min()) <= 1e-8:
-                touching.append(b)
-        if touching:
-            failures.append(
-                f"requested band group touches stable zero modes on the mesh "
-                f"(band indices {sorted(set(touching))}); a validated invariant "
-                "needs a certified finite smooth projector, which a "
-                "zero-mode-touching group does not have."
+    for g in requested_groups:
+        if g and n_pos > 0 and max(g) >= n_pos:
+            raise ValueError(
+                f"band index {max(g)} out of range for {n_pos} physical modes."
             )
 
-    # --- isolation diagnostics: sorted-energy boundary gap of the band set
-    band_set = set(bands)
-    min_gap = np.inf
-    gap_location = None
-    if energies is not None:
-        for idx in range(nu * nv):
-            w = np.sort(energies.reshape(nu * nv, -1)[idx])
-            for b in range(len(w) - 1):
-                inside_b = b in band_set
-                inside_b1 = (b + 1) in band_set
-                if inside_b != inside_b1:
-                    gap = float(w[b + 1] - w[b])
-                    if gap < min_gap:
-                        min_gap = gap
-                        gap_location = (idx, b, b + 1)
-        if min_gap <= request.gap_tol:
-            failures.append(
-                f"band group is not isolated: minimum external gap {min_gap:.3e} "
-                f"at mesh point {gap_location} within tolerance {request.gap_tol:.3e}."
+    def _group_invariant(bands: List[int]) -> Tuple[List[Any], Dict[str, Any]]:
+        """FHS invariant of one band group: (failures, record)."""
+        gfail: List[str] = []
+        # a requested band touching the stable zero level on the mesh is
+        # unvalidated: a zero-energy mode is non-normalizable
+        if energies is not None and energies.shape[-1] > 0:
+            touching = [b for b in bands if float(energies[:, :, b].min()) <= 1e-8]
+            if touching:
+                gfail.append(
+                    f"requested band group touches stable zero modes on the "
+                    f"mesh (band indices {sorted(set(touching))}); a validated "
+                    "invariant needs a certified finite smooth projector, "
+                    "which a zero-mode-touching group does not have."
+                )
+        # isolation: sorted-energy boundary gap (internal degeneracies are
+        # allowed for multi-band groups; a single band has only external
+        # boundaries, so an internal touch is refused through min_gap)
+        band_set = set(bands)
+        min_gap = np.inf
+        gap_location = None
+        if energies is not None:
+            for idx in range(nu * nv):
+                w = np.sort(energies.reshape(nu * nv, -1)[idx])
+                for b in range(len(w) - 1):
+                    if (b in band_set) != ((b + 1) in band_set):
+                        gap = float(w[b + 1] - w[b])
+                        if gap < min_gap:
+                            min_gap = gap
+                            gap_location = (idx, b, b + 1)
+            if min_gap <= request.gap_tol:
+                gfail.append(
+                    f"band group is not isolated: minimum external gap "
+                    f"{min_gap:.3e} at mesh point {gap_location} within "
+                    f"tolerance {request.gap_tol:.3e}."
+                )
+        flux = np.zeros((nu, nv))
+        chern = None
+        vertex = None
+        min_link = np.inf
+        if not gfail and not failures:
+            # map requested band indices to the normalized positive-mode
+            # columns per mesh point (zero-mode positions may vary)
+            psi = np.empty(
+                (nu * nv, modes[0].vectors.shape[0], len(bands)), dtype=complex
             )
-    diagnostics["gap"] = {
-        "min_gap": None if not np.isfinite(min_gap) else float(min_gap),
-        "gap_location": gap_location,
-        "gap_tol": float(request.gap_tol),
-    }
+            for idx in range(nu * nv):
+                cols = modes[idx].positive_indices
+                psi[idx] = modes[idx].vectors[
+                    :, [int(np.flatnonzero(cols == b)[0]) for b in bands]
+                ]
 
-    # --- gauge-invariant FHS links over the selected band subspace
-    flux = np.zeros((nu, nv))
-    chern = None
-    vertex = None
-    min_link = np.inf
-    if not failures:
-        # map requested band indices to the normalized positive-mode columns
-        # per mesh point (zero-mode positions may vary across the mesh)
-        psi = np.empty((nu * nv, modes[0].vectors.shape[0], len(bands)), dtype=complex)
-        for idx in range(nu * nv):
-            cols = modes[idx].positive_indices
-            psi[idx] = modes[idx].vectors[
-                :, [int(np.flatnonzero(cols == b)[0]) for b in bands]
-            ]
+            def link(p, q) -> complex:
+                # normalized determinant of the between-points Gram matrix
+                d = np.linalg.det(psi[p].conj().T @ psi[q])
+                return d / abs(d)
 
-        def link(p, q) -> complex:
-            # normalized determinant of the between-points Gram matrix
-            d = np.linalg.det(psi[p].conj().T @ psi[q])
-            return d / abs(d)
-
-        min_link = min(
-            abs(
-                np.linalg.det(psi[(i * nv + j)].conj().T @ psi[((i + 1) % nu) * nv + j])
+            min_link = min(
+                abs(
+                    np.linalg.det(
+                        psi[(i * nv + j)].conj().T @ psi[((i + 1) % nu) * nv + j]
+                    )
+                )
+                for i in range(nu)
+                for j in range(nv)
             )
-            for i in range(nu)
-            for j in range(nv)
-        )
-
-        prod = np.ones((nu, nv), dtype=complex)
-        for i in range(nu):
-            for j in range(nv):
-                p0 = i * nv + j
-                p1 = ((i + 1) % nu) * nv + j
-                p2 = ((i + 1) % nu) * nv + (j + 1) % nv
-                p3 = i * nv + (j + 1) % nv
-                prod[i, j] = link(p0, p1) * link(p1, p2) * link(p2, p3) * link(p3, p0)
-        flux = np.angle(prod) / (2 * np.pi)
-        chern = int(np.rint(flux.sum()))
-        # gauge-safe vertex curvature: average of adjacent plaquette fluxes
-        vertex = (
-            np.roll(flux, 1, axis=0)
-            + np.roll(flux, 1, axis=1)
-            + np.roll(np.roll(flux, 1, axis=0), 1, axis=1)
-            + flux
-        ) / 4.0
-        if min_link <= request.link_tol:
-            failures.append(
-                f"vanishing link determinant overlap: min |det S| = {min_link:.3e} "
-                f"within tolerance {request.link_tol:.3e}; the band group overlaps "
-                "other states on this mesh."
-            )
-        diagnostics["links"] = {
-            "min_det_overlap": min_link,
-            "link_tol": float(request.link_tol),
+            prod = np.ones((nu, nv), dtype=complex)
+            for i in range(nu):
+                for j in range(nv):
+                    p0 = i * nv + j
+                    p1 = ((i + 1) % nu) * nv + j
+                    p2 = ((i + 1) % nu) * nv + (j + 1) % nv
+                    p3 = i * nv + (j + 1) % nv
+                    prod[i, j] = (
+                        link(p0, p1) * link(p1, p2) * link(p2, p3) * link(p3, p0)
+                    )
+            flux = np.angle(prod) / (2 * np.pi)
+            chern = int(np.rint(flux.sum()))
+            # gauge-safe vertex curvature: average of adjacent plaquette fluxes
+            vertex = (
+                np.roll(flux, 1, axis=0)
+                + np.roll(flux, 1, axis=1)
+                + np.roll(np.roll(flux, 1, axis=0), 1, axis=1)
+                + flux
+            ) / 4.0
+            if min_link <= request.link_tol:
+                gfail.append(
+                    f"vanishing link determinant overlap: min |det S| = "
+                    f"{min_link:.3e} within tolerance {request.link_tol:.3e}; "
+                    "the band group overlaps other states on this mesh."
+                )
+        record = {
+            "bands": [int(b) for b in bands],
+            "chern": None if (gfail or chern is None) else int(chern),
+            "plaquette_flux": None if gfail else flux,
+            "vertex_curvature": None if gfail else vertex,
+            "valid": not gfail,
+            "min_external_gap": None if not np.isfinite(min_gap) else float(min_gap),
+            "min_det_overlap": None if not np.isfinite(min_link) else float(min_link),
+            "failures": gfail,
         }
+        return gfail, record
 
+    group_records = []
+    group_failures: List[str] = []
+    for g in requested_groups:
+        gfail, record = _group_invariant(g)
+        group_records.append(record)
+        for f in gfail:
+            group_failures.append(f"groups {record['bands']}: {f}")
+    diagnostics["links"] = {
+        "link_tol": float(request.link_tol),
+        "min_det_overlap_per_group": [r["min_det_overlap"] for r in group_records],
+    }
+    diagnostics["gap"] = {
+        "gap_tol": float(request.gap_tol),
+        "min_external_gap_per_group": [r["min_external_gap"] for r in group_records],
+    }
     diagnostics["mesh_refinement"] = {
         "mesh": [nu, nv],
         "note": "an integer on one mesh is not a convergence certificate; "
         "refine the mesh and compare when convergence evidence is required.",
     }
+    failures.extend(group_failures)
     valid = not failures
+    primary = group_records[0]
     diagnostics["failures"] = failures
-    return BulkTopologyResult(
+    result = BulkTopologyResult(
         request=request,
         model=model,
         embedding=embedding,
         kpoints=kpoints,
         energies=energies,
-        band_indices=bands,
-        plaquette_flux=flux if valid else None,
-        vertex_curvature=vertex if valid else None,
-        chern=chern if valid else None,
+        band_indices=primary["bands"],
+        plaquette_flux=primary["plaquette_flux"] if valid else None,
+        vertex_curvature=primary["vertex_curvature"] if valid else None,
+        chern=primary["chern"] if valid else None,
         valid=valid,
         diagnostics=diagnostics,
     )
+    result.groups = group_records
+    return result
+
+
+def refine_bulk(
+    model: TopologyModel,
+    request: BulkRequest,
+    factor: int = 2,
+) -> Dict[str, Any]:
+    """Inspectable mesh-refinement report for a bulk request.
+
+    Runs the request on the requested mesh and on the factor-refined mesh and
+    reports band Chern values, minimum external gaps and their agreement.
+    Agreement is convergence EVIDENCE, not a certificate of continuum
+    isolation: a gap closing between mesh points can hide from any discrete
+    sampling.
+    """
+    if factor < 2:
+        raise ValueError("refinement factor must be >= 2.")
+    fine = BulkRequest(
+        mesh=(request.mesh[0] * factor, request.mesh[1] * factor),
+        bands=request.bands,
+        groups=request.groups,
+        embedding=request.embedding,
+        gap_tol=request.gap_tol,
+        link_tol=request.link_tol,
+        stationarity_rtol=request.stationarity_rtol,
+    )
+    coarse = calculate_bulk(model, request)
+    fine_result = calculate_bulk(model, fine)
+
+    def _summary(result: BulkTopologyResult) -> Dict[str, Any]:
+        return {
+            "mesh": [int(result.request.mesh[0]), int(result.request.mesh[1])],
+            "valid": bool(result.valid),
+            "chern_per_group": [g["chern"] for g in (result.groups or [])],
+            "min_external_gap_per_group": [
+                g["min_external_gap"] for g in (result.groups or [])
+            ],
+        }
+
+    coarse_summary = _summary(coarse)
+    fine_summary = _summary(fine_result)
+    chern_agrees = (
+        coarse_summary["chern_per_group"]
+        and coarse_summary["chern_per_group"] == fine_summary["chern_per_group"]
+        and all(c is not None for c in fine_summary["chern_per_group"])
+    )
+    return {
+        "factor": int(factor),
+        "coarse": coarse_summary,
+        "fine": fine_summary,
+        "chern_agrees": bool(chern_agrees),
+        "note": "integer agreement plus gap growth is convergence evidence, "
+        "not proof: a continuum gap closing between mesh points escapes any "
+        "discrete sampling.",
+    }

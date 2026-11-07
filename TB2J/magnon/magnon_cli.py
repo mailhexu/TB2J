@@ -73,6 +73,25 @@ def create_parser() -> argparse.ArgumentParser:
         ),
     )
     topo_group.add_argument(
+        "--topology-groups",
+        type=str,
+        default=None,
+        help=(
+            "Semicolon-separated band groups for --topology, e.g. "
+            "'0;1' requests two independent groups. Mutually exclusive "
+            "with --topology-bands."
+        ),
+    )
+    topo_group.add_argument(
+        "--topology-refine",
+        action="store_true",
+        default=False,
+        help=(
+            "Add a mesh-refinement report (coarse vs factor-2 refined mesh) "
+            "to the topology JSON under 'refinement'."
+        ),
+    )
+    topo_group.add_argument(
         "--topology-out",
         type=str,
         default="topology_bulk.json",
@@ -199,17 +218,31 @@ def run_topology(args, params: MagnonParameters) -> int:
         print(f"Topology preparation refused the input: {error}")
         return 2
     bands = None
-    if args.topology_bands:
+    groups = None
+    if args.topology_groups:
+        groups = [
+            [int(b) for b in part.split(",")]
+            for part in args.topology_groups.split(";")
+        ]
+    elif args.topology_bands:
         bands = [int(b) for b in args.topology_bands.split(",")]
-    request = BulkRequest(mesh=tuple(args.topology_mesh), bands=bands)
+    request = BulkRequest(mesh=tuple(args.topology_mesh), bands=bands, groups=groups)
     result = calculate_bulk(model, request)
+    record = result.to_json_dict()
+    if args.topology_refine:
+        from TB2J.magnon.topology.bulk import refine_bulk
+
+        record["refinement"] = refine_bulk(model, request)
     with open(args.topology_out, "w") as f:
-        json.dump(result.to_json_dict(), f, indent=1)
+        json.dump(record, f, indent=1)
     print(f"Topology result written to {args.topology_out}")
     diag = result.diagnostics
     if result.valid:
-        print(f"Chern number for bands {result.band_indices}: {result.chern}")
-        print(f"Minimum external gap: {diag['gap']['min_gap']:.6e} eV")
+        for g in result.groups or []:
+            print(f"Chern number for bands {g['bands']}: {g['chern']}")
+            gap = g["min_external_gap"]
+            if gap is not None:
+                print(f"  minimum external gap: {gap:.6e} eV")
         return 0
     print("Topology result is INVALID; no Chern value emitted. Reasons:")
     for reason in diag.get("failures", []):
