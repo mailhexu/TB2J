@@ -54,6 +54,13 @@ These are the new features and changes  not yet included in the official release
   ``LatticeEmbedding`` maps primitive embedding momenta and rejects
   nonprimitive bases.
 
+- Open-strip magnon spectra and signed bulk-edge comparison are now available
+  through `calculate_strip` and `compare_bulk_edge`, with physical spin-amplitude
+  localization, cut-specific stationarity using the same spin-normalized
+  exchange as the magnon Hamiltonian, shared stability diagnostics,
+  basis-invariant edge-subspace reporting, strict parent/geometry/reference
+  matching and versioned JSON. The paired `TB2J_magnon --topology-compare` CLI
+  writes standalone bulk and strip records plus a signed comparison result.
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires an non-official SIESTA branch which can seperate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

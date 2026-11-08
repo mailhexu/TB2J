@@ -28,6 +28,9 @@ Welcome to TB2J's documentation!
    src/tutorial.rst
    src/applications.rst
    src/magnon_theory.md
+   src/magnon_topology.md
+   src/magnon_topology_strip.md
+   src/magnon_topology_bulk_edge.md
    src/magnon_band.rst
    src/sprkkr_magnon.md
    src/edit.md

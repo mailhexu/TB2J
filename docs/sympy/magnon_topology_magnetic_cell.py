@@ -1,8 +1,8 @@
 """Certificate: commensurate magnetic-cell expansion and embedding phases.
 
 Executable checks for ticket 05 (matched embeddings and commensurate
-magnetic cells). Model: a one-site 1D ferromagnetic chain with isotropic J1
-and a single-Q ordering vector Q (fractional, commensurate).
+magnetic cells). The symbolic reference is a one-dimensional three-site
+120-degree antiferromagnetic chain with isotropic nearest-neighbour exchange.
 
 The certificate derives the reference truth for the magnetic-cell expansion
 symbolically (section 2) and then verifies the executable construction
@@ -12,26 +12,26 @@ against it (section 3). Pinned statements (all executed):
    the real-space displacement d (in original cells) of any expanded bond
    satisfies exp(2 pi i Q d) == exp(2 pi i Q R) with R = d mod m, so the
    single-Q bond twist is well defined on the expanded cell.
-2. Twisted-ring reference (symbolic): the real-space N=3 ring with moments
-   twisted by phi_s = s*2*pi*Q about the single-Q axis, isotropic J1 bonds,
-   has (a) vanishing linear classical gradient (the uniform twist is a
-   stationary reference under torque balance), (b) Hermitian A and symmetric
-   B blocks under the Holstein-Primakoff linearization, (c) B = 0 for
-   isotropic exchange, and (d) cell Bloch bands given by eig(A(k')) with an
-   exact Goldstone at k' = 0 in the chosen wrap gauge.
+2. Twisted-ring reference (symbolic): for the N=3 ring with moments twisted
+   by `phi_s = s*2*pi/3`, the linear classical gradient vanishes. The full
+   bosonic A block is Hermitian, B is symmetric and nonzero, and the k'=0
+   Hessian has an exact Goldstone null direction. This one-dimensional
+   nearest-neighbour reference is dynamically unstable at the other folded
+   momenta; the pipeline detects and refuses those modes rather than claiming
+   a stable folded spectrum.
+For a Hermitian Fourier A block, the Nambu hole block is `A(-k)^* = A^T(-k)`: conjugate each real-space A coefficient before the Fourier phase. Conjugating the already transformed `A(k)` is not equivalent.
 3. Construction verification: the expanded-cell SpinIO model with twisted
-   frames and unchanged (re-keyed) interaction tensors reproduces the
-   symbolic Bloch spectrum at the three folded momenta through the topology
-   local-frame assembly. In-plane SIA on the twisted reference breaks
-   stationarity and is refused by the pipeline guard.
+   frames and unchanged re-keyed tensors is stationary and receives the same
+   zero-mode/unstable classifications from the executable topology assembler.
+   In-plane SIA on the twisted reference breaks stationarity and is refused.
 4. Stationarity: the twisted expanded reference passes the constrained
    transverse classical gradient check of the topology pipeline.
 5. No double rotation: solving the expanded model with a second Q rotation
    changes the Hamiltonian; the expanded reference must be solved with
    Q = 0 (the ordering is real space now).
 6. Embedding identity: LatticeEmbedding maps embedding-fractional momenta
-   via k_in = k_embed @ basis with the fixed normal_k appended; nonprimitive
-   bases (|det| != 1) are refused.
+   through the reciprocal dual k_in = k_embed @ basis^{-T}, with fixed
+   normal_k appended; nonprimitive bases (|det| != 1) are refused.
 """
 
 from pathlib import Path
@@ -94,9 +94,19 @@ y_sym = sp.symbols(f"y0:{nsites}", real=True)
 
 
 def _frames(phi):
-    """Local frame of a moment twisted by phi about z (the single-Q axis)."""
+    """Right-handed HP frame around a moment twisted about the z axis."""
     c, s = sp.cos(phi), sp.sin(phi)
-    return sp.Matrix([c, s, 0]), sp.Matrix([-s, c, 0]), sp.Matrix([0, 0, 1])
+    e1 = sp.Matrix([-s, c, 0])  # in-plane tangent
+    e2 = sp.Matrix([0, 0, 1])  # spiral axis
+    e3 = sp.Matrix([c, s, 0])  # classical moment
+    return e1, e2, e3
+
+
+e1_ref, e2_ref, e3_ref = _frames(delta)
+check(
+    e1_ref.cross(e2_ref) == e3_ref,
+    "local transverse axes are right-handed about the classical moment",
+)
 
 
 def _spin_vec(site, xs, ys):
@@ -114,7 +124,7 @@ for s in range(nsites):
     t = (s + 1) % nsites
     Ss = _spin_vec(s, x_sym[s], y_sym[s])
     St = _spin_vec(t, x_sym[t], y_sym[t])
-    E_full = E_full - J1_sym * Ss.dot(St)
+    E_full = E_full + J1_sym * Ss.dot(St)
 E_full = sp.expand(E_full)
 
 # keep terms through second order in the transverse variables
@@ -131,9 +141,8 @@ for term in sp.Add.make_args(E_full):
         E2 += term
 
 check(
-    sp.simplify(E1) == 0,
-    "linear classical gradient vanishes identically "
-    "(uniform twist is a stationary reference)",
+    sp.simplify(E1.subs(delta, 2 * sp.pi / 3)) == 0,
+    "linear classical gradient vanishes at the commensurate pitch " "delta = 2*pi/3",
 )
 
 # Holstein-Primakoff linearization: with the transverse components defined
@@ -162,58 +171,70 @@ check(_mat_zero(Amat - Amat.H), "bosonic A block is Hermitian")
 check(_mat_zero(Bmat - Bmat.T), "bosonic B block is complex symmetric (pairing)")
 
 
-# symbolic Bloch Hamiltonian at the folded ring momenta. The twist winds
-# once around the ring (delta = 2 pi q / 3), so the real-space A matrix is
-# not circulant: bands are the eigenvalues of the cell Bloch matrix A(k')
-# with the wrapping entries carrying the R = +-1 phase factors.
-def _a_bloch(kp):
+# Bloch BdG matrix at the folded ring momenta. The wrap bond carries the
+# reciprocal phase in both number-conserving and anomalous blocks.
+def _bloch(M, kp):
     phase = sp.exp(sp.I * 2 * sp.pi * kp)
-    M = Amat.copy()
-    M[0, 2] *= phase
-    M[2, 0] /= phase
-    return M
+    out = M.copy()
+    out[0, 2] *= phase
+    out[2, 0] /= phase
+    return out
 
 
-ring_k = [sp.Integer(0) / 3, sp.Integer(1) / 3, sp.Integer(2) / 3]
-# Goldstone: at k' = 0 (the wrap-gauge image of the spiral momentum) the
-# smallest Bloch-matrix eigenvalue vanishes exactly at delta = 2 pi q / N.
-gold_det = sp.simplify(sp.factor(_a_bloch(ring_k[0]).det().subs(delta, 2 * sp.pi / 3)))
+def _bdg(kp):
+    A = _bloch(Amat, kp)
+    B = _bloch(Bmat, kp)
+    return A, B, _bloch(Amat.conjugate(), kp)
+
+
+ring_k = [sp.Integer(0), sp.Rational(1, 3), sp.Rational(2, 3)]
+G_metric = sp.diag(1, 1, 1, -1, -1, -1)
+H0_blocks = _bdg(ring_k[0])
+A0, B0, A0bar = H0_blocks
+H0 = A0.row_join(B0).col_join(B0.conjugate().T.row_join(A0bar))
+check(
+    sp.simplify(H0 - H0.conjugate().T) == sp.zeros(6),
+    "full k=0 bosonic BdG matrix is Hermitian",
+)
+gold_det = sp.simplify(sp.factor(H0.det().subs(delta, 2 * sp.pi / 3)))
 check(
     gold_det == 0,
-    "det A(k' = 0) vanishes exactly at delta = 2 pi/3: "
-    "an exact Goldstone mode in the folded spectrum",
+    "full bosonic Hessian has an exact Goldstone null direction at k'=0",
 )
-all_B_zero = Bmat == sp.zeros(nsites, nsites)
 check(
-    all_B_zero,
-    "isotropic twist: bosonic pairing vanishes identically "
-    "(B matrix is exactly zero)",
+    not _mat_zero(Bmat),
+    "isotropic noncollinear reference has a nonzero anomalous pairing block",
 )
 
-# numeric anchors for the executable construction checks
-# the symbolic S is the full moment magnitude: spinat |mu| = 2 muB.
+# Numeric check exposes the limitation of this one-dimensional 120-degree
+# nearest-neighbour chain: it is stationary but has unstable folded momenta.
 anchor_subs = {S_sym: 2.0, J1_sym: 0.01, delta: 2 * sp.pi / 3}
-anchors = []
+ring_imaginary_parts = []
 for kp in ring_k:
-    M = _a_bloch(kp).subs(anchor_subs)
-    eig = [complex(sp.N(w)) for w in sp.Matrix(M).eigenvals().keys()]
-    max_imag = max(abs(w.imag) for w in eig)
+    A_k, B_k, Abar_k = _bdg(kp)
+    H_k = A_k.row_join(B_k).col_join(B_k.conjugate().T.row_join(Abar_k))
     check(
-        max_imag < 1e-10,
-        f"symbolic Bloch eigenvalues at k' = {float(kp)} "
-        f"are real (max |imag| {max_imag:.1e})",
+        sp.simplify(H_k - H_k.conjugate().T) == sp.zeros(6),
+        f"full bosonic BdG matrix is Hermitian at k'={float(kp):g}",
     )
-    anchors.append(sorted(_np.real(eig)))
-note(
-    "   symbolic ring anchors at |mu|=2 muB, J1=0.01, delta=2pi/3: "
-    + "; ".join(
-        f"k'={float(kp)}: {np.round(vals, 6).tolist()}"
-        for kp, vals in zip(ring_k, anchors)
-    )
+    H_num = np.array(H_k.subs(anchor_subs).evalf(), dtype=complex)
+    frequencies = np.linalg.eigvals(np.asarray(G_metric, dtype=complex) @ H_num)
+    ring_imaginary_parts.append(float(np.max(np.abs(frequencies.imag))))
+check(
+    ring_imaginary_parts[0] < 1e-9,
+    "the stationary reference has real frequencies at k'=0",
 )
 check(
-    all(w >= -1e-12 for vals in anchors for w in vals),
-    "all symbolic ring anchors are non-negative (stable reference)",
+    ring_imaginary_parts[1] > 1e-8 and ring_imaginary_parts[2] > 1e-8,
+    "nearest-neighbour 120-degree chain is dynamically unstable away from k'=0",
+)
+check(
+    np.isclose(ring_imaginary_parts[1], ring_imaginary_parts[2], atol=1e-9),
+    "the two symmetry-related unstable folded momenta have equal growth rates",
+)
+check(
+    not _mat_zero(Bmat),
+    "isotropic noncollinear reference has a nonzero anomalous pairing block",
 )
 
 # ---------------------------------------------------------------------------
@@ -222,7 +243,7 @@ check(
 note("3. Expanded-cell construction verification (twisted frames)")
 
 
-def expanded_twisted_chain(q_num=1, q_den=3, J1=0.01, K=0.0):
+def expanded_twisted_chain(q_num=1, q_den=3, J1=-0.01, K=0.0):
     """Expanded N-cell chain: twisted moments, unchanged re-keyed tensors.
 
     Bond (s -> s+1) with wrap displacement kept integer via R = +-1 keys.
@@ -265,36 +286,31 @@ def expanded_twisted_chain(q_num=1, q_den=3, J1=0.01, K=0.0):
     return io
 
 
-def _ring_bands(io, q_den=3):
-    """Sorted A-block eigenvalues at the folded ring momenta."""
+def _ring_classifications(io, q_den=3):
     from TB2J.magnon.topology.assembly import local_frame_bosonic_hamiltonian
+    from TB2J.magnon.topology.bosonic import solve_bosonic_modes
     from TB2J.magnon.topology.preparation import prepare_topology_model
 
     model = prepare_topology_model(io, source_path="cert")
-    bands = []
+    classifications = []
     for n in range(q_den):
         kv = n / q_den
         H = local_frame_bosonic_hamiltonian(
             model.JR, model.Rlist, model.magmoms, _np.array([[kv, 0.0, 0.0]])
         )
-        nspin = H.shape[-1] // 2
-        bands.append(_np.sort(_np.linalg.eigvalsh(H[0][:nspin, :nspin])))
-    return bands
+        classifications.append(solve_bosonic_modes(H[0]).classification)
+    return classifications
 
 
 twisted_io = expanded_twisted_chain()
-twisted_bands = _ring_bands(twisted_io)
-for n in range(3):
-    note(
-        f"   twisted ring k' = {n / 3:.3f}: pipeline A-eigenvalues "
-        f"{np.round(twisted_bands[n], 8).tolist()}"
-    )
-    check(
-        _np.allclose(twisted_bands[n], anchors[n], atol=1e-9),
-        f"twisted-cell bands at k' = {n / 3:.3f} equal the symbolic Bloch "
-        f"reference (max diff "
-        f"{_np.max(_np.abs(twisted_bands[n] - _np.asarray(anchors[n]))):.2e})",
-    )
+twisted_classifications = _ring_classifications(twisted_io)
+note(f"   executable 120-degree chain classifications: {twisted_classifications}")
+check(
+    twisted_classifications[0] == "zero_mode"
+    and twisted_classifications[1:] == ["energetically_unstable"] * 2,
+    "the numerical topology pipeline refuses the same unstable folded modes "
+    "identified by the symbolic metric spectrum",
+)
 
 
 # in-plane SIA on the twisted reference must break stationarity
@@ -349,11 +365,27 @@ from TB2J.magnon.topology.embedding import (  # noqa: E402
     identity_embedding,
 )
 
-emb = LatticeEmbedding(basis=[[1, 1, 0], [0, 1, 0], [0, 0, 1]], normal_k=0.25)
+B_sym = sp.Matrix([[1, 1, 0], [0, 1, 0], [0, 0, 1]])
+A_sym = sp.Matrix(3, 3, lambda i, j: sp.Symbol(f"a{i}{j}"))
+G_input = A_sym.inv().T
+A_embed = B_sym * A_sym
+G_embed = A_embed.inv().T
+dual_sym = B_sym.inv().T
+k_embed_sym = sp.Matrix([[sp.Rational(1, 10), sp.Rational(1, 5), sp.Rational(1, 4)]])
+check(
+    sp.simplify(A_embed * G_embed.T - sp.eye(3)) == sp.zeros(3),
+    "declared direct basis and reciprocal dual satisfy A_embed G_embed^T = I",
+)
+check(
+    sp.simplify(k_embed_sym * dual_sym * G_input - k_embed_sym * G_embed)
+    == sp.zeros(1, 3),
+    "reciprocal-coordinate map k_input = k_embed B^{-T} preserves physical k",
+)
+emb = LatticeEmbedding(basis=B_sym.tolist(), normal_k=0.25)
 k_in = emb.to_input_k([0.1, 0.2])
 check(
-    _np.allclose(k_in, [0.1, 0.3, 0.25]),
-    "to_input_k maps k_embed @ basis with normal_k appended "
+    _np.allclose(k_in, [-0.1, 0.2, 0.25]),
+    "to_input_k uses the reciprocal dual and appends normal_k "
     f"([0.1, 0.2] -> {np.round(k_in, 6).tolist()})",
 )
 ident = identity_embedding()
@@ -379,20 +411,23 @@ passed in the `mydev` environment). Pinned statements:
    for commensurate `Q = p/m`; the single-Q bond twist is well defined on the
    expanded cell.
 2. Twisted-ring reference (symbolic): for the N=3 ring with moments twisted
-   by `phi_s = s delta` (isotropic J1), the linear classical gradient vanishes,
-   the A block is Hermitian, the B block is symmetric and vanishes identically,
-   and the cell Bloch bands are the eigenvalues of `A(k')`. The wrap gauge has
-   an exact Goldstone at `k' = 0`.
-3. Construction verification: the expanded SpinIO cell with twisted frames
-   and unchanged re-keyed tensors reproduces the symbolic Bloch spectrum at
-   the three folded momenta through the topology local-frame assembly;
-   in-plane SIA on the twisted reference breaks stationarity and is refused.
+   by `phi_s = s*2*pi/3`, the linear classical gradient vanishes. The full
+   bosonic A block is Hermitian, B is symmetric and nonzero, and the k'=0
+   Hessian has an exact Goldstone null direction. This one-dimensional
+   nearest-neighbour reference is dynamically unstable at the other folded
+   momenta; the topology pipeline detects and refuses those modes rather than
+   claiming a stable folded spectrum.
+For a Hermitian Fourier A block, the Nambu hole block is `A(-k)^* = A^T(-k)`: conjugate real-space coefficients before the Fourier phase.
+3. Construction verification: the expanded-cell SpinIO model with twisted
+   frames is stationary and the executable assembler reports the same
+   zero-mode/unstable classifications. In-plane SIA breaks stationarity and
+   is refused by the pipeline guard.
 4. The twisted expanded reference is stationary (vanishing constrained
    transverse classical gradient).
 5. Applying a second Q rotation to the expanded model changes the
    Hamiltonian: refused by construction (the expanded reference is Q = 0).
-6. Embedding: `k_in = k_embed @ basis` with fixed `normal_k`; nonprimitive
-   bases (|det| != 1) refused.
+6. Embedding: `k_in = k_embed @ basis^{-T}` is the reciprocal dual of the
+   declared direct basis, with fixed `normal_k`; nonprimitive bases refused.
 
 ## Console output of the executed script
 

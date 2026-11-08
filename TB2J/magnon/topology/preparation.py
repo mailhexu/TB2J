@@ -184,6 +184,7 @@ class TopologyModel:
     auxiliary_present: Tuple[str, ...]
     source_path: Optional[str] = None
     canonicalization_version: str = CANONICALIZATION_VERSION
+    magnetic_cell_transform: Optional[Dict[str, Any]] = None
 
     @property
     def nspin(self) -> int:
@@ -209,6 +210,7 @@ class TopologyModel:
             "unsupported_nonzero": dict(self.unsupported_nonzero),
             "auxiliary_present": list(self.auxiliary_present),
             "natom": self.natom,
+            "magnetic_cell_transform": self.magnetic_cell_transform,
             "nspin": self.nspin,
         }
 

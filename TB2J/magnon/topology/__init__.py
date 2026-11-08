@@ -23,6 +23,10 @@ from TB2J.magnon.topology.bulk import (
     BulkTopologyResult,
     calculate_bulk,
 )
+from TB2J.magnon.topology.bulk_edge import (
+    BulkEdgeComparison,
+    compare_bulk_edge,
+)
 from TB2J.magnon.topology.embedding import LatticeEmbedding, identity_embedding
 from TB2J.magnon.topology.magnetic_cell import expand_magnetic_cell
 from TB2J.magnon.topology.preparation import (
@@ -33,6 +37,12 @@ from TB2J.magnon.topology.preparation import (
     TopologyPreparationError,
     prepare_topology_model,
 )
+from TB2J.magnon.topology.strip import (
+    StripRequest,
+    StripSpectrumResult,
+    calculate_strip,
+    strip_site_map,
+)
 
 __all__ = [
     "CANONICALIZATION_VERSION",
@@ -41,13 +51,19 @@ __all__ = [
     "BosonicModes",
     "BulkRequest",
     "BulkTopologyResult",
+    "BulkEdgeComparison",
+    "compare_bulk_edge",
     "LatticeEmbedding",
     "ModeSolverError",
+    "StripRequest",
+    "StripSpectrumResult",
     "TopologyModel",
     "TopologyPreparationError",
     "calculate_bulk",
+    "calculate_strip",
     "expand_magnetic_cell",
     "identity_embedding",
     "prepare_topology_model",
     "solve_bosonic_modes",
+    "strip_site_map",
 ]

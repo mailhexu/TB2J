@@ -56,12 +56,17 @@ class LatticeEmbedding:
         """Sign of (edge, width, normal) handedness: +1 right-handed."""
         return int(round(np.linalg.det(self.basis)))
 
-    def to_input_k(self, k_embed: np.ndarray) -> np.ndarray:
-        """Map embedding-fractional momenta ``(ke, kw)`` or ``(ke, kw, kn)``.
+    @property
+    def reciprocal_dual(self) -> np.ndarray:
+        """Integer reciprocal-coordinate map dual to the declared direct basis."""
+        return np.rint(np.linalg.inv(self.basis).T).astype(np.int64)
 
-        The normal component defaults to the fixed ``normal_k``. Returns
-        input-cell fractional coordinates: ``k_in = k_embed @ basis`` with
-        the normal component added at ``normal_k``.
+    def to_input_k(self, k_embed: np.ndarray) -> np.ndarray:
+        """Map embedding-fractional momenta to input-cell coordinates.
+
+        For direct basis rows ``B`` in the input cell, reciprocal coordinates
+        transform by the inverse transpose: ``k_in = k_embed @ B^{-T}``.
+        The normal component defaults to ``normal_k``.
         """
         k_embed = np.atleast_2d(np.asarray(k_embed, dtype=float))
         if k_embed.shape[1] == 2:
@@ -69,7 +74,7 @@ class LatticeEmbedding:
             k_embed = np.concatenate([k_embed, kn], axis=1)
         elif k_embed.shape[1] != 3:
             raise ValueError("k_embed must have 2 or 3 components per row.")
-        return k_embed @ self.basis
+        return k_embed @ self.reciprocal_dual
 
 
 def identity_embedding() -> LatticeEmbedding:

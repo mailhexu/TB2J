@@ -17,7 +17,9 @@ from TB2J.magnon.topology.preparation import (
 __all__ = ["expand_magnetic_cell"]
 
 
-def _period(q: float, max_denominator: int, tolerance: float) -> int:
+def _commensurate_component(
+    q: float, max_denominator: int, tolerance: float
+) -> Fraction:
     fraction = Fraction(float(q)).limit_denominator(max_denominator)
     if abs(float(fraction) - q) > tolerance:
         raise TopologyPreparationError(
@@ -25,7 +27,7 @@ def _period(q: float, max_denominator: int, tolerance: float) -> int:
             f"denominator limit {max_denominator}; increase max_denominator "
             "only when a larger real-space cell is acceptable."
         )
-    return fraction.denominator
+    return fraction
 
 
 def expand_magnetic_cell(
@@ -52,7 +54,14 @@ def expand_magnetic_cell(
     if u.shape != (3,) or not np.isfinite(u).all() or np.linalg.norm(u) == 0:
         raise ValueError("axis must be a finite nonzero three-component vector.")
     u /= np.linalg.norm(u)
-    periods = np.array([_period(x, max_denominator, tolerance) for x in q], dtype=int)
+    if model.magnetic_cell_transform is not None and np.any(q != 0.0):
+        raise TopologyPreparationError(
+            "This model already contains an explicit magnetic-cell transform; "
+            "additional Q rotation would apply the ordering twice."
+        )
+    fractions = [_commensurate_component(x, max_denominator, tolerance) for x in q]
+    q_commensurate = np.array([float(x) for x in fractions])
+    periods = np.array([x.denominator for x in fractions], dtype=int)
     images = list(product(*(range(int(m)) for m in periods)))
     nspin = model.nspin * len(images)
     if nspin > max_sites:
@@ -66,7 +75,7 @@ def expand_magnetic_cell(
         for i in range(model.nspin):
             coordinate = model.positions_fractional[i] + np.asarray(image)
             positions.append(coordinate @ model.cell)
-            angle = 2.0 * np.pi * float(np.dot(q, coordinate))
+            angle = 2.0 * np.pi * float(np.dot(q_commensurate, coordinate))
             moments.append(Rotation.from_rotvec(angle * u).apply(model.magmoms[i]))
     positions = np.asarray(positions)
     moments = np.asarray(moments)
@@ -99,10 +108,42 @@ def expand_magnetic_cell(
     for (R, i, j), tensor in bond_map.items():
         JR[r_index[R], i, j] = tensor
 
-    # Expanded models retain only magnetic-site mappings; nonmagnetic atoms
-    # are absent from the canonical topology Hamiltonian by construction.
-    index_spin = np.arange(nspin, dtype=np.int64)
-    spin_atoms = np.arange(nspin, dtype=np.int64)
+    # Repeat all atom mappings, including nonmagnetic atoms, per image.
+    image_map = [
+        {
+            "new_spin": image_index * model.nspin + i,
+            "source_spin": i,
+            "source_atom": int(model.spin_atoms[i]),
+            "image": [int(x) for x in image],
+        }
+        for image_index, image in enumerate(images)
+        for i in range(model.nspin)
+    ]
+    transformation = {
+        "source_model_digest": model.digest,
+        "supercell_matrix": np.diag(periods).tolist(),
+        "ordering_vector_input_fractional": q.tolist(),
+        "ordering_vector_commensurate_input_fractional": q_commensurate.tolist(),
+        "ordering_vector_rational": [
+            f"{x.numerator}/{x.denominator}" for x in fractions
+        ],
+        "commensurability_error_max": float(np.max(np.abs(q - q_commensurate))),
+        "rotation_axis_cartesian": u.tolist(),
+        "image_map": image_map,
+        "folded_mode_count": int(nspin),
+        "additional_ordering_vector": [0.0, 0.0, 0.0],
+    }
+    index_spin = np.tile(model.index_spin, len(images)).astype(np.int64)
+    for image_index in range(len(images)):
+        start = image_index * model.natom
+        block = index_spin[start : start + model.natom]
+        block[block >= 0] += image_index * model.nspin
+    spin_atoms = np.concatenate(
+        [
+            model.spin_atoms + image_index * model.natom
+            for image_index in range(len(images))
+        ]
+    )
     digest = _digest_model(
         new_cell, positions, index_spin, spin_atoms, moments, Rlist, JR
     )
@@ -122,4 +163,5 @@ def expand_magnetic_cell(
         auxiliary_present=tuple(model.auxiliary_present),
         source_path=model.source_path,
         canonicalization_version=model.canonicalization_version,
+        magnetic_cell_transform=transformation,
     )

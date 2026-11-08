@@ -174,6 +174,70 @@ def test_identity_embedding_map(model_pos):
     np.testing.assert_allclose(k[0], [0.25, 0.5, 0.0], atol=1e-15)
 
 
+def test_oblique_embedding_uses_reciprocal_dual_and_preserves_chern(model_pos):
+    from TB2J.magnon.topology.embedding import LatticeEmbedding
+
+    embedding = LatticeEmbedding(
+        basis=[[1, 1, 0], [0, 1, 0], [0, 0, 1]],
+        normal_k=0.25,
+    )
+    np.testing.assert_array_equal(
+        embedding.reciprocal_dual,
+        [[1, 0, 0], [-1, 1, 0], [0, 0, 1]],
+    )
+    np.testing.assert_allclose(
+        embedding.to_input_k([0.1, 0.2]),
+        [[-0.1, 0.2, 0.25]],
+        atol=1e-15,
+    )
+
+    identity = calculate_bulk(model_pos, BulkRequest(mesh=(6, 6), bands=[0]))
+    oblique = calculate_bulk(
+        model_pos,
+        BulkRequest(mesh=(6, 6), bands=[0], embedding=embedding),
+    )
+    assert identity.valid and oblique.valid
+    assert identity.chern == oblique.chern
+    np.testing.assert_allclose(
+        np.sort(identity.energies.ravel()),
+        np.sort(oblique.energies.ravel()),
+        atol=1e-12,
+    )
+
+
+def test_fixed_normal_momentum_retains_normal_translation_couplings():
+    from TB2J.magnon.topology.embedding import LatticeEmbedding
+
+    exc = honeycomb_spinio(0.0005)
+    for i in range(2):
+        exc.exchange_Jdict[((0, 0, 1), i, i)] = 0.003
+        exc.exchange_Jdict[((0, 0, -1), i, i)] = 0.003
+    exc._build_Rlist()
+    model = prepare_topology_model(exc, source_path="normal-coupling-test")
+    at_gamma = calculate_bulk(
+        model,
+        BulkRequest(
+            mesh=(6, 6),
+            bands=[0],
+            embedding=LatticeEmbedding(np.eye(3, dtype=int), normal_k=0.0),
+        ),
+    )
+    at_quarter = calculate_bulk(
+        model,
+        BulkRequest(
+            mesh=(6, 6),
+            bands=[0],
+            embedding=LatticeEmbedding(np.eye(3, dtype=int), normal_k=0.25),
+        ),
+    )
+    assert at_gamma.valid and at_quarter.valid
+    assert not np.allclose(at_gamma.energies, at_quarter.energies)
+    record = at_quarter.to_json_dict()
+    assert record["embedding"]["normal_k"] == 0.25
+    assert [0, 0, 1] in record["model_snapshot"]["Rlist"]
+    assert record["model_snapshot"]["JR_eV"]
+
+
 def test_cli_topology_mode(tmp_path):
     import sys
 
@@ -192,6 +256,18 @@ def test_cli_topology_mode(tmp_path):
         "--topology-mesh",
         "12",
         "12",
+        "--topology-basis",
+        "1",
+        "1",
+        "0",
+        "0",
+        "1",
+        "0",
+        "0",
+        "0",
+        "1",
+        "--topology-normal-k",
+        "0.25",
         "--topology-bands",
         "0",
         "--topology-out",
@@ -206,6 +282,14 @@ def test_cli_topology_mode(tmp_path):
     data = json.loads(out.read_text())
     assert data["valid"] is True
     assert data["chern"] == 1
+    assert data["embedding"]["basis"] == [[1, 1, 0], [0, 1, 0], [0, 0, 1]]
+    assert data["embedding"]["reciprocal_dual"] == [
+        [1, 0, 0],
+        [-1, 1, 0],
+        [0, 0, 1],
+    ]
+    assert data["embedding"]["normal_k"] == 0.25
+    assert data["model_snapshot"]["reference_magmoms_muB"]
 
 
 def test_cli_topology_invalid_exit(tmp_path):
@@ -241,6 +325,27 @@ def test_cli_topology_invalid_exit(tmp_path):
     data = json.loads(out.read_text())
     assert data["valid"] is False
     assert data["chern"] is None
+    out.write_text("preserve the previous diagnostic")
+    sys.argv = [
+        "TB2J_magnon",
+        "-p",
+        str(root),
+        "--topology",
+        "--topology-mesh",
+        "12",
+        "12",
+        "--topology-bands",
+        "0",
+        "--topology-out",
+        str(out),
+    ]
+    try:
+        with pytest.raises(SystemExit) as second_exit:
+            main()
+    finally:
+        sys.argv = argv
+    assert second_exit.value.code == 1
+    assert out.read_text() == "preserve the previous diagnostic"
 
 
 def test_curvature_field_concentrates_at_valleys(model_pos):

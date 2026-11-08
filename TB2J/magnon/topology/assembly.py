@@ -55,13 +55,18 @@ def classical_transverse_gradient(
 ) -> StationarityDiagnostics:
     """Transverse classical field at each spin for the given reference.
 
-    ``B_i = sum_{j,R} J_ij(R) R_n(2 pi R.Q) mu_j`` with ``mu`` the magnetic
-    moments (muB) and the executable single-Q right-rotation convention of
-    ``Magnon.Jq``. The constrained gradient is ``P_i B_i`` with
+    ``B_i = sum_{j,R} Jbar_ij(R) R_n(2 pi R.Q) mu_j`` with ``mu`` the
+    magnetic moments (muB), ``s_i = |mu_i|/2`` and
+    ``Jbar_ij = J_ij/(s_i s_j)``, matching the legacy magnon Hamiltonian.
+    The constrained gradient is ``P_i B_i`` with
     ``P_i = 1 - zhat_i zhat_i^T``; a stationary reference requires
     ``max|P_i B_i| <= max(atol, rtol * max|B|)``.
     """
     magmoms = np.asarray(magmoms, dtype=float)
+    spin = np.linalg.norm(magmoms, axis=1) / 2.0
+    JR = np.asarray(JR, dtype=float) / (
+        spin[None, :, None, None, None] * spin[None, None, :, None, None]
+    )
     Q = np.asarray(Q, dtype=float)
     n = np.asarray(n, dtype=float)
     nspin = magmoms.shape[0]
@@ -93,35 +98,27 @@ def classical_transverse_gradient(
 def _local_frames(
     magmoms: np.ndarray, u: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Global-axis spiral-gauge frames: e3 = u, e1 = mu_hat, e2 = u x e1.
-
-    The fluctuation basis of site ``s`` is ``(e1_s, e2_s) = (mu_hat_s,
-    normalize(cross(u, mu_hat_s)))`` with the common quantization axis
-    ``e3 = u``; this matches the certificate convention of
-    ``docs/sympy/magnon_topology_magnetic_cell.py``. Sites with ``mu``
-    parallel to ``u`` fall back to ``e1`` = the in-plane x direction
-    (y when degenerate), i.e. the standard collinear frame.
-    """
+    """Return right-handed local frames with ``e3`` along each moment."""
     magmoms = np.asarray(magmoms, dtype=float)
     norms = np.linalg.norm(magmoms, axis=1)
     if np.any(norms <= 0):
         raise ValueError("magmoms must have nonzero length for local frames.")
-    e1 = magmoms / norms[:, None]
+    e3 = magmoms / norms[:, None]
     u = np.asarray(u, dtype=float)
-    u = u / np.linalg.norm(u)
-    e2 = np.cross(u, e1)
-    nnorm = np.linalg.norm(e2, axis=1)
+    u_norm = np.linalg.norm(u)
+    if u.shape != (3,) or not np.isfinite(u).all() or u_norm <= 0:
+        raise ValueError("u must be a finite nonzero three-component vector.")
+    u = u / u_norm
+    e1 = np.cross(u, e3)
     for i in range(e1.shape[0]):
-        if nnorm[i] < 1e-12:  # mu parallel to u: standard collinear frame
-            axis = np.array([1.0, 0.0, 0.0])
-            if abs(e1[i] @ axis) > 0.9:
-                axis = np.array([0.0, 1.0, 0.0])
-            v = axis - (axis @ e1[i]) * e1[i]
-            e1[i] = v / np.linalg.norm(v)
-            e2[i] = np.cross(u, e1[i])
-        else:
-            e2[i] = e2[i] / nnorm[i]
-    return e1, e2, np.broadcast_to(u, e1.shape)
+        norm = np.linalg.norm(e1[i])
+        if norm < 1e-12:
+            axis = np.eye(3)[np.argmin(np.abs(e3[i]))]
+            e1[i] = axis - np.dot(axis, e3[i]) * e3[i]
+            norm = np.linalg.norm(e1[i])
+        e1[i] /= norm
+    e2 = np.cross(e3, e1)
+    return e1, e2, e3
 
 
 def local_frame_bosonic_hamiltonian(
@@ -131,26 +128,24 @@ def local_frame_bosonic_hamiltonian(
     kpoints: np.ndarray,
     u: np.ndarray = (0.0, 0.0, 1.0),
 ) -> np.ndarray:
-    """Magnon Hamiltonian for noncollinear references (spiral-gauge frames).
+    """Magnon Hamiltonian from site-local Holstein–Primakoff frames.
 
-    Linear spin-wave expansion of ``E = -sum_ijR S_i . J_ij(R) . S_j`` about
-    the classical reference ``magmoms``, with Holstein-Primakoff bosons
-    quantized along the common axis ``u`` and fluctuation bases
-    ``(e1_i, e2_i) = (mu_hat_i, normalize(u x mu_hat_i))``. Returns the
-    Colpa block matrix
+    ``e3_i = mu_i / |mu_i|`` is the classical moment direction.
+    ``e1_i = normalize(u x e3_i)`` and ``e2_i = e3_i x e1_i`` define a
+    right-handed transverse basis; the fallback for moments parallel to ``u``
+    chooses any stable orthonormal transverse pair. ``u`` therefore fixes only
+    the local-frame gauge, not the quantization axis.
 
-        H = [[A(k), B(k)], [B(k)^dagger, A(k)^*]]
-
-    with shape ``(nk, 2*nspin, 2*nspin)``, consumable by
-    :func:`TB2J.magnon.topology.bosonic.solve_bosonic_modes`.
-
-    Convention (certificate ``magnon_topology_magnetic_cell``): with moment
-    magnitude ``S_i = |mu_i|``,
-    ``A_ij(R) = -sqrt(S_i S_j) / 2 * [(g00 + g11) - i (g01 - g10)]`` and
-    ``B_ij(R) = -sqrt(S_i S_j) / 2 * [(g00 - g11) + i (g01 + g10)]`` where
-    ``g_ab = e_a(i) . J_ij(R) . e_b(j)``; the transverse stiffness enters the
-    diagonal as ``A_ii += sum_l S_l e3 . J_il . e3``. In the collinear limit
-    this reproduces the legacy ``Magnon.Hq`` energies.
+    The returned Colpa matrix is ``[[A(k), B(k)], [B^dagger(k), A(-k)^*]]``.
+    For a Hermitian Fourier block, ``A(-k)^* = A^T(-k)``. The hole block is
+    accumulated from the conjugated real-space number-conserving coefficients;
+    it is not generally ``A(k)^*``. Let ``M_i = |mu_i|``,
+    ``s_i = M_i/2``, and ``Jbar_ij(R) = J_ij(R)/(s_i s_j)`` as in the
+    legacy magnon Hamiltonian. With ``g_ab = e_a(i) . Jbar_ij(R) . e_b(j)``,
+    the transverse blocks are ``A_ij(R) = -sqrt(M_i M_j)/2 *
+    [(g00+g11)-i(g01-g10)]`` and ``B_ij(R) = -sqrt(M_i M_j)/2 *
+    [(g00-g11)+i(g01+g10)]``; longitudinal normalization contributes
+    ``A_ii += sum_jR M_j e3_i . Jbar_ij(R) . e3_j``.
     """
     magmoms = np.asarray(magmoms, dtype=float)
     JR = np.asarray(JR, dtype=float)
@@ -158,11 +153,14 @@ def local_frame_bosonic_hamiltonian(
     kpoints = np.atleast_2d(np.asarray(kpoints, dtype=float))
     nspin = magmoms.shape[0]
     e1, e2, e3 = _local_frames(magmoms, np.asarray(u, dtype=float))
-    S = np.linalg.norm(magmoms, axis=1)  # full moment magnitude (muB)
+    M = np.linalg.norm(magmoms, axis=1)
+    spin = M / 2.0
+    JR = JR / (spin[None, :, None, None, None] * spin[None, None, :, None, None])
 
     nk = kpoints.shape[0]
     phases = np.exp(-2j * np.pi * kpoints @ Rlist.T)  # (nk, nR)
     A = np.zeros((nk, nspin, nspin), dtype=complex)
+    A_hole = np.zeros((nk, nspin, nspin), dtype=complex)
     B = np.zeros((nk, nspin, nspin), dtype=complex)
     stiff = np.zeros((nspin,), dtype=float)
     for iR in range(Rlist.shape[0]):
@@ -170,7 +168,7 @@ def local_frame_bosonic_hamiltonian(
         frame12 = np.stack([e1, e2], axis=1)  # (nspin, 2, 3)
         g = np.einsum("iax,ijxy,jby->ijab", frame12, J, frame12)
         g33 = np.einsum("ix,ijxy,jy->ij", e3, J, e3)
-        s = np.sqrt(S)[:, None] * np.sqrt(S)[None, :]
+        s = np.sqrt(M)[:, None] * np.sqrt(M)[None, :]
         a_contrib = (
             -0.5
             * s
@@ -183,19 +181,21 @@ def local_frame_bosonic_hamiltonian(
         )
         ph = phases[:, iR][:, None, None]
         A += ph * a_contrib[None, :, :]
+        A_hole += ph * a_contrib.conj()[None, :, :]
         B += ph * b_contrib[None, :, :]
         # transverse stiffness from the normalization (tr) terms
         for i in range(nspin):
             for j in range(nspin):
                 if i != j:
-                    stiff[i] += S[j] * g33[i, j]
+                    stiff[i] += M[j] * g33[i, j]
                 else:
-                    stiff[i] += S[i] * g33[i, i]
+                    stiff[i] += M[i] * g33[i, i]
     A += np.diag(stiff)[None, :, :]
+    A_hole += np.diag(stiff)[None, :, :]
 
     H = np.empty((nk, 2 * nspin, 2 * nspin), dtype=complex)
     H[:, :nspin, :nspin] = A
     H[:, :nspin, nspin:] = B
-    H[:, nspin:, :nspin] = B.conj()
-    H[:, nspin:, nspin:] = A.conj()
+    H[:, nspin:, :nspin] = B.conj().transpose(0, 2, 1)
+    H[:, nspin:, nspin:] = A_hole
     return H

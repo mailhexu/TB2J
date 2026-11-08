@@ -7,20 +7,23 @@ passed in the `mydev` environment). Pinned statements:
    for commensurate `Q = p/m`; the single-Q bond twist is well defined on the
    expanded cell.
 2. Twisted-ring reference (symbolic): for the N=3 ring with moments twisted
-   by `phi_s = s delta` (isotropic J1), the linear classical gradient vanishes,
-   the A block is Hermitian, the B block is symmetric and vanishes identically,
-   and the cell Bloch bands are the eigenvalues of `A(k')`. The wrap gauge has
-   an exact Goldstone at `k' = 0`.
-3. Construction verification: the expanded SpinIO cell with twisted frames
-   and unchanged re-keyed tensors reproduces the symbolic Bloch spectrum at
-   the three folded momenta through the topology local-frame assembly;
-   in-plane SIA on the twisted reference breaks stationarity and is refused.
+   by `phi_s = s*2*pi/3`, the linear classical gradient vanishes. The full
+   bosonic A block is Hermitian, B is symmetric and nonzero, and the k'=0
+   Hessian has an exact Goldstone null direction. This one-dimensional
+   nearest-neighbour reference is dynamically unstable at the other folded
+   momenta; the topology pipeline detects and refuses those modes rather than
+   claiming a stable folded spectrum.
+For a Hermitian Fourier A block, the Nambu hole block is `A(-k)^* = A^T(-k)`: conjugate real-space coefficients before the Fourier phase.
+3. Construction verification: the expanded-cell SpinIO model with twisted
+   frames is stationary and the executable assembler reports the same
+   zero-mode/unstable classifications. In-plane SIA breaks stationarity and
+   is refused by the pipeline guard.
 4. The twisted expanded reference is stationary (vanishing constrained
    transverse classical gradient).
 5. Applying a second Q rotation to the expanded model changes the
    Hamiltonian: refused by construction (the expanded reference is Q = 0).
-6. Embedding: `k_in = k_embed @ basis` with fixed `normal_k`; nonprimitive
-   bases (|det| != 1) refused.
+6. Embedding: `k_in = k_embed @ basis^{-T}` is the reciprocal dual of the
+   declared direct basis, with fixed `normal_k`; nonprimitive bases refused.
 
 ## Console output of the executed script
 
@@ -28,30 +31,32 @@ passed in the `mydev` environment). Pinned statements:
 1. Phase-composition identity on the commensurate expansion
   [OK] exp(2 pi i Q d) == exp(2 pi i Q R) with R = d mod m for q = p/m (all sampled displacements)
 2. Symbolic twisted-ring reference (N = 3, isotropic J1)
-  [OK] linear classical gradient vanishes identically (uniform twist is a stationary reference)
+  [OK] local transverse axes are right-handed about the classical moment
+  [OK] linear classical gradient vanishes at the commensurate pitch delta = 2*pi/3
   [OK] bosonic A block is Hermitian
   [OK] bosonic B block is complex symmetric (pairing)
-  [OK] det A(k' = 0) vanishes exactly at delta = 2 pi/3: an exact Goldstone mode in the folded spectrum
-  [OK] isotropic twist: bosonic pairing vanishes identically (B matrix is exactly zero)
-  [OK] symbolic Bloch eigenvalues at k' = 0.0 are real (max |imag| 2.7e-34)
-  [OK] symbolic Bloch eigenvalues at k' = 0.3333333333333333 are real (max |imag| 5.6e-34)
-  [OK] symbolic Bloch eigenvalues at k' = 0.6666666666666666 are real (max |imag| 2.4e-34)
-   symbolic ring anchors at |mu|=2 muB, J1=0.01, delta=2pi/3: k'=0.0: [-0.0, 0.06, 0.06]; k'=0.3333333333333333: [0.009358, 0.033054, 0.077588]; k'=0.6666666666666666: [0.009358, 0.033054, 0.077588]
-  [OK] all symbolic ring anchors are non-negative (stable reference)
+  [OK] full k=0 bosonic BdG matrix is Hermitian
+  [OK] full bosonic Hessian has an exact Goldstone null direction at k'=0
+  [OK] isotropic noncollinear reference has a nonzero anomalous pairing block
+  [OK] full bosonic BdG matrix is Hermitian at k'=0
+  [OK] full bosonic BdG matrix is Hermitian at k'=0.333333
+  [OK] full bosonic BdG matrix is Hermitian at k'=0.666667
+  [OK] the stationary reference has real frequencies at k'=0
+  [OK] nearest-neighbour 120-degree chain is dynamically unstable away from k'=0
+  [OK] the two symmetry-related unstable folded momenta have equal growth rates
+  [OK] isotropic noncollinear reference has a nonzero anomalous pairing block
 3. Expanded-cell construction verification (twisted frames)
-   twisted ring k' = 0.000: pipeline A-eigenvalues [-0.0, 0.06, 0.06]
-  [OK] twisted-cell bands at k' = 0.000 equal the symbolic Bloch reference (max diff 6.94e-18)
-   twisted ring k' = 0.333: pipeline A-eigenvalues [0.00935822, 0.03305407, 0.0775877]
-  [OK] twisted-cell bands at k' = 0.333 equal the symbolic Bloch reference (max diff 1.39e-17)
-   twisted ring k' = 0.667: pipeline A-eigenvalues [0.00935822, 0.03305407, 0.0775877]
-  [OK] twisted-cell bands at k' = 0.667 equal the symbolic Bloch reference (max diff 1.39e-17)
-  [OK] in-plane SIA on the twisted reference breaks stationarity (max transverse gradient 8.66e-04 > tolerance 1.95e-08); the pipeline guard refuses it
+   executable 120-degree chain classifications: ['zero_mode', 'energetically_unstable', 'energetically_unstable']
+  [OK] the numerical topology pipeline refuses the same unstable folded modes identified by the symbolic metric spectrum
+  [OK] in-plane SIA on the twisted reference breaks stationarity (max transverse gradient 8.66e-04 > tolerance 2.20e-08); the pipeline guard refuses it
 4. Stationarity of the twisted expanded reference
-  [OK] twisted expanded reference is stationary (max transverse gradient 6.25e-18 within tolerance 2.00e-08)
+  [OK] twisted expanded reference is stationary (max transverse gradient 9.81e-18 within tolerance 2.00e-08)
 5. No double rotation
   [OK] solving the expanded model with a second Q rotation changes the Hamiltonian (the expanded reference must be solved with Q = 0)
 6. Embedding identity
-  [OK] to_input_k maps k_embed @ basis with normal_k appended ([0.1, 0.2] -> [[0.1, 0.3, 0.25]])
+  [OK] declared direct basis and reciprocal dual satisfy A_embed G_embed^T = I
+  [OK] reciprocal-coordinate map k_input = k_embed B^{-T} preserves physical k
+  [OK] to_input_k uses the reciprocal dual and appends normal_k ([0.1, 0.2] -> [[-0.1, 0.2, 0.25]])
   [OK] identity embedding preserves the input momentum
   [OK] nonprimitive basis refused (|det| = 2): 'Embedding basis is nonprimitive (|det| = 2). Topology currently requires a primitive basis; a nonprimitive edge choice needs an explicit supercell expansion with site and bond remapping (not yet supported).'
 ```

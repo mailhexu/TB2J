@@ -116,6 +116,7 @@ def solve_bosonic_modes(
                 "shift is refused because it would not legitimize topology.",
             },
         )
+    hessian_null_space = None
     try:
         L = np.linalg.cholesky(H)  # lower, H = L L^dag
     except np.linalg.LinAlgError:
@@ -123,11 +124,11 @@ def solve_bosonic_modes(
             raise ModeSolverError(
                 f"Cholesky failed with negative Hessian minimum {h_min:.3e}."
             ) from None
-        # exactly semidefinite H: build the psd square root from the
-        # eigendecomposition (clamping only |w| <= zero_tol numerical zeros).
-        # This is an exact factorization H = L L^dag, not an energy shift.
+        # Exactly semidefinite H: build its psd square root without a shift.
         w_h, U_h = np.linalg.eigh(H)
-        w_clamped = np.where(np.abs(w_h) <= zero_tol, 0.0, w_h)
+        null_h = np.abs(w_h) <= zero_tol
+        hessian_null_space = U_h[:, null_h]
+        w_clamped = np.where(null_h, 0.0, w_h)
         L = (U_h * np.sqrt(w_clamped)[None, :]) @ U_h.conj().T
         if np.max(np.abs(L @ L.conj().T - H)) > zero_tol:
             raise ModeSolverError(
@@ -155,8 +156,12 @@ def solve_bosonic_modes(
     null_space = None
     null_resid = 0.0
     if np.any(zero_mask):
-        # stable zero modes: non-normalizable directions in Nambu coordinates
-        null_space = np.linalg.solve(L.conj().T, u[:, n:][:, zero_mask])
+        # Null vectors of a semidefinite Hessian cannot be recovered by
+        # solving through its singular square root.
+        if hessian_null_space is not None and hessian_null_space.shape[1]:
+            null_space = hessian_null_space
+        else:
+            null_space = np.linalg.solve(L.conj().T, u[:, n:][:, zero_mask])
         null_resid = float(np.max(np.abs(H @ null_space))) if null_space.size else 0.0
     if not np.any(pos_mask):
         return BosonicModes(

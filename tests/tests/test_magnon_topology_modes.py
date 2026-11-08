@@ -80,6 +80,42 @@ def baseline_model():
     return prepare_topology_model(honeycomb_spinio(delta=0.0), source_path="bench")
 
 
+def test_anomalous_hole_block_is_the_conjugate_negative_momentum_block(
+    anomalous_model,
+):
+    from TB2J.magnon.topology.assembly import local_frame_bosonic_hamiltonian
+
+    kpoint = np.array([[0.11, 0.23, 0.0]])
+    hamiltonian = local_frame_bosonic_hamiltonian(
+        anomalous_model.JR,
+        anomalous_model.Rlist,
+        anomalous_model.magmoms,
+        kpoint,
+    )[0]
+    reverse = local_frame_bosonic_hamiltonian(
+        anomalous_model.JR,
+        anomalous_model.Rlist,
+        anomalous_model.magmoms,
+        -kpoint,
+    )[0]
+    particle = hamiltonian[:2, :2]
+    hole = hamiltonian[2:, 2:]
+    np.testing.assert_allclose(particle, particle.conj().T, atol=1e-12)
+    assert np.max(np.abs(particle - particle.conj())) > 1e-6
+    np.testing.assert_allclose(hole, reverse[:2, :2].conj(), atol=1e-12)
+
+    real_bond_model = prepare_topology_model(
+        honeycomb_spinio(D=0.0, delta=DELTA), source_path="real-bond"
+    )
+    real_bond_h = local_frame_bosonic_hamiltonian(
+        real_bond_model.JR,
+        real_bond_model.Rlist,
+        real_bond_model.magmoms,
+        kpoint,
+    )[0]
+    np.testing.assert_allclose(real_bond_h[2:, 2:], real_bond_h[:2, :2], atol=1e-12)
+
+
 def test_anomalous_pairing_present_and_stable(anomalous_model):
     magnon = anomalous_model.magnon()
     H = magnon.Hq(np.array([[0.11, 0.23, 0.0]]))[0]
@@ -130,6 +166,17 @@ def test_anomalous_cli_end_to_end(tmp_path):
     assert data["valid"] is True and data["chern"] == 1
 
 
+def test_semidefinite_goldstone_reports_hessian_nullspace_without_singular_solve():
+    H = np.ones((2, 2), dtype=complex)
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    assert modes.null_space.shape == (2, 1)
+    np.testing.assert_allclose(H @ modes.null_space, 0.0, atol=1e-12)
+    assert modes.residuals["null_space_residual"] < 1e-12
+
+
 def test_zero_mode_group_touching_zero_refused():
     # drop the SIA: Goldstone touches band 0 on the mesh
     exc = honeycomb_spinio(delta=0.0)
@@ -169,6 +216,32 @@ def test_canted_torque_detected_by_assembly():
     res = calculate_bulk(model, BulkRequest(mesh=(6, 6), bands=[0]))
     assert not res.valid
     assert any("nonstationary" in f for f in res.diagnostics["failures"])
+
+
+def test_unequal_spin_lengths_preserve_noncollinear_stationarity():
+    from TB2J.magnon.topology.assembly import classical_transverse_gradient
+    from TB2J.magnon.topology.strip import _local_fields
+
+    directions = np.array(
+        [[1.0, 0.0, 0.0], [-0.5, np.sqrt(3.0) / 2, 0.0], [-0.5, -np.sqrt(3.0) / 2, 0.0]]
+    )
+    moments = directions * np.array([2.0, 4.0, 6.0])[:, None]
+    exchange = np.zeros((1, 3, 3, 3, 3))
+    for i in range(3):
+        for j in range(3):
+            if i != j:
+                exchange[0, i, j] = -np.eye(3)
+    rlist = np.zeros((1, 3), dtype=int)
+
+    stat = classical_transverse_gradient(exchange, rlist, moments)
+    assert stat.stationary
+    np.testing.assert_allclose(stat.max_transverse, 0.0, atol=1e-14)
+    fields = _local_fields(exchange, rlist, moments)
+    np.testing.assert_allclose(
+        fields - np.einsum("ij,ij->i", fields, directions)[:, None] * directions,
+        0.0,
+        atol=1e-14,
+    )
 
 
 def test_negative_hessian_real_frequency_refused_with_character(tmp_path):
@@ -235,7 +308,6 @@ def test_json_carries_validity_classes(tmp_path, anomalous_model):
     data = json.loads(json.dumps(res.to_json_dict()))
     solver = data["diagnostics"]["solver"]
     assert solver["classifications"] == {"positive_definite": 36}
-    assert "max_metric_norm_error" or True
     assert data["conventions"]["certificate"] == (
         "docs/sympy/magnon_topology_lswt_ferromagnet.py"
     )

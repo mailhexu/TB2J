@@ -62,8 +62,10 @@ builds a real-space cell, rotates each moment by
 ``Q`` is in reciprocal coordinates of the input cell. The returned model
 represents the ordered state explicitly and must be solved with ``Q = 0``;
 applying the spiral rotation again double-counts the ordering. Components are
-approximated only within the explicit denominator and site limits; failure
-raises ``TopologyPreparationError`` instead of silently truncating the cell.
+accepted only when their bounded rational approximants are within the declared
+tolerance; the requested Q, effective rational Q, maximum error, supercell,
+image map and folded mode count are recorded in model provenance. Nonmagnetic
+atom mappings are repeated in the expanded snapshot.
 
 ::
 
@@ -73,7 +75,7 @@ raises ``TopologyPreparationError`` instead of silently truncating the cell.
 Bulk and strip calculations
 ---------------------------
 
-The public calculation seam (implemented incrementally on this branch):
+The public calculation seam is implemented:
 
 ::
 
@@ -165,5 +167,11 @@ The opt-in CLI mode writes the same JSON record:
 exit code 0 for a validated invariant, 1 for a refused one (reasons printed
 and recorded).
 
-``calculate_strip`` and ``compare_bulk_edge`` are specified but not yet
-implemented (tickets 06 and 07).
+Bulk–edge comparison requires completed valid bulk and strip results with
+matching parent identity, magnetic-cell mapping, embedding orientation,
+fixed-normal momentum and interior reference. ``compare_bulk_edge`` counts
+edge-resolved signed crossings in a selected bulk gap; the min-width edge is
+compared to the negative sum of Chern numbers below the gap, and the max-width
+edge to the positive sum. The paired CLI writes standalone bulk and strip records and a
+separate versioned comparison record. Width and momentum convergence must be
+demonstrated by the caller; one finite strip is not a convergence claim.
