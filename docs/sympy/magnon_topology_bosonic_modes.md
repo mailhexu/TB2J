@@ -15,6 +15,14 @@ passed in the `mydev` environment). Pinned statements:
    without shifts; stable zero modes report non-normalizable null spaces;
    the legacy shift fallback behavior is unchanged and never used for
    topology.
+6. Singular square-root back-transform on exactly singular PSD Hessians
+   (Goldstone): the generalized eigenproblem `H v = omega g v` and the Colpa
+   normalization `v^dag g v = 1/omega` hold exactly, symbolically on a
+   closed-form nontrivial singular Hessian with a nonzero pairing channel
+   and numerically through `solve_bosonic_modes`, including the
+   metric-degenerate Jordan-null case (`N = psi^dag g psi` singular) where
+   the pencil is solved on the nondegenerate quotient and unsolvable modes
+   are refused with documented diagnostics.
 
 ## Console output of the executed script
 
@@ -46,4 +54,20 @@ passed in the `mydev` environment). Pinned statements:
   [OK] complex-frequency dynamic instability (min Hessian -3.900e-02, max |Im omega| 1.05e-02): classified energetically unstable and refused; the frequency character is reported separately
   [OK] symmetry-verified positive-semidefinite case: 2 zero mode(s) at Gamma without SIA (H psi_null = 0 residual 5.7e-19); the metric norm 1/omega diverges there, so the direction is non-normalizable and reported as null space, not as invented normalized vectors
   [OK] legacy _magnon_energies still shifts an indefinite Hessian with a warning (documented legacy behavior, untouched by topology)
+5. Singular square-root back-transform on a nontrivial singular PSD Hessian
+  [OK] exactly singular PSD Hessian with nonzero pairing channel: det = 0, two exact null vectors, eigenvalues {7/300, 1/60, 0, 0}
+  [OK] generalized eigenproblem EXACT (symbolic): H v = omega g v with omega = sqrt(x^2 - b^2) = sqrt(35)/300 and v = ((1+kappa) s/2, (1-kappa) s/2), kappa = (x + b)/omega; v carries a null-space admixture ((1-kappa)/2 != 0) so that g v stays inside range(H)
+  [OK] metric normalization EXACT (symbolic): v^dag g v = kappa, so the Colpa-rescaled v/sqrt(omega kappa) obeys v^dag g v = 1/omega (kappa = sqrt(35)/5)
+  [OK] numeric Hessian with -1e-12 dust fails Cholesky (deterministic singular-square-root branch)
+  [OK] solver classifies zero_mode and attaches the positive-mode vector (classification zero_mode, vectors (4, 1))
+  [OK] solver energy equals the symbolic closed form: 0.019720265944 vs sqrt(x^2 - b^2) = 0.019720265944
+  [OK] solver vector satisfies H v = omega g v on the singular Hessian (residual 3.04e-18); a plain range-restricted back-transform would miss the null admixture by ~4e-3 here
+  [OK] metric normalization on the solver vector: omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) = 1.000000000000000
+  [OK] Hessian null space still reported as non-normalizable null vectors (H psi residual 7.1e-13)
+  [OK] Jordan-null fixture: g-neutral null vector (N = 0, singular) of an exactly PSD doubled-form Hessian
+  [OK] positive mode survives the metric-degenerate null space exactly: omega = 0.866025403784 = sqrt(1 - beta^2), generalized residual 1.9e-16, omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) = 1.000000000000000; no singular-matrix crash
+  [OK] paraunitary fixture: g-unitary congruence of an exactly PSD singular doubled-form Hessian (g-unitarity error < 1e-14, Hessian psd within 1e-12 congruence rounding)
+  [OK] complex Jordan dust classified as zeros (2 dust modes), genuine positive mode preserved: omega = 1.977371993329 = sqrt(3.4), generalized residual 1.0e-15, omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) = 1.000000000000000
+  [OK] parity reduction and characteristic polynomial hold symbolically for noncommuting symmetric A and B
+  [OK] noncommuting singular fixture: solver energies agree with the parity product eigenvalues 0 and 2
 ```

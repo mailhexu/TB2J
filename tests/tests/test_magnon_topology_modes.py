@@ -177,6 +177,235 @@ def test_semidefinite_goldstone_reports_hessian_nullspace_without_singular_solve
     assert modes.residuals["null_space_residual"] < 1e-12
 
 
+def _semidefinite_goldstone_hessian():
+    # legacy doubled form [[A, 0], [0, A*]] with a rank-1 FM Goldstone block:
+    # spectrum {+0.016, +0.016, dust, dust} like the SIESTA CrI3 collinear
+    # Gamma point. The |dust| < zero_tol negative mode makes the Cholesky
+    # failure deterministic while staying inside the semidefinite gate, so
+    # the singular-square-root branch is pinned.
+    p = 0.5 * np.array([[1.0, 1.0], [1.0, 1.0]])
+    q = 0.5 * np.array([[1.0, -1.0], [-1.0, 1.0]])
+    a = 0.016 * p - 1e-12 * q
+    return np.block([[a, np.zeros((2, 2))], [np.zeros((2, 2)), a.conj()]])
+
+
+def test_semidefinite_hessian_with_positive_modes_classifies_zero_mode():
+    # negative roundoff dust below zero_tol makes the Cholesky failure
+    # deterministic, pinning the singular-square-root branch.
+    H = _semidefinite_goldstone_hessian()
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    assert modes.null_space.shape == (4, 2)
+    np.testing.assert_allclose(H @ modes.null_space, 0.0, atol=1e-12)
+    assert modes.residuals["null_space_residual"] < 1e-12
+    assert modes.residuals["n_zero_modes"] == 1
+    # positive mode is still returned, normalized and consistent with
+    # H v = omega g v (Colpa convention, sqrt(omega)-rescaled to unit norm).
+    assert modes.vectors.shape == (4, 1)
+    n = 2
+    g = np.diag(np.concatenate([np.ones(n), -np.ones(n)]))
+    norm = np.real(modes.vectors[:, 0].conj() @ g @ modes.vectors[:, 0])
+    assert abs(norm - 1.0) < 1e-12
+    omega = modes.energies[modes.positive_indices[0]]
+    resid = H @ modes.vectors[:, 0] - omega * (g @ modes.vectors[:, 0])
+    assert np.max(np.abs(resid)) < 1e-12
+    assert modes.residuals["max_generalized_residual"] < 1e-12
+    assert modes.residuals["max_metric_norm_error"] < 1e-12
+
+
+def test_singular_hessian_with_pairing_channel_exact_pencil_solution():
+    # nonzero symmetric-anisotropy pairing on a singular Goldstone Hessian:
+    # the generalized eigenvector leaves range(H) so that g v stays in
+    # range(H); the reduced pencil must return exact identities (a plain
+    # range-restricted back-transform misses the null-space admixture by
+    # ~4e-3 in the generalized residual).
+    s2 = np.sqrt(0.5)
+    rot = np.array([[s2, 0, s2, 0], [0, s2, 0, s2], [s2, 0, -s2, 0], [0, s2, 0, -s2]])
+    p = 0.5 * np.array([[1.0, 1.0], [1.0, 1.0]])
+    q = 0.5 * np.array([[1.0, -1.0], [-1.0, 1.0]])
+    x, b, dust = 0.016, 0.003, -1e-12
+    diag_blocks = np.block(
+        [
+            [(x + b) * p + dust * q, np.zeros((2, 2))],
+            [np.zeros((2, 2)), (x - b) * p + dust * q],
+        ]
+    )
+    H = rot.T @ diag_blocks @ rot  # [[A, B], [B, A]] physical doubled form
+    assert np.max(np.abs(H[:2, 2:])) > 1e-6  # genuinely paired
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    omega = modes.energies[modes.positive_indices[0]]
+    # true generalized eigenvalue of the exactly-singular clamped problem
+    np.testing.assert_allclose(omega, np.sqrt(x**2 - b**2), rtol=1e-9)
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    v = modes.vectors[:, 0]
+    resid = H @ v - omega * (g @ v)
+    assert np.max(np.abs(resid)) < 1e-12
+    vu = v / np.sqrt(omega)
+    assert abs(omega * np.real(vu.conj() @ g @ vu) - 1.0) < 1e-12
+    assert modes.residuals["max_metric_norm_error"] < 1e-12
+    assert modes.residuals["null_space_residual"] < 1e-12
+
+
+def test_metric_degenerate_jordan_null_keeps_positive_mode_exact():
+    # a g-neutral (Jordan) Goldstone null vector makes N = psi^dag g psi
+    # singular, yet a decoupled positive mode survives: the pencil must be
+    # solved on the nondegenerate quotient with the constraint enforced by
+    # pseudoinverse and per-mode solvability validation -- never a
+    # singular-matrix crash.
+    beta = 0.5
+    H = np.zeros((4, 4), dtype=complex)
+    H[0, 0] = H[1, 1] = H[2, 2] = H[3, 3] = 1.0
+    H[0, 2] = H[2, 0] = -1.0
+    H[1, 3] = H[3, 1] = beta
+    psi = np.array([1, 0, 1, 0]) / np.sqrt(2)
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    assert abs(psi.conj() @ (g @ psi)) < 1e-14  # g-neutral null vector
+    assert H @ psi == pytest.approx(0.0, abs=1e-14)
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    omega = modes.energies[modes.positive_indices[0]]
+    assert omega == pytest.approx(np.sqrt(1.0 - beta**2), rel=1e-10)
+    v = modes.vectors[:, 0]
+    resid = H @ v - omega * (g @ v)
+    assert np.max(np.abs(resid)) < 1e-12
+    vu = v / np.sqrt(omega)
+    assert abs(omega * np.real(vu.conj() @ (g @ vu)) - 1.0) < 1e-12
+    assert modes.residuals["max_metric_norm_error"] < 1e-12
+    assert modes.residuals["null_space_residual"] < 1e-12
+
+
+def test_paraunitary_mixed_jordan_positive_mode_preserved():
+    # regression (Main-reported): a g-unitary paraunitary mode mix on a PSD
+    # singular Hessian lifts the exact Jordan zeros into a complex dust pair
+    # (+-1.09e-8 +- 3.2e-8j above zero_tol) while a genuine positive mode
+    # survives. The solver must classify zero_mode and preserve the positive
+    # mode (metric-norm dust recognition), never raise or refuse.
+    h = np.array(
+        [[1, 0, 1, 0], [0, 2, 0, 0.3], [1, 0, 1, 0], [0, 0.3, 0, 2]], dtype=float
+    )
+    t = np.array([[0.2, 0.25], [0.25, -0.1]])
+    from scipy.linalg import expm
+
+    mix = expm(np.block([[np.zeros((2, 2)), t], [t, np.zeros((2, 2))]]))
+    H = mix.T @ h @ mix
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    assert abs(float(np.max(np.abs(mix.T @ g @ mix - g)))) < 1e-14
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    assert modes.residuals["n_jordan_dust_modes"] == 2
+    omega = modes.energies[modes.positive_indices[0]]
+    assert omega == pytest.approx(np.sqrt(3.91), rel=1e-10)
+    v = modes.vectors[:, 0]
+    resid = H @ v - omega * (g @ v)
+    assert np.max(np.abs(resid)) < 1e-12
+    vu = v / np.sqrt(omega)
+    assert abs(omega * np.real(vu.conj() @ (g @ vu)) - 1.0) < 1e-12
+    assert modes.residuals["max_metric_norm_error"] < 1e-12
+    assert modes.residuals["null_space_residual"] < 1e-12
+
+
+def test_squeezed_small_metric_mode_is_genuine_not_jordan_dust():
+    # regression (Main-reported): a strongly squeezed mode has a tiny metric
+    # norm (|v^dag g v| ~ 4.7e-7 for the Euclidean-normalized pencil vector),
+    # far below any absolute metric-norm cut, yet its spectral weight
+    # omega*|v^dag g v| sits well above the rounding floor of ||H||. The
+    # solver must keep it as a genuine positive mode -- never discard it as
+    # Jordan dust.
+    H = np.zeros((4, 4), dtype=complex)
+    H[0, 0] = H[2, 2] = 1.0
+    H[1, 1] = H[3, 3] = 1e5
+    H[1, 3] = H[3, 1] = 1e5 - 1.1e-8
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "positive_definite"
+    assert modes.energies.size == 2
+    # +-sqrt(2.2e-3) exactly by the characteristic polynomial; eigensolvers
+    # are limited to ~1e-3 relative accuracy by cond(H) ~ 2e13, so the
+    # regression asserts preservation and order of magnitude, not last digits
+    assert modes.energies[0] == pytest.approx(np.sqrt(2.2e-3), rel=2e-3)
+    assert modes.energies[1] == pytest.approx(1.0, rel=1e-12)
+    for k, omega in enumerate(modes.energies):
+        v = modes.vectors[:, k]
+        resid = H @ v - omega * (g @ v)
+        assert np.max(np.abs(resid)) < 1e-6  # absolute; backward error ~1e-16
+        assert abs(np.real(v.conj() @ (g @ v)) - 1.0) < 1e-9
+    assert modes.residuals["max_metric_norm_error"] < 1e-8
+
+
+def test_exact_jordan_zero_with_squeezed_positive_mode_recovered_not_zero():
+    # regression (Main-reported, exact fixture): H[0,0]=H[2,2]=H[0,2]=1 is an
+    # exact Goldstone Jordan zero, and the 1e5 block split by 1.1e-8 carries a
+    # squeezed positive mode. The Hessian is PSD, so dynamical instability is
+    # impossible: the solver must recover the squeezed mode and classify the
+    # point zero_mode, never dynamically_unstable and never labeling the
+    # squeezed positive mode as zero.
+    H = np.zeros((4, 4), dtype=complex)
+    H[0, 0] = H[2, 2] = 1.0
+    H[0, 2] = H[2, 0] = 1.0
+    H[1, 1] = H[3, 3] = 1e5
+    H[1, 3] = H[3, 1] = 1e5 - 1.1e-8
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    assert modes.energies[0] == 0.0
+    assert modes.residuals["n_jordan_dust_modes"] == 2
+    # exact pencil root of the STORED float64 matrix: the float64 grid
+    # quantizes delta = 1e5 - fl(1e5 - 1.1e-8), so the symbolic 1.1e-8 root
+    # sqrt(2.2e-3) is not attainable; the certified parity-reduced spectrum
+    # is exact for the stored matrix
+    delta = 1e5 - (1e5 - 1.1e-8)
+    assert delta > 0.0
+    exact = float(np.sqrt(delta * (2e5 - delta)))
+    omega = modes.energies[modes.positive_indices[0]]
+    assert omega == pytest.approx(exact, rel=1e-10)
+    v = modes.vectors[:, 0]
+    assert abs(np.real(v.conj() @ (g @ v)) - 1.0) < 1e-9
+    # absolute residual is scaled by cond(H) ~ 2e13; the backward error is
+    # the meaningful validation and is reported by the solver
+    assert np.max(np.abs(H @ v - omega * (g @ v))) < 1e-6
+    assert modes.residuals["max_generalized_residual"] < 1e-8
+    assert modes.residuals["null_space_residual"] < 1e-12
+
+
+def test_degenerate_positive_pair_g_orthonormal_and_exact():
+    # doubled form of A = diag(1, 2, 2), B = diag(1, 0.3, 0.3): the pencil has
+    # two exactly degenerate positive modes omega = sqrt(3.91) and two zeros.
+    # The emitted basis must be g-orthonormal (V^dag g V = I) even inside the
+    # degenerate subspace, and both modes must satisfy the generalized
+    # eigenproblem exactly.
+    A = np.diag([1.0, 2.0, 2.0])
+    B = np.diag([1.0, 0.3, 0.3])
+    H = np.block([[A, B], [B, A]])
+    g = np.diag([1.0, 1.0, 1.0, -1.0, -1.0, -1.0])
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    assert modes.energies[0] == 0.0
+    np.testing.assert_allclose(modes.energies[1:], np.sqrt(3.91), rtol=1e-10)
+    assert modes.vectors.shape == (6, 2)
+    gram = modes.vectors.conj().T @ (g @ modes.vectors)
+    np.testing.assert_allclose(gram, np.eye(2), atol=1e-10)
+    for k, omega in enumerate(modes.energies[modes.positive_indices]):
+        resid = H @ modes.vectors[:, k] - omega * (g @ modes.vectors[:, k])
+        assert np.max(np.abs(resid)) < 1e-10
+    assert modes.residuals["max_generalized_residual"] < 1e-10
+    assert modes.residuals["n_zero_modes"] == 1
+
+
 def test_zero_mode_group_touching_zero_refused():
     # drop the SIA: Goldstone touches band 0 on the mesh
     exc = honeycomb_spinio(delta=0.0)

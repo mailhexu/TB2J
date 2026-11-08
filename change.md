@@ -95,6 +95,24 @@ This document summarizes the changes made to TB2J between version releases based
 - Legendre integration path as fallback for stability
 
 ### Bug Fixes
+- Fixed `numpy.linalg.LinAlgError: Singular matrix` in `TB2J_magnon_topology`
+  on collinear ferromagnets with a Goldstone mode (e.g. monolayer CrI3 from
+  SIESTA): the semidefinite-Hessian branch solved positive-mode vectors
+  through the singular PSD square root; it now never solves through the
+  singular factor. For the standard bosonic doubled form the spectrum is
+  certified by the parity reduction `lambda = eig((A-B)(A+B))` with modes
+  `+-sqrt(lambda)` (backward stable, so strongly squeezed small modes stay
+  resolved instead of being mislabeled), otherwise the full pencil
+  `gH v = omega v` is solved with Jordan-dust modes recognized by their
+  vanishing spectral weight `omega*|v^dag g v|` at the rounding level of
+  `||H||` (classifying them as zero modes; squeezed genuine modes with small
+  metric norm are preserved) and every discard cross-checked against the
+  independent Colpa metric spectrum, refusing inconclusive classifications
+  instead of inventing zeros or modes; eigenvectors are refined,
+  g-orthogonalized in degenerate subspaces, and the generalized eigenproblem
+  and metric Gram orthonormality are enforced on every emitted vector; the
+  point is classified as `zero_mode` (refusal: band group touches stable zero
+  modes) instead of crashing.
 - Fixed magnetic moment y-component error in `exchange.out` (introduced in v0.9.0)
 - Fixed command line function name errors (v0.9.12.5)
 - Fixed magnon band CLI issues

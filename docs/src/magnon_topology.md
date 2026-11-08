@@ -142,9 +142,24 @@ The shared solver ``solve_bosonic_modes`` (certified in
   attached (generalized residual and metric-norm error reported).
 - ``zero_mode``: stable zero-frequency directions exist; they are reported as
   a non-normalizable null space, never as invented normalized vectors.
-  Strictly positive modes still carry normalizable vectors, so a separated
-  band group (gap from the zero level above ``gap_tol``) can be validated;
-  a group touching zero is refused.
+  Strictly positive modes still carry normalizable vectors. On a singular
+  (Goldstone) Hessian the standard bosonic doubled form is certified by the
+  parity reduction ``lambda = eig((A-B)(A+B))`` with modes ``+-sqrt(lambda)``
+  (backward stable, so strongly squeezed small modes with tiny metric norm
+  stay resolved; exact zeros are ``lambda <= zero_tol^2``); otherwise the
+  pencil ``gH v = omega v`` is solved on the above-cut spectrum with
+  eigenvectors refined (Rayleigh plus singular subspace, so degenerate
+  clusters stay distinct) and positive modes recognized by their spectral
+  weight ``omega*|v^dag g v| = |v^dag H v|``: Jordan dust carries it only at
+  the rounding level of ``||H||`` and classifies as zeros (never emitted),
+  while squeezed genuine modes are kept however small their metric norm is.
+  Every discard is cross-checked against the independent Hermitian Colpa
+  metric spectrum — an unexplained count mismatch is refused as inconclusive
+  instead of inventing zeros or modes — degenerate positive subspaces are
+  g-orthogonalized, and each emitted vector must pass the
+  generalized-eigenproblem and metric Gram (``V^dag g V = I``) validations, so
+  a separated band group (gap from the zero level above ``gap_tol``) can be
+  validated; a group touching zero is refused.
 - ``energetically_unstable``: the Hessian has a resolved negative direction.
   The dynamical frequency character (``real`` or ``complex`` from ``gH``) is
   reported as a diagnostic; a diagonal shift is refused because it would not

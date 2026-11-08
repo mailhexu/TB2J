@@ -9,12 +9,12 @@ easy-axis SIA K. Moments are z-aligned with mu = 2 muB (S = 1).
 Pinned statements (all executed):
 1. Pairing contractions: a(J) = u^T J u* = J_xx + J_yy + i(J_yx - J_xy) and
    b(J) = u^T J u = J_xx - J_yy + i(J_xy + J_yx) with u = (1, i, 0). DMI
-   (antisymmetric tensors) contribute ZERO to both, so a collinear z FM
+   (antisymmetric tensors) contribute zero to b, so a collinear z FM
    cannot become anomalous through DMI; only symmetric anisotropy pairs.
 2. Dimer blocks: P_AA = P_BB = 4 J1 + 2 K, P_AB = -4 J1 cos(2 pi k a),
    Q_AB = -4 delta cos(2 pi k a) (S = 1).
-3. Physical frequencies = sorted(eig(P - Q) union eig(P + Q)); verified
-   against the actual Magnon.Hq + Colpa solve at numeric k points.
+3. Physical frequencies of the symmetric doubled form are square roots of
+   eig((P - Q)(P + Q)), verified against actual bosonic solves.
 4. Metric identities of the full normalized set: H v = omega g v with
    v^dag g v = 1/omega; sqrt(omega)-rescaled positive modes carry metric
    signature +1, negative-norm partners -1; signed completeness
@@ -25,6 +25,12 @@ Pinned statements (all executed):
    this form; a resolved negative Hessian direction is refused without any
    diagonal shift, and a stable zero mode reports a non-normalizable null
    space rather than invented vectors.
+7. Singular square-root back-transform on exactly singular PSD Hessians
+   (Goldstone): positive modes satisfy the generalized eigenproblem and the
+   Colpa metric normalization exactly (symbolically on a closed-form
+   nontrivial Hessian with a nonzero pairing channel, and numerically
+   through the solver), including the metric-degenerate Jordan-null case
+   where N = psi^dag g psi is singular.
 """
 
 import warnings
@@ -32,13 +38,14 @@ from pathlib import Path
 
 import numpy as np
 import sympy as sp
+from ase import Atoms as _Atoms
+from scipy.linalg import expm as _expm
+
+from TB2J.io_exchange import SpinIO as _SpinIO
+from TB2J.magnon.magnon3 import Magnon as _Magnon
+from TB2J.magnon.topology.bosonic import solve_bosonic_modes as _solve_modes
 
 _np = np
-
-from ase import Atoms as _Atoms  # noqa: E402
-
-from TB2J.io_exchange import SpinIO as _SpinIO  # noqa: E402
-from TB2J.magnon.magnon3 import Magnon as _Magnon  # noqa: E402
 
 REPORT: list[str] = []
 
@@ -332,6 +339,235 @@ check(
     "warning (documented legacy behavior, untouched by topology)",
 )
 
+# ---------------------------------------------------------------------------
+# 5. Singular square-root back-transform (Goldstone Hessians)
+# ---------------------------------------------------------------------------
+note("5. Singular square-root back-transform on a nontrivial singular PSD Hessian")
+
+# 5a. symbolic: exactly singular Hessian of the physical doubled form
+# [[A, B], [B, A]] with a Goldstone null pair AND a nonzero symmetric
+# pairing channel B = b P (b != 0). Closed-form generalized eigenvector:
+# on the shared eigenvector s of A and B the pencil H v = omega g v gives
+# omega = sqrt(x^2 - b^2) and v = ((1+kappa) s / 2, (1-kappa) s / 2) with
+# kappa = (x + b) / omega, which leaves range(H) through a null-space
+# admixture so that g v stays inside range(H).
+x_sym, b_sym = sp.Rational(1, 50), sp.Rational(1, 300)
+om_s = sp.sqrt(x_sym**2 - b_sym**2)
+kappa_s = (x_sym + b_sym) / om_s
+s_vec = sp.Matrix([1, 1]) / sp.sqrt(2)
+t_vec = sp.Matrix([1, -1]) / sp.sqrt(2)
+p_mat = sp.Matrix(
+    [[sp.Rational(1, 2), sp.Rational(1, 2)], [sp.Rational(1, 2), sp.Rational(1, 2)]]
+)
+q_mat = sp.Matrix(
+    [[sp.Rational(1, 2), -sp.Rational(1, 2)], [-sp.Rational(1, 2), sp.Rational(1, 2)]]
+)
+a_sym = x_sym * p_mat
+b_sym_mat = b_sym * p_mat
+z_two = sp.zeros(2)
+h_sym = sp.Matrix(sp.BlockMatrix([[a_sym, b_sym_mat], [b_sym_mat, a_sym]]))
+g_sym = sp.Matrix(sp.BlockMatrix([[sp.eye(2), z_two], [z_two, -sp.eye(2)]]))
+psi_null1 = sp.Matrix(sp.BlockMatrix([[t_vec], [t_vec]]))
+psi_null2 = sp.Matrix(sp.BlockMatrix([[t_vec], [-t_vec]]))
+check(
+    sp.simplify(h_sym.det()) == 0
+    and h_sym * psi_null1 == sp.zeros(4, 1)
+    and h_sym * psi_null2 == sp.zeros(4, 1)
+    and dict(h_sym.eigenvals()) == {x_sym + b_sym: 1, x_sym - b_sym: 1, 0: 2},
+    f"exactly singular PSD Hessian with nonzero pairing channel: det = 0, "
+    f"two exact null vectors, eigenvalues {{{x_sym + b_sym}, {x_sym - b_sym}, "
+    f"0, 0}}",
+)
+v_cf = sp.Matrix(
+    sp.BlockMatrix([[(s_vec + kappa_s * s_vec) / 2], [(s_vec - kappa_s * s_vec) / 2]])
+)
+resid_sym = sp.simplify(h_sym * v_cf - om_s * g_sym * v_cf)
+check(
+    resid_sym == sp.zeros(4, 1),
+    "generalized eigenproblem EXACT (symbolic): H v = omega g v with "
+    f"omega = sqrt(x^2 - b^2) = {om_s} and v = ((1+kappa) s/2, (1-kappa) s/2), "
+    "kappa = (x + b)/omega; v carries a null-space admixture ((1-kappa)/2 "
+    "!= 0) so that g v stays inside range(H)",
+)
+gv_unscaled = sp.simplify((v_cf.T * g_sym * v_cf)[0, 0])
+vn_cf = v_cf / sp.sqrt(om_s * kappa_s)
+check(
+    sp.simplify(gv_unscaled - kappa_s) == 0
+    and sp.simplify((vn_cf.T * g_sym * vn_cf)[0, 0] - 1 / om_s) == 0,
+    "metric normalization EXACT (symbolic): v^dag g v = kappa, so the "
+    "Colpa-rescaled v/sqrt(omega kappa) obeys v^dag g v = 1/omega "
+    f"(kappa = {gv_unscaled})",
+)
+
+# 5b. numeric: the actual solver on the dust-shifted Hessian (negative
+# roundoff dust below zero_tol pins the Cholesky failure and hence the
+# singular-square-root branch; the solver clamps it exactly like the
+# symbolic eps = 0 case).
+
+dust = -1e-12
+x_num = float(x_sym)
+b_val = float(b_sym)
+a_num = x_num * np.array(p_mat, dtype=float) + dust * np.array(q_mat, dtype=float)
+b_num = b_val * np.array(p_mat, dtype=float)
+h_num = np.block([[a_num, b_num], [b_num, a_num]])
+g_num = np.diag([1.0, 1.0, -1.0, -1.0])
+try:
+    np.linalg.cholesky(h_num)
+    _chol_ok = True
+except np.linalg.LinAlgError:
+    _chol_ok = False
+check(
+    not _chol_ok,
+    "numeric Hessian with -1e-12 dust fails Cholesky (deterministic "
+    "singular-square-root branch)",
+)
+modes_s = _solve_modes(h_num)
+check(
+    modes_s.classification == "zero_mode"
+    and modes_s.vectors is not None
+    and modes_s.vectors.shape == (4, 1),
+    f"solver classifies zero_mode and attaches the positive-mode vector "
+    f"(classification {modes_s.classification}, vectors "
+    f"{None if modes_s.vectors is None else modes_s.vectors.shape})",
+)
+om_num = float(modes_s.energies[modes_s.positive_indices[0]])
+check(
+    abs(om_num - float(om_s)) < 1e-10,
+    f"solver energy equals the symbolic closed form: "
+    f"{om_num:.12f} vs sqrt(x^2 - b^2) = {float(om_s):.12f}",
+)
+v_num = modes_s.vectors[:, 0]
+resid_num = h_num @ v_num - om_num * (g_num @ v_num)
+check(
+    float(np.max(np.abs(resid_num))) < 1e-12,
+    f"solver vector satisfies H v = omega g v on the singular Hessian "
+    f"(residual {float(np.max(np.abs(resid_num))):.2e}); a plain "
+    "range-restricted back-transform would miss the null admixture by "
+    "~4e-3 here",
+)
+vu_num = v_num / np.sqrt(om_num)
+norm_num = float(om_num * np.real(vu_num.conj() @ (g_num @ vu_num)))
+check(
+    abs(norm_num - 1.0) < 1e-12 and modes_s.residuals["max_metric_norm_error"] < 1e-12,
+    f"metric normalization on the solver vector: omega * (v/sqrt(omega))"
+    f"^dag g (v/sqrt(omega)) = {norm_num:.15f}",
+)
+null_num = float(np.max(np.abs(h_num @ modes_s.null_space)))
+check(
+    null_num < 1e-12 and modes_s.residuals["null_space_residual"] < 1e-12,
+    f"Hessian null space still reported as non-normalizable null vectors "
+    f"(H psi residual {null_num:.1e})",
+)
+
+# 5c. metric-degenerate (Jordan) null space WITH a surviving positive mode:
+# a g-neutral null vector makes N = psi^dag g psi singular while a
+# decoupled sector still carries a real positive frequency. The pencil is
+# solved on the nondegenerate quotient of the constrained subspace (the
+# kernel direction cannot carry a finite eigenvalue because A = Q^dag H Q
+# is positive definite), the constraint is enforced by pseudoinverse with
+# per-mode solvability validation, and unsolvable modes are refused with
+# documented diagnostics instead of a singular-matrix crash.
+beta_num = 0.5
+h_jordan = np.zeros((4, 4), dtype=complex)
+h_jordan[0, 0] = h_jordan[1, 1] = h_jordan[2, 2] = h_jordan[3, 3] = 1.0
+h_jordan[0, 2] = h_jordan[2, 0] = -1.0
+h_jordan[1, 3] = h_jordan[3, 1] = beta_num
+psi_j = np.array([1, 0, 1, 0]) / np.sqrt(2)
+n_j = float(np.real(psi_j.conj() @ (g_num @ psi_j)))
+check(
+    float(np.max(np.abs(h_jordan @ psi_j))) < 1e-12
+    and abs(n_j) < 1e-14
+    and float(np.linalg.eigvalsh(h_jordan)[0]) >= 0.0,
+    "Jordan-null fixture: g-neutral null vector (N = 0, singular) of an "
+    "exactly PSD doubled-form Hessian",
+)
+modes_j = _solve_modes(h_jordan)
+om_j = float(modes_j.energies[modes_j.positive_indices[0]])
+v_j = modes_j.vectors[:, 0]
+resid_j = float(np.max(np.abs(h_jordan @ v_j - om_j * (g_num @ v_j))))
+vu_j = v_j / np.sqrt(om_j)
+norm_j = float(om_j * np.real(vu_j.conj() @ (g_num @ vu_j)))
+check(
+    modes_j.classification == "zero_mode"
+    and abs(om_j - np.sqrt(1.0 - beta_num**2)) < 1e-10
+    and resid_j < 1e-12
+    and abs(norm_j - 1.0) < 1e-12,
+    f"positive mode survives the metric-degenerate null space exactly: "
+    f"omega = {om_j:.12f} = sqrt(1 - beta^2), generalized residual "
+    f"{resid_j:.1e}, omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) = "
+    f"{norm_j:.15f}; no singular-matrix crash",
+)
+
+# 5d. paraunitary mode mixing (Main-reported regression): a g-unitary
+# congruence lifts exact Jordan zeros into a COMPLEX dust pair above
+# zero_tol (+-1.09e-8 +- 3.2e-8j) while a genuine positive mode survives.
+# The metric-norm discriminator recognizes the dust (vanishing
+# |v^dag g v|) and classifies it as zeros; the positive mode is preserved
+# and validated. No singular-matrix crash, no fabricated positive mode.
+
+h_p = np.array(
+    [[1, 0, 1, 0], [0, 2, 0, 0.3], [1, 0, 1, 0], [0, 0.3, 0, 2]], dtype=float
+)
+t_p = np.array([[0.2, 0.25], [0.25, -0.1]])
+s_p = _expm(np.block([[np.zeros((2, 2)), t_p], [t_p, np.zeros((2, 2))]]))
+h_para = s_p.T @ h_p @ s_p
+check(
+    float(np.max(np.abs(s_p.T @ g_num @ s_p - g_num))) < 1e-14
+    and float(np.linalg.eigvalsh(h_para)[0]) >= -1e-12,
+    "paraunitary fixture: g-unitary congruence of an exactly PSD singular "
+    "doubled-form Hessian (g-unitarity error < 1e-14, Hessian psd within "
+    "1e-12 congruence rounding)",
+)
+modes_p = _solve_modes(h_para)
+om_p = float(modes_p.energies[modes_p.positive_indices[0]])
+v_p = modes_p.vectors[:, 0]
+resid_p = float(np.max(np.abs(h_para @ v_p - om_p * (g_num @ v_p))))
+vu_p = v_p / np.sqrt(om_p)
+norm_p = float(om_p * np.real(vu_p.conj() @ (g_num @ vu_p)))
+check(
+    modes_p.classification == "zero_mode"
+    and modes_p.residuals.get("n_jordan_dust_modes", 0) == 2
+    and abs(om_p - float(sp.sqrt(sp.Rational(391, 100)))) < 1e-10
+    and resid_p < 1e-12
+    and abs(norm_p - 1.0) < 1e-12,
+    f"complex Jordan dust classified as zeros (2 dust modes), genuine "
+    f"positive mode preserved: omega = {om_p:.12f} = sqrt(3.4), generalized "
+    f"residual {resid_p:.1e}, omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) "
+    f"= {norm_p:.15f}",
+)
+
+# 5e. The parity reduction does not require A and B to commute.
+a, b, c, d, e, f, z = sp.symbols("a b c d e f z", real=True)
+A = sp.Matrix([[a, b], [b, c]])
+B = sp.Matrix([[d, e], [e, f]])
+I2 = sp.eye(2)
+Z2 = sp.zeros(2)
+parity = sp.BlockMatrix([[I2, I2], [I2, -I2]]).as_explicit()
+h_parity = sp.BlockMatrix([[A, B], [B, A]]).as_explicit()
+g_parity = sp.diag(1, 1, -1, -1)
+reduced = sp.BlockMatrix([[Z2, A - B], [A + B, Z2]]).as_explicit()
+check(
+    parity.inv() * g_parity * h_parity * parity == reduced
+    and sp.expand(
+        (z * sp.eye(4) - g_parity * h_parity).det()
+        - (z**2 * I2 - (A - B) * (A + B)).det()
+    )
+    == 0,
+    "parity reduction and characteristic polynomial hold symbolically for "
+    "noncommuting symmetric A and B",
+)
+A_num = np.array([[1.0, 0.5], [0.5, 1.5]])
+B_num = np.array([[1.0, 0.5], [0.5, 0.5]])
+h_num = np.block([[A_num, B_num], [B_num, A_num]])
+modes_num = _solve_modes(h_num)
+check(
+    np.max(np.abs(A_num @ B_num - B_num @ A_num)) > 0.1
+    and modes_num.classification == "zero_mode"
+    and np.allclose(modes_num.energies, [0.0, np.sqrt(2.0)], atol=1e-10),
+    "noncommuting singular fixture: solver energies agree with the "
+    "parity product eigenvalues 0 and 2",
+)
+
 header = """# Certificate: anomalous bosonic modes, Colpa metric and stability policy
 
 Generated by `magnon_topology_bosonic_modes.py` (all assertions executed and
@@ -349,6 +585,14 @@ passed in the `mydev` environment). Pinned statements:
    without shifts; stable zero modes report non-normalizable null spaces;
    the legacy shift fallback behavior is unchanged and never used for
    topology.
+6. Singular square-root back-transform on exactly singular PSD Hessians
+   (Goldstone): the generalized eigenproblem `H v = omega g v` and the Colpa
+   normalization `v^dag g v = 1/omega` hold exactly, symbolically on a
+   closed-form nontrivial singular Hessian with a nonzero pairing channel
+   and numerically through `solve_bosonic_modes`, including the
+   metric-degenerate Jordan-null case (`N = psi^dag g psi` singular) where
+   the pencil is solved on the nondegenerate quotient and unsolvable modes
+   are refused with documented diagnostics.
 
 ## Console output of the executed script
 
