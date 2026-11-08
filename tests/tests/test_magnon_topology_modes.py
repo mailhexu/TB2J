@@ -380,6 +380,29 @@ def test_exact_jordan_zero_with_squeezed_positive_mode_recovered_not_zero():
     assert modes.residuals["null_space_residual"] < 1e-12
 
 
+def test_block_mismatch_not_treated_as_exact_standard_form():
+    # guard (Main-reported): A2 = A1 + 1e-6 changes the Hamiltonian, so the
+    # certified parity reduction (which assumes the exact standard form) must
+    # not be applied. The solver has to refuse with a documented class and
+    # emit no vectors instead of reporting the idealized squeezed spectrum.
+    H = np.zeros((4, 4), dtype=complex)
+    H[0, 0] = H[2, 2] = 1.0
+    H[0, 2] = H[2, 0] = 1.0
+    H[1, 1] = H[3, 3] = 1e5
+    H[1, 3] = H[3, 1] = 1e5 - 1.1e-8
+    H[2, 2] += 1e-6
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "dynamically_unstable"
+    assert modes.vectors is None
+    # the Hessian itself is still positive definite here, so the refusal is
+    # the non-BdG metric-spectrum class, never an invented zero or a silently
+    # certified squeezed root
+    assert modes.h_min_eigenvalue > 0.0
+    assert np.all(np.isfinite(modes.energies))
+
+
 def test_degenerate_positive_pair_g_orthonormal_and_exact():
     # doubled form of A = diag(1, 2, 2), B = diag(1, 0.3, 0.3): the pencil has
     # two exactly degenerate positive modes omega = sqrt(3.91) and two zeros.

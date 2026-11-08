@@ -22,7 +22,13 @@ passed in the `mydev` environment). Pinned statements:
    and numerically through `solve_bosonic_modes`, including the
    metric-degenerate Jordan-null case (`N = psi^dag g psi` singular) where
    the pencil is solved on the nondegenerate quotient and unsolvable modes
-   are refused with documented diagnostics.
+   are refused with documented diagnostics. The parity reduction
+   `lam = eig((A-B)(A+B))`, `omega = +-sqrt(lam)` of the standard bosonic
+   doubled form is asserted symbolically (block congruence identity and
+   characteristic polynomial, noncommuting A and B) and numerically against
+   the solver on a noncommuting singular fixture and on a strongly squeezed
+   float64-quantized mode; a genuine diagonal-block mismatch is refused with
+   a documented class, never silently accepted as the exact standard form.
 
 ## Console output of the executed script
 
@@ -61,7 +67,7 @@ passed in the `mydev` environment). Pinned statements:
   [OK] numeric Hessian with -1e-12 dust fails Cholesky (deterministic singular-square-root branch)
   [OK] solver classifies zero_mode and attaches the positive-mode vector (classification zero_mode, vectors (4, 1))
   [OK] solver energy equals the symbolic closed form: 0.019720265944 vs sqrt(x^2 - b^2) = 0.019720265944
-  [OK] solver vector satisfies H v = omega g v on the singular Hessian (residual 3.04e-18); a plain range-restricted back-transform would miss the null admixture by ~4e-3 here
+  [OK] solver vector satisfies H v = omega g v on the singular Hessian (residual 5.20e-18); a plain range-restricted back-transform would miss the null admixture by ~4e-3 here
   [OK] metric normalization on the solver vector: omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) = 1.000000000000000
   [OK] Hessian null space still reported as non-normalizable null vectors (H psi residual 7.1e-13)
   [OK] Jordan-null fixture: g-neutral null vector (N = 0, singular) of an exactly PSD doubled-form Hessian
@@ -70,4 +76,6 @@ passed in the `mydev` environment). Pinned statements:
   [OK] complex Jordan dust classified as zeros (2 dust modes), genuine positive mode preserved: omega = 1.977371993329 = sqrt(3.4), generalized residual 1.0e-15, omega * (v/sqrt(omega))^dag g (v/sqrt(omega)) = 1.000000000000000
   [OK] parity reduction and characteristic polynomial hold symbolically for noncommuting symmetric A and B
   [OK] noncommuting singular fixture: solver energies agree with the parity product eigenvalues 0 and 2
+  [OK] exact Jordan zero + squeezed block: parity-reduced spectrum exact for the stored matrix (omega = 0.046906818081 = sqrt(delta*(2e5-delta)), delta = 1e5 - fl(1e5 - 1.1e-8) = 1.1001247913e-08); squeezed positive mode preserved, never a zero (classification zero_mode, absolute residual 1.0e-08)
+  [OK] block-mismatch guard: A2 = A1 + 1e-6 is not treated as the exact standard form; documented refusal (dynamically_unstable, no mode vectors) instead of the idealized parity spectrum
 ```

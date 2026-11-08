@@ -190,7 +190,13 @@ def solve_bosonic_modes(
                     float(np.max(np.abs(lam.imag), initial=0.0))
                     <= hermiticity_tol * scale_l
                 ):
-                    lam_ref = np.sort(np.real(lam))
+                    lam_sorted = np.sort(np.real(lam))
+                    # the certified zero count (lambda <= zero_tol^2) must
+                    # equal the actual Hessian's null count; a mismatch means
+                    # the structural assumption is inconsistent with H, so the
+                    # pencil route (with its own validations) is used instead
+                    if int(np.sum(lam_sorted <= zero_tol**2)) == int(np.sum(null_h)):
+                        lam_ref = lam_sorted
         if lam_ref is not None:
             # exact zeros are lambda <= zero_tol^2; a lambda resolved
             # negative below the rounding floor of the product spectrum is a
