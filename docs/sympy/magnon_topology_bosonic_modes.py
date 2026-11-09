@@ -18,7 +18,8 @@ Pinned statements (all executed):
 4. Metric identities of the full normalized set: H v = omega g v with
    v^dag g v = 1/omega; sqrt(omega)-rescaled positive modes carry metric
    signature +1, negative-norm partners -1; signed completeness
-   sum(signatures) = 0; +-pairing of the metric spectrum.
+   sum(signatures) = 0; the same-k +-pairing observed here is a property of
+   this reciprocal standard form, not a stability criterion.
 5. Cholesky-intermediate columns are NOT physical modes (they fail the
    generalized residual for every eigenvalue).
 6. Stability policy anchors: Hessian psd <=> real physical frequencies for
@@ -31,6 +32,15 @@ Pinned statements (all executed):
    nontrivial Hessian with a nonzero pairing channel, and numerically
    through the solver), including the metric-degenerate Jordan-null case
    where N = psi^dag g psi is singular.
+8. Nonreciprocal stability is decided by the Hessian signature, not by
+   same-momentum +- symmetry: H(k) = diag(a, b) with g = diag(1, -1) is
+   positive definite, its same-k metric spectrum {a, -b} is not +- paired
+   for a != b, and the particle-hole identity X (gH(k))* X = -gH(-k) pairs
+   k with -k. The solver returns the normalized positive mode and keeps the
+   same-k residual as a diagnostic only; a generic positive-definite H is
+   similar to the Hermitian H^{1/2} g H^{1/2}, so its metric spectrum is
+   real, and a singular PSD nonreciprocal fixture keeps its normalized
+   positive modes plus the Hessian null space.
 """
 
 import warnings
@@ -228,6 +238,145 @@ for kv in [0.13, 0.37]:
 check(
     _pairing_max > 1e-6,
     f"anomalous dimer has a genuinely nonzero pairing block (max {_pairing_max:.3e})",
+)
+
+# ---------------------------------------------------------------------------
+# 3c. Nonreciprocal pairing is k <-> -k, not same-k
+# ---------------------------------------------------------------------------
+note("3c. Nonreciprocal particle-hole pairing is k <-> -k, never same-k")
+
+a_nr, b_nr = sp.symbols("a_nr b_nr", real=True, positive=True)
+Hk_nr = sp.diag(a_nr, b_nr)
+Hmk_nr = sp.diag(b_nr, a_nr)
+X_nr = sp.Matrix([[0, 1], [1, 0]])
+g2_nr = sp.diag(1, -1)
+check(
+    sp.simplify(Hk_nr.conjugate() - Hk_nr) == sp.zeros(2, 2)
+    and sp.simplify(X_nr * Hk_nr.conjugate() * X_nr - Hmk_nr) == sp.zeros(2, 2),
+    "H(-k) = X H(k)* X with X = [[0, 1], [1, 0]] swaps the diagonal blocks",
+)
+check(
+    sp.simplify(X_nr * (g2_nr * Hk_nr).conjugate() * X_nr + g2_nr * Hmk_nr)
+    == sp.zeros(2, 2),
+    "X (g H(k))* X = -g H(-k): the bosonic particle-hole partner lives at "
+    "-k; same-k +- pairing is not implied",
+)
+check(
+    sp.simplify((g2_nr * Hk_nr).trace() - (a_nr - b_nr)) == 0,
+    "same-k metric trace a - b need not vanish, so the {a, -b} spectrum is "
+    "not +- paired when a != b",
+)
+
+# Implementation cross-check: the public solver must not infer instability
+# from the same-k residual.
+a_val, b_val_nr = 2.0, 3.0
+H_nr = _np.diag([a_val, b_val_nr]).astype(complex)
+g_nr = _np.diag([1.0, -1.0])
+X_nr_num = _np.array([[0.0, 1.0], [1.0, 0.0]])
+H_mk_nr = X_nr_num @ H_nr.conj() @ X_nr_num
+check(
+    _np.allclose(X_nr_num @ (g_nr @ H_nr).conj() @ X_nr_num, -(g_nr @ H_mk_nr)),
+    "numeric cross-momentum identity X (gH(k))* X = -gH(-k) at a=2, b=3",
+)
+eig_nr = _np.sort(_np.linalg.eigvals(g_nr @ H_nr).real)
+check(
+    _np.allclose(eig_nr, _np.array([-b_val_nr, a_val]))
+    and not _np.allclose(eig_nr, _np.sort(-eig_nr)),
+    f"same-k metric spectrum {eig_nr} is not +- symmetric (a != b)",
+)
+eig_mk_nr = _np.sort(_np.linalg.eigvals(g_nr @ H_mk_nr).real)
+check(
+    _np.allclose(eig_mk_nr, _np.sort(-eig_nr)),
+    f"cross-momentum metric spectra are negatives: eig(gH(-k)) {eig_mk_nr} "
+    f"= -eig(gH(k))",
+)
+modes_nr = _solve_modes(H_nr)
+v_nr = modes_nr.vectors[:, 0]
+check(
+    modes_nr.classification == "positive_definite"
+    and _np.allclose(modes_nr.energies, [a_val], atol=1e-12)
+    and abs(_np.real(v_nr.conj() @ (g_nr @ v_nr)) - 1.0) < 1e-12
+    and _np.max(_np.abs(H_nr @ v_nr - modes_nr.energies[0] * (g_nr @ v_nr))) < 1e-12
+    and abs(modes_nr.residuals["pairing_residual"] - (b_val_nr - a_val)) < 1e-12,
+    "implementation: positive-definite nonreciprocal H=diag(2,3) yields the "
+    "normalized mode omega=2; the same-k pairing residual 1.0 is diagnostic "
+    "only and never a dynamic-instability gate",
+)
+
+g4_nr = _np.diag([1.0, 1.0, -1.0, -1.0])
+H_nr4 = _np.diag([1.0, 2.0, 3.0, 4.0]).astype(complex)
+modes_nr4 = _solve_modes(H_nr4)
+check(
+    modes_nr4.classification == "positive_definite"
+    and _np.allclose(modes_nr4.energies, [1.0, 2.0], atol=1e-12)
+    and _np.max(
+        _np.abs(modes_nr4.vectors.conj().T @ (g4_nr @ modes_nr4.vectors) - _np.eye(2))
+    )
+    < 1e-12,
+    "implementation: nonreciprocal positive-definite block Hessian "
+    "diag(1,2,3,4) yields both physical modes with V^dag g V = I",
+)
+H_nrs = _np.diag([1.0, 2.0, 0.0, 3.0]).astype(complex)
+check(
+    _np.allclose(
+        _np.sort(_np.linalg.eigvals(g4_nr @ H_nrs).real),
+        [-3.0, 0.0, 1.0, 2.0],
+        atol=1e-12,
+    ),
+    "singular nonreciprocal fixture metric spectrum {-3, 0, 1, 2}: positive, "
+    "negative and Goldstone finite modes coexist",
+)
+modes_nrs = _solve_modes(H_nrs)
+check(
+    modes_nrs.classification == "zero_mode"
+    and _np.allclose(modes_nrs.energies, [1.0, 2.0], atol=1e-12)
+    and _np.max(_np.abs(H_nrs @ modes_nrs.null_space)) < 1e-12
+    and _np.max(
+        _np.abs(modes_nrs.vectors.conj().T @ (g4_nr @ modes_nrs.vectors) - _np.eye(2))
+    )
+    < 1e-12,
+    "implementation: singular positive-semidefinite nonreciprocal Hessian "
+    "diag(1,2,0,3) keeps both positive modes normalized and reports the "
+    "Hessian null space",
+)
+
+# Soundness of the same-momentum criterion: for a generic Hermitian positive
+# definite H, gH is similar to the Hermitian H^{1/2} g H^{1/2}; Sylvester
+# inertia gives n positive and n negative real eigenvalues, so real
+# frequencies follow from H > 0 without any same-k +- pairing.
+rng_nr = _np.random.default_rng(20261109)
+B_nr = rng_nr.normal(size=(4, 4)) + 1j * rng_nr.normal(size=(4, 4))
+H_pd = B_nr @ B_nr.conj().T + _np.eye(4)
+w_pd, U_pd = _np.linalg.eigh(H_pd)
+sqrt_pd = (U_pd * _np.sqrt(w_pd)[None, :]) @ U_pd.conj().T
+inv_sqrt_pd = (U_pd * (1.0 / _np.sqrt(w_pd))[None, :]) @ U_pd.conj().T
+similar_pd = sqrt_pd @ g4_nr @ sqrt_pd
+gh_pd = g4_nr @ H_pd
+check(
+    _np.allclose(gh_pd, inv_sqrt_pd @ similar_pd @ sqrt_pd)
+    and _np.max(_np.abs(similar_pd - similar_pd.conj().T)) < 1e-12,
+    "positive-definite Hessian: gH is similar to the Hermitian "
+    "H^{1/2} g H^{1/2}, hence its spectrum is real",
+)
+eig_pd = _np.sort(_np.linalg.eigvals(gh_pd).real)
+check(
+    _np.max(_np.abs(_np.linalg.eigvals(gh_pd).imag)) < 1e-10
+    and _np.all(eig_pd[:2] < 0.0)
+    and _np.all(eig_pd[2:] > 0.0),
+    f"positive-definite Hessian: gH has n=2 negative and n=2 positive real "
+    f"eigenvalues (inertia {{2,2}}, spectrum {eig_pd})",
+)
+modes_pd = _solve_modes(H_pd)
+check(
+    modes_pd.classification == "positive_definite"
+    and modes_pd.vectors.shape == (4, 2)
+    and _np.max(
+        _np.abs(modes_pd.vectors.conj().T @ (g4_nr @ modes_pd.vectors) - _np.eye(2))
+    )
+    < 1e-10
+    and modes_pd.residuals["max_generalized_residual"] < 1e-10,
+    "implementation: generic positive-definite H (nonreciprocal in general) "
+    "returns the two positive modes with unit metric Gram, no pairing assumed",
 )
 
 # ---------------------------------------------------------------------------
@@ -599,20 +748,43 @@ check(
 )
 
 # 5g. Structural guard: a genuine block mismatch changes the Hamiltonian, so
-# the certified parity reduction must not be applied to it. The solver must
-# refuse with a documented class and emit no vectors instead of reporting the
-# idealized squeezed spectrum of the assumed exact standard form.
+# the certified parity reduction must not be applied to it. Here the actual
+# matrix remains positive definite, so the solver must solve it directly and
+# return both normalized positive modes -- never the idealized parity zero
+# and never a false same-k-pairing dynamic instability.
 h_pert = h_sq.copy()
 h_pert[2, 2] += 1e-6
 modes_pert = _solve_modes(h_pert)
+pert_gram = (
+    _np.max(
+        _np.abs(modes_pert.vectors.conj().T @ (g_num @ modes_pert.vectors) - _np.eye(2))
+    )
+    if modes_pert.vectors is not None
+    else _np.inf
+)
+pert_resid = (
+    _np.max(
+        _np.abs(
+            h_pert @ modes_pert.vectors
+            - modes_pert.energies[None, :] * (g_num @ modes_pert.vectors)
+        )
+    )
+    if modes_pert.vectors is not None
+    else _np.inf
+)
 check(
-    modes_pert.classification == "dynamically_unstable"
-    and modes_pert.vectors is None
-    and modes_pert.h_min_eigenvalue > 0.0,
+    not _np.array_equal(h_pert[2:, 2:], h_pert[:2, :2])
+    and modes_pert.classification == "positive_definite"
+    and modes_pert.vectors is not None
+    and modes_pert.h_min_eigenvalue > 0.0
+    and modes_pert.energies[0] > 0.0
+    and pert_gram < 1e-8
+    and pert_resid < 1e-6,
     f"block-mismatch guard: A2 = A1 + 1e-6 is not treated as the exact "
-    f"standard form; documented refusal "
-    f"({modes_pert.classification}, no mode vectors) instead of the "
-    "idealized parity spectrum",
+    f"standard form; the actual positive-definite matrix is solved "
+    f"({modes_pert.classification}, modes {modes_pert.energies}) with both "
+    "normalized vectors, never the idealized parity zero and never a false "
+    "dynamic instability",
 )
 
 header = """# Certificate: anomalous bosonic modes, Colpa metric and stability policy
@@ -625,7 +797,9 @@ passed in the `mydev` environment). Pinned statements:
 2. Dimer blocks with symmetric anisotropy `delta`: pairing `Q_AB = -4 delta cos(2 pi k a)`.
 3. Physical frequencies = sorted(eig(P-Q) U eig(P+Q)), verified against the
    actual `Magnon.Hq` Colpa solve; generalized residuals < 1e-10; metric
-   norms `v^dag g v = 1/omega`; signed completeness 0; +-pairing.
+   norms `v^dag g v = 1/omega`; signed completeness 0. The same-k +-pairing
+   seen here is a property of this reciprocal standard form, not a stability
+   criterion.
 4. Cholesky-intermediate columns are not physical modes.
 5. Stability policy: Hessian psd <=> real frequencies for this form;
    negative-Hessian references with real dynamical frequencies are refused
@@ -644,8 +818,18 @@ passed in the `mydev` environment). Pinned statements:
    doubled form is asserted symbolically (block congruence identity and
    characteristic polynomial, noncommuting A and B) and numerically against
    the solver on a noncommuting singular fixture and on a strongly squeezed
-   float64-quantized mode; a genuine diagonal-block mismatch is refused with
-   a documented class, never silently accepted as the exact standard form.
+   float64-quantized mode; a genuine diagonal-block mismatch is solved as
+   the actual positive-definite matrix, never accepted as the idealized
+   parity spectrum and never mislabeled dynamically unstable.
+7. Nonreciprocal stability: the reported minimal counterexample
+   `H(k) = diag(2, 3)` (generally `diag(a, b)`) is positive definite with
+   same-k metric spectrum `{a, -b}`, but the bosonic particle-hole identity
+   `X (gH(k))* X = -gH(-k)` pairs `k` with `-k` (asserted symbolically and
+   numerically). The same-k pairing residual is diagnostic only; the
+   solver returns the normalized positive mode. A generic positive-definite
+   `H` is similar to the Hermitian `H^{1/2} g H^{1/2}`, so its metric
+   spectrum is real, and a singular PSD nonreciprocal fixture keeps both
+   normalized positive modes and its Hessian null space.
 
 ## Console output of the executed script
 

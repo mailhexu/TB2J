@@ -94,18 +94,65 @@ def _validate_index_spin(index_spin: np.ndarray) -> Tuple[np.ndarray, np.ndarray
 
 
 def _dict_nonzero_count(ddict, tol: float) -> int:
-    """Count entries of a channel dictionary with content above ``tol``."""
+    """Count entries of a channel dictionary with content above ``tol``.
+
+    The magnitude is used so imaginary-only complex content counts as
+    nonzero; casting to float would silently discard it.
+    """
     if not ddict:
         return 0
     count = 0
     for value in ddict.values():
-        arr = np.asarray(value, dtype=float)
-        if np.max(np.abs(arr)) > tol:
+        arr = np.abs(np.asarray(value))
+        if np.max(arr) > tol:
             count += 1
     return count
 
 
-def _sia_contribution(exc, i: int) -> np.ndarray:
+def _real_channel_array(
+    value,
+    channel: str,
+    location: str,
+    shape: Optional[Tuple[int, ...]],
+    rtol: float,
+    atol: float,
+) -> np.ndarray:
+    """Return a real channel array, rejecting material imaginary content.
+
+    Imaginary exchange cannot enter the real tensor model. Roundoff-sized
+    imaginary noise is tolerated only below the pair-reversal tolerances
+    (``max(atol, rtol * max|real|)`` for the same entry), so nothing
+    meaningful is discarded silently.
+    """
+    arr = np.asarray(value)
+    if not np.iscomplexobj(arr):
+        arr = np.asarray(arr, dtype=float)
+    if shape is not None and arr.shape != shape:
+        raise TopologyPreparationError(
+            f"{channel} entry at {location} must have shape {shape}, "
+            f"got {arr.shape}."
+        )
+    if not np.all(np.isfinite(arr)):
+        raise TopologyPreparationError(
+            f"{channel} entry at {location} contains non-finite values."
+        )
+    if not np.iscomplexobj(arr):
+        return arr
+    real = np.asarray(arr.real, dtype=float)
+    imag = float(np.max(np.abs(arr.imag))) if arr.size else 0.0
+    scale = float(np.max(np.abs(real))) if arr.size else 0.0
+    tol = max(atol, rtol * scale)
+    if imag > tol:
+        raise TopologyPreparationError(
+            f"{channel} entry at {location} has material imaginary content "
+            f"(max |Im| = {imag:.3e} exceeds tolerance {tol:.3e}); the "
+            "topology model requires real exchange tensors and cannot "
+            "represent or discard imaginary exchange."
+        )
+    return real
+
+
+def _sia_contribution(exc, i: int, rtol: float, atol: float) -> np.ndarray:
     """Effective single-ion anisotropy tensor of spin ``i``.
 
     The SpinIO constructor merges uniaxial ``k1``/``k1dir`` into
@@ -120,13 +167,9 @@ def _sia_contribution(exc, i: int) -> np.ndarray:
     if getattr(exc, "has_sia_tensor", False) and exc.sia_tensor is not None:
         value = exc.sia_tensor.get(i)
         if value is not None:
-            arr = np.asarray(value, dtype=float)
-            if arr.shape != (3, 3):
-                raise TopologyPreparationError(
-                    f"sia_tensor entry for spin {i} must have shape (3, 3), "
-                    f"got {arr.shape}."
-                )
-            tensor += arr
+            tensor += _real_channel_array(
+                value, "SIA (sia_tensor)", f"spin {i}", (3, 3), rtol, atol
+            )
     k1 = getattr(exc, "k1", None)
     k1dir = getattr(exc, "k1dir", None)
     has_k1 = k1 is not None
@@ -138,16 +181,23 @@ def _sia_contribution(exc, i: int) -> np.ndarray:
             "constructor merges both into sia_tensor; set both or neither."
         )
     if has_k1 and getattr(exc, "has_uniaxial_anistropy", False):
-        k1 = np.asarray(k1, dtype=float)
-        k1dir = np.asarray(k1dir, dtype=float)
-        if i < k1.size and abs(k1[i]) > 1e-12:
-            axis = np.asarray(k1dir[i], dtype=float)
-            norm = np.linalg.norm(axis)
-            if norm <= 1e-10:
-                raise TopologyPreparationError(
-                    f"k1dir for spin {i} has zero norm with nonzero k1."
+        k1_values = np.asarray(k1)
+        k1dir_values = np.asarray(k1dir)
+        if i < k1_values.size:
+            K = _real_channel_array(
+                k1_values[i], "SIA (k1)", f"spin {i}", (), rtol, atol
+            )
+            K = float(K.reshape(-1)[0])
+            if abs(K) > 1e-12:
+                axis = _real_channel_array(
+                    k1dir_values[i], "SIA (k1dir)", f"spin {i}", (3,), rtol, atol
                 )
-            tensor += k1[i] * np.outer(axis / norm, axis / norm)
+                norm = np.linalg.norm(axis)
+                if norm <= 1e-10:
+                    raise TopologyPreparationError(
+                        f"k1dir for spin {i} has zero norm with nonzero k1."
+                    )
+                tensor += K * np.outer(axis / norm, axis / norm)
     return tensor
 
 
@@ -288,7 +338,9 @@ def prepare_topology_model(
         the resulting model is labeled a selected approximation.
     hermiticity_rtol, hermiticity_atol : float
         Scale-aware tolerance for pair-reversal validation of the assembled
-        tensors.
+        tensors. The same tolerance bounds the numerically negligible
+        imaginary part accepted in selected exchange channels; larger
+        imaginary content is rejected rather than discarded.
     source_path : str, optional
         Provenance only; excluded from the content digest.
 
@@ -300,8 +352,9 @@ def prepare_topology_model(
     ------
     TopologyPreparationError
         On inconsistent maps, zero moments, nonzero undisclosed unsupported
-        interactions, ambiguous SIA representations, or pair tensors that
-        violate reversal symmetry.
+        interactions, ambiguous SIA representations, material imaginary
+        content in selected exchange channels, or pair tensors that violate
+        reversal symmetry.
     """
     if include is None:
         include = {name: True for name in SUPPORTED_CHANNELS}
@@ -416,34 +469,47 @@ def prepare_topology_model(
         for i in range(nspin):
             for j in range(nspin):
                 tensor = np.zeros((3, 3), dtype=float)
+                location = f"R={tuple(int(x) for x in R)}, spins ({i},{j})"
                 if include["Jiso"]:
                     Jiso = _pair_value(exc.exchange_Jdict, R, i, j)
                     if Jiso is not None:
-                        Jiso = float(np.real(np.asarray(Jiso)))
-                        if not np.isfinite(Jiso):
+                        Jiso = _real_channel_array(
+                            Jiso,
+                            "Jiso",
+                            location,
+                            None,
+                            hermiticity_rtol,
+                            hermiticity_atol,
+                        )
+                        if Jiso.size != 1:
                             raise TopologyPreparationError(
-                                f"Non-finite isotropic exchange at R={R}, spins ({i},{j})."
+                                f"Jiso entry at {location} must be a scalar, "
+                                f"got shape {Jiso.shape}."
                             )
-                        tensor += Jiso * np.eye(3)
+                        tensor += float(Jiso.reshape(-1)[0]) * np.eye(3)
                 if include["DMI"]:
                     D = _pair_value(exc.dmi_ddict, R, i, j)
                     if D is not None:
-                        D = np.asarray(D, dtype=float)
-                        if D.shape != (3,) or not np.all(np.isfinite(D)):
-                            raise TopologyPreparationError(
-                                f"DMI entry at R={R}, spins ({i},{j}) must be a "
-                                "finite 3-vector."
-                            )
+                        D = _real_channel_array(
+                            D,
+                            "DMI",
+                            location,
+                            (3,),
+                            hermiticity_rtol,
+                            hermiticity_atol,
+                        )
                         tensor += combine_J_tensor(D=D)
                 if include["Jani"]:
                     Jani = _pair_value(exc.Jani_dict, R, i, j)
                     if Jani is not None:
-                        Jani = np.asarray(Jani, dtype=float)
-                        if Jani.shape != (3, 3) or not np.all(np.isfinite(Jani)):
-                            raise TopologyPreparationError(
-                                f"Jani entry at R={R}, spins ({i},{j}) must be a "
-                                "finite 3x3 tensor."
-                            )
+                        Jani = _real_channel_array(
+                            Jani,
+                            "Jani",
+                            location,
+                            (3, 3),
+                            hermiticity_rtol,
+                            hermiticity_atol,
+                        )
                         if np.max(np.abs(Jani - Jani.T)) > max(
                             hermiticity_atol,
                             hermiticity_rtol * float(np.max(np.abs(Jani))),
@@ -455,7 +521,9 @@ def prepare_topology_model(
                             )
                         tensor += Jani
                 if include["SIA"] and i == j and np.all(R == 0):
-                    tensor += _sia_contribution(exc, i)
+                    tensor += _sia_contribution(
+                        exc, i, hermiticity_rtol, hermiticity_atol
+                    )
                 JR[iR, i, j] = tensor
 
     # --- pair-reversal (Hermiticity) validation ---------------------------

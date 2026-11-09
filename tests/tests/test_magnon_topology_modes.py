@@ -380,27 +380,172 @@ def test_exact_jordan_zero_with_squeezed_positive_mode_recovered_not_zero():
     assert modes.residuals["null_space_residual"] < 1e-12
 
 
-def test_block_mismatch_not_treated_as_exact_standard_form():
-    # guard (Main-reported): A2 = A1 + 1e-6 changes the Hamiltonian, so the
-    # certified parity reduction (which assumes the exact standard form) must
-    # not be applied. The solver has to refuse with a documented class and
-    # emit no vectors instead of reporting the idealized squeezed spectrum.
+def test_positive_definite_nonreciprocal_same_k_asymmetry_is_not_instability():
+    # H(k) = diag(2, 3) with g = diag(1, -1): the metric spectrum is {2, -3},
+    # so the same-k +- pairing residual is 1.0, yet H is positive definite and
+    # the only physical mode is omega = 2. Bosonic particle-hole pairing
+    # relates H(k) to H(-k); same-k asymmetry is diagnostic only. Classifying
+    # this as dynamically unstable is the reported false refusal.
+    H = np.diag([2.0, 3.0]).astype(complex)
+    g = np.diag([1.0, -1.0])
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "positive_definite"
+    np.testing.assert_allclose(modes.energies, [2.0], atol=1e-12)
+    assert modes.vectors.shape == (2, 1)
+    v = modes.vectors[:, 0]
+    assert abs(np.real(v.conj() @ (g @ v)) - 1.0) < 1e-12
+    assert np.max(np.abs(H @ v - 2.0 * (g @ v))) < 1e-12
+    # retained diagnostic; it is deliberately NOT used as a stability proof
+    assert modes.residuals["pairing_residual"] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_positive_definite_nonreciprocal_block_modes_are_normalized():
+    # legacy doubled form with different particle/hole blocks (nonreciprocal):
+    # H = diag(1, 2, 3, 4) with g = diag(1, 1, -1, -1). The metric spectrum is
+    # {1, 2, -3, -4}, so same-k +- pairing fails, but H is positive definite
+    # and the physical modes are the positive generalized eigenvalues 1 and 2.
+    H = np.diag([1.0, 2.0, 3.0, 4.0]).astype(complex)
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "positive_definite"
+    np.testing.assert_allclose(modes.energies, [1.0, 2.0], atol=1e-12)
+    assert modes.vectors.shape == (4, 2)
+    np.testing.assert_allclose(
+        modes.vectors.conj().T @ (g @ modes.vectors), np.eye(2), atol=1e-12
+    )
+    for k, omega in enumerate(modes.energies[modes.positive_indices]):
+        v = modes.vectors[:, k]
+        assert np.max(np.abs(H @ v - omega * (g @ v))) < 1e-12
+    assert modes.residuals["pairing_residual"] == pytest.approx(2.0, abs=1e-12)
+
+
+def test_nonreciprocal_coupled_positive_definite_modes_normalized():
+    # genuine off-diagonal nonreciprocity: different particle/hole diagonal
+    # blocks plus a Hermitian pairing block. The metric spectrum
+    # {-3.98, -2.98, 0.98, 1.98} is not +- paired, yet H is positive definite.
+    A1 = np.diag([1.0, 2.0])
+    A2 = np.diag([3.0, 4.0])
+    B = 0.3 * np.array([[0.0, 1.0], [1.0, 0.0]])
+    H = np.block([[A1, B], [B.T, A2]]).astype(complex)
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    assert np.linalg.eigvalsh(H)[0] > 0.0
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "positive_definite"
+    assert modes.energies.size == 2 and np.all(modes.energies > 0.0)
+    np.testing.assert_allclose(
+        modes.vectors.conj().T @ (g @ modes.vectors), np.eye(2), atol=1e-12
+    )
+    for k, omega in enumerate(modes.energies[modes.positive_indices]):
+        v = modes.vectors[:, k]
+        assert np.max(np.abs(H @ v - omega * (g @ v))) < 1e-12
+    assert modes.residuals["pairing_residual"] == pytest.approx(2.0, abs=1e-12)
+
+
+def test_semidefinite_nonreciprocal_hessian_keeps_normalized_positive_modes():
+    # H = diag(1, 2, 0, 3) is positive semidefinite and singular, with
+    # different particle/hole blocks (nonreciprocal) and metric spectrum
+    # {1, 2, 0, -3}. The positive modes have no same-k negative partners, but
+    # H PSD guarantees real frequencies: the solver must classify zero_mode,
+    # attach the Hessian null space and keep both normalized positive modes.
+    H = np.diag([1.0, 2.0, 0.0, 3.0]).astype(complex)
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    # positive (1, 2), negative (-3) and Goldstone (0) finite modes coexist
+    np.testing.assert_allclose(
+        np.sort(np.linalg.eigvals(g @ H).real), [-3.0, 0.0, 1.0, 2.0], atol=1e-12
+    )
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    np.testing.assert_allclose(modes.energies, [1.0, 2.0], atol=1e-12)
+    np.testing.assert_allclose(H @ modes.null_space, 0.0, atol=1e-12)
+    # the same-k pairing diagnostic is nonzero (no -1/-2 partners) but it is
+    # not a validity gate
+    assert modes.residuals["pairing_residual"] > 0.0
+    assert modes.vectors.shape == (4, 2)
+    np.testing.assert_allclose(
+        modes.vectors.conj().T @ (g @ modes.vectors), np.eye(2), atol=1e-12
+    )
+    for k, omega in enumerate(modes.energies[modes.positive_indices]):
+        v = modes.vectors[:, k]
+        assert np.max(np.abs(H @ v - omega * (g @ v))) < 1e-12
+
+
+def test_nonreciprocal_singular_squeezed_mode_uses_general_pencil():
+    # A2 = A1 + 1e-9 breaks the exact standard form while leaving a
+    # near-Goldstone zero mode (below zero_tol) and a strongly squeezed
+    # positive mode. The parity reduction must not be applied; the general
+    # pencil route must recover the squeezed mode.
+    H = np.zeros((4, 4), dtype=complex)
+    H[0, 0] = H[2, 2] = 1.0
+    H[0, 2] = H[2, 0] = 1.0
+    H[1, 1] = H[3, 3] = 1e5
+    H[1, 3] = H[3, 1] = 1e5 - 1.1e-8
+    H[2, 2] += 1e-9
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    assert not np.array_equal(H[2:, 2:], H[:2, :2])
+
+    modes = solve_bosonic_modes(H)
+
+    assert modes.classification == "zero_mode"
+    assert modes.null_space is not None
+    assert modes.residuals["null_space_residual"] < 1e-8
+    assert modes.residuals["n_jordan_dust_modes"] == 2
+    omega = modes.energies[modes.positive_indices[0]]
+    delta = 1e5 - (1e5 - 1.1e-8)
+    exact = float(np.sqrt(delta * (2e5 - delta)))
+    assert omega == pytest.approx(exact, rel=5e-3)
+    v = modes.vectors[:, 0]
+    assert abs(np.real(v.conj() @ (g @ v)) - 1.0) < 1e-8
+    # squeezed-mode vectors have large Euclidean norm; the solver's relative
+    # generalized residual is the meaningful validation
+    assert modes.residuals["max_generalized_residual"] < 1e-8
+
+
+def test_nonreciprocal_negative_direction_still_energetically_unstable():
+    # The validity gate is the Hessian signature, not same-k pairing: a
+    # Hermitian Hessian with a resolved negative direction stays refused even
+    # when its metric frequencies are real.
+    modes = solve_bosonic_modes(np.diag([1.0, -2.0]).astype(complex))
+
+    assert modes.classification == "energetically_unstable"
+    assert modes.vectors is None
+
+
+def test_block_mismatch_solved_as_actual_positive_definite_matrix():
+    # guard: A2 = A1 + 1e-6 changes the Hamiltonian, so the certified parity
+    # reduction (which assumes the exact standard form) must not be applied.
+    # The Hessian remains positive definite, so the correct consumer-visible
+    # result is a valid solve of the ACTUAL matrix -- never the idealized
+    # parity zero mode and never a false same-k-pairing dynamic instability.
     H = np.zeros((4, 4), dtype=complex)
     H[0, 0] = H[2, 2] = 1.0
     H[0, 2] = H[2, 0] = 1.0
     H[1, 1] = H[3, 3] = 1e5
     H[1, 3] = H[3, 1] = 1e5 - 1.1e-8
     H[2, 2] += 1e-6
+    g = np.diag([1.0, 1.0, -1.0, -1.0])
+    assert not np.array_equal(H[2:, 2:], H[:2, :2])
 
     modes = solve_bosonic_modes(H)
 
-    assert modes.classification == "dynamically_unstable"
-    assert modes.vectors is None
-    # the Hessian itself is still positive definite here, so the refusal is
-    # the non-BdG metric-spectrum class, never an invented zero or a silently
-    # certified squeezed root
+    assert modes.classification == "positive_definite"
+    assert modes.vectors is not None
     assert modes.h_min_eigenvalue > 0.0
-    assert np.all(np.isfinite(modes.energies))
+    # the lifted Goldstone is a real positive mode, not a fabricated zero
+    assert modes.energies[0] > 0.0
+    np.testing.assert_allclose(
+        modes.vectors.conj().T @ (g @ modes.vectors), np.eye(2), atol=1e-8
+    )
+    for k, omega in enumerate(modes.energies[modes.positive_indices]):
+        v = modes.vectors[:, k]
+        assert np.max(np.abs(H @ v - omega * (g @ v))) < 1e-6
 
 
 def test_degenerate_positive_pair_g_orthonormal_and_exact():

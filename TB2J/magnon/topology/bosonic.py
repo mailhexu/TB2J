@@ -5,7 +5,14 @@ legacy ``Magnon.Hq`` doubled form ``[[A1-C, B], [B^dag, A2-C]]``) and returns
 physical mode energies, metric-normalized mode vectors when a complete
 normalized set exists, and the diagnostics required by the validity policy
 (architecture section 4). It never supplies a regularized mode set silently:
-any necessary diagonal shift is refused, never applied.
+any necessary diagonal shift is refused, never applied. Stability is decided
+from the Hessian itself, never from same-momentum ``omega/-omega`` symmetry:
+for Hermitian ``H`` positive semidefinite the non-zero spectrum of ``gH``
+equals the real spectrum of the Hermitian ``L^dag g L`` (``L L^dag = H``),
+and the positive generalized eigenvalues are the physical positive-metric
+modes. Nonreciprocal Hamiltonians pair momentum ``k`` with ``-k``, so the
+same-k pairing residual is reported as a diagnostic only and never gates
+validity.
 
 Certified Colpa identities (``docs/sympy/magnon_topology_lswt_ferromagnet.py``):
 with ``H = L L^dag`` (lower Cholesky), ``M = L^dag g L`` eigendecomposition
@@ -78,8 +85,10 @@ def solve_bosonic_modes(
     Parameters
     ----------
     H : (2n, 2n) complex Hermitian array in the legacy ``Magnon.Hq`` form.
-    hermiticity_tol : absolute tolerance on ``max|H - H^dag|`` and on the
-        +-pairing residual of the metric spectrum.
+    hermiticity_tol : absolute tolerance on ``max|H - H^dag|``. The
+        same-momentum ``+-`` pairing residual is only a diagnostic; bosonic
+        particle-hole pairing relates ``H(k)`` to ``H(-k)``, not ``H(k)`` to
+        itself.
     zero_tol : absolute energy tolerance separating a stable zero mode from
         resolved positive energies (eV).
 
@@ -94,8 +103,11 @@ def solve_bosonic_modes(
         refuses validated invariants on such meshes.
       - ``energetically_unstable``: the Hessian has a resolved negative
         direction; no diagonal shift is applied and no vectors are provided.
-      - ``dynamically_unstable``: the metric spectrum violates the +-pairing
-        structure expected of a bosonic BdG set; no vectors are provided.
+      - ``dynamically_unstable``: the generalized spectrum has a resolved
+        non-real frequency (a genuine complex-frequency instability) or an
+        inconsistent metric signature; no vectors are provided. Same-k
+        ``+-`` asymmetry is never such a test: nonreciprocal Hamiltonians
+        are paired across ``k`` and ``-k``.
     """
     H = np.asarray(H, dtype=complex)
     n2 = H.shape[0]
@@ -323,21 +335,17 @@ def solve_bosonic_modes(
             genuine.sort(key=lambda t: t[0])
             om_pos = np.array([om for om, _ in genuine])
             om_neg = np.sort(np.array([om for om, _ in others]))
+            # Same-momentum +- asymmetry is expected for nonreciprocal H and
+            # is NOT a stability criterion: the bosonic particle-hole
+            # relation pairs H(k) with H(-k). Stability here follows from
+            # H PSD (h_min >= -zero_tol): the non-zero spectrum of gH is the
+            # real spectrum of the Hermitian L^dag g L, so every positive
+            # generalized eigenvalue is a genuine metric-positive mode.
+            # ``pairing_residual`` is retained only as a diagnostic.
             if len(others) == len(om_pos):
                 pairing_red = float(np.max(np.abs(-om_neg - om_pos[::-1]), initial=0.0))
             else:
                 pairing_red = float(np.max(np.abs(om_pos), initial=0.0)) + 1.0
-            if pairing_red > tol_cplx:
-                return BosonicModes(
-                    energies=np.concatenate([np.zeros(n - om_pos.size), om_pos]),
-                    classification="dynamically_unstable",
-                    h_min_eigenvalue=h_min,
-                    min_energy=0.0,
-                    residuals={
-                        "hermiticity_asymmetry": asym,
-                        "pairing_residual": pairing_red,
-                    },
-                )
             # Two-witness rule: the metric discriminator may only discard
             # candidates that the independent Hermitian Colpa M spectrum
             # explains as Jordan dust — M inflates exact zeros into
@@ -478,19 +486,14 @@ def solve_bosonic_modes(
     M = L.conj().T @ g @ L
     omega_all, u = np.linalg.eigh(M)
     omega = omega_all[n:]  # physical top half (legacy [:, n:] convention)
+    # Same-momentum +- asymmetry is expected for nonreciprocal H and is NOT a
+    # stability criterion: H(k) is paired with H(-k), not with itself. Here H
+    # is strictly positive definite (no Hessian eigenvalue within zero_tol), so
+    # gH is similar to the Hermitian H^{1/2} g H^{1/2}: every generalized
+    # frequency is real and the n largest (the ascending top half of the metric
+    # spectrum) are the positive physical modes. ``pairing_residual`` is
+    # retained only as a diagnostic.
     pairing_residual = float(np.max(np.abs(omega_all[:n] + omega_all[n:][::-1])))
-    scale = max(float(np.max(np.abs(omega_all))), 1.0)
-    if pairing_residual > hermiticity_tol * scale:
-        return BosonicModes(
-            energies=omega,
-            classification="dynamically_unstable",
-            h_min_eigenvalue=h_min,
-            min_energy=float(omega[0]),
-            residuals={
-                "hermiticity_asymmetry": asym,
-                "pairing_residual": pairing_residual,
-            },
-        )
 
     pos_mask = omega > zero_tol
     zero_mask = ~pos_mask

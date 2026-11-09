@@ -61,6 +61,8 @@ class BulkRequest:
             if self.bands is not None:
                 raise ValueError("bands and groups are mutually exclusive.")
             groups = [[int(b) for b in g] for g in self.groups]
+            if not groups:
+                raise ValueError("groups must contain at least one band group.")
             for g in groups:
                 if not g or len(set(g)) != len(g) or any(b < 0 for b in g):
                     raise ValueError(
@@ -72,6 +74,8 @@ class BulkRequest:
             object.__setattr__(self, "groups", groups)
         elif self.bands is not None:
             bands = [int(b) for b in self.bands]
+            if not bands:
+                raise ValueError("bands must contain at least one band index.")
             if len(set(bands)) != len(bands) or any(b < 0 for b in bands):
                 raise ValueError("bands must be distinct nonnegative integers.")
             object.__setattr__(self, "bands", bands)
@@ -161,8 +165,11 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     The calculation refuses to emit a validated invariant when the reference
     is nonstationary, the spectrum is unstable or contains a zero-mode
     touching the requested bands, the band group is not isolated on the
-    mesh, or a plaquette link determinant vanishes. In those cases a result
-    with ``valid=False``, no Chern value and explicit reasons is returned.
+    mesh, a plaquette link determinant vanishes, or a mesh point lacks
+    validated mode vectors/positive-index maps. In those cases a result
+    with ``valid=False``, no Chern value and explicit reasons is returned;
+    per-group flux, curvature and Chern fields are ``None`` whenever they
+    were not computed.
     """
     if not isinstance(model, TopologyModel):
         raise TypeError(
@@ -236,6 +243,12 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
                 f"energetically unstable spectrum at mesh point {idx}: Hessian "
                 f"minimum {m.h_min_eigenvalue:.3e} < 0; no shift is applied."
             )
+        elif m.classification == "dynamically_unstable":
+            failures.append(
+                f"dynamically unstable spectrum at mesh point {idx}: the solver "
+                "emitted no validated bosonic mode set; band-group fluxes are "
+                "not defined."
+            )
     n_pos = len(modes[0].energies)
     lengths = {len(m.energies) for m in modes}
     energies = None
@@ -249,6 +262,25 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
             )
     else:
         failures.append("inconsistent physical-mode count across the mesh.")
+    missing_mode_points = [
+        idx
+        for idx, m in enumerate(modes)
+        if m.vectors is None
+        or m.positive_indices is None
+        or len(m.positive_indices) == 0
+    ]
+    if missing_mode_points:
+        diagnostics["missing_mode_points"] = missing_mode_points
+        show = missing_mode_points[:8]
+        more = "" if len(missing_mode_points) <= 8 else " ..."
+        failures.append(
+            "no validated mode vectors or positive-index map at "
+            f"{len(missing_mode_points)} of {n_mesh} mesh points "
+            f"(first {show}{more}, classifications "
+            f"{sorted({modes[i].classification for i in missing_mode_points})}); "
+            "band-group fluxes are undefined without a normalized projector, "
+            "so no invariant is emitted."
+        )
     diagnostics["solver"] = {
         "max_generalized_residual": max(
             m.residuals.get("max_generalized_residual", 0.0) for m in modes
@@ -282,15 +314,20 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
         diagnostics["zero_mode_points"] = zero_points
 
     # --- group requests
-    requested_groups: List[List[int]] = (
-        [list(g) for g in request.groups]
-        if request.groups is not None
-        else [
-            list(request.bands)
-            if request.bands is not None
-            else [int(i) for i in modes[0].positive_indices]
-        ]
-    )
+    requested_groups: List[List[int]]
+    if request.groups is not None:
+        requested_groups = [list(g) for g in request.groups]
+    elif request.bands is not None:
+        requested_groups = [list(request.bands)]
+    elif modes[0].positive_indices is not None and len(modes[0].positive_indices) > 0:
+        requested_groups = [[int(i) for i in modes[0].positive_indices]]
+    else:
+        requested_groups = []
+        failures.append(
+            "cannot resolve the default all-positive band group: the first "
+            f"mesh point has no positive-index map (classification "
+            f"{modes[0].classification}); request explicit bands instead."
+        )
     for g in requested_groups:
         if g and n_pos > 0 and max(g) >= n_pos:
             raise ValueError(
@@ -338,15 +375,41 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
         min_link = np.inf
         if not gfail and not failures:
             # map requested band indices to the normalized positive-mode
-            # columns per mesh point (zero-mode positions may vary)
+            # columns per mesh point (zero-mode positions may vary); a band
+            # that is not a positive mode at any point cannot be projected.
+            columns: List[List[int]] = []
+            for idx in range(nu * nv):
+                m = modes[idx]
+                if (
+                    m.vectors is None
+                    or m.positive_indices is None
+                    or len(m.positive_indices) == 0
+                ):
+                    gfail.append(
+                        f"mesh point {idx} has no validated mode vectors or "
+                        f"positive-index map (classification "
+                        f"{m.classification}); the requested group has no "
+                        "computable projector."
+                    )
+                    break
+                band_to_column = {
+                    int(b): int(c) for c, b in enumerate(m.positive_indices)
+                }
+                missing = [b for b in bands if b not in band_to_column]
+                if missing:
+                    gfail.append(
+                        f"requested bands {missing} are not positive modes at "
+                        f"mesh point {idx}; the group cannot be projected on "
+                        "this mesh."
+                    )
+                    break
+                columns.append([band_to_column[b] for b in bands])
+        if not gfail and not failures:
             psi = np.empty(
                 (nu * nv, modes[0].vectors.shape[0], len(bands)), dtype=complex
             )
             for idx in range(nu * nv):
-                cols = modes[idx].positive_indices
-                psi[idx] = modes[idx].vectors[
-                    :, [int(np.flatnonzero(cols == b)[0]) for b in bands]
-                ]
+                psi[idx] = modes[idx].vectors[:, columns[idx]]
 
             def link(p, q) -> complex:
                 # normalized determinant of the between-points Gram matrix
@@ -387,12 +450,13 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
                     f"{min_link:.3e} within tolerance {request.link_tol:.3e}; "
                     "the band group overlaps other states on this mesh."
                 )
+        group_valid = not gfail and not failures
         record = {
             "bands": [int(b) for b in bands],
-            "chern": None if (gfail or chern is None) else int(chern),
-            "plaquette_flux": None if gfail else flux,
-            "vertex_curvature": None if gfail else vertex,
-            "valid": not gfail,
+            "chern": int(chern) if group_valid and chern is not None else None,
+            "plaquette_flux": flux if group_valid else None,
+            "vertex_curvature": vertex if group_valid else None,
+            "valid": group_valid,
             "min_external_gap": None if not np.isfinite(min_gap) else float(min_gap),
             "min_det_overlap": None if not np.isfinite(min_link) else float(min_link),
             "failures": gfail,
@@ -421,7 +485,16 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     }
     failures.extend(group_failures)
     valid = not failures
-    primary = group_records[0]
+    primary = (
+        group_records[0]
+        if group_records
+        else {
+            "bands": [],
+            "chern": None,
+            "plaquette_flux": None,
+            "vertex_curvature": None,
+        }
+    )
     diagnostics["failures"] = failures
     result = BulkTopologyResult(
         request=request,

@@ -44,6 +44,9 @@ Preparation validates the source before any information is discarded:
 - Nonzero unsupported interactions (biquadratic exchange, NJT DMI/exchange)
   are refused. Pass ``exclude=("biquadratic",)`` to record an explicit
   selection; the resulting model is then labeled a selected approximation.
+- Selected interaction values must be real within the pair-reversal
+  tolerances; material imaginary components are refused instead of silently
+  discarded. Unselected channels are not interpreted.
 - Pair tensors are validated against reversal symmetry
   ``J_ij(R) = J_ji(-R)^T`` without fabricating missing reverse bonds.
 
@@ -96,6 +99,8 @@ Per-group records (Chern value, plaquette flux, vertex curvature, minimum
 external gap, minimum link overlap, failures) appear under ``groups`` in the
 JSON; the group-curvature convention is documented in the record
 (``vertex value = average of the four adjacent plaquette fluxes``).
+If a global validity check fails or normalized mode vectors are unavailable,
+group records are invalid and uncomputed fluxes are ``None``, not zero arrays.
 
 Each mesh point is solved with the certified Colpa metric construction
 (``docs/sympy/magnon_topology_lswt_ferromagnet.py``): with ``H = L L^dag`` the
@@ -165,8 +170,10 @@ The shared solver ``solve_bosonic_modes`` (certified in
   reported as a diagnostic; a diagonal shift is refused because it would not
   legitimize topology of the unshifted model. The legacy band/DOS shift
   fallback is untouched.
-- ``dynamically_unstable``: the metric spectrum violates the +-pairing
-  structure of a bosonic BdG set.
+- ``dynamically_unstable``: the solver finds a resolved non-real dynamical
+  frequency or an inconsistent metric signature. Same-momentum positive and
+  negative frequencies need not pair in a nonreciprocal model; bosonic
+  particle-hole partners relate opposite momenta.
 
 DMI never pairs a collinear ferromagnet (``u^T eps(D) u = 0``); genuine
 anomalous terms require symmetric anisotropic exchange, exercised by the

@@ -4,6 +4,11 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- Magnon topology correctness: nonreciprocal modes are no longer rejected for
+  lacking same-momentum positive/negative pairing; globally invalid bulk results
+  no longer mark uncomputed group fluxes valid. Selected exchange interactions
+  with material imaginary components are refused instead of silently truncated.
+
 - Topological magnon calculations (draft, on the `magnon_topology` branch): a new
   `TB2J.magnon.topology` package provides topology-ready model preparation
   (`prepare_topology_model`) that validates exchange sources before topological

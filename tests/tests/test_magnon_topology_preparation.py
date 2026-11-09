@@ -73,7 +73,7 @@ def iso_pair(R, i, j, value):
 def dmi_pair(R, i, j, vector):
     """DMI pair with the reverse entry following the TB2J convention
     D_ji(-R) = -D_ij(R)."""
-    d = np.asarray(vector, dtype=float)
+    d = np.asarray(vector)
     return {
         (tuple(int(x) for x in R), i, j): d,
         (tuple(-int(x) for x in R), j, i): -d,
@@ -81,7 +81,7 @@ def dmi_pair(R, i, j, vector):
 
 
 def jani_pair(R, i, j, tensor):
-    t = np.asarray(tensor, dtype=float)
+    t = np.asarray(tensor)
     return {
         (tuple(int(x) for x in R), i, j): t,
         (tuple(-int(x) for x in R), j, i): t,
@@ -235,6 +235,17 @@ class TestUnsupportedChannels:
         with pytest.raises(TopologyPreparationError, match="biquadratic"):
             prepare_topology_model(exc)
 
+    def test_imaginary_only_unsupported_channel_rejected(self):
+        exchange, dmi, jani = basic_channels()
+        exc = make_exc(
+            exchange=exchange,
+            dmi=dmi,
+            jani=jani,
+            biquadratic={((1, 0, 0), 0, 1): np.complex128(1e-3j)},
+        )
+        with pytest.raises(TopologyPreparationError, match="biquadratic"):
+            prepare_topology_model(exc)
+
     def test_biquadratic_exclusion_recorded(self):
         exchange, dmi, jani = basic_channels()
         exc = make_exc(
@@ -283,6 +294,92 @@ class TestPairReversal:
         )
         with pytest.raises(TopologyPreparationError, match="symmetric"):
             prepare_topology_model(make_exc(exchange=exchange, jani=asymmetric))
+
+
+class TestComplexChannels:
+    """Selected exchange channels must never discard imaginary content."""
+
+    def test_material_imaginary_jiso_rejected(self):
+        exchange = {}
+        exchange.update(iso_pair((1, 0, 0), 0, 1, 0.01 + 1e-4j))
+        exchange.update(iso_pair((-1, 0, 0), 1, 0, 0.01 + 1e-4j))
+        with pytest.raises(TopologyPreparationError, match="Jiso.*imaginary"):
+            prepare_topology_model(make_exc(exchange=exchange))
+
+    def test_material_imaginary_dmi_rejected(self):
+        exchange, _, _ = basic_channels()
+        dmi = dmi_pair((1, 0, 0), 0, 1, np.array([0.0, 0.0, 1e-3 + 1e-5j]))
+        with pytest.raises(TopologyPreparationError, match="DMI.*imaginary"):
+            prepare_topology_model(make_exc(exchange=exchange, dmi=dmi))
+
+    def test_material_imaginary_jani_rejected(self):
+        exchange, _, _ = basic_channels()
+        jani = jani_pair(
+            (1, 1, 0),
+            0,
+            1,
+            np.diag([2e-4, -1e-4, -1e-4]) + 1e-5j * np.eye(3),
+        )
+        with pytest.raises(TopologyPreparationError, match="Jani.*imaginary"):
+            prepare_topology_model(make_exc(exchange=exchange, jani=jani))
+
+    def test_material_imaginary_sia_rejected(self):
+        sia = {0: np.diag([0.0, 0.0, 5e-4 + 1e-5j])}
+        with pytest.raises(TopologyPreparationError, match="SIA.*imaginary"):
+            prepare_topology_model(make_exc(sia_tensor=sia))
+
+    def test_unselected_complex_channel_not_rejected(self):
+        exchange, dmi, _ = basic_channels()
+        jani = jani_pair(
+            (1, 1, 0),
+            0,
+            1,
+            np.diag([2e-4, -1e-4, -1e-4]) + 1e-5j * np.eye(3),
+        )
+        model = prepare_topology_model(
+            make_exc(exchange=exchange, dmi=dmi, jani=jani),
+            include={"Jiso": True, "Jani": False, "DMI": True, "SIA": True},
+        )
+        assert model.selection["Jani"] is False
+
+    def test_complex_zero_input_matches_real_model(self):
+        exchange, dmi, jani = basic_channels()
+        sia = {0: 5e-4 * np.outer([0, 0, 1], [0, 0, 1])}
+        real = prepare_topology_model(
+            make_exc(exchange=exchange, dmi=dmi, jani=jani, sia_tensor=sia)
+        )
+        complexed = prepare_topology_model(
+            make_exc(
+                exchange={k: complex(v) for k, v in exchange.items()},
+                dmi={k: np.asarray(v, dtype=complex) for k, v in dmi.items()},
+                jani={k: np.asarray(v, dtype=complex) for k, v in jani.items()},
+                sia_tensor={k: np.asarray(v, dtype=complex) for k, v in sia.items()},
+            )
+        )
+        assert complexed.digest == real.digest
+        np.testing.assert_array_equal(complexed.JR, real.JR)
+
+    def test_imaginary_roundoff_within_tolerance_accepted(self):
+        exchange = {}
+        exchange.update(iso_pair((1, 0, 0), 0, 1, 0.01 + 1e-9j))
+        exchange.update(iso_pair((-1, 0, 0), 1, 0, 0.01 + 1e-9j))
+        model = prepare_topology_model(make_exc(exchange=exchange))
+        iR = next(idx for idx, R in enumerate(model.Rlist) if tuple(R) == (1, 0, 0))
+        np.testing.assert_array_equal(model.JR[iR, 0, 1], 0.01 * np.eye(3))
+
+    def test_imaginary_content_above_roundoff_tolerance_rejected(self):
+        exchange = {}
+        exchange.update(iso_pair((1, 0, 0), 0, 1, 0.01 + 2e-8j))
+        exchange.update(iso_pair((-1, 0, 0), 1, 0, 0.01 + 2e-8j))
+        with pytest.raises(TopologyPreparationError, match="Jiso.*imaginary"):
+            prepare_topology_model(make_exc(exchange=exchange))
+
+    def test_roundoff_tolerance_follows_hermiticity_parameters(self):
+        exchange = {}
+        exchange.update(iso_pair((1, 0, 0), 0, 1, 0.01 + 1e-9j))
+        exchange.update(iso_pair((-1, 0, 0), 1, 0, 0.01 + 1e-9j))
+        with pytest.raises(TopologyPreparationError, match="Jiso.*imaginary"):
+            prepare_topology_model(make_exc(exchange=exchange), hermiticity_rtol=1e-12)
 
 
 class TestIdentity:

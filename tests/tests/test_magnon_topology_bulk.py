@@ -24,7 +24,7 @@ J2 = 0.002
 K_SIA = 0.001
 
 
-def honeycomb_spinio(D):
+def honeycomb_spinio(D, k_sia=K_SIA):
     basis = np.array([[1.0, 0.0, 0.0], [0.5, np.sqrt(3) / 2, 0.0], [0.0, 0.0, 10.0]])
     atoms = Atoms(
         "Cr2",
@@ -50,7 +50,7 @@ def honeycomb_spinio(D):
         dmi[(rev(R), 0, 0)] = np.array([0.0, 0.0, -D])
         dmi[(R, 1, 1)] = np.array([0.0, 0.0, -D])
         dmi[(rev(R), 1, 1)] = np.array([0.0, 0.0, D])
-    sia = {0: np.diag([0.0, 0.0, K_SIA]), 1: np.diag([0.0, 0.0, K_SIA])}
+    sia = {0: np.diag([0.0, 0.0, k_sia]), 1: np.diag([0.0, 0.0, k_sia])}
     spinio = SpinIO(
         atoms=atoms,
         spinat=magmoms,
@@ -146,6 +146,84 @@ def test_rejects_nonstationary_reference():
     assert not res.valid
     assert res.chern is None
     assert any("nonstationary" in f for f in res.diagnostics["failures"])
+
+
+def test_nonstationary_reference_refuses_every_group_without_flux():
+    # Band 1 alone has a resolved external gap here, so only the global
+    # stationarity failure can invalidate it: its group record must refuse
+    # instead of reporting valid=True with an all-zero uncomputed flux.
+    exc = honeycomb_spinio(0.0005)
+    exc.spinat = np.array([[1.0, 1.0, np.sqrt(2.0)], [1.0, 1.0, np.sqrt(2.0)]])
+    model = prepare_topology_model(exc, source_path="bench")
+    res = calculate_bulk(model, BulkRequest(mesh=(6, 6), groups=[[1], [0]]))
+    assert not res.valid
+    assert res.chern is None
+    assert res.plaquette_flux is None
+    assert res.vertex_curvature is None
+    assert res.groups[0]["bands"] == [1]
+    assert res.groups[0]["min_external_gap"] > 0.0
+    for group in res.groups:
+        assert group["valid"] is False
+        assert group["chern"] is None
+        assert group["plaquette_flux"] is None
+        assert group["vertex_curvature"] is None
+    record = res.to_json_dict()
+    assert all(g["plaquette_flux"] is None for g in record["groups"])
+    assert any("nonstationary" in f for f in res.diagnostics["failures"])
+
+
+def test_degenerate_zero_spectrum_refuses_groups_without_vectors():
+    # A lone spin with only a site-local exchange gives a vanishing
+    # Hamiltonian: every mesh point is an all-zero spectrum, so the solver
+    # emits no positive-mode vectors or index map. This is a structural
+    # fixture, not a solver-criterion artifact, and the public API must
+    # refuse instead of fabricating an invariant or indexing None.
+    atoms = Atoms(
+        "Cr",
+        scaled_positions=[[0.0, 0.0, 0.0]],
+        cell=np.diag([1.0, 1.0, 10.0]),
+        pbc=True,
+    )
+    exc = SpinIO(
+        atoms=atoms,
+        spinat=np.array([[0.0, 0.0, 2.0]]),
+        charges=np.zeros(1),
+        index_spin=[0],
+        colinear=False,
+        exchange_Jdict={((0, 0, 0), 0, 0): 0.001},
+    )
+    exc._build_Rlist()
+    model = prepare_topology_model(exc, source_path="bench")
+
+    res = calculate_bulk(model, BulkRequest(mesh=(4, 4), bands=[0]))
+    assert not res.valid
+    assert res.chern is None
+    assert res.plaquette_flux is None
+    assert res.groups[0]["valid"] is False
+    assert res.groups[0]["plaquette_flux"] is None
+    assert res.diagnostics["missing_mode_points"] == list(range(16))
+    assert any("validated mode vectors" in f for f in res.diagnostics["failures"])
+
+    # The default all-positive request must also refuse rather than iterate
+    # a missing positive-index map.
+    default = calculate_bulk(model, BulkRequest(mesh=(4, 4)))
+    assert not default.valid
+    assert default.groups == []
+    assert any("default all-positive" in f for f in default.diagnostics["failures"])
+
+
+def test_zero_mode_mesh_keeps_isolated_upper_band_valid():
+    # Without easy-axis SIA the Goldstone mode survives at Gamma, while the
+    # DMI opens the valley gaps: the non-touching upper band stays usable.
+    model = prepare_topology_model(
+        honeycomb_spinio(0.0005, k_sia=0.0), source_path="bench"
+    )
+    res = calculate_bulk(model, BulkRequest(mesh=(6, 6), bands=[1]))
+    assert res.valid, res.diagnostics["failures"]
+    assert res.chern == -1
+    assert res.plaquette_flux is not None
+    assert res.groups[0]["valid"] is True
+    assert res.diagnostics["zero_mode_points"] == [0]
 
 
 def test_unstable_spectrum_refused_without_shift():

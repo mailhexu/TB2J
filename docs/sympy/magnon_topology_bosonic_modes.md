@@ -8,7 +8,9 @@ passed in the `mydev` environment). Pinned statements:
 2. Dimer blocks with symmetric anisotropy `delta`: pairing `Q_AB = -4 delta cos(2 pi k a)`.
 3. Physical frequencies = sorted(eig(P-Q) U eig(P+Q)), verified against the
    actual `Magnon.Hq` Colpa solve; generalized residuals < 1e-10; metric
-   norms `v^dag g v = 1/omega`; signed completeness 0; +-pairing.
+   norms `v^dag g v = 1/omega`; signed completeness 0. The same-k +-pairing
+   seen here is a property of this reciprocal standard form, not a stability
+   criterion.
 4. Cholesky-intermediate columns are not physical modes.
 5. Stability policy: Hessian psd <=> real frequencies for this form;
    negative-Hessian references with real dynamical frequencies are refused
@@ -27,8 +29,18 @@ passed in the `mydev` environment). Pinned statements:
    doubled form is asserted symbolically (block congruence identity and
    characteristic polynomial, noncommuting A and B) and numerically against
    the solver on a noncommuting singular fixture and on a strongly squeezed
-   float64-quantized mode; a genuine diagonal-block mismatch is refused with
-   a documented class, never silently accepted as the exact standard form.
+   float64-quantized mode; a genuine diagonal-block mismatch is solved as
+   the actual positive-definite matrix, never accepted as the idealized
+   parity spectrum and never mislabeled dynamically unstable.
+7. Nonreciprocal stability: the reported minimal counterexample
+   `H(k) = diag(2, 3)` (generally `diag(a, b)`) is positive definite with
+   same-k metric spectrum `{a, -b}`, but the bosonic particle-hole identity
+   `X (gH(k))* X = -gH(-k)` pairs `k` with `-k` (asserted symbolically and
+   numerically). The same-k pairing residual is diagnostic only; the
+   solver returns the normalized positive mode. A generic positive-definite
+   `H` is similar to the Hermitian `H^{1/2} g H^{1/2}`, so its metric
+   spectrum is real, and a singular PSD nonreciprocal fixture keeps both
+   normalized positive modes and its Hessian null space.
 
 ## Console output of the executed script
 
@@ -54,6 +66,20 @@ passed in the `mydev` environment). Pinned statements:
   [OK] k=0.37: +-pairing of the metric spectrum
   [OK] k=0.37: Cholesky-intermediate columns fail the generalized residual (max 1.219e-02) — never physical modes
   [OK] anomalous dimer has a genuinely nonzero pairing block (max 1.000e-03)
+3c. Nonreciprocal particle-hole pairing is k <-> -k, never same-k
+  [OK] H(-k) = X H(k)* X with X = [[0, 1], [1, 0]] swaps the diagonal blocks
+  [OK] X (g H(k))* X = -g H(-k): the bosonic particle-hole partner lives at -k; same-k +- pairing is not implied
+  [OK] same-k metric trace a - b need not vanish, so the {a, -b} spectrum is not +- paired when a != b
+  [OK] numeric cross-momentum identity X (gH(k))* X = -gH(-k) at a=2, b=3
+  [OK] same-k metric spectrum [-3.  2.] is not +- symmetric (a != b)
+  [OK] cross-momentum metric spectra are negatives: eig(gH(-k)) [-2.  3.] = -eig(gH(k))
+  [OK] implementation: positive-definite nonreciprocal H=diag(2,3) yields the normalized mode omega=2; the same-k pairing residual 1.0 is diagnostic only and never a dynamic-instability gate
+  [OK] implementation: nonreciprocal positive-definite block Hessian diag(1,2,3,4) yields both physical modes with V^dag g V = I
+  [OK] singular nonreciprocal fixture metric spectrum {-3, 0, 1, 2}: positive, negative and Goldstone finite modes coexist
+  [OK] implementation: singular positive-semidefinite nonreciprocal Hessian diag(1,2,0,3) keeps both positive modes normalized and reports the Hessian null space
+  [OK] positive-definite Hessian: gH is similar to the Hermitian H^{1/2} g H^{1/2}, hence its spectrum is real
+  [OK] positive-definite Hessian: gH has n=2 negative and n=2 positive real eigenvalues (inertia {2,2}, spectrum [-11.01139299  -7.08467939   2.9578005    5.35247786])
+  [OK] implementation: generic positive-definite H (nonreciprocal in general) returns the two positive modes with unit metric Gram, no pairing assumed
 4. Stability policy anchors (numeric)
   [OK] stable anomalous dimer: Hessian psd with a nonzero pairing block (real frequencies despite the anomalous terms)
   [OK] negative-Hessian reference with REAL dynamical frequencies (min Hessian -3.800e-02, max |Im omega| 0.0e+00): classified energetically unstable and refused; a diagonal shift would not legitimize topology
@@ -77,5 +103,5 @@ passed in the `mydev` environment). Pinned statements:
   [OK] parity reduction and characteristic polynomial hold symbolically for noncommuting symmetric A and B
   [OK] noncommuting singular fixture: solver energies agree with the parity product eigenvalues 0 and 2
   [OK] exact Jordan zero + squeezed block: parity-reduced spectrum exact for the stored matrix (omega = 0.046906818081 = sqrt(delta*(2e5-delta)), delta = 1e5 - fl(1e5 - 1.1e-8) = 1.1001247913e-08); squeezed positive mode preserved, never a zero (classification zero_mode, absolute residual 1.0e-08)
-  [OK] block-mismatch guard: A2 = A1 + 1e-6 is not treated as the exact standard form; documented refusal (dynamically_unstable, no mode vectors) instead of the idealized parity spectrum
+  [OK] block-mismatch guard: A2 = A1 + 1e-6 is not treated as the exact standard form; the actual positive-definite matrix is solved (positive_definite, modes [0.0009995  0.04692233]) with both normalized vectors, never the idealized parity zero and never a false dynamic instability
 ```
