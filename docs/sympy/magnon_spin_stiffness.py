@@ -60,6 +60,15 @@ def check(condition, label: str):
     note(f"  [OK] {label}")
 
 
+def min_boson_energy(M, k0=None):
+    """Smallest eigenvalue of the boson Hamiltonian (>= 0 iff the reference
+    state is stable).  The magnon module uses ``H = -sum_<ij> J S_i.S_j`` with
+    every bond counted once, so ``jiso > 0`` is the ferromagnet and
+    ``jiso < 0`` the antiferromagnet."""
+    k0 = np.zeros(3) if k0 is None else np.asarray(k0, dtype=float)
+    return float(np.linalg.eigvalsh(M.Hq(np.atleast_2d(k0))[0]).min())
+
+
 # ---------------------------------------------------------------------------
 # 1. FM chain: omega(k) = 2 J S (1 - cos(k a))  =>  A_xx = J S a^2
 # ---------------------------------------------------------------------------
@@ -291,9 +300,13 @@ def afm_chain_magnon(S_val, jiso, a_val=1.0):
     return M
 
 
-# FM chain (S = 2, J = -1 meV, a = 1 A): the module's global sign convention
-# makes the reported stiffness positive, so compare |J S a^2|.
-S_val, jiso = 2.0, -1.0e-3
+# FM chain (S = 2, J = +1 meV, a = 1 A): jiso > 0 is the ferromagnet in the
+# module's convention, so this reference is the stable one.
+S_val, jiso = 2.0, 1.0e-3
+check(
+    min_boson_energy(fm_chain_magnon(S_val, jiso)) > -1e-12,
+    "FM chain reference state is stable (jiso > 0)",
+)
 st = fm_chain_magnon(S_val, jiso).get_spin_stiffness()
 theory = abs(S_val * jiso * 1e3)
 check(
@@ -306,8 +319,12 @@ check(
     "implementation FM chain A is diagonal (no in-plane exchange)",
 )
 
-# FM honeycomb (S = 1.5, J = -1 meV): A = |J S| / 4, isotropic.
-S_val, jiso = 1.5, -1.0e-3
+# FM honeycomb (S = 1.5, J = +1 meV): A = |J S| / 4, isotropic.
+S_val, jiso = 1.5, 1.0e-3
+check(
+    min_boson_energy(fm_honeycomb_magnon(S_val, jiso)) > -1e-12,
+    "FM honeycomb reference state is stable (jiso > 0)",
+)
 st = fm_honeycomb_magnon(S_val, jiso).get_spin_stiffness()
 theory = abs(S_val * jiso * 1e3) / 4
 check(
@@ -319,10 +336,14 @@ check(
     f"(textbook |J S a^2|/4 = {theory:.6f})",
 )
 
-# AFM chain (S = 1.5, J = +1 meV, magnetic cell 2 A): linear branch.
-S_val, jiso = 1.5, 1.0e-3
+# AFM chain (S = 1.5, J = -1 meV, magnetic cell 2 A): linear branch.
+S_val, jiso = 1.5, -1.0e-3
+check(
+    min_boson_energy(afm_chain_magnon(S_val, jiso)) > -1e-12,
+    "AFM chain reference state is stable (jiso < 0)",
+)
 st = afm_chain_magnon(S_val, jiso).get_spin_stiffness()
-theory = S_val * jiso * 1e3 * 2.0  # J S a_cell, a_cell = 2 A
+theory = abs(S_val * jiso * 1e3 * 2.0)  # |J| S a_cell, a_cell = 2 A
 check(
     st.order == 1 and st.A is None,
     "implementation AFM chain reports a linear branch (no stiffness tensor)",
@@ -337,7 +358,7 @@ check(
 # *not* the general answer for the multi-sublattice honeycomb.
 from TB2J.magnon.magnon_stiffness import stiffness_sum_rule  # noqa: E402
 
-S_val, jiso = 2.0, -1.0e-3
+S_val, jiso = 2.0, 1.0e-3
 A_sum = stiffness_sum_rule(
     J_iso=[jiso * 1e3, jiso * 1e3],
     S=S_val,
@@ -347,7 +368,7 @@ check(
     abs(abs(A_sum[0, 0]) - abs(S_val * jiso * 1e3)) < 1e-9,
     f"sum rule A_xx = {A_sum[0,0]:.6f} meV A^2 equals the Bravais textbook value",
 )
-S_val, jiso = 1.5, -1.0e-3
+S_val, jiso = 1.5, 1.0e-3
 d01 = np.array([0.5, np.sqrt(3) / 2, 0.0])
 a1v = np.array([1.0, 0.0, 0.0])
 a2v = np.array([0.5, np.sqrt(3) / 2, 0.0])
@@ -423,11 +444,15 @@ def gapped_fm_chain_magnon(S_val, jiso, k_anis, a_val=1.0):
     return M
 
 
-# Neel honeycomb (S = 1.5, J = +1 meV, a = 2 A): linear branch,
-# v = sqrt(3/2) J S a.
-S_val, jiso, a_val = 1.5, 1.0e-3, 2.0
+# Neel honeycomb (S = 1.5, J = -1 meV, a = 2 A): linear branch,
+# v = sqrt(3/2) |J| S a.
+S_val, jiso, a_val = 1.5, -1.0e-3, 2.0
+check(
+    min_boson_energy(afm_honeycomb_magnon(S_val, jiso, a_val)) > -1e-12,
+    "Neel honeycomb reference state is stable (jiso < 0)",
+)
 st = afm_honeycomb_magnon(S_val, jiso, a_val).get_spin_stiffness()
-theory = np.sqrt(1.5) * S_val * jiso * 1e3 * a_val
+theory = np.sqrt(1.5) * abs(S_val * jiso * 1e3 * a_val)
 check(
     st.order == 1 and st.A is None,
     "implementation Neel honeycomb reports a linear branch (no tensor)",
@@ -441,7 +466,7 @@ check(
 )
 
 # Gapped FM chain: the gap shifts the branch, the curvature is unchanged.
-S_val, jiso, k_anis = 2.0, -1.0e-3, 0.5e-3
+S_val, jiso, k_anis = 2.0, 1.0e-3, 0.5e-3
 st_free = gapped_fm_chain_magnon(S_val, jiso, 0.0).get_spin_stiffness()
 st_gap = gapped_fm_chain_magnon(S_val, jiso, k_anis).get_spin_stiffness()
 check(
@@ -458,7 +483,7 @@ check(
 
 # Mixed-spin FM honeycomb: A = J S1 S2 / (2 (S1 + S2)) with the graphene bonds
 # (equal spins reduce to J S / 4).
-S1_val, S2_val, jiso = 1.5, 2.0, -1.0e-3
+S1_val, S2_val, jiso = 1.5, 2.0, 1.0e-3
 mixed = fm_honeycomb_magnon(S1_val, jiso)
 mixed.magmom = np.array([[0.0, 0, 2 * S1_val], [0.0, 0, 2 * S2_val]])
 mixed.set_reference(np.zeros(3), np.array([[0.0, 0, 1.0]]),
@@ -474,7 +499,7 @@ check(
 # Spiral reference: an incommensurate J1-J2 spiral has a linear Goldstone
 # mode in the rotating frame => speed, no tensor.
 def spiral_chain_magnon(S_val, j1, j2, q_frac):
-    """1D J1-J2 spiral; j1, j2 in the TB2J sign convention (J<0 = FM)."""
+    """1D J1-J2 spiral; j1, j2 in the module's convention (j > 0 = FM)."""
     Rlist = np.array([[-2.0, 0, 0], [-1.0, 0, 0], [1.0, 0, 0], [2.0, 0, 0]])
     JR = np.zeros((4, 1, 1, 3, 3))
     JR[0, 0, 0] = np.eye(3) * j2
@@ -497,10 +522,15 @@ def spiral_chain_magnon(S_val, j1, j2, q_frac):
     return M
 
 
-# J1 = 1 meV FM, J2 = 1 meV AFM in physics units; TB2J uses J<0 for FM.
+# J1 = 1 meV FM, J2 = 1 meV AFM; in the module's convention (H = -sum J S.S)
+# the ferromagnet has jiso > 0 and the antiferromagnet jiso < 0.
 S_val = 1.0
-j1_tb2j, j2_tb2j = -1.0e-3, 1.0e-3
+j1_tb2j, j2_tb2j = 1.0e-3, -1.0e-3
 q_frac = np.arccos(1.0 / 4.0) / (2 * np.pi)   # cos(2 pi q) = -J1/(4 J2) = 1/4
+check(
+    min_boson_energy(spiral_chain_magnon(S_val, j1_tb2j, j2_tb2j, q_frac)) > -1e-12,
+    "J1-J2 spiral reference state is stable",
+)
 st = spiral_chain_magnon(S_val, j1_tb2j, j2_tb2j, q_frac).get_spin_stiffness()
 check(
     st.order == 1 and st.A is None,

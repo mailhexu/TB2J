@@ -43,18 +43,23 @@ the `mydev` environment). Pinned statements:
   [OK] Neel honeycomb 1 - |gamma|^2 = a^2 |k|^2 / 6  =>  v = sqrt(3/2) J S a
   [OK] easy-axis gap shifts the FM branch by a constant; A_xx = J S a^2 unchanged
   [OK] J1-J2 spiral: cos(2 pi q*) = -J1/(4 J2) is a stationary point
+  [OK] FM chain reference state is stable (jiso > 0)
   [OK] implementation FM chain A_xx = 1.999983 meV A^2 (textbook |J S a^2| = 2.000000)
   [OK] implementation FM chain A is diagonal (no in-plane exchange)
+  [OK] FM honeycomb reference state is stable (jiso > 0)
   [OK] implementation FM honeycomb A = diag(0.374999, 0.374999) meV A^2 (textbook |J S a^2|/4 = 0.375000)
+  [OK] AFM chain reference state is stable (jiso < 0)
   [OK] implementation AFM chain reports a linear branch (no stiffness tensor)
   [OK] implementation AFM chain speed v_x = 2.999946 meV A (textbook J S a_cell = 3.000000)
-  [OK] sum rule A_xx = 2.000000 meV A^2 equals the Bravais textbook value
+  [OK] sum rule A_xx = -2.000000 meV A^2 equals the Bravais textbook value
   [OK] sum rule does not reproduce the multi-sublattice honeycomb stiffness (the exact LSWT band is not the bond sum)
+  [OK] Neel honeycomb reference state is stable (jiso < 0)
   [OK] implementation Neel honeycomb reports a linear branch (no tensor)
   [OK] implementation Neel honeycomb v_x = v_y = 3.674178 meV A, v_z = 0.0e+00 (textbook sqrt(3/2) J S a = 3.674235)
   [OK] implementation gapped FM chain omega(Gamma) = 1.000000 meV equals the anisotropy gap |S K| = 1.000000 meV
-  [OK] gapped FM chain A_xx = -1.999983 equals the ungapped 1.999983 meV A^2 (gap does not change the curvature)
+  [OK] gapped FM chain A_xx = 1.999983 equals the ungapped 1.999983 meV A^2 (gap does not change the curvature)
   [OK] implementation mixed-spin honeycomb A_xx = 0.428570 meV A^2 (textbook |J| S1 S2 / (2(S1+S2)) = 0.428571)
+  [OK] J1-J2 spiral reference state is stable
   [OK] implementation spiral reference reports a linear branch (no tensor)
   [OK] implementation spiral speed is one-directional: [2.904498 0.       0.      ] meV A
 

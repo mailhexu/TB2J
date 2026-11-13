@@ -241,7 +241,12 @@ $$
 \omega_{\pm}(k) = 3 J S \left(1 \mp |\gamma(k)|\right) \quad \text{(ferromagnetic honeycomb)},
 $$
 
-with $J$ in meV and $S$ the physical spin.
+with $J$ in meV and $S$ the physical spin. The sign of $J$ fixes which state
+is the ground state: $H = -\sum_{\langle ij\rangle} J\,\mathbf{S}_i\!\cdot\!\mathbf{S}_j$
+with every bond counted once, so $J > 0$ is the **ferromagnet** (the reference
+is then stable, $\mathrm{eigvalsh}(H) \geq 0$) and $J < 0$ the
+antiferromagnet; $|\omega|$ is the same for both signs, only the stability
+differs.
 
 ## Band Structure Calculation
 

@@ -140,7 +140,7 @@ def _afm_chain(S, jiso, a=1.0):
 
 def test_fm_chain_stiffness():
     """A_xx = |J S a^2| for the FM chain."""
-    S, jiso, a = 2.0, -1.0e-3, 1.0
+    S, jiso, a = 2.0, 1.0e-3, 1.0
     st = _fm_chain(S, jiso, a).get_spin_stiffness()
     assert st.order == 2
     assert abs(abs(st.A[0, 0]) - abs(S * jiso * 1e3 * a**2)) < 1e-3
@@ -152,7 +152,7 @@ def test_fm_chain_stiffness():
 
 def test_fm_chain_stiffness_scales_with_lattice_constant():
     """The stiffness scales with a^2."""
-    S, jiso = 2.0, -1.0e-3
+    S, jiso = 2.0, 1.0e-3
     a1 = _fm_chain(S, jiso, 1.0).get_spin_stiffness().A[0, 0]
     a2 = _fm_chain(S, jiso, 2.0).get_spin_stiffness().A[0, 0]
     assert abs(a2 / a1 - 4.0) < 1e-3
@@ -160,8 +160,12 @@ def test_fm_chain_stiffness_scales_with_lattice_constant():
 
 def test_fm_honeycomb_stiffness_is_isotropic():
     """A_xx = A_yy = |J S a^2| / 4 and A_xy = 0 for the FM honeycomb."""
-    S, jiso, a = 1.5, -1.0e-3, 1.0
-    st = _fm_honeycomb(S, jiso, a).get_spin_stiffness()
+    S, jiso, a = 1.5, 1.0e-3, 1.0
+    M = _fm_honeycomb(S, jiso, a)
+    # in the module's convention (H = -sum_<ij> J S_i.S_j) jiso > 0 is the
+    # ferromagnet, and then the reference state is stable.
+    assert np.linalg.eigvalsh(M.Hq(np.zeros((1, 3)))[0]).min() > -1e-12
+    st = M.get_spin_stiffness()
     theory = abs(S * jiso * 1e3 * a**2) / 4
     assert st.order == 2
     assert abs(abs(st.A[0, 0]) - theory) / theory < 1e-3
@@ -171,9 +175,9 @@ def test_fm_honeycomb_stiffness_is_isotropic():
 
 def test_afm_chain_reports_linear_branch_and_speed():
     """The AFM chain has no quadratic stiffness but a finite spin-wave speed."""
-    S, jiso, a = 1.5, 1.0e-3, 1.0
+    S, jiso, a = 1.5, -1.0e-3, 1.0
     st = _afm_chain(S, jiso, a).get_spin_stiffness()
-    theory = S * jiso * 1e3 * 2 * a  # J S a_cell, a_cell = 2a
+    theory = abs(S * jiso * 1e3 * 2 * a)  # |J| S a_cell, a_cell = 2a
     assert st.order == 1
     assert st.A is None
     # velocity holds one directional speed per cartesian axis
@@ -219,9 +223,9 @@ def _afm_honeycomb(S, jiso, a=2.0):
 
 def test_afm_honeycomb_is_linear_and_isotropic():
     """The Neel honeycomb acoustic branch is linear with v = sqrt(3/2) J S a."""
-    S, jiso, a = 1.5, 1.0e-3, 2.0
+    S, jiso, a = 1.5, -1.0e-3, 2.0
     st = _afm_honeycomb(S, jiso, a).get_spin_stiffness()
-    theory = np.sqrt(1.5) * S * jiso * 1e3 * a
+    theory = np.sqrt(1.5) * abs(S * jiso * 1e3 * a)
     assert st.order == 1
     assert st.A is None
     # directional speeds, one entry per cartesian axis
@@ -232,7 +236,7 @@ def test_afm_honeycomb_is_linear_and_isotropic():
 
 def test_afm_honeycomb_speed_scales_linearly_with_lattice_constant():
     """The linear-branch speed scales as a (not a^2)."""
-    S, jiso = 1.5, 1.0e-3
+    S, jiso = 1.5, -1.0e-3
     v1 = _afm_honeycomb(S, jiso, 1.0).get_spin_stiffness().velocity[0]
     v2 = _afm_honeycomb(S, jiso, 2.0).get_spin_stiffness().velocity[0]
     assert abs(v2 / v1 - 2.0) < 1e-3
@@ -240,7 +244,7 @@ def test_afm_honeycomb_speed_scales_linearly_with_lattice_constant():
 
 def test_mixed_spin_honeycomb_stiffness():
     """A_xx = |J| S1 S2 / (2 (S1 + S2)) for inequivalent sublattice spins."""
-    S1, S2, jiso, a = 1.5, 2.0, -1.0e-3, 1.0
+    S1, S2, jiso, a = 1.5, 2.0, 1.0e-3, 1.0
     M = _fm_honeycomb(S1, jiso, a)
     magmoms = np.array([[0.0, 0, 2 * S1], [0.0, 0, 2 * S2]])
     M.magmom = magmoms
@@ -259,7 +263,7 @@ def test_mixed_spin_honeycomb_stiffness():
 
 def test_easy_axis_gap_does_not_change_the_stiffness():
     """A single-ion easy-axis term shifts the band but leaves the curvature."""
-    S, jiso, a = 2.0, -1.0e-3, 1.0
+    S, jiso, a = 2.0, 1.0e-3, 1.0
     K = 0.5e-3
 
     def build(anis):
@@ -285,10 +289,11 @@ def test_spiral_reference_reports_linear_branch():
     S, q = 1.0, np.arccos(0.25) / (2 * np.pi)
     Rlist = np.array([[-2.0, 0, 0], [-1.0, 0, 0], [1.0, 0, 0], [2.0, 0, 0]])
     JR = np.zeros((4, 1, 1, 3, 3))
-    JR[0, 0, 0] = np.eye(3) * 1.0e-3      # J2, AFM (R = -2)
-    JR[1, 0, 0] = np.eye(3) * (-1.0e-3)   # J1, FM  (R = -1)
-    JR[2, 0, 0] = np.eye(3) * (-1.0e-3)
-    JR[3, 0, 0] = np.eye(3) * 1.0e-3
+    # in the module's convention (H = -sum_<ij> J S_i.S_j) jiso > 0 is FM
+    JR[0, 0, 0] = np.eye(3) * (-1.0e-3)   # J2, AFM (R = -2)
+    JR[1, 0, 0] = np.eye(3) * 1.0e-3      # J1, FM  (R = -1)
+    JR[2, 0, 0] = np.eye(3) * 1.0e-3
+    JR[3, 0, 0] = np.eye(3) * (-1.0e-3)
     magmoms = np.array([[2 * S, 0.0, 0.0]])
     M = Magnon(
         nspin=1,
@@ -316,7 +321,7 @@ def test_spiral_reference_reports_linear_branch():
 
 def test_sum_rule_matches_dispersion_for_bravais_chain():
     """The real-space sum rule reproduces the dispersion route for a Bravais lattice."""
-    S, jiso, a = 2.0, -1.0e-3, 1.0
+    S, jiso, a = 2.0, 1.0e-3, 1.0
     st = _fm_chain(S, jiso, a).get_spin_stiffness(
         J_iso=[jiso * 1e3, jiso * 1e3],
         bond_vectors=[[a, 0, 0], [-a, 0, 0]],
@@ -327,7 +332,7 @@ def test_sum_rule_matches_dispersion_for_bravais_chain():
 
 def test_sum_rule_is_not_the_multisublattice_answer():
     """The bond sum is not the exact LSWT stiffness of a multi-sublattice lattice."""
-    S, jiso, a = 1.5, -1.0e-3, 1.0
+    S, jiso, a = 1.5, 1.0e-3, 1.0
     d01 = np.array([0.5, np.sqrt(3) / 2, 0.0])
     a1v = np.array([a, 0.0, 0.0])
     a2v = np.array([a / 2, np.sqrt(3) * a / 2, 0.0])
