@@ -139,13 +139,12 @@ def local_frame_bosonic_hamiltonian(
     The returned Colpa matrix is ``[[A(k), B(k)], [B^dagger(k), A(-k)^*]]``.
     For a Hermitian Fourier block, ``A(-k)^* = A^T(-k)``. The hole block is
     accumulated from the conjugated real-space number-conserving coefficients;
-    it is not generally ``A(k)^*``. Let ``M_i = |mu_i|``,
-    ``s_i = M_i/2``, and ``Jbar_ij(R) = J_ij(R)/(s_i s_j)`` as in the
-    legacy magnon Hamiltonian. With ``g_ab = e_a(i) . Jbar_ij(R) . e_b(j)``,
-    the transverse blocks are ``A_ij(R) = -sqrt(M_i M_j)/2 *
-    [(g00+g11)-i(g01-g10)]`` and ``B_ij(R) = -sqrt(M_i M_j)/2 *
-    [(g00-g11)+i(g01+g10)]``; longitudinal normalization contributes
-    ``A_ii += sum_jR M_j e3_i . Jbar_ij(R) . e3_j``.
+    it is not generally ``A(k)^*``. Let ``M_i = |mu_i|`` and ``s_i = M_i/2``.
+    The exchange enters unscaled, as in Toth & Lake (2015) Eq. (26): with
+    ``g_ab = e_a(i) . J_ij(R) . e_b(j)``, the transverse blocks are
+    ``A_ij(R) = -sqrt(s_i s_j)/2 * [(g00+g11)-i(g01-g10)]`` and
+    ``B_ij(R) = -sqrt(s_i s_j)/2 * [(g00-g11)+i(g01+g10)]``; longitudinal
+    normalization contributes ``A_ii += sum_jR s_j e3_i . J_ij(R) . e3_j``.
     """
     magmoms = np.asarray(magmoms, dtype=float)
     JR = np.asarray(JR, dtype=float)
@@ -155,7 +154,6 @@ def local_frame_bosonic_hamiltonian(
     e1, e2, e3 = _local_frames(magmoms, np.asarray(u, dtype=float))
     M = np.linalg.norm(magmoms, axis=1)
     spin = M / 2.0
-    JR = JR / (spin[None, :, None, None, None] * spin[None, None, :, None, None])
 
     nk = kpoints.shape[0]
     phases = np.exp(-2j * np.pi * kpoints @ Rlist.T)  # (nk, nR)
@@ -168,7 +166,7 @@ def local_frame_bosonic_hamiltonian(
         frame12 = np.stack([e1, e2], axis=1)  # (nspin, 2, 3)
         g = np.einsum("iax,ijxy,jby->ijab", frame12, J, frame12)
         g33 = np.einsum("ix,ijxy,jy->ij", e3, J, e3)
-        s = np.sqrt(M)[:, None] * np.sqrt(M)[None, :]
+        s = np.sqrt(spin)[:, None] * np.sqrt(spin)[None, :]
         a_contrib = (
             -0.5
             * s
@@ -187,9 +185,9 @@ def local_frame_bosonic_hamiltonian(
         for i in range(nspin):
             for j in range(nspin):
                 if i != j:
-                    stiff[i] += M[j] * g33[i, j]
+                    stiff[i] += spin[j] * g33[i, j]
                 else:
-                    stiff[i] += M[i] * g33[i, i]
+                    stiff[i] += spin[i] * g33[i, i]
     A += np.diag(stiff)[None, :, :]
     A_hole += np.diag(stiff)[None, :, :]
 

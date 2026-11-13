@@ -52,7 +52,7 @@ For a Hermitian Fourier A block, the Nambu hole block is `A(-k)^* = A^T(-k)`: co
 4. Stationarity of the twisted expanded reference
   [OK] twisted expanded reference is stationary (max transverse gradient 9.81e-18 within tolerance 2.00e-08)
 5. No double rotation
-  [OK] solving the expanded model with a second Q rotation changes the Hamiltonian (the expanded reference must be solved with Q = 0)
+  [OK] a second Q rotation on the expanded (non-uniform) reference is refused (the expanded reference must be solved with Q = 0)
 6. Embedding identity
   [OK] declared direct basis and reciprocal dual satisfy A_embed G_embed^T = I
   [OK] reciprocal-coordinate map k_input = k_embed B^{-T} preserves physical k

@@ -24,14 +24,33 @@ TB2J calculates magnon properties from first-principles-derived exchange paramet
 The magnetic interactions in a crystal are described by a generalized Heisenberg Hamiltonian:
 
 $$
-\mathcal{H} = -\sum_{i,j,\mathbf{R}} \mathbf{S}_i \cdot \mathbf{J}_{ij}(\mathbf{R}) \cdot \mathbf{S}_j(\mathbf{R})
+\mathcal{H} = -\sum_{\langle ij\rangle} \mathbf{S}_i \cdot \mathbf{J}_{ij}(\mathbf{R}) \cdot \mathbf{S}_j(\mathbf{R})
 $$
 
 where:
+- $\langle ij\rangle$ runs over **unordered** magnetic pairs once (each bond is
+  counted a single time; the "+$\mathbf{R}$" and the "-$\mathbf{R}$" entries of a
+  directed exchange list are two different bonds)
 - $i, j$ index magnetic atoms in the unit cell
 - $\mathbf{R}$ is the lattice vector connecting unit cells
-- $\mathbf{S}_i$ is the spin operator at site $i$
-- $\mathbf{J}_{ij}(\mathbf{R})$ is the $3\times3$ exchange tensor
+- $\mathbf{S}_i$ is the spin operator at site $i$, with $|\mathbf{S}_i| = S_i$
+  (the physical spin, $S_i = |\mathbf{m}_i|/2$ for a moment $\mathbf{m}_i$ given in
+  $\mu_B$)
+- $\mathbf{J}_{ij}(\mathbf{R})$ is the $3\times3$ exchange tensor, in meV, as
+  coupling the *physical* spins $S_i$
+
+```{note}
+The double sum $\sum_{i,j,\mathbf{R}}$ that appears in some references (for
+example Toth & Lake, Eq. 1) counts every bond twice. The operative convention
+of the reference — and the one used by TB2J — is one coupling per bond.
+```
+
+```{note}
+$\mathbf{J}_{ij}$ is the exchange of the spins whose moments are given to the
+magnon calculation. If the moments are changed with respect to the ones used
+in the exchange calculation, the exchange has to be rescaled with the DFT
+rule $J \propto 1/m^2$: $J(m') = J(m)\,(m/m')^2$.
+```
 
 ### Exchange Tensor Components
 
@@ -168,24 +187,61 @@ $$
 
 ### Matrix Elements
 
-The matrix elements are computed from the exchange tensors:
+The matrix elements are computed from the exchange tensors. With the
+**unnormalised** transverse frame $\mathbf{U}_i = \mathbf{e}_{1i} + i\,\mathbf{e}_{2i}$
+($|\mathbf{U}_i|^2 = 2$), the elements carry a factor $1/2$ *inside* $A$ and
+$B$ (this is the same $1/2$ that the quadratic form above carries in front of
+the $\mathbf{q}$-sum; moving it between the two places is an identity):
 
 $$
-A_{ij}(\mathbf{q}) = \sqrt{S_i S_j} \left[ \sum_k V_k^T \mathbf{J}_{ik}(\mathbf{0}) V_k S_k \delta_{ij} - U_i^* \mathbf{J}_{ij}(\mathbf{q}) U_j \right]
+A_{ij}(\mathbf{q}) = \frac{\sqrt{S_i S_j}}{2}\; \mathbf{U}_i^T \mathbf{J}_{ij}(-\mathbf{q}) \overline{\mathbf{U}}_j
 $$
 
 $$
-B_{ij}(\mathbf{q}) = -\sqrt{S_i S_j} \, U_i \mathbf{J}_{ij}(\mathbf{q}) U_j
+B_{ij}(\mathbf{q}) = \frac{\sqrt{S_i S_j}}{2}\; \mathbf{U}_i^T \mathbf{J}_{ij}(-\mathbf{q}) \mathbf{U}_j
 $$
 
-This is implemented in `Magnon.Hq()`:
+$$
+C_{ij} = \delta_{ij} \sum_l S_l\, \mathbf{V}_i^T \mathbf{J}_{il}(\mathbf{0}) \mathbf{V}_l
+$$
+
+This is the construction of Toth & Lake (2015), Eq. (26) (with their
+$\mathbf{u}\to\mathbf{U}$, $\mathbf{v}\to\mathbf{V}$), and it is implemented in
+`Magnon.Hq()` as:
 
 ```python
-A1 = np.einsum("ix,kijxy,jy->kij", U, Jq, U.conj())
-B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
-C = np.diag(np.einsum("ix,ijxy,jy,j->i", V, 2*J0, V, self.Snorm))
+# U = e1 + i e2 is not unit-normalised (|U|^2 = 2): the 1/2 below is the
+# one printed inside A(q) and B(q) of Toth & Lake (2015), Eq. (26).
+A1 = 0.5 * np.einsum("ix,kijxy,jy->kij", U, Jmq, U.conj())
+A2 = 0.5 * np.einsum("ix,kijxy,jy->kij", U.conj(), Jq.conj(), U)
+B = 0.5 * np.einsum("ix,kijxy,jy->kij", U, Jmq, U)
+# the mean field of the reference state is sum_j J_ij M_j, i.e. Jq(0) once
+C = np.diag(np.einsum("ix,ijxy,jy,j->i", V, J0, V, self.Snorm))
+
+# the sqrt(S_i S_j) of Eq. (26) is applied here
+A1 = np.einsum("kij, i, j-> kij", A1, Ssqrt, Ssqrt)
+A2 = np.einsum("kij, i, j-> kij", A2, Ssqrt, Ssqrt)
+B = np.einsum("kij, i, j-> kij", B, Ssqrt, Ssqrt)
+
 H = np.block([[A1 - C, B], [B.swapaxes(-1,-2).conj(), A2 - C]])
 ```
+
+Here `Jq` is the Fourier transform of the real-space exchange tensors (no
+$1/(S_iS_j)$ rescale: the spin-length factors enter only through
+$\sqrt{S_iS_j}$), `Jmq` is the same tensor at $-\mathbf{q}$ with transposed
+sublattice indices, and `J0 = -Jq(0)`. The module's overall minus sign
+(`Jq_code = -Jq`) is a sign convention of the code and does not change the
+frequencies.
+
+With these conventions the frequencies are the textbook values of linear spin
+wave theory, for example
+
+$$
+\omega(k) = 2 J S (1 - \cos ka) \quad \text{(ferromagnetic chain)}, \qquad
+\omega_{\pm}(k) = 3 J S \left(1 \mp |\gamma(k)|\right) \quad \text{(ferromagnetic honeycomb)},
+$$
+
+with $J$ in meV and $S$ the physical spin.
 
 ## Band Structure Calculation
 
@@ -211,6 +267,20 @@ g = np.block([[1*I, 0*I], [0*I, -1*I]])
 energies = np.linalg.eigvalsh(K.T.conj() @ g @ K)[:, n:]
 ```
 
+```{warning}
+The Cholesky route is only accurate to about $10^{-6}$ and it needs a positive
+definite $\mathbf{H}$. At a Goldstone point $\mathbf{H}$ is singular, and the
+shifted fallback (`H - (min_eig - 1e-6) I`) can return negative frequencies for
+ferromagnetic references. For exact frequencies, and for any test that pins a
+band value, use the exact Colpa route instead: the eigenvalues of
+$\mathbf{g}\,\mathbf{H}$, whose positive half are the magnon energies,
+
+```python
+g = np.block([[1*I, 0*I], [0*I, -1*I]])
+energies = np.sort(np.linalg.eigvals(g @ H).real)[n:]
+```
+```
+
 ### Goldstone Mode
 
 For ferromagnetic systems, the magnon energy at $\mathbf{q}=0$ should be zero (Goldstone mode). Deviations indicate:
@@ -218,6 +288,7 @@ For ferromagnetic systems, the magnon energy at $\mathbf{q}=0$ should be zero (G
 1. Insufficient exchange parameter convergence
 2. Incorrect magnetic ground state
 3. Missing long-range interactions
+4. The Cholesky artefact described above (use the exact $\mathbf{g}\,\mathbf{H}$ route)
 
 ### k-Path Selection
 

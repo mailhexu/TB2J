@@ -30,11 +30,11 @@ passed in the `mydev` environment). Pinned statements:
   [OK] negated-phase J(-k) equals negated argument of the positive-phase kernel
   [OK] conjugation identity J(k)* = sum J(R) e^{+2pi i k.R} = J(-k)
 2. Single-sublattice ferromagnet HP reduction
-  [OK] chain dispersion omega(k) = 2S sum_R J(R)[1 - cos(k.R)] (self shell drops)
+  [OK] chain dispersion omega(k) = S sum_R J(R)[1 - cos(k.R)] (the R-sum counts every bond twice, so this is the textbook 2 J S (1-cos ka))
   [OK] pairing block B = u^T J u vanishes for isotropic z-FM
-  [OK] executable chain omega = 2[J(0) - J(k)]/S (uniform-S scaling pinned)
-  [OK] at S = 1 (mu = 2 muB) the executable omega equals the textbook 2S[J(0)-J(k)]
-  [OK] legacy Magnon energies scale as 1/S^2 vs textbook LSWT (ratios [np.float64(1.0), np.float64(0.25), np.float64(0.1111)])
+  [OK] executable chain omega = S[J(0) - J(k)] (textbook LSWT, all S)
+  [OK] at S = 1 (mu = 2 muB) the executable omega equals the textbook S[J(0) - J(k)]
+  [OK] Magnon energies equal the textbook LSWT for every S (ratios [np.float64(1.0), np.float64(1.0), np.float64(1.0)])
   [OK] easy-axis gap omega(0) = 2 K / S (executable scaling; 2 K S at S = 1)
   [OK] numeric: H v = omega g v with v = K^{-dag} u for M = K^dag g K
   [OK] numeric: metric norm v^dag g v = 1/omega
@@ -53,20 +53,20 @@ passed in the `mydev` environment). Pinned statements:
   [OK] symbolic bands evaluate real (residual imaginary part negligible)
   [OK] symbolic bands evaluate real (residual imaginary part negligible)
   [OK] symbolic bands evaluate real (residual imaginary part negligible)
-  [OK] certificate site blocks match direct numeric build (max err 4.44e-15, 6 k-points)
+  [OK] certificate site blocks match direct numeric build (max err 2.22e-15, 6 k-points)
   [OK] W(K) = 0: K = (1/3, 2/3) is a Dirac point of this NN set
   [OK] W(K') = 0: K' = (2/3, 1/3) is a Dirac point of this NN set
-  [OK] valley chiralities chi_K = 1, chi_K' = -1 (crosses 136.7573, -136.7573)
+  [OK] valley chiralities chi_K = 1, chi_K' = -1 (crosses 34.1893, -34.1893)
   [OK] valley masses are real
   [OK] valley masses are equal in magnitude and nonzero (staggered Dirac masses)
   [OK] valley masses have opposite signs: m(K) = -6*sqrt(3)*D_z, m(K') = +6*sqrt(3)*D_z
   [OK] mass is linear in D_z
   pinned (executable convention): per-cone C = -chi*sign(m)/2 with chi_K=-1, chi_K'=+1 and m(K)=-6*sqrt(3)*D_z; C_lower = +sign(D_z), C_upper = -sign(D_z). The displacement-phase site map has the opposite chirality labels and therefore the negated band Chern labels.
-  [OK] omega_minus(Gamma) = 2 K S (gapped Goldstone with easy-axis SIA, S=1)
-  [OK] omega_plus(Gamma) = 12 J1 S + 2 K S (S=1)
+  [OK] omega_minus(Gamma) = K S (gapped Goldstone with easy-axis SIA, S=1)
+  [OK] omega_plus(Gamma) = 6 J1 S + K S (S=1)
 4b. Executable-convention anchor: Colpa modes of Magnon.Hq + FHS winding
   [OK] executable honeycomb FM has exactly zero pairing blocks (z-DMI, collinear)
-  [OK] executable valley masses: m(K) = -6*sqrt(3)*D_z, m(K') = +6*sqrt(3)*D_z
+  [OK] executable valley masses: m(K) = -3*sqrt(3)*D_z, m(K') = +3*sqrt(3)*D_z
   [OK] executable in-plane windings: chi_K = -1, chi_K' = +1 (opposite of the displacement-phase site map)
   [OK] executable FHS winding: C_lower = {1: 1, -1: -1}, C_upper = {1: -1, -1: 1} match the pin C_lower = +sign(D_z), C_upper = -sign(D_z)
 4c. Site-space (displacement-phase) winding: negated labels

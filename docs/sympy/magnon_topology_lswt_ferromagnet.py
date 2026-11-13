@@ -103,19 +103,21 @@ def simpl(expr):
     return sp.simplify(sp.expand(sp.expand(expr).rewrite(sp.cos)))
 
 
-omega_chain = 2 * S * ((J0s + 2 * J1s) - J_of_k)
+omega_chain = S * ((J0s + 2 * J1s) - J_of_k)
 check(
-    simpl(omega_chain - 2 * S * 2 * J1s * (1 - sp.cos(k))) == 0,
-    "chain dispersion omega(k) = 2S sum_R J(R)[1 - cos(k.R)] (self shell drops)",
+    simpl(omega_chain - S * 2 * J1s * (1 - sp.cos(k))) == 0,
+    "chain dispersion omega(k) = S sum_R J(R)[1 - cos(k.R)]"
+    " (the R-sum counts every bond twice, so this is the textbook 2 J S (1-cos ka))",
 )
 
 # Executable block chain for a z-aligned FM (units as in the code path):
-#   Jq divides tensors by Snorm_i Snorm_j; Hq multiplies A1, B by sqrt(SiSj)
-#   and C by S_j. With u = (1, i, 0) unnormalized:
-#   A1_total = -2 J(-k)/S,  B_total = 0,  C_total = +2 J(0)/S
-#   omega = eig(A1 - C) = 2 [J(0) - J(k)] / S
-# The textbook LSWT form 2 S [J(0) - J(k)] is recovered at S = 1 (mu = 2 muB).
-# Topological invariants are invariant under this uniform positive rescaling.
+#   Jq Fourier-transforms the exchange without a spin rescale; Hq multiplies
+#   A1, A2, B by sqrt(SiSj) and carries the printed 1/2 of Toth & Lake (2015)
+#   Eq. (26) (the frame u = (1, i, 0) is unnormalised, |u|^2 = 2), and C by
+#   S_j with J0 = -Jq(0) (the classical mean field sum_j J_ij M_j):
+#   A1_total = -S J(-k),  B_total = 0,  C_total = -S J(0)
+#   omega = eig(A1 - C) = S [J(0) - J(k)]
+# which is the textbook LSWT dispersion for every S.
 u = sp.Matrix([1, sp.I, 0])
 
 
@@ -125,18 +127,18 @@ def isoT(J):
 
 J_of_k = J0s + J1s * (sp.exp(sp.I * k) + sp.exp(-sp.I * k))
 Jneg = J_of_k.subs(k, -k)
-A1 = -simpl((u.T * isoT(Jneg) * u.conjugate())[0, 0]) / S  # net /S scaling
+A1 = -0.5 * simpl((u.T * isoT(Jneg) * u.conjugate())[0, 0]) * S  # 1/2 of Eq. (26)
 B = sp.simplify((u.T * isoT(Jneg) * u)[0, 0])
-C = simpl(-2 * (J0s + 2 * J1s) / S)  # C_total = -2 J(0)/S from J0 = -Jq(0)
+C = simpl(-S * (J0s + 2 * J1s))  # C_total = -S J(0) from J0 = -Jq(0)
 check(sp.simplify(B) == 0, "pairing block B = u^T J u vanishes for isotropic z-FM")
 omega_exec = simpl(A1 - C)  # B = 0: bands are eigenvalues of A1 - C
 check(
-    simpl(omega_exec - 2 * (J0s + 2 * J1s - J_of_k) / S) == 0,
-    "executable chain omega = 2[J(0) - J(k)]/S (uniform-S scaling pinned)",
+    simpl(omega_exec - S * (J0s + 2 * J1s - J_of_k)) == 0,
+    "executable chain omega = S[J(0) - J(k)] (textbook LSWT, all S)",
 )
 check(
-    simpl(omega_exec.subs(S, 1) - 2 * S.subs(S, 1) * ((J0s + 2 * J1s) - J_of_k)) == 0,
-    "at S = 1 (mu = 2 muB) the executable omega equals the textbook 2S[J(0)-J(k)]",
+    simpl(omega_exec.subs(S, 1) - S.subs(S, 1) * ((J0s + 2 * J1s) - J_of_k)) == 0,
+    "at S = 1 (mu = 2 muB) the executable omega equals the textbook S[J(0) - J(k)]",
 )
 
 # Numeric anchor: reproduce the legacy Magnon path scaling for mu = 2, 4, 6.
@@ -157,11 +159,12 @@ for mu in (2.0, 4.0, 6.0):
     _m.set_reference((0, 0, 0), [[0, 0, 1]], (1, 0, 0), magmoms=[[0, 0, mu]])
     _om = float(_m._magnon_energies(np.array([[0.0, 0.0, 0.5]]))[0, 0])
     _S = mu / 2
-    _theory = 2 * _S * (2 * 0.002 - 2 * 0.002 * np.cos(np.pi))
+    _theory = _S * (2 * 0.002 - 2 * 0.002 * np.cos(np.pi))
     ratios.append(_om / _theory)
 check(
-    np.allclose(ratios, [1 / (mu / 2) ** 2 for mu in (2.0, 4.0, 6.0)]),
-    f"legacy Magnon energies scale as 1/S^2 vs textbook LSWT (ratios {[round(r, 4) for r in ratios]})",
+    np.allclose(ratios, [1.0, 1.0, 1.0]),
+    f"Magnon energies equal the textbook LSWT for every S"
+    f" (ratios {[round(r, 6) for r in ratios]})",
 )
 
 K_sia = sp.symbols("K", real=True, positive=True)
@@ -264,16 +267,22 @@ def A1_contractions(chirality):
 # A1 = -sqrt(SiSj) u^T J(-k)^T u* ; J^T for iso is I, for eps(D) is -eps(D),
 # which flips the chirality sign again; we absorb: net chirality as coded.
 A1_AA_dmi = sp.simplify(
-    (u.T * ((+Dz) * eps_D).T * u.conjugate())[0, 0]
-    * sum(phase_neg(-Rf) for Rf in NNN_R)
-    + (u.T * ((-Dz) * eps_D).T * u.conjugate())[0, 0]
-    * sum(phase_neg(Rf) for Rf in NNN_R)
+    0.5
+    * (
+        (u.T * ((+Dz) * eps_D).T * u.conjugate())[0, 0]
+        * sum(phase_neg(-Rf) for Rf in NNN_R)
+        + (u.T * ((-Dz) * eps_D).T * u.conjugate())[0, 0]
+        * sum(phase_neg(Rf) for Rf in NNN_R)
+    )
 )
 A1_BB_dmi = sp.simplify(
-    (u.T * ((-Dz) * eps_D).T * u.conjugate())[0, 0]
-    * sum(phase_neg(-Rf) for Rf in NNN_R)
-    + (u.T * ((+Dz) * eps_D).T * u.conjugate())[0, 0]
-    * sum(phase_neg(Rf) for Rf in NNN_R)
+    0.5
+    * (
+        (u.T * ((-Dz) * eps_D).T * u.conjugate())[0, 0]
+        * sum(phase_neg(-Rf) for Rf in NNN_R)
+        + (u.T * ((+Dz) * eps_D).T * u.conjugate())[0, 0]
+        * sum(phase_neg(Rf) for Rf in NNN_R)
+    )
 )
 check(
     simpl(sp.im(sp.expand(A1_AA_dmi))) == 0,
@@ -284,16 +293,21 @@ check(simpl(sp.im(sp.expand(A1_BB_dmi))) == 0, "A1_BB DMI part is real")
 # Full site blocks (collinear FM, u^T I u* = 2). NN bonds (A->B) contribute
 # only to the off-diagonal block; the site-diagonal A1 entries carry the NNN
 # (isotropic J2 + z-DMI) shells. The on-site field C_i sums over all bonds
-# leaving site i: 3 NN keys (J1) and 6 NNN A-A keys (J2), times 2S.
-C_AA = -2 * Ssym * (6 * J2 + 3 * J1)
+# leaving site i: 3 NN keys (J1) and 6 NNN A-A keys (J2), times S.
+# The executable convention carries the printed 1/2 of Toth & Lake (2015)
+# Eq. (26) on the transverse blocks (the frame u is unnormalised) and the
+# spin length as sqrt(S_i S_j); C carries the classical mean field Jq(0).
+C_AA = -Ssym * (6 * J2 + 3 * J1)
 C_BB = C_AA
 A1_AA = sp.simplify(
-    -2 * J2 * sum(phase_neg(Rf) + phase_neg(-Rf) for Rf in NNN_R) + A1_AA_dmi
+    -Ssym * J2 * sum(phase_neg(Rf) + phase_neg(-Rf) for Rf in NNN_R)
+    + Ssym * A1_AA_dmi
 )
 A1_BB = sp.simplify(
-    -2 * J2 * sum(phase_neg(Rf) + phase_neg(-Rf) for Rf in NNN_R) + A1_BB_dmi
+    -Ssym * J2 * sum(phase_neg(Rf) + phase_neg(-Rf) for Rf in NNN_R)
+    + Ssym * A1_BB_dmi
 )
-A1_AB = sp.simplify(-2 * J1 * sum(phase_neg(d) for d in NN))
+A1_AB = sp.simplify(-Ssym * J1 * sum(phase_neg(d) for d in NN))
 
 # pairing blocks vanish (isotropic NNN + z-DMI): B = u^T J^T u summed over the
 # +-R pairs; the isotropic contraction u^T I u = 0 and the eps contraction
@@ -305,8 +319,8 @@ check(
     "B_AA pairing vanishes (u^T I u = 0 and u^T eps(D_z)^T u = 0)",
 )
 
-P_AA = sp.simplify(A1_AA - C_AA + 2 * K2 * Ssym)
-P_BB = sp.simplify(A1_BB - C_BB + 2 * K2 * Ssym)
+P_AA = sp.simplify(A1_AA - C_AA + K2 * Ssym)
+P_BB = sp.simplify(A1_BB - C_BB + K2 * Ssym)
 P_AB = A1_AB
 
 # Physical positive bands = eigenvalues of the site matrix
@@ -331,26 +345,25 @@ def numeric_Hq(kpt, J1v, J2v, Dv, Kv, Sv):
         np.array([0, -1, 0]),
     ]  # counterclockwise triangle
     iso_nnn = (
-        2
-        * J2v
+        J2v
         * sum(
             np.exp(-2j * np.pi * Rf @ karr) + np.exp(2j * np.pi * Rf @ karr)
             for Rf in nnn
         )
     )
-    iso_nn = 2 * J1v * sum(np.exp(-2j * np.pi * d @ karr) for d in nn)
+    iso_nn = J1v * sum(np.exp(-2j * np.pi * d @ karr) for d in nn)
     dmi_A = 0.0
     dmi_B = 0.0
     for Rf in nnn:
-        dmi_A += (-2j * Dv) * np.exp(-2j * np.pi * Rf @ karr) + (2j * Dv) * np.exp(
+        dmi_A += (-1j * Dv) * np.exp(-2j * np.pi * Rf @ karr) + (1j * Dv) * np.exp(
             2j * np.pi * Rf @ karr
         )
-        dmi_B += (2j * Dv) * np.exp(-2j * np.pi * Rf @ karr) + (-2j * Dv) * np.exp(
+        dmi_B += (1j * Dv) * np.exp(-2j * np.pi * Rf @ karr) + (-1j * Dv) * np.exp(
             2j * np.pi * Rf @ karr
         )
-    Paa = -iso_nnn + dmi_A + 2 * Sv * (6 * J2v + 3 * J1v) + 2 * Kv * Sv
-    Pbb = -iso_nnn + dmi_B + 2 * Sv * (6 * J2v + 3 * J1v) + 2 * Kv * Sv
-    Pab = -iso_nn
+    Paa = -Sv * iso_nnn + Sv * dmi_A + Sv * (6 * J2v + 3 * J1v) + Kv * Sv
+    Pbb = -Sv * iso_nnn + Sv * dmi_B + Sv * (6 * J2v + 3 * J1v) + Kv * Sv
+    Pab = -Sv * iso_nn
     return np.array([[Paa, Pab], [np.conj(Pab), Pbb]], dtype=complex)
 
 
@@ -419,7 +432,7 @@ W_Km = P_AB.subs({kx: Km_frac[0] + qx, ky: Km_frac[1] + qy})
 # Im(vx * conj(vy)). Exact derivatives are taken symbolically, then evaluated
 # at high precision (the rational-valley trig constants stay symbolic).
 def valley_chi(W_expr):
-    W_expr = W_expr.subs({J1: 1, a: 1})
+    W_expr = W_expr.subs({J1: 1, Ssym: 1, a: 1})
     vxc = complex(sp.N(sp.diff(W_expr, qx).subs({qx: 0, qy: 0}), 40))
     vyc = complex(sp.N(sp.diff(W_expr, qy).subs({qx: 0, qy: 0}), 40))
     cross = (vxc * vyc.conjugate()).imag
@@ -487,18 +500,18 @@ note(
     "chirality labels and therefore the negated band Chern labels."
 )
 
-# Gamma sanity at S = 1 (executable convention): Goldstone gap = 2 K, optic = 12 J1 + 2 K (J2 = 0)
+# Gamma sanity at S = 1 (executable convention): Goldstone gap = K, optic = 6 J1 + K (J2 = 0)
 omega_gamma = [
     sp.simplify(w.subs({kx: 0, ky: 0, J2: 0, a: 1, Ssym: 1}))
     for w in (omega_minus, omega_plus)
 ]
 check(
-    sp.simplify(omega_gamma[0] - 2 * K2) == 0,
-    "omega_minus(Gamma) = 2 K S (gapped Goldstone with easy-axis SIA, S=1)",
+    sp.simplify(omega_gamma[0] - K2) == 0,
+    "omega_minus(Gamma) = K S (gapped Goldstone with easy-axis SIA, S=1)",
 )
 check(
-    sp.simplify(omega_gamma[1] - (12 * J1 + 2 * K2)) == 0,
-    "omega_plus(Gamma) = 12 J1 S + 2 K S (S=1)",
+    sp.simplify(omega_gamma[1] - (6 * J1 + K2)) == 0,
+    "omega_plus(Gamma) = 6 J1 S + K S (S=1)",
 )
 
 
@@ -609,9 +622,9 @@ for _name, _kv in (("K=(1/3,2/3)", (1 / 3, 2 / 3)), ("K'=(2/3,1/3)", (2 / 3, 1 /
     _P = _mgn_exe.Hq(_np.array([[_kv[0], _kv[1], 0.0]]))[0][:2, :2]
     _mass_exe[_name] = (_P[0, 0] - _P[1, 1]).real / 2
 check(
-    abs(_mass_exe["K=(1/3,2/3)"] + 6 * _np.sqrt(3) * 0.05) < 1e-9
-    and abs(_mass_exe["K'=(2/3,1/3)"] - 6 * _np.sqrt(3) * 0.05) < 1e-9,
-    "executable valley masses: m(K) = -6*sqrt(3)*D_z, m(K') = +6*sqrt(3)*D_z",
+    abs(_mass_exe["K=(1/3,2/3)"] + 3 * _np.sqrt(3) * 0.05) < 1e-9
+    and abs(_mass_exe["K'=(2/3,1/3)"] - 3 * _np.sqrt(3) * 0.05) < 1e-9,
+    "executable valley masses: m(K) = -3*sqrt(3)*D_z, m(K') = +3*sqrt(3)*D_z",
 )
 
 # executable in-plane windings at the named valleys (chirality labels)

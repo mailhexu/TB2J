@@ -66,6 +66,25 @@ class Magnon:
             Normal vector for rotation
         """
         self.set_propagation_vector(Q)
+        if magmoms is not None:
+            self.magmom = np.array(magmoms, dtype=float)
+        if np.any(np.abs(np.asarray(Q, dtype=float)) > 1e-12):
+            mm = np.asarray(self.magmom, dtype=float)
+            norms = np.linalg.norm(mm, axis=1)
+            if len(norms) > 1:
+                dirs = mm / np.where(norms[:, None] == 0, 1.0, norms[:, None])
+                uniform = np.allclose(norms, norms[0], atol=1e-12) and np.allclose(
+                    dirs, dirs[0], atol=1e-12
+                )
+                if not uniform:
+                    raise ValueError(
+                        "A non-zero propagation vector Q with a non-uniform "
+                        "reference moment pattern is not supported: the "
+                        "rotating-frame treatment rotates the exchange once "
+                        "per lattice vector, which double-counts the frame "
+                        "for a multi-site cell. Solve the expanded "
+                        "(magnetic) cell with Q = 0 instead."
+                    )
         axis = np.asarray(n, dtype=float)
         if axis.shape != (3,):
             raise ValueError("Rotation axis n must have three components.")
@@ -76,8 +95,6 @@ class Magnon:
             raise ValueError("Rotation axis n must be non-zero.")
         self._uz = np.array(uz, dtype=float)
         self._n = axis / axis_norm
-        if magmoms is not None:
-            self.magmom = np.array(magmoms, dtype=float)
         self.Snorm = np.linalg.norm(self.magmom, axis=1) / 2
         # self.Snorm=np.ones(self.nspin)
 
@@ -132,8 +149,11 @@ class Magnon:
             Last two indices are for 3x3 tensor components
         """
         Rlist = np.array(self.Rlist)
-        Snorm_inv = 1 / self.Snorm
-        JR = np.einsum("rijxy, i, j-> rijxy", self.JR, Snorm_inv, Snorm_inv)
+        # NOTE (convention audit 2026-11-13): no 1/(S_i S_j) rescale here.
+        # The spin-length factors are applied once, as sqrt(S_i S_j), on the
+        # transverse terms in Hq (Toth & Lake, J. Phys.: Condens. Matter 27,
+        # 166002 (2015), Eq. 26).
+        JR = self.JR.copy()
         JRprime = JR.copy()
 
         for iR, R in enumerate(Rlist):
@@ -192,12 +212,17 @@ class Magnon:
 
         Ssqrt = np.sqrt(self.Snorm)
 
+        # The transverse frame U = e1 + i e2 is NOT unit-normalised
+        # (|U|^2 = 2); Toth & Lake (2015) Eq. (26) therefore carry a printed
+        # factor 1/2 inside A(q) and B(q).  Without it the whole matrix is
+        # twice the textbook value.  With it, A1, A2 and B are exactly the
+        # Eq. (26) elements (sqrt(S_i S_j)/2) u^T J'(-k) (u*, u).
         # A1 = UT J(-k) U.conj()
-        A1 = np.einsum("ix,kijxy,jy->kij", U, Jmq, U.conj())
+        A1 = 0.5 * np.einsum("ix,kijxy,jy->kij", U, Jmq, U.conj())
         # A2 = [ UT J(-k) U.conj() ] .conj() = U.conj()^T J(k).conj() U
-        A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq.conj(), U)
+        A2 = 0.5 * np.einsum("ix,kijxy,jy->kij", U.conj(), Jq.conj(), U)
         # B = UT J(-k) U
-        B = np.einsum("ix,kijxy,jy->kij", U, Jmq, U)
+        B = 0.5 * np.einsum("ix,kijxy,jy->kij", U, Jmq, U)
 
         # debug: check B(q) == B(-q).T
         # Jmq = -self.Jq(-kpoints)
@@ -207,7 +232,10 @@ class Magnon:
         #    print(f"Max difference: {np.max(np.abs(B - B2))}")
 
         # C = \delta_ij \sum_l (S_l v_i^T J'_{il} v_l)
-        C = np.diag(np.einsum("ix,ijxy,jy, j->i", V, 2 * J0, V, self.Snorm))
+        # The mean field of the classical state is sum_j J_ij M_j, i.e. Jq(0)
+        # once -- not twice.  (The factor 2 belonged to the same
+        # unnormalised-frame error as the transverse terms.)
+        C = np.diag(np.einsum("ix,ijxy,jy, j->i", V, J0, V, self.Snorm))
 
         # Apply the sqrt(Si Sj) ans Sl
         A1 = np.einsum("kij, i, j-> kij", A1, Ssqrt, Ssqrt)

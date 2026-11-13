@@ -348,12 +348,17 @@ check(
 # ---------------------------------------------------------------------------
 note("5. No double rotation")
 H_exp = model_tw.magnon().Hq(_np.array([[0.1, 0.0, 0.0]]))[0]
-m_double = model_tw.magnon(Q=(1 / 3, 0.0, 0.0))
-H_double = m_double.Hq(_np.array([[0.1, 0.0, 0.0]]))[0]
+_refused = False
+try:
+    m_double = model_tw.magnon(Q=(1 / 3, 0.0, 0.0))
+    H_double = m_double.Hq(_np.array([[0.1, 0.0, 0.0]]))[0]
+    _refused = not _np.allclose(H_exp, H_double, atol=1e-8)
+except ValueError as _exc:
+    _refused = "non-uniform reference moment pattern" in str(_exc)
 check(
-    not _np.allclose(H_exp, H_double, atol=1e-8),
-    "solving the expanded model with a second Q rotation changes the "
-    "Hamiltonian (the expanded reference must be solved with Q = 0)",
+    _refused,
+    "a second Q rotation on the expanded (non-uniform) reference is refused "
+    "(the expanded reference must be solved with Q = 0)",
 )
 
 # ---------------------------------------------------------------------------

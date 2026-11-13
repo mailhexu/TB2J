@@ -50,22 +50,22 @@ passed in the `mydev` environment). Pinned statements:
   [OK] b(J) = u^T J u = (J_xx - J_yy) + i(J_xy + J_yx)
   [OK] DMI (antisymmetric) contributes zero to the pairing contraction b: a collinear z FM cannot become anomalous (B != 0) through DMI; its diagonal a-contraction u^T eps(D_z) u* = -2 i D_z is the certified A1 phase amplitude
 2. Dimer site blocks
-  P_AA = 2*J_1*S + 2*K*S, P_AB = -2*J_1*S*exp(2*I*pi*k), Q_AB = -2*S*delta*exp(2*I*pi*k)
+  P_AA = J_1*S + K*S, P_AB = -J_1*S*exp(2*I*pi*k), Q_AB = -S*delta*exp(2*I*pi*k)
 3. Numeric anchor: Colpa solve of the actual Magnon.Hq
-  [OK] k=0.0: assembled Hq equals the symbolic [[P, Q], [Q*, P*]] blocks (max diff 8.67e-19)
-  [OK] k=0.21: assembled Hq equals the symbolic [[P, Q], [Q*, P*]] blocks (max diff 4.34e-18)
-  [OK] k=0.5: assembled Hq equals the symbolic [[P, Q], [Q*, P*]] blocks (max diff 2.45e-18)
+  [OK] k=0.0: assembled Hq equals the symbolic [[P, Q], [Q*, P*]] blocks (max diff 4.34e-19)
+  [OK] k=0.21: assembled Hq equals the symbolic [[P, Q], [Q*, P*]] blocks (max diff 2.17e-18)
+  [OK] k=0.5: assembled Hq equals the symbolic [[P, Q], [Q*, P*]] blocks (max diff 1.22e-18)
   [OK] k=0.13: Colpa physical modes match the legacy Magnon path (max diff 6.94e-18)
   [OK] k=0.13: H v = omega g v residual < 1e-10 on all finite modes
   [OK] k=0.13: metric norms v^dag g v = 1/omega (signatures 2+/-2-, signed completeness 0.0)
   [OK] k=0.13: +-pairing of the metric spectrum
-  [OK] k=0.13: Cholesky-intermediate columns fail the generalized residual (max 1.219e-02) — never physical modes
+  [OK] k=0.13: Cholesky-intermediate columns fail the generalized residual (max 4.311e-03) — never physical modes
   [OK] k=0.37: Colpa physical modes match the legacy Magnon path (max diff 6.94e-18)
   [OK] k=0.37: H v = omega g v residual < 1e-10 on all finite modes
   [OK] k=0.37: metric norms v^dag g v = 1/omega (signatures 2+/-2-, signed completeness 0.0)
   [OK] k=0.37: +-pairing of the metric spectrum
-  [OK] k=0.37: Cholesky-intermediate columns fail the generalized residual (max 1.219e-02) — never physical modes
-  [OK] anomalous dimer has a genuinely nonzero pairing block (max 1.000e-03)
+  [OK] k=0.37: Cholesky-intermediate columns fail the generalized residual (max 4.311e-03) — never physical modes
+  [OK] anomalous dimer has a genuinely nonzero pairing block (max 5.000e-04)
 3c. Nonreciprocal particle-hole pairing is k <-> -k, never same-k
   [OK] H(-k) = X H(k)* X with X = [[0, 1], [1, 0]] swaps the diagonal blocks
   [OK] X (g H(k))* X = -g H(-k): the bosonic particle-hole partner lives at -k; same-k +- pairing is not implied
@@ -82,9 +82,9 @@ passed in the `mydev` environment). Pinned statements:
   [OK] implementation: generic positive-definite H (nonreciprocal in general) returns the two positive modes with unit metric Gram, no pairing assumed
 4. Stability policy anchors (numeric)
   [OK] stable anomalous dimer: Hessian psd with a nonzero pairing block (real frequencies despite the anomalous terms)
-  [OK] negative-Hessian reference with REAL dynamical frequencies (min Hessian -3.800e-02, max |Im omega| 0.0e+00): classified energetically unstable and refused; a diagonal shift would not legitimize topology
-  [OK] complex-frequency dynamic instability (min Hessian -3.900e-02, max |Im omega| 1.05e-02): classified energetically unstable and refused; the frequency character is reported separately
-  [OK] symmetry-verified positive-semidefinite case: 2 zero mode(s) at Gamma without SIA (H psi_null = 0 residual 5.7e-19); the metric norm 1/omega diverges there, so the direction is non-normalizable and reported as null space, not as invented normalized vectors
+  [OK] negative-Hessian reference with REAL dynamical frequencies (min Hessian -1.900e-02, max |Im omega| 0.0e+00): classified energetically unstable and refused; a diagonal shift would not legitimize topology
+  [OK] complex-frequency dynamic instability (min Hessian -1.950e-02, max |Im omega| 5.27e-03): classified energetically unstable and refused; the frequency character is reported separately
+  [OK] symmetry-verified positive-semidefinite case: 2 zero mode(s) at Gamma without SIA (H psi_null = 0 residual 2.9e-19); the metric norm 1/omega diverges there, so the direction is non-normalizable and reported as null space, not as invented normalized vectors
   [OK] legacy _magnon_energies still shifts an indefinite Hessian with a warning (documented legacy behavior, untouched by topology)
 5. Singular square-root back-transform on a nontrivial singular PSD Hessian
   [OK] exactly singular PSD Hessian with nonzero pairing channel: det = 0, two exact null vectors, eigenvalues {7/300, 1/60, 0, 0}

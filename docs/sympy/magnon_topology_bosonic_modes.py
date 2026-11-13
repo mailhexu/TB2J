@@ -111,12 +111,15 @@ J1, delta, K, S = sp.symbols("J_1 delta K S", real=True, positive=True)
 k = sp.symbols("k", real=True)
 # bond list: exactly one NN pair, (R,0,1) and its reversal (-R,1,0), R=(1,0,0).
 # Blocks measured on Magnon.Hq and consistent with the certified
-# contractions: P_AA = -C_AA + 2KS with C_AA = -2 S J1 (one bond pair);
-# P_AB = -S b(J1 I)^T ... = -2 S J1 e^{+2 pi i k} (the J(-k) phase);
-# Q_AB = -2 S delta e^{+2 pi i k} (b(J') = 2 delta with J' = delta diag(1,-1,0)).
-P_AA = 2 * J1 * S + 2 * K * S
-P_AB = -2 * J1 * S * sp.exp(sp.I * 2 * sp.pi * k)
-Q_AB = -2 * delta * S * sp.exp(sp.I * 2 * sp.pi * k)
+# contractions: the executable convention carries the printed 1/2 of
+# Toth & Lake (2015) Eq. (26) on the transverse blocks (the frame u = e1 + i e2
+# is unnormalised), the spin length as sqrt(S_i S_j) and the mean field as
+# Jq(0): P_AA = -C_AA + K S with C_AA = -S J1 (one bond pair);
+# P_AB = -S b(J1 I)^T ... = -S J1 e^{+2 pi i k} (the J(-k) phase);
+# Q_AB = -S delta e^{+2 pi i k} (b(J') = delta with J' = delta diag(1,-1,0)).
+P_AA = J1 * S + K * S
+P_AB = -J1 * S * sp.exp(sp.I * 2 * sp.pi * k)
+Q_AB = -delta * S * sp.exp(sp.I * 2 * sp.pi * k)
 note(f"  P_AA = {P_AA}, P_AB = {P_AB}, Q_AB = {Q_AB}")
 
 # ---------------------------------------------------------------------------

@@ -5,8 +5,8 @@ Conventions are pinned by the executed certificate
 convention): plaquette order ``(i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1)`` on
 the ``(a1,a2)`` torus, band Chern numbers ``C_lower = +sign(D_z)`` and
 ``C_upper = -sign(D_z)`` for the gapped honeycomb ferromagnet with NNN
-Kane-Mele DMI and easy-axis SIA, Gamma energies ``omega- = 2K`` and
-``omega+ = 12 J1 + 2K`` at ``S = 1``.
+Kane-Mele DMI and easy-axis SIA, Gamma energies ``omega- = K`` and
+``omega+ = 6 J1 + K`` at ``S = 1``.
 """
 
 import json
@@ -92,7 +92,7 @@ def test_chern_anti_aligns_with_dmi_sign():
 def test_gamma_energies_match_certificate(model_pos):
     res = calculate_bulk(model_pos, BulkRequest(mesh=(6, 6), bands=[0]))
     np.testing.assert_allclose(
-        res.energies[0, 0], [2 * K_SIA, 12 * J1 + 2 * K_SIA], atol=1e-10
+        res.energies[0, 0], [K_SIA, 6 * J1 + K_SIA], atol=1e-10
     )
 
 
