@@ -131,25 +131,18 @@ class Magnon:
     def Jq(self, kpoints):
         """
         The exchange interactions J(q) are computed using the Fourier transform:
-        J_ij(q) = ∑_R J_ij(R) exp(iq·(R + r_j - r_i))
-
-        The intra-cell offset (r_j - r_i) of the pair key (R, i, j) carries
-        the Bloch phase whenever magnetic atoms sit at inequivalent
-        fractional positions -- e.g. replicated supercells (make_supercell)
-        or any multi-sublattice cell. When ``positions`` is unavailable the
-        transform falls back to exp(iq·R), which is exact only when all
-        magnetic atoms share one fractional position.
+        J(q) = ∑_R J(R) exp(iq·R)
 
         Array shapes and indices:
         - kpoints: (nkpt, 3) array of k-points
         - Rlist: (nR, 3) array of real-space lattice vectors
         - JR: (nR, nspin, nspin, 3, 3) array of exchange tensors in real space
             where nspin is number of magnetic atoms
-            - Output Jq: (nkpt, nspin, nspin, 3, 3) array of exchange tensors in q-space
+        - Output Jq: (nkpt, nspin, nspin, 3, 3) array of exchange tensors in q-space
 
         If propagation vector Q is set, each J(R) is rotated before the Fourier transform:
         J'_mn(R) = R_m(ϕ)^T J(R) R_n(ϕ)
-        where ϕ = 2π R·Q and R(ϕ) is rotation matrix around axis n by ϕ
+        where ϕ = 2π R·Q and R(ϕ) is rotation matrix around axis n by angle ϕ
 
         Parameters
         ----------
@@ -180,26 +173,9 @@ class Magnon:
                     JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
             self._Jq_prepared_cache = (state, (Rlist, JRprime))
         kpoints = np.asarray(kpoints, dtype=float)
-        if (
-            getattr(self, "positions", None) is not None
-            and getattr(self, "cell", None) is not None
-        ):
-            # offset[i, j] = r_j - r_i in fractional coordinates
-            frac = (
-                np.asarray(self.positions, dtype=float)
-                @ np.linalg.inv(np.asarray(self.cell, dtype=float))
-            )
-            offset = frac[None, :, :] - frac[:, None, :]
-            Jq = np.zeros((len(kpoints),) + JRprime.shape[1:], dtype=complex)
-            for iq, kpt in enumerate(kpoints):
-                disp = Rlist[:, None, None, :] + offset[None, :, :, :]
-                phase = 2 * np.pi * disp @ kpt  # (nR, nspin, nspin)
-                Jq[iq] = np.einsum(
-                    "rij,rijxy->ijxy", np.exp(-1j * phase), JRprime
-                )
-        else:
-            phase = 2 * np.pi * Rlist @ kpoints.T  # (nR, nkpt)
-            Jq = np.einsum("rq,rijxy->qijxy", np.exp(-1j * phase), JRprime)
+        # Vectorized Fourier transform: identical sum, no (R, q) Python loop.
+        phase = 2 * np.pi * Rlist @ kpoints.T  # (nR, nkpt)
+        Jq = np.einsum("rq,rijxy->qijxy", np.exp(-1j * phase), JRprime)
         if self._Q is not None:
             Jq = Jq.astype(complex)
         return Jq

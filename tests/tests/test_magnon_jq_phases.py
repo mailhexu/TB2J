@@ -1,3 +1,19 @@
+"""Supercell magnon validation for magnon3 (two-sided TB2J pickles).
+
+These oracles seal that Magnon produces correct supercell magnon bands for
+cells whose magnetic atoms sit at inequivalent fractional positions
+(replicated supercells, multi-sublattice cells): folded-band containment,
+Goldstone + dispersion, and the 2-site fold identity. A Jq phase change
+(k.(R + r_j - r_i) instead of k.R) was tried and reverted: it is a pure
+site-diagonal similarity -- spectra are identical, eigenvectors re-gauge --
+and TB2J's eigenstates module plus the unfolding package's sealed
+projector consume the cell-origin gauge (review TB2J-JQ-001, 2026-11-13).
+
+Note: magnon3 spectra are only correct for pickles storing both bond
+directions ((R,i,j) and (-R,j,i)), as real TB2J results do. One-sided
+dictionaries are unsupported and produce non-Hermitian J(k).
+"""
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -71,12 +87,21 @@ def test_replicated_chain_has_goldstone_mode(tmp_path):
         "sc6",
     )
     assert sc_bands[0, 0] == pytest.approx(0.0, abs=1e-8)
-    # and the bands disperse (they were flat with the k.R-only transform)
+    # and the bands disperse along the (periodic) a axis
     assert np.abs(sc_bands[2] - sc_bands[0]).max() > 0.1
 
 
-def test_two_site_chain_jq_matches_exact_transform(tmp_path):
-    atoms = Atoms("FeFe", cell=np.diag([1.0, 1, 1]), scaled_positions=[[0, 0, 0], [0.5, 0, 0]], pbc=True)
+def test_two_site_cell_bands_fold_one_site_bands(tmp_path):
+    # A 2-site cell (magnetic atoms at inequivalent positions 0 and 1/2)
+    # is the 1-site NN chain folded by 2. Its magnon bands must equal the
+    # 1-site bands at q/2 and q/2 + 1/2 (scale-free, gauge-free check that
+    # magnon3 is correct for multi-position cells).
+    atoms = Atoms(
+        "FeFe",
+        cell=np.diag([1.0, 1, 1]),
+        scaled_positions=[[0, 0, 0], [0.5, 0, 0]],
+        pbc=True,
+    )
     terms = {
         ((0, 0, 0), 0, 1): 1.0,
         ((-1, 0, 0), 0, 1): 1.0,
@@ -88,27 +113,36 @@ def test_two_site_chain_jq_matches_exact_transform(tmp_path):
         spinat=np.array([[0.0, 0.0, 3.0], [0.0, 0.0, 3.0]]),
         charges=np.array([6.0, 6.0]),
         index_spin=[0, 1],
-        distance_dict=gen_distance_dict([0, 1], atoms, sorted({R for (R, _, _) in terms})),
+        distance_dict=gen_distance_dict(
+            [0, 1], atoms, sorted({R for (R, _, _) in terms})
+        ),
         exchange_Jdict=terms,
         dmi_ddict=None,
         Jani_dict=None,
         sia_tensor=None,
     )
-    out = tmp_path / "two_site"
-    save(spinio, out)
-    magnon = _magnon(out)
-    # J01(k) with full phases = e^{2 pi i k/2} + e^{-2 pi i k/2} = 2 cos(pi k)
-    # (the loader stores each bond once per direction, and Jq's Snorm^-2
-    # rescale divides both sides equally; compare the shape against the
-    # exact transform, not the old k.R-only form 1 + e^{-2 pi i k})
-    ks = np.array([[0.1, 0, 0], [0.25, 0, 0], [0.4, 0, 0]])
-    Jq = magnon.Jq(ks)
-    ratios = []
-    for iq, k in enumerate(ks):
-        magnon3_01 = Jq[iq][0, 1, 0, 0]
-        exact = 2 * np.cos(np.pi * k[0])
-        ratios.append(magnon3_01 / exact)
-    assert np.allclose(ratios, ratios[0], atol=1e-10)
+    two_site = _bands(spinio, [[0.3, 0, 0]], tmp_path, "two_site")
+
+    # the same chain as a 1-site cell: lattice constant 0.5, NN J=1.0
+    atoms1 = Atoms(
+        "Fe", cell=np.diag([0.5, 1, 1]), scaled_positions=[[0, 0, 0]], pbc=True
+    )
+    terms1 = {((1, 0, 0), 0, 0): 1.0, ((-1, 0, 0), 0, 0): 1.0}
+    one = SpinIO(
+        atoms=atoms1,
+        spinat=np.array([[0.0, 0.0, 3.0]]),
+        charges=np.array([6.0]),
+        index_spin=[0],
+        distance_dict=gen_distance_dict(
+            [0], atoms1, sorted({R for (R, _, _) in terms1})
+        ),
+        exchange_Jdict=terms1,
+        dmi_ddict=None,
+        Jani_dict=None,
+        sia_tensor=None,
+    )
+    one_bands = _bands(one, [[0.15, 0, 0], [0.65, 0, 0]], tmp_path, "one_site")
+    assert np.allclose(sorted(two_site[0]), sorted(one_bands[:, 0]), atol=1e-9)
 
 
 def test_cut_ribbon_bands_finite(tmp_path):
