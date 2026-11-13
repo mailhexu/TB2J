@@ -17,6 +17,18 @@ the `mydev` environment). Pinned statements:
    route for the single-sublattice chain, and does **not** reproduce the
    multi-sublattice honeycomb (the exact LSWT band is not the bond sum); it
    therefore needs the true bond vectors and is a cross-check only.
+5. Non-ferromagnetic reference states go through the same machinery: the
+   branch order is read from the deviation scaling, so a quadratic branch
+   yields the tensor `A` and a linear branch the directional speeds
+   `d omega / d|k|`. Pinned closed forms:
+   - mixed-spin FM honeycomb `A = 6 J S1 S2 mu / sqrt(4 S1 S2 + (S1-S2)^2)`
+     (reduces to `3 J S mu`, i.e. `|J S a^2|/4`, for equal spins);
+   - Neel honeycomb `omega(k) = 3 J S sqrt(1 - |gamma|^2)`, hence the linear
+     branch has `v = sqrt(3/2) J S a`;
+   - an easy-axis single-ion gap shifts the branch by `|S K|` and leaves the
+     curvature unchanged;
+   - an incommensurate J1-J2 spiral has a linear Goldstone mode at
+     `cos(2 pi q*) = -J1/(4 J2)`.
 
 ## Console output of the executed script
 
@@ -26,13 +38,25 @@ the `mydev` environment). Pinned statements:
   [OK] FM honeycomb stiffness A_yy = J S a^2 / 4
   [OK] FM honeycomb stiffness A_xy = 0
   [OK] AFM chain spin-wave speed v = J S a_cell (no quadratic stiffness)
+  [OK] mixed-spin honeycomb reduces to 3 J S mu for S1 = S2
+  [OK] mixed-spin honeycomb A = 6 J S1 S2 mu / sqrt(4 S1 S2 + (S1-S2)^2)
+  [OK] Neel honeycomb 1 - |gamma|^2 = a^2 |k|^2 / 6  =>  v = sqrt(3/2) J S a
+  [OK] easy-axis gap shifts the FM branch by a constant; A_xx = J S a^2 unchanged
+  [OK] J1-J2 spiral: cos(2 pi q*) = -J1/(4 J2) is a stationary point
   [OK] implementation FM chain A_xx = 1.999983 meV A^2 (textbook |J S a^2| = 2.000000)
   [OK] implementation FM chain A is diagonal (no in-plane exchange)
   [OK] implementation FM honeycomb A = diag(0.374999, 0.374999) meV A^2 (textbook |J S a^2|/4 = 0.375000)
   [OK] implementation AFM chain reports a linear branch (no stiffness tensor)
-  [OK] implementation AFM chain speed |v| = 2.999946 meV A (textbook J S a_cell = 3.000000)
+  [OK] implementation AFM chain speed v_x = 2.999946 meV A (textbook J S a_cell = 3.000000)
   [OK] sum rule A_xx = 2.000000 meV A^2 equals the Bravais textbook value
   [OK] sum rule does not reproduce the multi-sublattice honeycomb stiffness (the exact LSWT band is not the bond sum)
+  [OK] implementation Neel honeycomb reports a linear branch (no tensor)
+  [OK] implementation Neel honeycomb v_x = v_y = 3.674178 meV A, v_z = 0.0e+00 (textbook sqrt(3/2) J S a = 3.674235)
+  [OK] implementation gapped FM chain omega(Gamma) = 1.000000 meV equals the anisotropy gap |S K| = 1.000000 meV
+  [OK] gapped FM chain A_xx = -1.999983 equals the ungapped 1.999983 meV A^2 (gap does not change the curvature)
+  [OK] implementation mixed-spin honeycomb A_xx = 0.428570 meV A^2 (textbook |J| S1 S2 / (2(S1+S2)) = 0.428571)
+  [OK] implementation spiral reference reports a linear branch (no tensor)
+  [OK] implementation spiral speed is one-directional: [2.904498 0.       0.      ] meV A
 
 CERTIFICATE OK: all assertions passed.
 ```

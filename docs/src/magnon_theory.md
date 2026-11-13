@@ -377,6 +377,42 @@ factors of the itinerant model; TB2J reports the stiffness of the mapped
 Heisenberg model, $H = -\sum_{\langle ij\rangle} J\,\mathbf{S}_i\!\cdot\!\mathbf{S}_j$
 with $J$ in meV and $|\mathbf{S}| = |\mathbf{m}|/2$.
 
+### Reference states: ferromagnetic, antiferromagnetic, spiral
+
+The extraction is not restricted to ferromagnets. It samples the exact LSWT
+band around the requested expansion point and reads the branch order off the
+deviation scaling, so:
+
+| reference state | acoustic branch | returns |
+|---|---|---|
+| ferromagnet (collinear) | quadratic, $\omega \propto k^2$ | tensor $A$ |
+| gapped ferromagnet (easy-axis anisotropy) | quadratic, $\omega_0 = |S K|$ | tensor $A$, unchanged by the gap |
+| mixed-spin ferrimagnet | quadratic | tensor $A = 6 J S_1 S_2 \mu / \sqrt{4 S_1 S_2 + (S_1-S_2)^2}$ |
+| Néel antiferromagnet | linear, $\omega \propto |k|$ | directional speeds $v$ |
+| spiral ($\mathbf{Q} \neq 0$, rotating frame) | linear | directional speeds $v$ |
+
+Closed forms for the isotropic models (verified in
+`docs/sympy/magnon_spin_stiffness.py`):
+
+* FM chain: $A_{xx} = J S a^2$, FM honeycomb:
+  $A_{xx} = A_{yy} = J S a^2/4$.
+* Néel chain: $v = J S a_{\text{cell}}$; Néel honeycomb:
+  $v = \sqrt{3/2}\,J S a = 3 J S a/\sqrt{6}$.
+* Mixed-spin honeycomb: for equal spins
+  $6 J S_1 S_2 \mu/\sqrt{4S_1S_2 + (S_1-S_2)^2} \to 3 J S \mu = JSa^2/4$.
+
+Two caveats matter in practice:
+
+1. **The expansion point must be the true minimum of the branch.** The API
+   does not search for it. For a spiral reference pass the ordering vector;
+   with Dzyaloshinskii–Moriya interactions a collinear reference is generally
+   *not* the ground state, so the band about $\Gamma$ carries a linear term
+   whose "speed" is not a stiffness.
+2. **A collinear reference with DMI is not a stationary state.** The
+   in-plane DM term is a two-magnon coupling for out-of-plane moments and
+   vanishes identically for collinear moments when $\mathbf{D}$ is parallel to
+   them; use the actual canted/spiral configuration.
+
 ## Density of States Calculation
 
 ### Definition

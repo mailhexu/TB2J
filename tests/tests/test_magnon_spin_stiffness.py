@@ -12,9 +12,15 @@ with the magnon convention of `TB2J.magnon.magnon3`
 The reference values are the textbook ones and are pinned symbolically in
 `docs/sympy/magnon_spin_stiffness.py`:
 
-    FM chain      A_xx = |J S a^2|
-    FM honeycomb  A_xx = A_yy = |J S a^2| / 4, A_xy = 0
-    AFM chain     linear branch, speed |v| = J S a_cell
+    FM chain            A_xx = |J S a^2|
+    FM honeycomb        A_xx = A_yy = |J S a^2| / 4, A_xy = 0
+    AFM chain           linear branch, speed v = J S a_cell
+    AFM honeycomb       linear branch, v = sqrt(3/2) J S a
+    mixed-spin honeycomb A_xx = |J| S1 S2 / (2 (S1 + S2))
+
+Non-ferromagnetic reference states go through the same extraction: a
+quadratic branch returns the tensor `A`, a linear one the directional
+speeds (the spiral and Neel cases below).
 """
 
 from pathlib import Path
@@ -170,7 +176,142 @@ def test_afm_chain_reports_linear_branch_and_speed():
     theory = S * jiso * 1e3 * 2 * a  # J S a_cell, a_cell = 2a
     assert st.order == 1
     assert st.A is None
-    assert abs(np.linalg.norm(st.velocity) - theory) / theory < 1e-3
+    # velocity holds one directional speed per cartesian axis
+    assert abs(st.velocity[0] - theory) / theory < 1e-3
+
+
+def _afm_honeycomb(S, jiso, a=2.0):
+    """Neel honeycomb: two sites/cell with opposite moments, 3 NN bonds."""
+    cellv = np.array([[a, 0, 0], [a / 2, np.sqrt(3) * a / 2, 0], [0, 0, 10.0]])
+    nspin, n, magmom = 2, 2, 2 * S
+    Rs, JR = [], []
+    for r1 in range(-n, n + 1):
+        for r2 in range(-n, n + 1):
+            Rs.append(np.array([r1, r2, 0.0]))
+            JR.append(np.zeros((nspin, nspin, 3, 3)))
+            for i in range(nspin):
+                for jj in range(nspin):
+                    if i == jj:
+                        continue
+                    if (i, jj) == (0, 1) and (r1, r2) in [(0, 0), (-1, 0), (0, -1)]:
+                        JR[-1][i, jj] = np.eye(3) * jiso
+                    if (i, jj) == (1, 0) and (r1, r2) in [(0, 0), (1, 0), (0, 1)]:
+                        JR[-1][i, jj] = np.eye(3) * jiso
+    magmoms = np.array([[0.0, 0, magmom], [0.0, 0, -magmom]])
+    M = Magnon(
+        nspin=nspin,
+        magmom=magmoms,
+        Rlist=np.array(Rs),
+        JR=np.array(JR),
+        cell=cellv,
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0, 1.0]]),
+        _n=np.array([1.0, 0, 0]),
+    )
+    M.set_reference(
+        np.zeros(3),
+        np.array([[0.0, 0, 1.0]]),
+        np.array([1.0, 0, 0]),
+        magmoms=magmoms,
+    )
+    return M
+
+
+def test_afm_honeycomb_is_linear_and_isotropic():
+    """The Neel honeycomb acoustic branch is linear with v = sqrt(3/2) J S a."""
+    S, jiso, a = 1.5, 1.0e-3, 2.0
+    st = _afm_honeycomb(S, jiso, a).get_spin_stiffness()
+    theory = np.sqrt(1.5) * S * jiso * 1e3 * a
+    assert st.order == 1
+    assert st.A is None
+    # directional speeds, one entry per cartesian axis
+    assert abs(st.velocity[0] - theory) / theory < 1e-3
+    assert abs(st.velocity[1] - theory) / theory < 1e-3
+    assert abs(st.velocity[2]) < 1e-6
+
+
+def test_afm_honeycomb_speed_scales_linearly_with_lattice_constant():
+    """The linear-branch speed scales as a (not a^2)."""
+    S, jiso = 1.5, 1.0e-3
+    v1 = _afm_honeycomb(S, jiso, 1.0).get_spin_stiffness().velocity[0]
+    v2 = _afm_honeycomb(S, jiso, 2.0).get_spin_stiffness().velocity[0]
+    assert abs(v2 / v1 - 2.0) < 1e-3
+
+
+def test_mixed_spin_honeycomb_stiffness():
+    """A_xx = |J| S1 S2 / (2 (S1 + S2)) for inequivalent sublattice spins."""
+    S1, S2, jiso, a = 1.5, 2.0, -1.0e-3, 1.0
+    M = _fm_honeycomb(S1, jiso, a)
+    magmoms = np.array([[0.0, 0, 2 * S1], [0.0, 0, 2 * S2]])
+    M.magmom = magmoms
+    M.set_reference(
+        np.zeros(3),
+        np.array([[0.0, 0, 1.0]]),
+        np.array([1.0, 0, 0]),
+        magmoms=magmoms,
+    )
+    st = M.get_spin_stiffness()
+    theory = abs(jiso * 1e3) * S1 * S2 / (2 * (S1 + S2))
+    assert st.order == 2
+    assert abs(abs(st.A[0, 0]) - theory) / theory < 1e-3
+    assert abs(abs(st.A[1, 1]) - theory) / theory < 1e-3
+
+
+def test_easy_axis_gap_does_not_change_the_stiffness():
+    """A single-ion easy-axis term shifts the band but leaves the curvature."""
+    S, jiso, a = 2.0, -1.0e-3, 1.0
+    K = 0.5e-3
+
+    def build(anis):
+        M = _fm_chain(S, jiso, a)
+        M.JR[0, 0, 0] += np.diag([0.0, 0.0, anis])
+        M.set_reference(
+            np.zeros(3),
+            np.array([[0.0, 0, 1.0]]),
+            np.array([1.0, 0, 0]),
+            magmoms=np.array([[0.0, 0, 2 * S]]),
+        )
+        return M
+
+    st_free = build(0.0).get_spin_stiffness()
+    st_gap = build(-K).get_spin_stiffness()
+    assert st_gap.order == 2
+    assert abs(st_gap.omega0 - abs(S * K) * 1e3) < 1e-6
+    assert abs(abs(st_gap.A[0, 0]) - abs(st_free.A[0, 0])) < 1e-3 * abs(st_free.A[0, 0])
+
+
+def test_spiral_reference_reports_linear_branch():
+    """An incommensurate J1-J2 spiral has a linear Goldstone mode."""
+    S, q = 1.0, np.arccos(0.25) / (2 * np.pi)
+    Rlist = np.array([[-2.0, 0, 0], [-1.0, 0, 0], [1.0, 0, 0], [2.0, 0, 0]])
+    JR = np.zeros((4, 1, 1, 3, 3))
+    JR[0, 0, 0] = np.eye(3) * 1.0e-3      # J2, AFM (R = -2)
+    JR[1, 0, 0] = np.eye(3) * (-1.0e-3)   # J1, FM  (R = -1)
+    JR[2, 0, 0] = np.eye(3) * (-1.0e-3)
+    JR[3, 0, 0] = np.eye(3) * 1.0e-3
+    magmoms = np.array([[2 * S, 0.0, 0.0]])
+    M = Magnon(
+        nspin=1,
+        magmom=magmoms,
+        Rlist=Rlist,
+        JR=JR,
+        cell=np.diag([1.0, 10.0, 10.0]),
+        _Q=np.array([q, 0.0, 0.0]),
+        _uz=np.array([[0.0, 0, 1.0]]),
+        _n=np.array([0.0, 0, 1.0]),
+    )
+    M.set_reference(
+        np.array([q, 0.0, 0.0]),
+        np.array([[0.0, 0, 1.0]]),
+        np.array([0.0, 0, 1.0]),
+        magmoms=magmoms,
+    )
+    st = M.get_spin_stiffness()
+    assert st.order == 1
+    assert st.A is None
+    # the spiral runs along x: the only non-zero directional speed
+    assert np.count_nonzero(st.velocity) == 1
+    assert st.velocity[0] > 0
 
 
 def test_sum_rule_matches_dispersion_for_bravais_chain():

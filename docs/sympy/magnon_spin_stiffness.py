@@ -21,6 +21,16 @@ comparisons, the quantities that `Magnon.get_spin_stiffness` returns:
    (2001)) and coincides with the dispersion route for the single-sublattice
    chain.  For the multi-sublattice honeycomb it does **not**: the exact LSWT
    band is not the bond sum.
+5. **Non-ferromagnetic reference states** are handled by the same machinery:
+   the branch order is read from the deviation scaling, so a quadratic branch
+   yields the tensor ``A`` and a linear one the directional speeds
+   ``d omega / d|k|``.  Pinned closed forms:
+   mixed-spin FM honeycomb ``A = 6 J S1 S2 mu / sqrt(4 S1 S2 + (S1-S2)^2)``
+   (reduces to ``3 J S mu``, i.e. ``|J S a^2|/4``, for equal spins);
+   Neel honeycomb ``omega(k) = 3 J S sqrt(1 - |gamma|^2)`` so ``v = sqrt(3/2) J S a``;
+   an easy-axis single-ion gap shifts the branch by a constant and leaves the
+   curvature unchanged; an incommensurate J1-J2 spiral has a linear Goldstone
+   mode with wavevector ``cos(2 pi q*) = -J1/(4 J2)``.
 
 Run in the mydev environment::
 
@@ -101,7 +111,90 @@ check(
 )
 
 # ---------------------------------------------------------------------------
-# 4. Implementation anchors: Magnon.get_spin_stiffness vs the certificate
+# 4. Non-collinear / non-ferromagnetic reference states
+#
+#    Every reference state the LSWT route supports is fitted the same way:
+#    the exact `eig(g H)` band is sampled about k0 and the deviation order is
+#    read off the scaling.  Quadratic -> tensor A, linear -> directional
+#    speed d omega / d|k|.  The statements below pin the two non-FM branches
+#    that have a closed form, so the branch classification is checked, not
+#    just the ferromagnetic case.
+# ---------------------------------------------------------------------------
+
+# 4a. Mixed-spin FM honeycomb: A = J S1 S2 / (2 (S1 + S2)) for the graphene
+#     bond set (equal spins reduce to J S / 4).
+S1s, S2s = sp.symbols("S1 S2", positive=True)
+Jpos = sp.Symbol("J", positive=True)
+mu = sp.symbols("mu", positive=True)
+d_half = 3 * Jpos * (S2s - S1s) / 2
+disc = sp.sqrt(d_half**2 + Jpos**2 * S1s * S2s * (3 * (1 - mu * k**2)) ** 2)
+lam_minus = sp.series(3 * Jpos * (S1s + S2s) / 2 - disc, mu, 0, 2).removeO()
+A_mixed = sp.simplify(sp.diff(lam_minus, mu) * mu / k**2)
+check(
+    sp.simplify(A_mixed.subs(S2s, S1s) - 3 * Jpos * S1s * mu) == 0,
+    "mixed-spin honeycomb reduces to 3 J S mu for S1 = S2",
+)
+check(
+    sp.simplify(
+        A_mixed - 6 * Jpos * S1s * S2s * mu
+        / sp.sqrt(4 * S1s * S2s + (S1s - S2s) ** 2)
+    )
+    == 0,
+    "mixed-spin honeycomb A = 6 J S1 S2 mu / sqrt(4 S1 S2 + (S1-S2)^2)",
+)
+
+# 4b. Neel honeycomb: the acoustic branch is *linear*,
+#     omega(k) = 3 J S sqrt(1 - |gamma|^2)  =>  v = sqrt(3/2) J S a.
+kx2, ky2 = sp.symbols("kx ky", real=True)
+kk1 = a * kx2 / (2 * sp.pi)
+kk2 = a * (kx2 / 2 + sp.sqrt(3) * ky2 / 2) / (2 * sp.pi)
+one_minus_g2 = sp.simplify(
+    sp.Rational(2, 3)
+    - sp.Rational(2, 9)
+    * (sp.cos(2 * sp.pi * kk1) + sp.cos(2 * sp.pi * kk2)
+       + sp.cos(2 * sp.pi * (kk1 - kk2)))
+)
+quad = sp.simplify(
+    sp.expand(
+        sp.series(sp.series(one_minus_g2, kx2, 0, 3).removeO(), ky2, 0, 3).removeO()
+    )
+)
+quad_c = sp.Poly(sp.expand(quad), kx2, ky2)  # keep only O(k^2) terms
+quad_xx = quad_c.coeff_monomial(kx2**2)
+quad_yy = quad_c.coeff_monomial(ky2**2)
+quad_xy = quad_c.coeff_monomial(kx2 * ky2)
+check(
+    sp.simplify(quad_xx - a**2 / 6) == 0
+    and sp.simplify(quad_yy - a**2 / 6) == 0
+    and sp.simplify(quad_xy) == 0,
+    "Neel honeycomb 1 - |gamma|^2 = a^2 |k|^2 / 6  =>  v = sqrt(3/2) J S a",
+)
+
+# 4c. Gapped FM chain: a single-ion easy-axis term adds a constant to the
+#     branch (the band shifts, the curvature does not).
+K_anis = sp.Symbol("K", positive=True)
+omega_gapped = 2 * J * S * (1 - sp.cos(k * a)) + K_anis
+check(
+    sp.simplify(sp.diff(omega_gapped, k, 2).subs(k, 0) - 2 * J * S * a**2) == 0,
+    "easy-axis gap shifts the FM branch by a constant; A_xx = J S a^2 unchanged",
+)
+
+# 4d. Spiral reference (incommensurate): the Goldstone mode of a stationary
+#     spiral is linear in the *rotating* frame, so the API reports a speed.
+#     For the J1-J2 chain the stationary spiral wavevector obeys
+#     cos(2 pi q) = -J1 / (4 J2), asserted as the minimum of the classical
+#     energy.
+J1, J2 = sp.symbols("J1 J2", real=True)
+qq = sp.Symbol("q", real=True)
+E_spiral = J1 * sp.cos(2 * sp.pi * qq) + J2 * sp.cos(4 * sp.pi * qq)
+q_star = sp.acos(-J1 / (4 * J2)) / (2 * sp.pi)
+check(
+    sp.simplify(sp.diff(E_spiral, qq).subs(qq, q_star)) == 0,
+    "J1-J2 spiral: cos(2 pi q*) = -J1/(4 J2) is a stationary point",
+)
+
+# ---------------------------------------------------------------------------
+# 5. Implementation anchors: Magnon.get_spin_stiffness vs the certificate
 # ---------------------------------------------------------------------------
 
 
@@ -235,8 +328,8 @@ check(
     "implementation AFM chain reports a linear branch (no stiffness tensor)",
 )
 check(
-    abs(np.linalg.norm(st.velocity) - theory) / theory < 1e-3,
-    f"implementation AFM chain speed |v| = {np.linalg.norm(st.velocity):.6f} meV A "
+    abs(st.velocity[0] - theory) / theory < 1e-3,
+    f"implementation AFM chain speed v_x = {st.velocity[0]:.6f} meV A "
     f"(textbook J S a_cell = {theory:.6f})",
 )
 
@@ -270,6 +363,154 @@ check(
     "(the exact LSWT band is not the bond sum)",
 )
 
+# ---------------------------------------------------------------------------
+# 6. Non-FM implementation anchors
+# ---------------------------------------------------------------------------
+
+
+def afm_honeycomb_magnon(S_val, jiso, a_val=2.0):
+    """Neel honeycomb: two sites/cell, opposite moments, 3 NN bonds."""
+    cellv = np.array([[a_val, 0, 0], [a_val / 2, np.sqrt(3) * a_val / 2, 0], [0, 0, 10.0]])
+    nspin, n, magmom = 2, 3, 2 * S_val
+    Rs, JR = [], []
+    for r1 in range(-n, n + 1):
+        for r2 in range(-n, n + 1):
+            Rs.append(np.array([r1, r2, 0.0]))
+            JR.append(np.zeros((nspin, nspin, 3, 3)))
+            for i in range(nspin):
+                for jj in range(nspin):
+                    if i == jj:
+                        continue
+                    if (i, jj) == (0, 1) and (r1, r2) in [(0, 0), (-1, 0), (0, -1)]:
+                        JR[-1][i, jj] = np.eye(3) * jiso
+                    if (i, jj) == (1, 0) and (r1, r2) in [(0, 0), (1, 0), (0, 1)]:
+                        JR[-1][i, jj] = np.eye(3) * jiso
+    magmoms = np.array([[0.0, 0, magmom], [0.0, 0, -magmom]])
+    M = _Magnon(
+        nspin=nspin,
+        magmom=magmoms,
+        Rlist=np.array(Rs),
+        JR=np.array(JR),
+        cell=cellv,
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0, 1.0]]),
+        _n=np.array([1.0, 0, 0]),
+    )
+    M.set_reference(np.zeros(3), np.array([[0.0, 0, 1.0]]),
+                    np.array([1.0, 0, 0]), magmoms=magmoms)
+    return M
+
+
+def gapped_fm_chain_magnon(S_val, jiso, k_anis, a_val=1.0):
+    """FM chain with an on-site easy-axis term (constant gap)."""
+    magmom = 2 * S_val
+    Rlist = np.array([[1.0, 0, 0], [-1.0, 0, 0]])
+    JR = np.zeros((2, 1, 1, 3, 3))
+    JR[0, 0, 0] = np.eye(3) * jiso + np.diag([0.0, 0.0, k_anis])
+    JR[1, 0, 0] = np.eye(3) * jiso
+    M = _Magnon(
+        nspin=1,
+        magmom=np.array([[0.0, 0, magmom]]),
+        Rlist=Rlist,
+        JR=JR,
+        cell=np.eye(3) * a_val,
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0, 1.0]]),
+        _n=np.array([1.0, 0, 0]),
+    )
+    M.set_reference(np.zeros(3), np.array([[0.0, 0, 1.0]]),
+                    np.array([1.0, 0, 0]), magmoms=np.array([[0.0, 0, magmom]]))
+    return M
+
+
+# Neel honeycomb (S = 1.5, J = +1 meV, a = 2 A): linear branch,
+# v = sqrt(3/2) J S a.
+S_val, jiso, a_val = 1.5, 1.0e-3, 2.0
+st = afm_honeycomb_magnon(S_val, jiso, a_val).get_spin_stiffness()
+theory = np.sqrt(1.5) * S_val * jiso * 1e3 * a_val
+check(
+    st.order == 1 and st.A is None,
+    "implementation Neel honeycomb reports a linear branch (no tensor)",
+)
+check(
+    abs(st.velocity[0] - theory) / theory < 1e-3
+    and abs(st.velocity[1] - theory) / theory < 1e-3
+    and abs(st.velocity[2]) < 1e-6,
+    f"implementation Neel honeycomb v_x = v_y = {st.velocity[0]:.6f} meV A, "
+    f"v_z = {st.velocity[2]:.1e} (textbook sqrt(3/2) J S a = {theory:.6f})",
+)
+
+# Gapped FM chain: the gap shifts the branch, the curvature is unchanged.
+S_val, jiso, k_anis = 2.0, -1.0e-3, 0.5e-3
+st_free = gapped_fm_chain_magnon(S_val, jiso, 0.0).get_spin_stiffness()
+st_gap = gapped_fm_chain_magnon(S_val, jiso, k_anis).get_spin_stiffness()
+check(
+    st_gap.order == 2
+    and abs(st_gap.omega0 - abs(S_val * k_anis) * 1e3) < 1e-6,
+    f"implementation gapped FM chain omega(Gamma) = {st_gap.omega0:.6f} meV "
+    f"equals the anisotropy gap |S K| = {abs(S_val * k_anis) * 1e3:.6f} meV",
+)
+check(
+    abs(abs(st_gap.A[0, 0]) - abs(st_free.A[0, 0])) / abs(st_free.A[0, 0]) < 1e-3,
+    f"gapped FM chain A_xx = {st_gap.A[0,0]:.6f} equals the ungapped "
+    f"{st_free.A[0,0]:.6f} meV A^2 (gap does not change the curvature)",
+)
+
+# Mixed-spin FM honeycomb: A = J S1 S2 / (2 (S1 + S2)) with the graphene bonds
+# (equal spins reduce to J S / 4).
+S1_val, S2_val, jiso = 1.5, 2.0, -1.0e-3
+mixed = fm_honeycomb_magnon(S1_val, jiso)
+mixed.magmom = np.array([[0.0, 0, 2 * S1_val], [0.0, 0, 2 * S2_val]])
+mixed.set_reference(np.zeros(3), np.array([[0.0, 0, 1.0]]),
+                    np.array([1.0, 0, 0]), magmoms=mixed.magmom)
+st = mixed.get_spin_stiffness()
+theory = abs(jiso * 1e3) * S1_val * S2_val / (2 * (S1_val + S2_val))
+check(
+    st.order == 2 and abs(abs(st.A[0, 0]) - theory) / theory < 1e-3,
+    f"implementation mixed-spin honeycomb A_xx = {st.A[0,0]:.6f} meV A^2 "
+    f"(textbook |J| S1 S2 / (2(S1+S2)) = {theory:.6f})",
+)
+
+# Spiral reference: an incommensurate J1-J2 spiral has a linear Goldstone
+# mode in the rotating frame => speed, no tensor.
+def spiral_chain_magnon(S_val, j1, j2, q_frac):
+    """1D J1-J2 spiral; j1, j2 in the TB2J sign convention (J<0 = FM)."""
+    Rlist = np.array([[-2.0, 0, 0], [-1.0, 0, 0], [1.0, 0, 0], [2.0, 0, 0]])
+    JR = np.zeros((4, 1, 1, 3, 3))
+    JR[0, 0, 0] = np.eye(3) * j2
+    JR[1, 0, 0] = np.eye(3) * j1
+    JR[2, 0, 0] = np.eye(3) * j1
+    JR[3, 0, 0] = np.eye(3) * j2
+    magmoms = np.array([[2 * S_val, 0.0, 0.0]])
+    M = _Magnon(
+        nspin=1,
+        magmom=magmoms,
+        Rlist=Rlist,
+        JR=JR,
+        cell=np.diag([1.0, 10.0, 10.0]),
+        _Q=np.array([q_frac, 0.0, 0.0]),
+        _uz=np.array([[0.0, 0, 1.0]]),
+        _n=np.array([0.0, 0, 1.0]),
+    )
+    M.set_reference(np.array([q_frac, 0.0, 0.0]), np.array([[0.0, 0, 1.0]]),
+                    np.array([0.0, 0, 1.0]), magmoms=magmoms)
+    return M
+
+
+# J1 = 1 meV FM, J2 = 1 meV AFM in physics units; TB2J uses J<0 for FM.
+S_val = 1.0
+j1_tb2j, j2_tb2j = -1.0e-3, 1.0e-3
+q_frac = np.arccos(1.0 / 4.0) / (2 * np.pi)   # cos(2 pi q) = -J1/(4 J2) = 1/4
+st = spiral_chain_magnon(S_val, j1_tb2j, j2_tb2j, q_frac).get_spin_stiffness()
+check(
+    st.order == 1 and st.A is None,
+    "implementation spiral reference reports a linear branch (no tensor)",
+)
+check(
+    st.velocity is not None and np.count_nonzero(st.velocity) == 1,
+    f"implementation spiral speed is one-directional: {np.round(st.velocity, 6)} meV A",
+)
+
 note("")
 note("CERTIFICATE OK: all assertions passed.")
 report_path = Path(__file__).with_suffix(".md")
@@ -292,6 +533,18 @@ the `mydev` environment). Pinned statements:
    route for the single-sublattice chain, and does **not** reproduce the
    multi-sublattice honeycomb (the exact LSWT band is not the bond sum); it
    therefore needs the true bond vectors and is a cross-check only.
+5. Non-ferromagnetic reference states go through the same machinery: the
+   branch order is read from the deviation scaling, so a quadratic branch
+   yields the tensor `A` and a linear branch the directional speeds
+   `d omega / d|k|`. Pinned closed forms:
+   - mixed-spin FM honeycomb `A = 6 J S1 S2 mu / sqrt(4 S1 S2 + (S1-S2)^2)`
+     (reduces to `3 J S mu`, i.e. `|J S a^2|/4`, for equal spins);
+   - Neel honeycomb `omega(k) = 3 J S sqrt(1 - |gamma|^2)`, hence the linear
+     branch has `v = sqrt(3/2) J S a`;
+   - an easy-axis single-ion gap shifts the branch by `|S K|` and leaves the
+     curvature unchanged;
+   - an incommensurate J1-J2 spiral has a linear Goldstone mode at
+     `cos(2 pi q*) = -J1/(4 J2)`.
 
 ## Console output of the executed script
 
