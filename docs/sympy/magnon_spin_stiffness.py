@@ -16,7 +16,7 @@ comparisons, the quantities that `Magnon.get_spin_stiffness` returns:
    acoustic branch is linear, ``omega(k) = 2 J S |sin(pi k)|`` in the magnetic
    fractional coordinate, i.e. the spin-wave speed is ``v = J S a_cell``
    (meV A).  There is no quadratic coefficient.
-4. The **real-space sum rule** ``A = -(S/2) sum_bonds J v v`` is the textbook
+4. The **real-space sum rule** ``A = (S/2) sum_bonds J v v`` is the textbook
    route (Liechtenstein-Katsnelson-Gubanov; Pajda et al., PRB 64, 174402
    (2001)) and coincides with the dispersion route for the single-sublattice
    chain.  For the multi-sublattice honeycomb it does **not**: the exact LSWT
@@ -58,6 +58,36 @@ def note(text: str):
 def check(condition, label: str):
     assert condition, f"CERTIFICATE FAILED: {label}"
     note(f"  [OK] {label}")
+
+# SpinIO stores both directed bonds for unit spin directions; the physical
+# spin kernel requires a factor 2/(S_i S_j), including onsite tensors as
+# represented by the existing SpinIO magnon tensor assembly.
+si, sj = sp.symbols("s_i s_j", positive=True)
+unit_exchange = sp.symbols("J_unit", real=True)
+physical_exchange = 2 * unit_exchange / (si * sj)
+check(
+    sp.simplify(
+        sp.sqrt(si * sj) * unit_exchange / (si * sj)
+        - sp.Rational(1, 2) * sp.sqrt(si * sj) * physical_exchange
+    ) == 0,
+    "TB2J directed unit-spin to physical-spin transverse coefficient",
+)
+check(
+    sp.simplify(2 * sj * unit_exchange / (si * sj) - sj * physical_exchange)
+    == 0,
+    "TB2J directed unit-spin to physical-spin longitudinal coefficient",
+)
+
+kx_sia, ky_sia, kz_sia = sp.symbols("K_x K_y K_z", real=True)
+onsite_a = (2 * kz_sia - kx_sia - ky_sia) / si
+onsite_b = (kx_sia - ky_sia) / si
+check(
+    sp.simplify(
+        onsite_a**2 - onsite_b**2
+        - 4 * (kz_sia - kx_sia) * (kz_sia - ky_sia) / si**2
+    ) == 0,
+    "unit-spin on-site anisotropy gap",
+)
 
 
 def min_boson_energy(M, k0=None):
@@ -365,7 +395,7 @@ A_sum = stiffness_sum_rule(
     bond_vectors=[[1.0, 0, 0], [-1.0, 0, 0]],
 )
 check(
-    abs(abs(A_sum[0, 0]) - abs(S_val * jiso * 1e3)) < 1e-9,
+    abs(A_sum[0, 0] - S_val * jiso * 1e3) < 1e-9,
     f"sum rule A_xx = {A_sum[0,0]:.6f} meV A^2 equals the Bravais textbook value",
 )
 S_val, jiso = 1.5, 1.0e-3
@@ -642,7 +672,7 @@ the `mydev` environment). Pinned statements:
 3. AFM chain (two-site Neel cell, magnetic cell `2a`): the acoustic branch is
    linear, `omega(k) = 2 J S |sin(pi k)|`, so the spin-wave speed is
    `v = J S a_cell` (meV A) and no quadratic stiffness exists.
-4. The real-space sum rule `A = -(S/2) sum_bonds J v v` equals the dispersion
+4. The real-space sum rule `A = (S/2) sum_bonds J v v` equals the dispersion
    route for the single-sublattice chain, and does **not** reproduce the
    multi-sublattice honeycomb (the exact LSWT band is not the bond sum); it
    therefore needs the true bond vectors and is a cross-check only.

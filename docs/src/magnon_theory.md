@@ -39,18 +39,22 @@ where:
 - $\mathbf{J}_{ij}(\mathbf{R})$ is the $3\times3$ exchange tensor, in meV, as
   coupling the *physical* spins $S_i$
 
-```{note}
-The double sum $\sum_{i,j,\mathbf{R}}$ that appears in some references (for
-example Toth & Lake, Eq. 1) counts every bond twice. The operative convention
-of the reference — and the one used by TB2J — is one coupling per bond.
-```
+This is the internal physical-spin convention of the magnon kernel and of
+direct `Magnon` construction. It is **not** the raw TB2J output convention:
+`SpinIO` records use unit spin directions and count both pair directions
+(see [TB2J conventions](convention.rst)). `Magnon.load_from_io()` and
+`Magnon.from_TB2J_results()` retain the TB2J tensors and convert them for
+the current reference moments when constructing the magnon Hamiltonian:
 
-```{note}
-$\mathbf{J}_{ij}$ is the exchange of the spins whose moments are given to the
-magnon calculation. If the moments are changed with respect to the ones used
-in the exchange calculation, the exchange has to be rescaled with the DFT
-rule $J \propto 1/m^2$: $J(m') = J(m)\,(m/m')^2$.
-```
+$$
+\mathbf J^{\rm physical}_{ij} =
+\frac{2\mathbf J^{\rm TB2J}_{ij}}{S_i S_j}.
+$$
+
+The conversion also applies to the on-site tensor representation used by
+`SpinIO` and the magnon kernel. The direct constructor expects already
+converted physical-spin tensors. The factor must be applied per pair when
+spin lengths differ; do not apply an additional global correction.
 
 ### Exchange Tensor Components
 
@@ -226,9 +230,10 @@ B = np.einsum("kij, i, j-> kij", B, Ssqrt, Ssqrt)
 H = np.block([[A1 - C, B], [B.swapaxes(-1,-2).conj(), A2 - C]])
 ```
 
-Here `Jq` is the Fourier transform of the real-space exchange tensors (no
-$1/(S_iS_j)$ rescale: the spin-length factors enter only through
-$\sqrt{S_iS_j}$), `Jmq` is the same tensor at $-\mathbf{q}$ with transposed
+Here `Jq` is the Fourier transform of physical-spin exchange tensors. For
+`SpinIO` inputs it converts the TB2J tensors per pair as described above;
+directly constructed models already supply physical-spin tensors. `Jmq` is
+the same tensor at $-\mathbf{q}$ with transposed
 sublattice indices, and `J0 = -Jq(0)`. The module's overall minus sign
 (`Jq_code = -Jq`) is a sign convention of the code and does not change the
 frequencies.
@@ -392,7 +397,7 @@ The textbook route is the real-space sum rule
 (Liechtenstein–Katsnelson–Gubanov; Pajda et al., PRB **64**, 174402 (2001)):
 
 $$
-A = -\frac{S}{2} \sum_{\text{bonds}} J\,\mathbf{v}\,\mathbf{v}^{T}
+A = \frac{S}{2} \sum_{\text{bonds}} J\,\mathbf{v}\,\mathbf{v}^{T}
 $$
 
 where $\mathbf{v}$ are the *true* bond vectors (lattice offset plus intra-cell
@@ -438,11 +443,10 @@ Closed forms for the isotropic models (verified in
 ### Multi-site magnets
 
 Nothing in the extraction assumes a single spin length. The transverse block
-carries a factor $\sqrt{S_i S_j}$ **per sublattice pair**, so a multi-site
-magnet is not the single-$S$ model with a rescaled coupling, and the old
-$1/(S_i S_j)$ rescale of `Jq()` (removed in the convention correction) was a
-per-pair error, not a global one. For the honeycomb with sublattice spins
-$S_1, S_2$ the textbook branches are
+carries a factor $\sqrt{S_i S_j}$ **per sublattice pair**, and conversion
+from TB2J output must also be made per pair. For the honeycomb with
+sublattice spins $S_1, S_2$, the textbook branches for physical-spin
+coupling $J$ are
 
 $$
 \omega_\pm(\mathbf{k}) = \frac{3J}{2}\left[(S_1+S_2) \pm \sqrt{(S_1-S_2)^2 + 4 S_1 S_2 |\gamma(\mathbf{k})|^2}\right],
@@ -450,8 +454,8 @@ $$
 
 so the acoustic branch is gapless at $\Gamma$ ($\omega_+(\Gamma) = 3J(S_1+S_2)$),
 the Dirac point splits into $3J\min(S_1,S_2)$ and $3J\max(S_1,S_2)$, and the
-branch stays **quadratic** for $S_1 \neq S_2$ (a ferrimagnet has a non-zero
-net moment, hence no Goldstone singularity in $\omega$): the stiffness is
+branch stays **quadratic** for $S_1 \neq S_2$ (the aligned mixed-spin
+ferromagnet has a non-zero net moment): the stiffness is
 $J S_1 S_2 a^2 / (2(S_1+S_2))$. Measured against the textbook closed form the
 module reproduces the band exactly (ratio 1.000000) and the stiffness to
 $4\times10^{-6}$ for $S_1 \neq S_2$.

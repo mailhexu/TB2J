@@ -7,6 +7,11 @@ the ``(a1,a2)`` torus, band Chern numbers ``C_lower = +sign(D_z)`` and
 ``C_upper = -sign(D_z)`` for the gapped honeycomb ferromagnet with NNN
 Kane-Mele DMI and easy-axis SIA, Gamma energies ``omega- = K`` and
 ``omega+ = 6 J1 + K`` at ``S = 1``.
+
+The source is a ``SpinIO``, whose exchange carries TB2J's unit-spin
+convention (both pair directions); the magnon kernel converts it by
+``2 / (S_i S_j)`` before the physical-spin kernel, so at ``S = 1`` the
+executable energies are twice the textbook values of these couplings.
 """
 
 import json
@@ -91,8 +96,10 @@ def test_chern_anti_aligns_with_dmi_sign():
 
 def test_gamma_energies_match_certificate(model_pos):
     res = calculate_bulk(model_pos, BulkRequest(mesh=(6, 6), bands=[0]))
+    # the SpinIO unit-spin exchange is converted by 2/(S_i S_j): at S = 1
+    # the executable energies are twice the textbook S=1 values.
     np.testing.assert_allclose(
-        res.energies[0, 0], [K_SIA, 6 * J1 + K_SIA], atol=1e-10
+        res.energies[0, 0], [2 * K_SIA, 2 * (6 * J1 + K_SIA)], atol=1e-10
     )
 
 
@@ -483,3 +490,207 @@ def test_nonprimitive_embedding_refused():
 
     with pytest.raises(ValueError, match="nonprimitive"):
         LatticeEmbedding(basis=2 * np.eye(3, dtype=int))
+
+
+def test_vanishing_width_link_refuses_invariant_without_chern():
+    atoms = Atoms(
+        "Cr2", positions=[[0, 0, 0], [1.5, 1.5, 0]],
+        cell=3 * np.eye(3), pbc=True,
+    )
+    exc = SpinIO(
+        atoms=atoms, spinat=np.array([[0, 0, 2.0], [0, 0, 2.0]]),
+        charges=np.zeros(2), index_spin=[0, 1], colinear=False,
+        exchange_Jdict={
+            ((0, 1, 0), 0, 1): 0.01,
+            ((0, -1, 0), 1, 0): 0.01,
+        },
+        sia_tensor={
+            0: np.diag([0.0, 0.0, 0.001]),
+            1: np.diag([0.0, 0.0, 0.001]),
+        },
+    )
+    exc._build_Rlist()
+    res = calculate_bulk(prepare_topology_model(exc), BulkRequest(mesh=(2, 2), bands=[0]))
+    assert not res.valid
+    assert res.chern is None
+    assert res.plaquette_flux is None
+    assert res.groups[0]["min_det_overlap"] < 1e-8
+    assert any("link determinant" in reason for reason in res.diagnostics["failures"])
+
+
+def test_cli_rejects_simultaneous_bands_and_groups(tmp_path, capsys):
+    import sys
+
+    from TB2J.magnon.magnon_cli import main
+
+    exc = honeycomb_spinio(0.0005)
+    root = tmp_path / "res_conflict"
+    exc.write_pickle(str(root))
+    argv = sys.argv
+    sys.argv = [
+        "TB2J_magnon",
+        "-p",
+        str(root),
+        "--topology",
+        "--topology-bands",
+        "0",
+        "--topology-groups",
+        "0;1",
+    ]
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+    finally:
+        sys.argv = argv
+    assert exit_info.value.code == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_cli_refuses_unsupported_ordering_vector(tmp_path, capsys):
+    import sys
+
+    from TB2J.magnon.magnon_cli import main
+
+    exc = honeycomb_spinio(0.0005)
+    root = tmp_path / "res_ordering"
+    exc.write_pickle(str(root))
+    argv = sys.argv
+    sys.argv = [
+        "TB2J_magnon",
+        "-p",
+        str(root),
+        "--topology",
+        "--topology-mesh",
+        "6",
+        "6",
+        "--ordering-vector",
+        "0.5",
+        "0",
+        "0",
+    ]
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+    finally:
+        sys.argv = argv
+    assert exit_info.value.code == 2
+    assert "--ordering-vector" in capsys.readouterr().out
+
+
+def test_cli_refuses_rotation_axis_without_ordering_vector(tmp_path, capsys):
+    import sys
+
+    from TB2J.magnon.magnon_cli import main
+
+    exc = honeycomb_spinio(0.0005)
+    root = tmp_path / "res_axis"
+    exc.write_pickle(str(root))
+    argv = sys.argv
+    sys.argv = [
+        "TB2J_magnon",
+        "-p",
+        str(root),
+        "--topology",
+        "--topology-mesh",
+        "6",
+        "6",
+        "--rotation-axis",
+        "0",
+        "0",
+        "1",
+    ]
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+    finally:
+        sys.argv = argv
+    assert exit_info.value.code == 2
+    assert "--rotation-axis" in capsys.readouterr().out
+
+
+def test_cli_refuses_unsupported_local_axes(tmp_path, capsys, monkeypatch):
+    import sys
+
+    from TB2J.magnon.magnon_cli import main
+
+    root = tmp_path / "results"
+    honeycomb_spinio(0.0005).write_pickle(str(root))
+    monkeypatch.setattr(
+        sys, "argv",
+        ["TB2J_magnon", "-p", str(root), "--topology", "--uz-file", "axes"],
+    )
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    assert "--uz-file" in capsys.readouterr().out
+
+
+def test_cli_applies_spin_conf_reference_moments(tmp_path):
+    import sys
+
+    from TB2J.magnon.magnon_cli import main
+
+    exc = honeycomb_spinio(0.0005)
+    root = tmp_path / "res_spinconf"
+    exc.write_pickle(str(root))
+    out = tmp_path / "topo_spinconf.json"
+    argv = sys.argv
+    sys.argv = [
+        "TB2J_magnon",
+        "-p",
+        str(root),
+        "--topology",
+        "--topology-mesh",
+        "6",
+        "6",
+        "--spin-conf",
+        "0",
+        "0",
+        "4",
+        "0",
+        "0",
+        "4",
+        "--topology-out",
+        str(out),
+    ]
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+    finally:
+        sys.argv = argv
+    assert exit_info.value.code == 0
+    data = json.loads(out.read_text())
+    np.testing.assert_allclose(
+        data["energies_eV"][0][0], [K_SIA, 6 * J1 + K_SIA], atol=1e-10
+    )
+
+
+def test_cli_standalone_bulk_input_error_is_refused(tmp_path, capsys):
+    # An invalid bulk request must be refused with the paired route's exit
+    # code and message instead of raising out of the CLI.
+    import sys
+
+    from TB2J.magnon.magnon_cli import main
+
+    exc = honeycomb_spinio(0.0005)
+    root = tmp_path / "res_badband"
+    exc.write_pickle(str(root))
+    argv = sys.argv
+    sys.argv = [
+        "TB2J_magnon",
+        "-p",
+        str(root),
+        "--topology",
+        "--topology-mesh",
+        "6",
+        "6",
+        "--topology-bands",
+        "5",
+    ]
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            main()
+    finally:
+        sys.argv = argv
+    assert exit_info.value.code == 2
+    assert "out of range" in capsys.readouterr().out

@@ -413,8 +413,44 @@ class TestIdentity:
         with pytest.raises(Exception):
             model.digest = "forged"
 
+    def test_model_arrays_cannot_be_changed_through_magnon(self):
+        model = prepare_topology_model(make_exc(exchange=basic_channels()[0]))
+        expected = model.JR.copy()
+        digest = model.digest
+        with pytest.raises(ValueError):
+            model.JR[0, 0, 0, 0, 0] = 1.0
+        legacy = model.magnon()
+        legacy.JR[0, 0, 0, 0, 0] += 1.0
+        np.testing.assert_array_equal(model.JR, expected)
+        assert model.digest == digest
+
 
 class TestLegacyCompatibility:
+    @pytest.mark.parametrize("topology", [False, True])
+    def test_multisite_tb2j_bands_match_unit_spin_hamiltonian(self, topology):
+        spins = ((0.0, 0.0, 3.0), (0.0, 0.0, 4.0), (0.0, 0.0, 0.0))
+        exchange = {}
+        families = (
+            (0, 1, [(0, 0, 0), (0, 1, 0), (-1, 0, 0)], 0.001),
+            (0, 0, [(1, 0, 0), (0, 1, 0), (1, 1, 0)], 0.0005),
+            (1, 1, [(1, 0, 0), (0, 1, 0), (1, 1, 0)], 0.0005),
+            (0, 1, [(1, 1, 0), (-1, 1, 0), (-1, -1, 0)], 0.00025),
+        )
+        for i, j, translations, coupling in families:
+            for R in translations:
+                exchange[(R, i, j)] = coupling
+                exchange[(tuple(-x for x in R), j, i)] = coupling
+        exc = make_exc(spinat=spins, exchange=exchange)
+        if topology:
+            model = prepare_topology_model(exc).magnon()
+        else:
+            model = Magnon.load_from_io(exc, Jani=False, DMI=False, SIA=False)
+            model.set_reference((0, 0, 0), [[0, 0, 1]], (1, 0, 0))
+        h = model.Hq(np.array([[1 / 3, 1 / 3, 0.0]]))[0]
+        w = np.linalg.eigvals(np.diag([1, 1, -1, -1]) @ h)
+        np.testing.assert_allclose(np.sort(np.abs(w.real))[::2] * 1000,
+                                   [8.25, 11.0], atol=1e-8)
+
     def test_legacy_loader_accepts_biquadratic_source(self):
         """The prior band/DOS path silently ignores unsupported channels;
         topology-only strictness must not change that behavior."""

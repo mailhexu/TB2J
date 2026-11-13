@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation
 from TB2J.io_exchange import SpinIO
 from TB2J.kpoints import monkhorst_pack
 from TB2J.magnon.magnon_band import MagnonBand
-from TB2J.magnon.magnon_math import get_rotation_arrays
+from TB2J.magnon.magnon_math import get_rotation_arrays, tb2j_to_physical
 from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_band_specific_args,
@@ -51,6 +51,7 @@ class Magnon:
     # the primitive-cell BZ k-path can be used and folded back.
     primitive_cell: np.ndarray = None
     supercell_matrix: np.ndarray = None
+    _tb2j_convention: bool = False
 
     def set_reference(self, Q, uz, n, magmoms=None):
         """
@@ -149,11 +150,12 @@ class Magnon:
             Last two indices are for 3x3 tensor components
         """
         Rlist = np.array(self.Rlist)
-        # NOTE (convention audit 2026-11-13): no 1/(S_i S_j) rescale here.
-        # The spin-length factors are applied once, as sqrt(S_i S_j), on the
-        # transverse terms in Hq (Toth & Lake, J. Phys.: Condens. Matter 27,
-        # 166002 (2015), Eq. 26).
-        JR = self.JR.copy()
+        # SpinIO exchange uses unit spins and counts both bond directions.
+        JR = (
+            tb2j_to_physical(self.JR, self.magmom)
+            if self._tb2j_convention
+            else self.JR
+        )
         JRprime = JR.copy()
 
         for iR, R in enumerate(Rlist):
@@ -600,6 +602,7 @@ class Magnon:
             pbc=pbc,
             primitive_cell=getattr(exc, "primitive_cell", None),
             supercell_matrix=getattr(exc, "supercell_matrix", None),
+            _tb2j_convention=True,
         )
 
     @classmethod

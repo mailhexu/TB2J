@@ -129,6 +129,8 @@ note("3. Numeric anchor: Colpa solve of the actual Magnon.Hq")
 
 
 def dimer_spinio(deltav, J1v=0.01, Kv=0.001):
+    # The symbolic parameters are physical-spin couplings; SpinIO uses unit spins.
+    J1v, deltav, Kv = J1v / 2, deltav / 2, Kv / 2
     basis = 10.0 * _np.eye(3)
     atoms = _Atoms(
         "Cr2", positions=[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]], cell=basis, pbc=True

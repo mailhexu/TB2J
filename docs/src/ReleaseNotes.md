@@ -4,6 +4,11 @@
 #### Current development version (v1.0.0-alpha) 
 These are the new features and changes  not yet included in the official release.
 
+- Magnon `SpinIO` inputs retain TB2J's unit-spin, double-counted-pair
+  convention. The physical-spin magnon and topology kernels convert exchange
+  tensors per site pair using the reference moment lengths; direct `Magnon`
+  construction continues to take physical-spin tensors.
+
 - Magnon topology correctness: nonreciprocal modes are no longer rejected for
   lacking same-momentum positive/negative pairing; globally invalid bulk results
   no longer mark uncomputed group fluxes valid. Selected exchange interactions

@@ -236,6 +236,15 @@ class TopologyModel:
     canonicalization_version: str = CANONICALIZATION_VERSION
     magnetic_cell_transform: Optional[Dict[str, Any]] = None
 
+    def __post_init__(self):
+        for name in (
+            "cell", "positions", "positions_fractional", "index_spin",
+            "spin_atoms", "magmoms", "Rlist", "JR",
+        ):
+            array = np.array(getattr(self, name), copy=True)
+            array.setflags(write=False)
+            object.__setattr__(self, name, array)
+
     @property
     def nspin(self) -> int:
         return int(self.magmoms.shape[0])
@@ -281,12 +290,13 @@ class TopologyModel:
         magnon = Magnon(
             nspin=self.nspin,
             magmom=moments,
-            Rlist=self.Rlist,
-            JR=self.JR,
+            Rlist=self.Rlist.copy(),
+            JR=self.JR.copy(),
             cell=AseCell(np.array(self.cell, dtype=float)),
             _Q=np.asarray(Q, dtype=float),
             _uz=np.asarray(uz, dtype=float),
             _n=np.asarray(n, dtype=float),
+            _tb2j_convention=True,
             pbc=(True, True, True),
         )
         magnon.set_reference(Q, uz, n, magmoms=moments)

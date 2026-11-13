@@ -110,14 +110,10 @@ check(
     " (the R-sum counts every bond twice, so this is the textbook 2 J S (1-cos ka))",
 )
 
-# Executable block chain for a z-aligned FM (units as in the code path):
-#   Jq Fourier-transforms the exchange without a spin rescale; Hq multiplies
-#   A1, A2, B by sqrt(SiSj) and carries the printed 1/2 of Toth & Lake (2015)
-#   Eq. (26) (the frame u = (1, i, 0) is unnormalised, |u|^2 = 2), and C by
-#   S_j with J0 = -Jq(0) (the classical mean field sum_j J_ij M_j):
-#   A1_total = -S J(-k),  B_total = 0,  C_total = -S J(0)
-#   omega = eig(A1 - C) = S [J(0) - J(k)]
-# which is the textbook LSWT dispersion for every S.
+# Direct-constructor block chain for a z-aligned FM with physical-spin
+# exchange: Hq applies the transverse 1/2 and the spin-length factors once.
+# SpinIO inputs instead use unit spins and directed bonds; the loader converts
+# those tensors by 2/(S_i S_j) before this same physical-spin kernel.
 u = sp.Matrix([1, sp.I, 0])
 
 
@@ -141,7 +137,7 @@ check(
     "at S = 1 (mu = 2 muB) the executable omega equals the textbook S[J(0) - J(k)]",
 )
 
-# Numeric anchor: reproduce the legacy Magnon path scaling for mu = 2, 4, 6.
+# Numeric anchor: convert the unit-spin SpinIO exchange for each moment.
 _atoms = _Atoms("Fe", positions=[[0, 0, 0]], cell=np.eye(3) * 4, pbc=True)
 _ex = {((0, 0, 1), 0, 0): 0.002, ((0, 0, -1), 0, 0): 0.002}
 _exc = _SpinIO(
@@ -159,11 +155,11 @@ for mu in (2.0, 4.0, 6.0):
     _m.set_reference((0, 0, 0), [[0, 0, 1]], (1, 0, 0), magmoms=[[0, 0, mu]])
     _om = float(_m._magnon_energies(np.array([[0.0, 0.0, 0.5]]))[0, 0])
     _S = mu / 2
-    _theory = _S * (2 * 0.002 - 2 * 0.002 * np.cos(np.pi))
+    _theory = (2.0 / _S**2) * _S * (2 * 0.002 - 2 * 0.002 * np.cos(np.pi))
     ratios.append(_om / _theory)
 check(
     np.allclose(ratios, [1.0, 1.0, 1.0]),
-    f"Magnon energies equal the textbook LSWT for every S"
+    f"SpinIO energies equal the converted textbook LSWT for every S"
     f" (ratios {[round(r, 6) for r in ratios]})",
 )
 
@@ -523,6 +519,7 @@ note("4b. Executable-convention anchor: Colpa modes of Magnon.Hq + FHS winding")
 
 def honeycomb_exc_spinio(Dv, J1v=1.0, J2v=0.2, Kv=0.1):
     """Honeycomb FM SpinIO in the executable convention (mu = 2 muB, S = 1)."""
+    J1v, J2v, Dv, Kv = (value / 2 for value in (J1v, J2v, Dv, Kv))
     _basis = _np.array([[1.0, 0.0, 0.0], [0.5, _np.sqrt(3) / 2, 0.0], [0.0, 0.0, 10.0]])
     _atoms = _Atoms(
         "Cr2",

@@ -13,7 +13,7 @@ the `mydev` environment). Pinned statements:
 3. AFM chain (two-site Neel cell, magnetic cell `2a`): the acoustic branch is
    linear, `omega(k) = 2 J S |sin(pi k)|`, so the spin-wave speed is
    `v = J S a_cell` (meV A) and no quadratic stiffness exists.
-4. The real-space sum rule `A = -(S/2) sum_bonds J v v` equals the dispersion
+4. The real-space sum rule `A = (S/2) sum_bonds J v v` equals the dispersion
    route for the single-sublattice chain, and does **not** reproduce the
    multi-sublattice honeycomb (the exact LSWT band is not the bond sum); it
    therefore needs the true bond vectors and is a cross-check only.
@@ -42,6 +42,9 @@ the `mydev` environment). Pinned statements:
 ## Console output of the executed script
 
 ```
+  [OK] TB2J directed unit-spin to physical-spin transverse coefficient
+  [OK] TB2J directed unit-spin to physical-spin longitudinal coefficient
+  [OK] unit-spin on-site anisotropy gap
   [OK] FM chain stiffness A_xx = J S a^2
   [OK] FM honeycomb stiffness A_xx = J S a^2 / 4
   [OK] FM honeycomb stiffness A_yy = J S a^2 / 4
@@ -60,7 +63,7 @@ the `mydev` environment). Pinned statements:
   [OK] AFM chain reference state is stable (jiso < 0)
   [OK] implementation AFM chain reports a linear branch (no stiffness tensor)
   [OK] implementation AFM chain speed v_x = 2.999946 meV A (textbook J S a_cell = 3.000000)
-  [OK] sum rule A_xx = -2.000000 meV A^2 equals the Bravais textbook value
+  [OK] sum rule A_xx = 2.000000 meV A^2 equals the Bravais textbook value
   [OK] sum rule does not reproduce the multi-sublattice honeycomb stiffness (the exact LSWT band is not the bond sum)
   [OK] Neel honeycomb reference state is stable (jiso < 0)
   [OK] implementation Neel honeycomb reports a linear branch (no tensor)

@@ -509,6 +509,78 @@ def run_topology_comparison(args, model, request, embedding) -> int:
     return 1
 
 
+def topology_ordering_options(args, params):
+    """Resolve the ordering vector and rotation axis of a topology run.
+
+    The topology path carries the ordering vector through ``--topology-q``
+    (the commensurate magnetic-cell expansion) and rotates the expanded
+    reference about the given axis. Common reference options that the
+    topology path cannot honor are refused instead of being ignored.
+
+    Returns the rotation axis for the magnetic-cell expansion.
+    """
+    import numpy as np
+
+    if params.uz_file is not None:
+        raise ValueError(
+            "--uz-file is not supported by the topology path; its local "
+            "frames are determined from the reference moments."
+        )
+
+    topology_q = np.asarray(args.topology_q, dtype=float)
+    if params.Q is not None:
+        ordering = np.asarray(params.Q, dtype=float)
+        if np.any(ordering != 0.0):
+            if not np.any(topology_q != 0.0):
+                raise ValueError(
+                    "--ordering-vector (Q) is not supported by the topology "
+                    "path: a nonzero ordering vector must be given as "
+                    "--topology-q, which expands the magnetic cell explicitly."
+                )
+            if not np.allclose(ordering, topology_q, rtol=0.0, atol=1e-12):
+                raise ValueError(
+                    "--ordering-vector and --topology-q disagree; the topology "
+                    "path uses the ordering vector given by --topology-q."
+                )
+    if params.n is None:
+        # the magnetic-cell expansion default (unchanged behaviour)
+        return (0.0, 0.0, 1.0)
+    if not np.any(topology_q != 0.0):
+        raise ValueError(
+            "--rotation-axis has no effect on the topology reference: it is "
+            "applied only together with a nonzero --topology-q ordering "
+            "vector."
+        )
+    return tuple(float(x) for x in params.n)
+
+
+def topology_reference_moments(params, exc) -> None:
+    """Apply the common reference-moment options to the source moments.
+
+    ``--spin-conf``/``--spin-conf-file`` give the moment of every magnetic
+    site; the topology model reads its reference moments from the source, so
+    the override is applied before the model is prepared.
+    """
+    import numpy as np
+
+    from TB2J.magnon.magnon_parameters import _load_spin_conf
+
+    index_spin = np.asarray(exc.index_spin, dtype=int)
+    conf = _load_spin_conf(params, int((index_spin >= 0).sum()))
+    if conf is None:
+        return
+    spinat = np.asarray(exc.spinat, dtype=float)
+    moments = (
+        np.zeros((len(index_spin), 3))
+        if spinat.ndim == 1
+        else spinat.astype(float)
+    )
+    for atom, spin in enumerate(index_spin):
+        if spin >= 0:
+            moments[atom] = conf[spin]
+    exc.spinat = moments
+
+
 def run_topology(args, params: MagnonParameters) -> int:
     """Opt-in bulk topology mode. Returns a process exit code."""
 
@@ -529,9 +601,15 @@ def run_topology(args, params: MagnonParameters) -> int:
         "SIA": params.SIA,
     }
     try:
+        axis = topology_ordering_options(args, params)
+        topology_reference_moments(params, exc)
+    except (OSError, TypeError, ValueError) as error:
+        print(f"Topology reference options refused the input: {error}")
+        return 2
+    try:
         model = prepare_topology_model(exc, include=include, source_path=params.path)
         if any(float(q) != 0.0 for q in args.topology_q):
-            model = expand_magnetic_cell(model, args.topology_q)
+            model = expand_magnetic_cell(model, args.topology_q, axis=axis)
     except TopologyPreparationError as error:
         print(f"Topology preparation refused the input: {error}")
         return 2
@@ -578,7 +656,11 @@ def run_topology(args, params: MagnonParameters) -> int:
         return 2
     if getattr(args, "topology_compare", False):
         return run_topology_comparison(args, model, request, embedding)
-    result = calculate_bulk(model, request)
+    try:
+        result = calculate_bulk(model, request)
+    except (TypeError, ValueError) as error:
+        print(f"Bulk topology request refused: {error}")
+        return 2
     record = result.to_json_dict()
     if args.topology_refine:
         from TB2J.magnon.topology.bulk import refine_bulk
@@ -613,6 +695,12 @@ def run_topology(args, params: MagnonParameters) -> int:
 
 def validate_topology_cli_options(args, parser) -> None:
     """Reject topology options that would otherwise be silently ignored."""
+    if args.topology_bands is not None and args.topology_groups is not None:
+        parser.error(
+            "--topology-bands and --topology-groups are mutually exclusive: "
+            "request either one band group or several independent groups."
+        )
+
     comparison_options = (
         args.topology_gap is not None
         or args.topology_edge is not None
@@ -671,14 +759,17 @@ def main():
         )
 
     window = None
-    if args.config:
-        params = MagnonParameters.from_toml(args.config)
-        if params.window is not None:
-            window = params.window
-    else:
-        if args.window is not None:
-            window = tuple(args.window)
-        params = parse_common_args(args)
+    try:
+        if args.config:
+            params = MagnonParameters.from_toml(args.config)
+            if params.window is not None:
+                window = params.window
+        else:
+            if args.window is not None:
+                window = tuple(args.window)
+            params = parse_common_args(args)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
 
     if args.topology or args.topology_compare:
         sys.exit(run_topology(args, params))

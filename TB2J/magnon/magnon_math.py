@@ -6,6 +6,14 @@ I = np.eye(3)
 uz = np.array([[0.0, 0.0, 1.0]])
 
 
+def tb2j_to_physical(JR, magmoms):
+    """Convert directed, unit-spin TB2J tensors to physical-spin tensors."""
+    spins = np.linalg.norm(np.asarray(magmoms, dtype=float), axis=1) / 2.0
+    if np.any(~np.isfinite(spins)) or np.any(spins <= 0):
+        raise ValueError("TB2J exchange conversion requires nonzero finite moments.")
+    return np.asarray(JR) * (2.0 / np.outer(spins, spins))[None, :, :, None, None]
+
+
 def generate_grid(kmesh, sort=True):
     half_grid = [int(n / 2) for n in kmesh]
     grid = np.stack(

@@ -226,10 +226,17 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
     )
     noncollinear = not collinear
     if noncollinear:
+        from TB2J.magnon.magnon_math import tb2j_to_physical
         from TB2J.magnon.topology.assembly import local_frame_bosonic_hamiltonian
 
+        # the model keeps the raw TB2J tensors; the local-frame assembly
+        # needs the physical (spin-normalized) exchange, exactly like the
+        # legacy Magnon path.
         H_all = local_frame_bosonic_hamiltonian(
-            model.JR, model.Rlist, model.magmoms, kpoints.reshape(n_mesh, 3)
+            tb2j_to_physical(model.JR, model.magmoms),
+            model.Rlist,
+            model.magmoms,
+            kpoints.reshape(n_mesh, 3),
         )
     else:
         H_all = magnon.Hq(kpoints.reshape(n_mesh, 3))
@@ -411,45 +418,58 @@ def calculate_bulk(model: TopologyModel, request: BulkRequest) -> BulkTopologyRe
             for idx in range(nu * nv):
                 psi[idx] = modes[idx].vectors[:, columns[idx]]
 
-            def link(p, q) -> complex:
-                # normalized determinant of the between-points Gram matrix
-                d = np.linalg.det(psi[p].conj().T @ psi[q])
-                return d / abs(d)
-
-            min_link = min(
-                abs(
-                    np.linalg.det(
-                        psi[(i * nv + j)].conj().T @ psi[((i + 1) % nu) * nv + j]
-                    )
-                )
-                for i in range(nu)
-                for j in range(nv)
-            )
-            prod = np.ones((nu, nv), dtype=complex)
+            # FHS links: the determinants of BOTH mesh directions are
+            # collected and tested BEFORE any division, because a vanishing
+            # determinant would otherwise produce NaN phases and a
+            # meaningless Chern number instead of a refusal.
+            det_edge = np.empty((nu, nv), dtype=complex)  # (i,j) -> (i+1,j)
+            det_width = np.empty((nu, nv), dtype=complex)  # (i,j) -> (i,j+1)
             for i in range(nu):
                 for j in range(nv):
-                    p0 = i * nv + j
-                    p1 = ((i + 1) % nu) * nv + j
-                    p2 = ((i + 1) % nu) * nv + (j + 1) % nv
-                    p3 = i * nv + (j + 1) % nv
-                    prod[i, j] = (
-                        link(p0, p1) * link(p1, p2) * link(p2, p3) * link(p3, p0)
+                    p = i * nv + j
+                    det_edge[i, j] = np.linalg.det(
+                        psi[p].conj().T @ psi[((i + 1) % nu) * nv + j]
                     )
-            flux = np.angle(prod) / (2 * np.pi)
-            chern = int(np.rint(flux.sum()))
-            # gauge-safe vertex curvature: average of adjacent plaquette fluxes
-            vertex = (
-                np.roll(flux, 1, axis=0)
-                + np.roll(flux, 1, axis=1)
-                + np.roll(np.roll(flux, 1, axis=0), 1, axis=1)
-                + flux
-            ) / 4.0
-            if min_link <= request.link_tol:
+                    det_width[i, j] = np.linalg.det(
+                        psi[p].conj().T @ psi[i * nv + (j + 1) % nv]
+                    )
+            mags = np.abs(np.concatenate([det_edge.ravel(), det_width.ravel()]))
+            min_link = float(mags.min())
+            if not np.isfinite(min_link):
+                gfail.append(
+                    "non-finite link determinant overlap: the group overlap "
+                    "matrices carry NaN or infinite values on this mesh."
+                )
+            elif min_link <= max(request.link_tol, 0.0):
                 gfail.append(
                     f"vanishing link determinant overlap: min |det S| = "
                     f"{min_link:.3e} within tolerance {request.link_tol:.3e}; "
                     "the band group overlaps other states on this mesh."
                 )
+            else:
+                link_edge = det_edge / np.abs(det_edge)
+                link_width = det_width / np.abs(det_width)
+                prod = np.ones((nu, nv), dtype=complex)
+                for i in range(nu):
+                    for j in range(nv):
+                        # plaquette order (i,j) -> (i+1,j) -> (i+1,j+1) -> (i,j+1);
+                        # the reversed links are the complex conjugates of the
+                        # forward ones (S_qp = S_pq^dag).
+                        prod[i, j] = (
+                            link_edge[i, j]
+                            * link_width[(i + 1) % nu, j]
+                            * np.conj(link_edge[i, (j + 1) % nv])
+                            * np.conj(link_width[i, j])
+                        )
+                flux = np.angle(prod) / (2 * np.pi)
+                chern = int(np.rint(flux.sum()))
+                # gauge-safe vertex curvature: average of adjacent plaquette fluxes
+                vertex = (
+                    np.roll(flux, 1, axis=0)
+                    + np.roll(flux, 1, axis=1)
+                    + np.roll(np.roll(flux, 1, axis=0), 1, axis=1)
+                    + flux
+                ) / 4.0
         group_valid = not gfail and not failures
         record = {
             "bands": [int(b) for b in bands],

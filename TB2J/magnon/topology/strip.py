@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from TB2J.magnon.magnon_math import tb2j_to_physical
+
 from TB2J.magnon.topology.assembly import (
     classical_transverse_gradient,
     local_frame_bosonic_hamiltonian,
@@ -819,6 +821,7 @@ def calculate_strip(model: TopologyModel, request: StripRequest) -> StripSpectru
     amplitude_norm = np.full_like(energies, np.nan)
     classifications: Dict[str, int] = {}
     all_stable = True
+    physical_JR = tb2j_to_physical(JR, reference)
     spin_lengths = np.linalg.norm(reference, axis=1) / 2.0
     kpoints_input = embedding.to_input_k(
         np.column_stack(
@@ -832,7 +835,7 @@ def calculate_strip(model: TopologyModel, request: StripRequest) -> StripSpectru
     for ik, k_input in enumerate(kpoints_input):
         try:
             hamiltonian = local_frame_bosonic_hamiltonian(
-                JR, Rlist, reference, k_input[None, :]
+                physical_JR, Rlist, reference, k_input[None, :]
             )[0]
             modes = solve_bosonic_modes(hamiltonian)
         except (ModeSolverError, ValueError, np.linalg.LinAlgError) as error:

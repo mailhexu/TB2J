@@ -1,21 +1,7 @@
-"""Regression tests for the magnon3 convention patch (ticket 05).
+"""Direct physical-spin and SpinIO unit-spin magnon convention regressions.
 
-These are the tests proposed to accompany the patch (they fail on the current
-code: the frequencies are (2/S^2) times the textbook values).  They assert
-external behaviour only -- the magnon frequencies against closed textbook
-formulas -- never internal matrix layouts.
-
-Textbook reference (Toth & Lake, J. Phys.: Condens. Matter 27, 166002 (2015),
-Eq. 25/26; convention H = -sum_<ij> J S_i.S_j, unordered bonds once, J in meV,
-|S| explicit):
-
-    FM chain      omega(k) = 2 J S (1 - cos ka)
-    FM honeycomb  omega_pm(k) = 3 J S (1 -/+ |gamma(k)|)
-
-Run against the throwaway patched copy of the package:
-
-    PYTHONPATH=<...>/scratch/lswt-audit/patched python -m pytest \
-        scratch/lswt-audit/test_magnon3_convention.py -q
+The direct constructor takes physical-spin exchange, with each bond counted
+once in the Hamiltonian. SpinIO supplies TB2J's unit-spin exchange convention.
 """
 
 import numpy as np
@@ -150,3 +136,53 @@ def test_guard_rejects_non_uniform_reference_with_q():
             np.array([1.0, 0, 0]),
             magmoms=np.array([[0.0, 0, 3.0], [0.0, 0, 1.5]]),
         )
+
+
+@pytest.mark.parametrize("S", [1.0, 1.5, 2.0])
+def test_spinio_chain_respects_tb2j_unit_spin_convention(S):
+    from ase import Atoms
+    from TB2J.io_exchange import SpinIO
+    from TB2J.magnon.magnon3 import Magnon
+
+    exc = SpinIO(
+        atoms=Atoms("Fe", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True),
+        spinat=np.array([[0.0, 0.0, 2 * S]]),
+        charges=np.zeros(1),
+        index_spin=[0],
+        colinear=False,
+        exchange_Jdict={
+            ((1, 0, 0), 0, 0): 1e-3,
+            ((-1, 0, 0), 0, 0): 1e-3,
+        },
+    )
+    exc._build_Rlist()
+    model = Magnon.load_from_io(exc, Jiso=True, Jani=False, DMI=False, SIA=False)
+    model.set_reference([0, 0, 0], [[0, 0, 1]], [1, 0, 0])
+    w = _exact_energies(model, np.array([[0.25, 0.0, 0.0]]))
+    assert w[0] == pytest.approx(4.0 / S, abs=1e-8)
+
+    # The unit-spin exchange remains fixed if the reference moment changes.
+    model.set_reference([0, 0, 0], [[0, 0, 1]], [1, 0, 0], [[0, 0, 4.0]])
+    w = _exact_energies(model, np.array([[0.25, 0.0, 0.0]]))
+    assert w[0] == pytest.approx(2.0, abs=1e-8)
+
+
+def test_spinio_single_ion_anisotropy_uses_unit_spin_convention():
+    from ase import Atoms
+    from TB2J.io_exchange import SpinIO
+    from TB2J.magnon.magnon3 import Magnon
+
+    exc = SpinIO(
+        atoms=Atoms("Fe", positions=[[0, 0, 0]], cell=np.eye(3), pbc=True),
+        spinat=np.array([[0.0, 0.0, 3.0]]),
+        charges=np.zeros(1),
+        index_spin=[0],
+        colinear=False,
+        exchange_Jdict={((0, 0, 0), 0, 0): 0.0},
+        sia_tensor={0: np.diag([0.0001, 0.0002, 0.0008])},
+    )
+    exc._build_Rlist()
+    model = Magnon.load_from_io(exc, Jiso=True, Jani=False, DMI=False, SIA=True)
+    model.set_reference([0, 0, 0], [[0, 0, 1]], [1, 0, 0])
+    w = _exact_energies(model, np.array([[0.0, 0.0, 0.0]]))
+    assert w[0] == pytest.approx(2.0 * np.sqrt(0.7 * 0.6) / 1.5, abs=1e-8)

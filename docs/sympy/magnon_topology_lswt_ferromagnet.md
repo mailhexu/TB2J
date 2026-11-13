@@ -34,7 +34,7 @@ passed in the `mydev` environment). Pinned statements:
   [OK] pairing block B = u^T J u vanishes for isotropic z-FM
   [OK] executable chain omega = S[J(0) - J(k)] (textbook LSWT, all S)
   [OK] at S = 1 (mu = 2 muB) the executable omega equals the textbook S[J(0) - J(k)]
-  [OK] Magnon energies equal the textbook LSWT for every S (ratios [np.float64(1.0), np.float64(1.0), np.float64(1.0)])
+  [OK] SpinIO energies equal the converted textbook LSWT for every S (ratios [np.float64(1.0), np.float64(1.0), np.float64(1.0)])
   [OK] easy-axis gap omega(0) = 2 K / S (executable scaling; 2 K S at S = 1)
   [OK] numeric: H v = omega g v with v = K^{-dag} u for M = K^dag g K
   [OK] numeric: metric norm v^dag g v = 1/omega

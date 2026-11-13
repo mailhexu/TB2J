@@ -8,6 +8,7 @@ import pytest
 from ase import Atoms
 
 from TB2J.io_exchange import SpinIO
+from TB2J.magnon.magnon_math import tb2j_to_physical
 from TB2J.magnon.topology import (
     LatticeEmbedding,
     StripRequest,
@@ -208,7 +209,8 @@ def test_periodic_strip_matches_bulk_with_unequal_spin_moments():
     moments = np.asarray([model.magmoms[site["source_spin"]] for site in sites])
     strip = solve_bosonic_modes(
         local_frame_bosonic_hamiltonian(
-            JR_strip, R_strip, moments, np.array([[0.0, 0.0, 0.0]])
+            tb2j_to_physical(JR_strip, moments), R_strip, moments,
+            np.array([[0.0, 0.0, 0.0]])
         )[0]
     ).energies
     bulk_kpoints = bulk.kpoints.reshape(-1, 3)

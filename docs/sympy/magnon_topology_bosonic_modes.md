@@ -82,7 +82,7 @@ passed in the `mydev` environment). Pinned statements:
   [OK] implementation: generic positive-definite H (nonreciprocal in general) returns the two positive modes with unit metric Gram, no pairing assumed
 4. Stability policy anchors (numeric)
   [OK] stable anomalous dimer: Hessian psd with a nonzero pairing block (real frequencies despite the anomalous terms)
-  [OK] negative-Hessian reference with REAL dynamical frequencies (min Hessian -1.900e-02, max |Im omega| 0.0e+00): classified energetically unstable and refused; a diagonal shift would not legitimize topology
+  [OK] negative-Hessian reference with REAL dynamical frequencies (min Hessian -3.800e-02, max |Im omega| 0.0e+00): classified energetically unstable and refused; a diagonal shift would not legitimize topology
   [OK] complex-frequency dynamic instability (min Hessian -1.950e-02, max |Im omega| 5.27e-03): classified energetically unstable and refused; the frequency character is reported separately
   [OK] symmetry-verified positive-semidefinite case: 2 zero mode(s) at Gamma without SIA (H psi_null = 0 residual 2.9e-19); the metric norm 1/omega diverges there, so the direction is non-normalizable and reported as null space, not as invented normalized vectors
   [OK] legacy _magnon_energies still shifts an indefinite Hessian with a warning (documented legacy behavior, untouched by topology)

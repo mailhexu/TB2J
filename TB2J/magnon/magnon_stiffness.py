@@ -15,13 +15,23 @@ The tensor is extracted from the exact `eig(gH)` spectrum, not from the
 shifted-Cholesky route of `Magnon._magnon_energies` (which is inaccurate and
 returns negative frequencies at a ferromagnetic Goldstone point).
 
-The real-space sum rule `A = -(S/2) sum_bonds J v v` is the textbook route
+The extraction refuses an unusable reference state instead of reporting
+numbers that look physical:
+
+* a *dynamically unstable* reference (the `gH` spectrum has a resolved
+  non-real frequency) raises, because the modulus of a complex frequency is
+  not a magnon energy;
+* an *energetically unstable* reference (the bosonic Hessian has a negative
+  direction at a sampled wavevector) raises instead of fitting its spectrum.
+
+The real-space sum rule `A = (S/2) sum_bonds J v v` is the textbook route
 (Liechtenstein-Katsnelson-Gubanov; Pajda et al., PRB 64, 174402 (2001)) and is
 available as a cross-check.  It is valid only for a single-sublattice (Bravais)
 ferromagnet: for a multi-sublattice lattice the exact LSWT band is not the
 bond sum.  It also needs the *true* bond vectors (lattice offset plus
 intra-cell displacement), which the magnon calculator does not carry, so the
-caller supplies them.
+caller supplies them.  Its sign follows the module convention: `J > 0` is the
+ferromagnet and gives a positive stiffness.
 """
 
 from dataclasses import dataclass
@@ -32,6 +42,9 @@ import scipy.linalg as sl
 __all__ = ["SpinStiffness", "get_spin_stiffness", "stiffness_sum_rule"]
 
 EV_TO_MEV = 1e3
+
+# Absolute and scale-relative tolerance for numerical zero modes (eV).
+HERMITICITY_TOL_EV = 1e-10
 
 
 @dataclass
@@ -83,9 +96,13 @@ class SpinStiffness:
         else:
             lines.append("branch order: 1 (linear)")
             lines.append("directional spin-wave speeds d omega/d|k| (meV A):")
-            lines.append("  [" + "  ".join(f"{v: .8g}" for v in self.velocity) + "]")
+            speeds = ", ".join(
+                f"{d}={self.velocity[i]: .6g}" for i, d in enumerate("xyz")
+            )
+            lines.append(f"  {speeds}")
             lines.append(
-                "speed |v| = {:.6g} meV A".format(np.linalg.norm(self.velocity))
+                "  (one projection per cartesian axis; the speed along a general "
+                "direction is not their Euclidean norm)"
             )
         if self.sum_rule is not None:
             lines.append("sum-rule tensor A (meV A^2), Bravais cross-check:")
@@ -112,16 +129,40 @@ def _branch_energy(M, k_frac):
     Uses the exact route: the eigenvalues of g H come in +/- pairs, so the
     acoustic magnon energy is the smallest absolute eigenvalue (zero at a
     Goldstone point, the gap for a gapped reference state).
+
+    A reference state whose spectrum has a resolved non-real frequency is
+    dynamically unstable: the modulus of a complex frequency is not a magnon
+    energy, so the extraction refuses instead of reporting it.
     """
     H = M.Hq(np.atleast_2d(k_frac))
     n = H.shape[-1] // 2
     g = np.block([[np.eye(n), np.zeros((n, n))], [np.zeros((n, n)), -np.eye(n)]])
-    w = sl.eigvals(g @ H[0]).real
+    w = sl.eigvals(g @ H[0])
+    scale = max(float(np.max(np.abs(w))), 1.0)
+    imag = float(np.max(np.abs(w.imag)))
+    if imag > HERMITICITY_TOL_EV * scale:
+        raise ValueError(
+            "The reference state is dynamically unstable: the magnon "
+            f"frequencies at k={np.round(k_frac, 6).tolist()} are complex "
+            f"(max |Im omega| = {imag * EV_TO_MEV:.6g} meV). The modulus of a "
+            "complex frequency is not a magnon energy."
+        )
+    h_min = float(np.linalg.eigvalsh(H[0]).min())
+    if h_min < -HERMITICITY_TOL_EV * max(float(np.max(np.abs(H[0]))), 1.0):
+        raise ValueError(
+            "The reference state is energetically unstable: the bosonic "
+            f"Hamiltonian at k={np.round(k_frac, 6).tolist()} has a negative "
+            f"eigenvalue ({h_min * EV_TO_MEV:.6g} meV)."
+        )
     return np.abs(w).min() * EV_TO_MEV
 
 
 def stiffness_sum_rule(J_iso, S, bond_vectors):
     """Real-space stiffness sum rule (Bravais ferromagnets only).
+
+    The rule is `A = (S/2) sum_bonds J v v` with the sign convention of the
+    magnon module (`H = -sum_<ij> J S_i.S_j`): `J > 0` is the ferromagnet and
+    gives a positive stiffness, the sign of the dispersion route.
 
     Parameters
     ----------
@@ -150,7 +191,7 @@ def stiffness_sum_rule(J_iso, S, bond_vectors):
     A = np.zeros((3, 3))
     for J, v in zip(J_iso, vectors):
         A += J * np.outer(v, v)
-    return -0.5 * float(S) * A
+    return 0.5 * float(S) * A
 
 
 def get_spin_stiffness(
@@ -181,6 +222,12 @@ def get_spin_stiffness(
     Returns
     -------
     SpinStiffness
+
+    Raises
+    ------
+    ValueError
+        If a sampled magnon spectrum has a resolved non-real frequency or
+        the bosonic Hamiltonian has a negative direction.
     """
     cell = np.asarray(M.cell, dtype=float)
     if step <= 0:
@@ -191,52 +238,67 @@ def get_spin_stiffness(
 
     omega0 = _branch_energy(M, k0)
 
-    # Symmetric stencil in cartesian k: the three axes and the six mixed
-    # directions.  The stencil is symmetric under k -> -k, so the odd terms of
-    # the expansion cancel and the fit returns the quadratic coefficient.
     e = np.eye(3)
-    samples = []
-    for i in range(3):
-        for sign in (-1.0, 1.0):
-            samples.append(sign * step * e[i])
-    for i in range(3):
-        for j in range(i + 1, 3):
-            for si in (-1.0, 1.0):
-                for sj in (-1.0, 1.0):
-                    samples.append(step * (si * e[i] + sj * e[j]))
 
-    rows, values = [], []
-    for k_cart in samples:
-        k_frac = k0 + _k_cart_to_frac(k_cart, cell)
-        rows.append(
-            [
-                k_cart[0] ** 2,
-                2.0 * k_cart[0] * k_cart[1],
-                2.0 * k_cart[0] * k_cart[2],
-                k_cart[1] ** 2,
-                2.0 * k_cart[1] * k_cart[2],
-                k_cart[2] ** 2,
-            ]
-        )
-        values.append(_branch_energy(M, k_frac) - omega0)
-    rows = np.array(rows)
-    values = np.array(values)
+    def energy_at(k_cart):
+        """Acoustic branch energy (meV) at a cartesian offset from k0."""
+        return _branch_energy(M, k0 + _k_cart_to_frac(k_cart, cell))
 
     # Branch order: for a quadratic branch the deviation grows like k^2 (ratio
-    # 4 between step and step/2), for a linear branch like k (ratio 2).
-    axis = np.zeros(3)
-    axis[0] = 1.0
-    dev_step = _branch_energy(M, k0 + _k_cart_to_frac(step * axis, cell)) - omega0
-    dev_half = (
-        _branch_energy(M, k0 + _k_cart_to_frac(0.5 * step * axis, cell)) - omega0
-    )
-    if abs(dev_half) < 1e-14:
-        ratio = 4.0 if abs(dev_step) < 1e-14 else float("inf")
-    else:
-        ratio = dev_step / dev_half
-    order = 2 if ratio > 3.0 else 1
+    # 4 between step and step/2), for a linear branch like k (ratio 2).  All
+    # three cartesian axes are probed: a branch that is flat along x but
+    # dispersive along y (a rotated antiferromagnetic chain) is linear, and
+    # reading the order from x alone would misreport it as quadratic.
+    deviations = []
+    for i in range(3):
+        direction = np.zeros(3)
+        direction[i] = 1.0
+        deviations.append(
+            (
+                energy_at(step * direction) - omega0,
+                energy_at(0.5 * step * direction) - omega0,
+            )
+        )
+    scale = max([omega0] + [abs(v) for pair in deviations for v in pair])
+    flat_tol = 1e-8 * max(scale, 1e-12)
+    linear = False
+    for dev_step, dev_half in deviations:
+        if max(abs(dev_step), abs(dev_half)) <= flat_tol:
+            continue  # flat direction: no information about the branch order
+        ratio = dev_step / dev_half if dev_half != 0.0 else float("inf")
+        if ratio < 3.0:
+            linear = True
+    order = 1 if linear else 2
 
     if order == 2:
+        # Symmetric stencil in cartesian k: the three axes and the six mixed
+        # directions.  The stencil is symmetric under k -> -k, so the odd terms
+        # of the expansion cancel and the fit returns the quadratic coefficient.
+        samples = []
+        for i in range(3):
+            for sign in (-1.0, 1.0):
+                samples.append(sign * step * e[i])
+        for i in range(3):
+            for j in range(i + 1, 3):
+                for si in (-1.0, 1.0):
+                    for sj in (-1.0, 1.0):
+                        samples.append(step * (si * e[i] + sj * e[j]))
+
+        rows, values = [], []
+        for k_cart in samples:
+            rows.append(
+                [
+                    k_cart[0] ** 2,
+                    2.0 * k_cart[0] * k_cart[1],
+                    2.0 * k_cart[0] * k_cart[2],
+                    k_cart[1] ** 2,
+                    2.0 * k_cart[1] * k_cart[2],
+                    k_cart[2] ** 2,
+                ]
+            )
+            values.append(energy_at(k_cart) - omega0)
+        rows = np.array(rows)
+        values = np.array(values)
         coef, *_ = np.linalg.lstsq(rows, values, rcond=None)
         A = np.zeros((3, 3))
         A[0, 0] = coef[0]
@@ -256,10 +318,7 @@ def get_spin_stiffness(
         for i in range(3):
             direction = np.zeros(3)
             direction[i] = 1.0
-            plus = _branch_energy(
-                M, k0 + _k_cart_to_frac(step * direction, cell)
-            ) - omega0
-            velocity[i] = plus / step
+            velocity[i] = (energy_at(step * direction) - omega0) / step
 
     sum_rule = None
     if J_iso is not None and bond_vectors is not None:
