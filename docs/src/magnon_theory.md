@@ -305,6 +305,78 @@ xlist, kptlist, Xs, knames, spk = auto_kpath(cell, None, npoints=300)
 bandpath = cell.bandpath(path="GXMR", npoints=300)
 ```
 
+## Spin-Wave Stiffness
+
+### Definition
+
+The spin-wave stiffness is the leading coefficient of the long-wavelength
+expansion of the acoustic magnon branch around its Goldstone (or gap) point:
+
+$$
+\omega(\mathbf{k}) = \omega_0 + \mathbf{k}^{T} A \mathbf{k}
+\qquad\text{(quadratic branch)}
+$$
+
+$$
+\omega(\mathbf{k}) = \omega_0 + \mathbf{v}\cdot\mathbf{k}
+\qquad\text{(linear branch)}
+$$
+
+$A$ is a cartesian tensor in meV Å² and $\mathbf{v}$ collects the directional
+spin-wave speeds in meV Å. A ferromagnet has a quadratic branch
+($\omega_0 = 0$ at $\Gamma$), an antiferromagnet a linear one
+($\omega_0 = 0$ at the ordering vector $\mathbf{Q}$). The stiffness is
+extracted from the *exact* $\mathbf{g}\,\mathbf{H}$ spectrum — the shifted
+Cholesky route is not accurate enough at a Goldstone point.
+
+### Usage
+
+```python
+from TB2J.magnon.magnon3 import Magnon
+
+magnon = Magnon.from_TB2J_results(path="TB2J_results")
+stiffness = magnon.get_spin_stiffness()          # expansion at Gamma
+print(stiffness)
+
+# antiferromagnet: expand at the ordering vector
+stiffness = magnon.get_spin_stiffness(k0=[0.5, 0.0, 0.0])
+```
+
+From the command line:
+
+```bash
+TB2J_magnon.py --stiffness -p TB2J_results
+TB2J_magnon.py --stiffness --stiffness-k0 0.5 0 0 --stiffness-step 0.005 -p TB2J_results
+```
+
+`--stiffness-step` is the finite-difference step in cartesian 1/Å
+(default 0.01); `--stiffness-k0` is the expansion point in reciprocal lattice
+coordinates (default $\Gamma$).
+
+### Sum rule and its limits
+
+The textbook route is the real-space sum rule
+(Liechtenstein–Katsnelson–Gubanov; Pajda et al., PRB **64**, 174402 (2001)):
+
+$$
+A = -\frac{S}{2} \sum_{\text{bonds}} J\,\mathbf{v}\,\mathbf{v}^{T}
+$$
+
+where $\mathbf{v}$ are the *true* bond vectors (lattice offset plus intra-cell
+displacement). It is available as a cross-check
+(`stiffness_sum_rule`, or `get_spin_stiffness(J_iso=..., bond_vectors=...)`)
+and reproduces the dispersion route for a single-sublattice ferromagnet. It
+does **not** generalise: for a multi-sublattice lattice the exact LSWT band is
+not the bond sum (for the honeycomb the sum rule gives
+$\mathrm{diag}(|JS|/2, |JS|)$, while the exact stiffness is
+$|JS|/4$ in both directions).
+
+The published spin-wave stiffness constants of itinerant magnets
+($\mathrm{meV\,Å^2}$ for Fe/Co/Ni) carry additional $\mu_B/M$ normalisation
+factors of the itinerant model; TB2J reports the stiffness of the mapped
+Heisenberg model, $H = -\sum_{\langle ij\rangle} J\,\mathbf{S}_i\!\cdot\!\mathbf{S}_j$
+with $J$ in meV and $|\mathbf{S}| = |\mathbf{m}|/2$.
+
 ## Density of States Calculation
 
 ### Definition

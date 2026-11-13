@@ -272,6 +272,46 @@ class Magnon:
         return np.linalg.eigvalsh(KH @ g @ K)[:, n:] + min_eig
         # return np.linalg.eigvalsh(KH @ g @ K)[:, :] + min_eig
 
+    def get_spin_stiffness(
+        self,
+        k0=None,
+        step=0.01,
+        J_iso=None,
+        bond_vectors=None,
+    ):
+        """Spin-wave stiffness of the acoustic magnon branch.
+
+        Parameters
+        ----------
+        k0 : array_like, optional
+            Fractional expansion point in units of 2 pi, default Gamma.  For an
+            antiferromagnet the Goldstone point is at the ordering vector, so
+            pass it explicitly.
+        step : float, optional
+            Finite-difference step in cartesian 1/A, default 0.01.
+        J_iso : array_like, optional
+            Isotropic exchange per bond in meV; with ``bond_vectors`` it
+            enables the real-space sum-rule cross-check (Bravais lattices
+            only).
+        bond_vectors : array_like, optional
+            (nbonds, 3) true bond vectors in Angstrom.
+
+        Returns
+        -------
+        SpinStiffness
+            Stiffness tensor A (meV A^2) for a quadratic branch, or the
+            spin-wave velocity (meV A) for a linear one.
+        """
+        from TB2J.magnon.magnon_stiffness import get_spin_stiffness
+
+        return get_spin_stiffness(
+            self,
+            k0=k0,
+            step=step,
+            J_iso=J_iso,
+            bond_vectors=bond_vectors,
+        )
+
     def get_magnon_bands(
         self,
         kpoints: np.array = np.array([]),

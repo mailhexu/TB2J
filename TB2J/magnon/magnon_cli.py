@@ -10,6 +10,7 @@ from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_common_magnon_args,
     parse_common_args,
+    prepare_magnon_from_params,
 )
 
 
@@ -28,6 +29,31 @@ def create_parser() -> argparse.ArgumentParser:
         "--dos",
         action="store_true",
         help="Plot magnon density of states",
+    )
+    parser.add_argument(
+        "--stiffness",
+        action="store_true",
+        help="Print the spin-wave stiffness of the acoustic magnon branch",
+    )
+    parser.add_argument(
+        "--stiffness-k0",
+        type=float,
+        nargs=3,
+        metavar=("K0X", "K0Y", "K0Z"),
+        default=None,
+        help=(
+            "Expansion point of the stiffness in reciprocal lattice coordinates "
+            "(default: Gamma). For an antiferromagnet pass the ordering vector."
+        ),
+    )
+    parser.add_argument(
+        "--stiffness-step",
+        type=float,
+        default=0.01,
+        help=(
+            "Finite-difference step of the stiffness extraction in cartesian "
+            "1/Angstrom (default: 0.01)."
+        ),
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -635,12 +661,13 @@ def main():
     if (
         not args.bands
         and not args.dos
+        and not args.stiffness
         and not args.topology
         and not args.topology_compare
     ):
         parser.error(
-            "Please specify at least one of --bands, --dos, --topology or "
-            "--topology-compare"
+            "Please specify at least one of --bands, --dos, --stiffness, "
+            "--topology or --topology-compare"
         )
 
     window = None
@@ -696,6 +723,15 @@ def main():
             use_primitive_kpath=getattr(args, "use_primitive_kpath", False),
         )
         plot_magnon_bands_from_TB2J(band_params)
+
+    if args.stiffness:
+        magnon = prepare_magnon_from_params(params)
+        stiffness = magnon.get_spin_stiffness(
+            k0=args.stiffness_k0,
+            step=args.stiffness_step,
+        )
+        print("\nSpin-wave stiffness")
+        print(stiffness)
 
     if args.dos:
         dos_params = MagnonParameters(
