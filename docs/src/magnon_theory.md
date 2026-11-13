@@ -420,7 +420,7 @@ deviation scaling, so:
 |---|---|---|
 | ferromagnet (collinear) | quadratic, $\omega \propto k^2$ | tensor $A$ |
 | gapped ferromagnet (easy-axis anisotropy) | quadratic, $\omega_0 = |S K|$ | tensor $A$, unchanged by the gap |
-| mixed-spin ferrimagnet | quadratic | tensor $A = 6 J S_1 S_2 \mu / \sqrt{4 S_1 S_2 + (S_1-S_2)^2}$ |
+| mixed-spin ferrimagnet | quadratic | tensor $A = J S_1 S_2 a^2 / (2(S_1+S_2))$ |
 | Néel antiferromagnet | linear, $\omega \propto |k|$ | directional speeds $v$ |
 | spiral ($\mathbf{Q} \neq 0$, rotating frame) | linear | directional speeds $v$ |
 
@@ -431,8 +431,30 @@ Closed forms for the isotropic models (verified in
   $A_{xx} = A_{yy} = J S a^2/4$.
 * Néel chain: $v = J S a_{\text{cell}}$; Néel honeycomb:
   $v = \sqrt{3/2}\,J S a = 3 J S a/\sqrt{6}$.
-* Mixed-spin honeycomb: for equal spins
-  $6 J S_1 S_2 \mu/\sqrt{4S_1S_2 + (S_1-S_2)^2} \to 3 J S \mu = JSa^2/4$.
+* Multi-site honeycomb with inequivalent spins $S_1 \neq S_2$:
+  $A_{xx} = A_{yy} = J S_1 S_2 a^2 / (2(S_1+S_2))$, which reduces to
+  $J S a^2/4$ for $S_1 = S_2$.
+
+### Multi-site magnets
+
+Nothing in the extraction assumes a single spin length. The transverse block
+carries a factor $\sqrt{S_i S_j}$ **per sublattice pair**, so a multi-site
+magnet is not the single-$S$ model with a rescaled coupling, and the old
+$1/(S_i S_j)$ rescale of `Jq()` (removed in the convention correction) was a
+per-pair error, not a global one. For the honeycomb with sublattice spins
+$S_1, S_2$ the textbook branches are
+
+$$
+\omega_\pm(\mathbf{k}) = \frac{3J}{2}\left[(S_1+S_2) \pm \sqrt{(S_1-S_2)^2 + 4 S_1 S_2 |\gamma(\mathbf{k})|^2}\right],
+$$
+
+so the acoustic branch is gapless at $\Gamma$ ($\omega_+(\Gamma) = 3J(S_1+S_2)$),
+the Dirac point splits into $3J\min(S_1,S_2)$ and $3J\max(S_1,S_2)$, and the
+branch stays **quadratic** for $S_1 \neq S_2$ (a ferrimagnet has a non-zero
+net moment, hence no Goldstone singularity in $\omega$): the stiffness is
+$J S_1 S_2 a^2 / (2(S_1+S_2))$. Measured against the textbook closed form the
+module reproduces the band exactly (ratio 1.000000) and the stiffness to
+$4\times10^{-6}$ for $S_1 \neq S_2$.
 
 Two caveats matter in practice:
 

@@ -496,6 +496,89 @@ check(
     f"(textbook |J| S1 S2 / (2(S1+S2)) = {theory:.6f})",
 )
 
+# ---------------------------------------------------------------------------
+# 4c. Multi-site magnons with inequivalent spins (S1 != S2).
+#
+#     The transverse block carries sqrt(S_i S_j) for every sublattice pair, so
+#     a multi-site magnet is NOT the single-S case with a rescaled coupling.
+#     For the honeycomb with sublattice spins S1, S2 the textbook branches are
+#
+#         omega_pm(k) = (3J/2) [ (S1+S2) +/- sqrt((S1-S2)^2 + 4 S1 S2 |gamma|^2) ],
+#         |gamma|^2 = 1 - a^2 k^2 / 6,
+#
+#     hence omega_-(Gamma) = 0, omega_+(Gamma) = 3 J (S1+S2), the Dirac point
+#     splits into 3 J min(S1,S2) / 3 J max(S1,S2), and the acoustic branch is
+#     quadratic with
+#
+#         A_xx = A_yy = J S1 S2 a^2 / (2 (S1+S2))   (-> J S a^2/4 for S1 = S2).
+# ---------------------------------------------------------------------------
+Xsym = sp.Symbol("X", positive=True)
+om_ferri = (3 * Jpos / 2) * (
+    Xsym - sp.sqrt(Xsym**2 - 4 * S1s * S2s * (a**2 * k**2 / 6))
+)
+A_ferri = sp.simplify(
+    sp.series(om_ferri, k, 0, 3).removeO().expand().coeff(k, 2)
+)
+check(
+    sp.simplify(
+        A_ferri.subs(Xsym, S1s + S2s) - Jpos * S1s * S2s * a**2 / (2 * (S1s + S2s))
+    )
+    == 0,
+    "multi-site honeycomb A = J S1 S2 a^2 / (2 (S1+S2))",
+)
+check(
+    sp.simplify(A_ferri.subs({Xsym: 2 * S, S1s: S, S2s: S}) - Jpos * S * a**2 / 4)
+    == 0,
+    "multi-site honeycomb reduces to J S a^2/4 for equal spins",
+)
+check(
+    sp.simplify(om_ferri.subs(k, 0)) == 0,
+    "multi-site honeycomb acoustic branch is gapless at Gamma",
+)
+
+
+def _exact_band(M, k_cart):
+    """Positive eigenenergies (meV) of the exact eig(gH) spectrum."""
+    cell = np.asarray(M.cell)
+    k_frac = cell @ np.asarray(k_cart, dtype=float) / (2 * np.pi)
+    H = M.Hq(np.atleast_2d(k_frac))[0]
+    n = H.shape[-1] // 2
+    g = np.block([[np.eye(n), np.zeros((n, n))], [np.zeros((n, n)), -np.eye(n)]])
+    return np.sort(np.abs(np.linalg.eigvals(g @ H))) * 1e3
+
+
+S1_val, S2_val, jiso = 1.5, 2.0, 1.0e-3
+a_val = 1.0
+multi = fm_honeycomb_magnon(S1_val, jiso)
+multi.magmom = np.array([[0.0, 0, 2 * S1_val], [0.0, 0, 2 * S2_val]])
+multi.set_reference(np.zeros(3), np.array([[0.0, 0, 1.0]]),
+                    np.array([1.0, 0, 0]), magmoms=multi.magmom)
+a1v = np.array([a_val, 0.0, 0.0])
+a2v = np.array([a_val / 2, np.sqrt(3) * a_val / 2, 0.0])
+for k_vec in (np.array([0.05, 0.0, 0.0]), np.array([0.1, 0.0, 0.0]),
+              np.array([0.0, 0.1, 0.0])):
+    gam = (1 + np.exp(1j * k_vec.dot(a1v)) + np.exp(1j * k_vec.dot(a2v))) / 3
+    root = np.sqrt((S1_val - S2_val) ** 2 + 4 * S1_val * S2_val * abs(gam) ** 2)
+    target = (3 * jiso * 1e3 / 2) * np.array([S1_val + S2_val - root,
+                                              S1_val + S2_val + root])
+    measured = _exact_band(multi, k_vec)
+    check(
+        abs(measured[0] - target[0]) < 1e-6
+        and abs(measured[-1] - target[1]) < 1e-6
+        and abs(measured[1] - measured[0]) < 1e-6
+        and abs(measured[2] - measured[-1]) < 1e-6,
+        f"implementation multi-site band at k={k_vec[:2].tolist()}: "
+        f"omega_-/+ = {measured[0]:.6f}/{measured[-1]:.6f} meV "
+        f"(textbook {target[0]:.6f}/{target[1]:.6f})",
+    )
+st = multi.get_spin_stiffness()
+theory = abs(jiso * 1e3) * S1_val * S2_val * a_val**2 / (2 * (S1_val + S2_val))
+check(
+    st.order == 2 and abs(abs(st.A[0, 0]) - theory) / theory < 1e-3,
+    f"implementation multi-site honeycomb A_xx = {st.A[0,0]:.6f} meV A^2 "
+    f"(textbook |J| S1 S2 a^2 / (2(S1+S2)) = {theory:.6f})",
+)
+
 # Spiral reference: an incommensurate J1-J2 spiral has a linear Goldstone
 # mode in the rotating frame => speed, no tensor.
 def spiral_chain_magnon(S_val, j1, j2, q_frac):
@@ -575,6 +658,15 @@ the `mydev` environment). Pinned statements:
      curvature unchanged;
    - an incommensurate J1-J2 spiral has a linear Goldstone mode at
      `cos(2 pi q*) = -J1/(4 J2)`.
+6. Multi-site magnets with inequivalent sublattice spins: the transverse
+   block carries `sqrt(S_i S_j)` per sublattice pair, so this is not the
+   single-`S` model with a rescaled coupling. For the honeycomb with spins
+   `S1, S2` the textbook branches are
+   `omega_pm(k) = (3J/2)[(S1+S2) +/- sqrt((S1-S2)^2 + 4 S1 S2 |gamma|^2)]`,
+   so `omega_-(Gamma) = 0`, `omega_+(Gamma) = 3 J (S1+S2)`, the Dirac point
+   splits into `3 J min(S1,S2)` / `3 J max(S1,S2)`, and the branch stays
+   quadratic with `A_xx = A_yy = J S1 S2 a^2 / (2 (S1+S2))`
+   (`-> J S a^2/4` for equal spins).
 
 ## Console output of the executed script
 

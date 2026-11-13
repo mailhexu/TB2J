@@ -110,6 +110,73 @@ def _fm_honeycomb(S, jiso, a=1.0):
     return M
 
 
+def _multisite_honeycomb(S1, S2, jiso, a=1.0):
+    """Honeycomb with inequivalent sublattice spins (ferrimagnet)."""
+    M = _fm_honeycomb(S1, jiso, a)
+    magmoms = np.array([[0.0, 0, 2 * S1], [0.0, 0, 2 * S2]])
+    M.magmom = magmoms
+    M.set_reference(
+        np.zeros(3),
+        np.array([[0.0, 0, 1.0]]),
+        np.array([1.0, 0, 0]),
+        magmoms=magmoms,
+    )
+    return M
+
+
+def _exact_band(M, k_cart):
+    """Positive eigenenergies (meV) of the exact eig(gH) spectrum."""
+    k_frac = np.asarray(M.cell) @ np.asarray(k_cart, dtype=float) / (2 * np.pi)
+    H = M.Hq(np.atleast_2d(k_frac))[0]
+    n = H.shape[-1] // 2
+    g = np.block([[np.eye(n), np.zeros((n, n))], [np.zeros((n, n)), -np.eye(n)]])
+    return np.sort(np.abs(np.linalg.eigvals(g @ H))) * 1e3
+
+
+def test_multisite_band_matches_textbook():
+    """A multi-site magnet is not the single-S case with a rescaled coupling.
+
+    Textbook for the honeycomb with sublattice spins S1, S2:
+    omega_pm(k) = (3J/2)[(S1+S2) +/- sqrt((S1-S2)^2 + 4 S1 S2 |gamma|^2)].
+    """
+    S1, S2, jiso, a = 1.5, 2.0, 1.0e-3, 1.0
+    M = _multisite_honeycomb(S1, S2, jiso, a)
+    a1 = np.array([a, 0.0, 0.0])
+    a2 = np.array([a / 2, np.sqrt(3) * a / 2, 0.0])
+    for k in (np.array([0.05, 0.0, 0.0]), np.array([0.1, 0.0, 0.0])):
+        gam = (1 + np.exp(1j * k.dot(a1)) + np.exp(1j * k.dot(a2))) / 3
+        root = np.sqrt((S1 - S2) ** 2 + 4 * S1 * S2 * abs(gam) ** 2)
+        target = (3 * jiso * 1e3 / 2) * np.array([S1 + S2 - root,
+                                                  S1 + S2 + root])
+        band = _exact_band(M, k)
+        assert abs(band[0] - target[0]) < 1e-6
+        assert abs(band[-1] - target[1]) < 1e-6
+        # both branches are doubly degenerate
+        assert abs(band[1] - band[0]) < 1e-6
+        assert abs(band[2] - band[-1]) < 1e-6
+
+
+def test_multisite_stiffness_is_isotropic_and_symmetric_in_the_spins():
+    """A_xx = A_yy = J S1 S2 a^2 / (2 (S1+S2)), A_xy = 0."""
+    jiso, a = 1.0e-3, 1.0
+    for S1, S2 in ((1.5, 2.0), (2.0, 2.5), (1.0, 3.0)):
+        M = _multisite_honeycomb(S1, S2, jiso, a)
+        st = M.get_spin_stiffness()
+        theory = jiso * 1e3 * S1 * S2 * a**2 / (2 * (S1 + S2))
+        assert st.order == 2
+        assert abs(st.A[0, 0] - theory) / theory < 1e-3
+        assert abs(st.A[1, 1] - theory) / theory < 1e-3
+        assert abs(st.A[0, 1]) < 1e-6 * theory
+
+
+def test_multisite_equal_spins_reduces_to_the_single_s_case():
+    """With S1 = S2 the multi-site model is the FM honeycomb."""
+    S, jiso, a = 1.5, 1.0e-3, 1.0
+    st = _multisite_honeycomb(S, S, jiso, a).get_spin_stiffness()
+    theory = abs(S * jiso * 1e3 * a**2) / 4
+    assert abs(st.A[0, 0] - theory) / theory < 1e-3
+
+
 def _afm_chain(S, jiso, a=1.0):
     """AFM chain, two-site Neel cell (magnetic cell 2a)."""
     magmom = 2 * S

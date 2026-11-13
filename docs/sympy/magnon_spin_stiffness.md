@@ -29,6 +29,15 @@ the `mydev` environment). Pinned statements:
      curvature unchanged;
    - an incommensurate J1-J2 spiral has a linear Goldstone mode at
      `cos(2 pi q*) = -J1/(4 J2)`.
+6. Multi-site magnets with inequivalent sublattice spins: the transverse
+   block carries `sqrt(S_i S_j)` per sublattice pair, so this is not the
+   single-`S` model with a rescaled coupling. For the honeycomb with spins
+   `S1, S2` the textbook branches are
+   `omega_pm(k) = (3J/2)[(S1+S2) +/- sqrt((S1-S2)^2 + 4 S1 S2 |gamma|^2)]`,
+   so `omega_-(Gamma) = 0`, `omega_+(Gamma) = 3 J (S1+S2)`, the Dirac point
+   splits into `3 J min(S1,S2)` / `3 J max(S1,S2)`, and the branch stays
+   quadratic with `A_xx = A_yy = J S1 S2 a^2 / (2 (S1+S2))`
+   (`-> J S a^2/4` for equal spins).
 
 ## Console output of the executed script
 
@@ -59,6 +68,13 @@ the `mydev` environment). Pinned statements:
   [OK] implementation gapped FM chain omega(Gamma) = 1.000000 meV equals the anisotropy gap |S K| = 1.000000 meV
   [OK] gapped FM chain A_xx = 1.999983 equals the ungapped 1.999983 meV A^2 (gap does not change the curvature)
   [OK] implementation mixed-spin honeycomb A_xx = 0.428570 meV A^2 (textbook |J| S1 S2 / (2(S1+S2)) = 0.428571)
+  [OK] multi-site honeycomb A = J S1 S2 a^2 / (2 (S1+S2))
+  [OK] multi-site honeycomb reduces to J S a^2/4 for equal spins
+  [OK] multi-site honeycomb acoustic branch is gapless at Gamma
+  [OK] implementation multi-site band at k=[0.05, 0.0]: omega_-/+ = 0.001071/10.498929 meV (textbook 0.001071/10.498929)
+  [OK] implementation multi-site band at k=[0.1, 0.0]: omega_-/+ = 0.004285/10.495715 meV (textbook 0.004285/10.495715)
+  [OK] implementation multi-site band at k=[0.0, 0.1]: omega_-/+ = 0.004285/10.495715 meV (textbook 0.004285/10.495715)
+  [OK] implementation multi-site honeycomb A_xx = 0.428570 meV A^2 (textbook |J| S1 S2 a^2 / (2(S1+S2)) = 0.428571)
   [OK] J1-J2 spiral reference state is stable
   [OK] implementation spiral reference reports a linear branch (no tensor)
   [OK] implementation spiral speed is one-directional: [2.904498 0.       0.      ] meV A
