@@ -335,6 +335,40 @@ def cmd_supercell(args):
     print("  Done!")
 
 
+def cmd_open(args):
+    """Open cell boundaries by dropping wrapping pair interactions."""
+    from TB2J.io_exchange.edit import load, open_boundary, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    print(f"Opening boundaries along: {', '.join(args.directions)}")
+    n_before = sum(
+        len(d or {})
+        for d in (spinio.exchange_Jdict, spinio.dmi_ddict, spinio.Jani_dict)
+    )
+    open_boundary(spinio, args.directions)
+    n_after = sum(
+        len(d or {})
+        for d in (spinio.exchange_Jdict, spinio.dmi_ddict, spinio.Jani_dict)
+    )
+    print(f"  Pair terms: {n_before} -> {n_after} (dropped {n_before - n_after})")
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_pipeline(args):
+    """Run a replicate+open edit pipeline from a TOML file."""
+    from TB2J.io_exchange.edit import run_pipeline
+
+    print(f"Running edit pipeline: {args.toml}")
+    spinio = run_pipeline(args.toml)
+    print(f"  Atoms: {len(spinio.atoms)}")
+    print("  Done!")
+
+
 def cmd_remove_sublattice(args):
     """Remove interactions associated with a sublattice."""
     from TB2J.io_exchange.edit import load, remove_sublattice, save
@@ -539,6 +573,36 @@ def main():
     )
     parser_supercell.set_defaults(func=cmd_supercell)
 
+
+    parser_open = subparsers.add_parser(
+        "open",
+        help="Open cell boundaries by dropping wrapping pair interactions",
+    )
+    parser_open.add_argument(
+        "-i", "--input", required=True, help="Input result directory or TB2J.pickle"
+    )
+    parser_open.add_argument(
+        "-o", "--output", required=True, help="Output directory"
+    )
+    parser_open.add_argument(
+        "-d",
+        "--directions",
+        nargs="+",
+        required=True,
+        choices=["a", "b", "c"],
+        help="Lattice directions to open (subset of a/b/c)",
+    )
+    parser_open.set_defaults(func=cmd_open)
+
+    parser_pipeline = subparsers.add_parser(
+        "pipeline",
+        help="Run a replicate+open edit pipeline from a TOML file",
+    )
+    parser_pipeline.add_argument(
+        "toml", help="Pipeline TOML file (keys: input, output, supercell_matrix, "
+        "open_directions, center)"
+    )
+    parser_pipeline.set_defaults(func=cmd_pipeline)
     parser_rm_sub = subparsers.add_parser(
         "remove-sublattice",
         help="Remove all interactions for a sublattice",

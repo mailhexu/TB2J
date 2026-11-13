@@ -31,6 +31,8 @@ __all__ = [
     "remove_sublattice",
     "symmetrize_exchange",
     "make_supercell",
+    "open_boundary",
+    "run_pipeline",
 ]
 
 
@@ -363,6 +365,119 @@ def make_supercell(spinio, sc_matrix, center=False, map_optional=True):
         )
 
     return sc_spinio
+
+def _direction_axes(directions):
+    """Map lattice-direction labels (a/b/c or 0/1/2) to axis indices."""
+    labels = {"a": 0, "b": 1, "c": 2}
+    axes = set()
+    for direction in directions:
+        key = str(direction).lower()
+        if key in labels:
+            axes.add(labels[key])
+        elif isinstance(direction, int) and 0 <= direction <= 2:
+            axes.add(direction)
+        else:
+            raise ValueError(
+                f"Invalid direction {direction!r}: use lattice labels a/b/c or 0/1/2"
+            )
+    return tuple(sorted(axes))
+
+
+def open_boundary(spinio, directions):
+    """Open the cell boundary along ``directions`` by strict truncation.
+
+    In the periodic model a pair term ``(R, i, j)`` whose lattice vector has
+    a nonzero component along an open direction couples a spin to a periodic
+    image across that boundary; dropping exactly those terms opens the
+    boundary with no compensation of the surviving couplings. On-site terms
+    (SIA, k1/k1dir) and the atom count are unchanged, and the atoms' PBC
+    flags are cleared along the open axes. Mutates and returns ``spinio``.
+    """
+    axes = _direction_axes(directions)
+    if not axes:
+        return spinio
+
+    def _cut(terms):
+        if terms is None:
+            return None
+        return {
+            key: value
+            for key, value in terms.items()
+            if all(key[0][axis] == 0 for axis in axes)
+        }
+
+    pair_names = (
+        "exchange_Jdict",
+        "dmi_ddict",
+        "Jani_dict",
+        "bruno_Jdict",
+        "dJdx",
+        "dJdx2",
+        "biquadratic_Jdict",
+        "NJT_Jdict",
+        "NJT_ddict",
+        "Jiso_orb",
+        "DMI_orb",
+        "Jani_orb",
+        "dJdx_orb",
+    )
+    pair_dicts = []
+    for name in pair_names:
+        terms = getattr(spinio, name, None)
+        if terms is not None:
+            terms = _cut(terms)
+            setattr(spinio, name, terms)
+        pair_dicts.append(terms)
+
+    spinio.distance_dict = _recompute_distance_dict(
+        pair_dicts, spinio.atoms, spinio.index_spin
+    )
+    pbc = list(spinio.atoms.get_pbc())
+    for axis in axes:
+        pbc[axis] = False
+    spinio.atoms.set_pbc(pbc)
+    spinio.open_directions = list(axes)
+    spinio._build_Rlist()
+    return spinio
+
+
+def run_pipeline(toml_path):
+    """Run a replicate+open edit pipeline described by a TOML file.
+
+    Keys: ``input`` (TB2J result dir or pickle), ``output`` (result dir),
+    optional ``supercell_matrix`` (3 or 9 ints; absent or ``null`` skips
+    replication), optional ``open_directions`` (subset of a/b/c), optional
+    ``center`` (bool, default false). The output is a standard TB2J result
+    directory; the pipeline equals chained ``make_supercell`` +
+    ``open_boundary`` calls.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
+
+    with open(toml_path, "rb") as handle:
+        config = tomllib.load(handle)
+
+    allowed = {"input", "output", "supercell_matrix", "open_directions", "center"}
+    unknown = set(config) - allowed
+    if unknown:
+        raise ValueError(f"Unknown pipeline keys: {sorted(unknown)}")
+    for required in ("input", "output"):
+        if required not in config:
+            raise ValueError(f"Pipeline file is missing required key '{required}'")
+
+    spinio = load(config["input"])
+    matrix = config.get("supercell_matrix")
+    if matrix is not None:
+        spinio = make_supercell(
+            spinio, matrix, center=bool(config.get("center", False))
+        )
+    directions = config.get("open_directions", [])
+    if directions:
+        open_boundary(spinio, directions)
+    save(spinio, config["output"])
+    return spinio
 
 
 def set_anisotropy(spinio, species, k1=None, k1dir=None):
