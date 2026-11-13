@@ -334,6 +334,34 @@ spin-wave speeds in meV Å. A ferromagnet has a quadratic branch
 extracted from the *exact* $\mathbf{g}\,\mathbf{H}$ spectrum — the shifted
 Cholesky route is not accurate enough at a Goldstone point.
 
+### A linear branch has no stiffness
+
+For a linear branch $\omega = \omega_0 + v|\mathbf{k}|$ the stiffness is
+**not defined**: $|\mathbf{k}|$ has a cusp at the minimum, so $\omega$ is not
+twice differentiable there and no Taylor coefficient of $k^2$ exists. The
+leading coefficient *is* the slope, i.e. the directional speed
+$\mathbf{v} = \nabla_{\hat{k}}\,\omega$ (meV Å), which is what
+`get_spin_stiffness` returns for these branches (`order=1`, `A=None`).
+Fitting $\omega$ against $k^2$ on a linear branch produces numbers that
+depend on the fit window and the finite-difference step — they are not a
+stiffness and must not be quoted as one.
+
+If a single number in meV Å² is needed for comparison with ferromagnets, use
+the $\omega^2$ stiffness instead,
+
+$$
+A_{\omega^2} = \frac{1}{2}\left.\frac{\mathrm{d}^2 \omega^2}{\mathrm{d}k^2}\right|_{k=0} = v^2 ,
+$$
+
+i.e. the coefficient of $k^2$ in $\omega^2$ (the standard expansion for
+antiferromagnets, $\omega^2 = v^2 k^2 + \Delta^2 + \dots$). It is a
+*different* quantity from the ferromagnetic stiffness — the coefficient of
+$k^2$ in $\omega$, not in $\omega^2$ — and for a linear branch it equals
+$v^2$, so it carries no information beyond the speed. State the definition
+when quoting it: an AFM with $v = 200$ meV Å gives $A_{\omega^2} = 4\times10^4$ meV Å²,
+which is *not* "200× stiffer" than a ferromagnet with $A = 100$ meV Å².
+
+
 ### Usage
 
 ```python
