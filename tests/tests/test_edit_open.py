@@ -142,6 +142,21 @@ def test_cut_supercell_equals_finite_cluster():
     assert np.allclose(adjacency, expected)
 
 
+def test_fully_cut_channels_become_none_and_save(tmp_path):
+    # TB2J-OB-001: a channel whose every pair crosses the cut must become
+    # None (toggle_* semantics) so save() -> plot_all cannot crash.
+    spinio = _chain_spinio(nnn=False)
+    spinio.dmi_ddict = {((1, 0, 0), 0, 0): np.array([0.1, 0.2, 0.3])}
+    spinio.Jani_dict = {((1, 0, 0), 0, 0): np.eye(3)}
+    # has_dmi/has_bilinear are derived: dmi_ddict/Jani_dict is not None
+    open_boundary(spinio, ["a"])
+    assert spinio.dmi_ddict is None
+    assert spinio.Jani_dict is None
+    out = tmp_path / "cut_all"
+    save(spinio, out)  # must not raise
+    reloaded = load(str(out))
+    assert reloaded.dmi_ddict is None
+
 def _pipeline_toml(tmp_path, name, extra):
     prim_dir = tmp_path / "prim"
     save(_chain_spinio(), prim_dir)

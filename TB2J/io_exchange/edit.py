@@ -425,7 +425,10 @@ def open_boundary(spinio, directions):
     for name in pair_names:
         terms = getattr(spinio, name, None)
         if terms is not None:
-            terms = _cut(terms)
+            # a fully-cut channel becomes None, matching toggle_* semantics:
+            # has_dmi/has_bilinear stay false so save()/plot_all cannot crash
+            # on empty tables (review finding TB2J-OB-001)
+            terms = _cut(terms) or None
             setattr(spinio, name, terms)
         pair_dicts.append(terms)
 
