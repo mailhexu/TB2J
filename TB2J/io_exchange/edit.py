@@ -422,13 +422,17 @@ def open_boundary(spinio, directions):
         "dJdx_orb",
     )
     pair_dicts = []
+    # Only DMI/Jani normalize an emptied table to None: has_dmi/has_bilinear
+    # gate plot_DvsR/plot_JanivsR, which crash on empty arrays (TB2J-OB-001).
+    # Exchange and bruno keep {}: write_txt sorts the table and the bruno
+    # scope writer must still emit for an empty table (TB2J-OB-002).
+    none_when_empty = {"dmi_ddict", "Jani_dict"}
     for name in pair_names:
         terms = getattr(spinio, name, None)
         if terms is not None:
-            # a fully-cut channel becomes None, matching toggle_* semantics:
-            # has_dmi/has_bilinear stay false so save()/plot_all cannot crash
-            # on empty tables (review finding TB2J-OB-001)
-            terms = _cut(terms) or None
+            terms = _cut(terms)
+            if not terms and name in none_when_empty:
+                terms = None
             setattr(spinio, name, terms)
         pair_dicts.append(terms)
 

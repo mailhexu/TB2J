@@ -144,7 +144,9 @@ def test_cut_supercell_equals_finite_cluster():
 
 def test_fully_cut_channels_become_none_and_save(tmp_path):
     # TB2J-OB-001: a channel whose every pair crosses the cut must become
-    # None (toggle_* semantics) so save() -> plot_all cannot crash.
+    # None (toggle_* semantics) so save() -> plot_all cannot crash -- but
+    # only for DMI/Jani; exchange and bruno keep {} (TB2J-OB-002: write_txt
+    # sorts the exchange table and the bruno scope writer must emit {}).
     spinio = _chain_spinio(nnn=False)
     spinio.dmi_ddict = {((1, 0, 0), 0, 0): np.array([0.1, 0.2, 0.3])}
     spinio.Jani_dict = {((1, 0, 0), 0, 0): np.eye(3)}
@@ -152,11 +154,25 @@ def test_fully_cut_channels_become_none_and_save(tmp_path):
     open_boundary(spinio, ["a"])
     assert spinio.dmi_ddict is None
     assert spinio.Jani_dict is None
+    assert spinio.exchange_Jdict == {((0, 0, 0), 0, 0): -0.1}
     out = tmp_path / "cut_all"
     save(spinio, out)  # must not raise
     reloaded = load(str(out))
     assert reloaded.dmi_ddict is None
 
+
+def test_fully_cut_exchange_stays_empty_dict_and_saves(tmp_path):
+    # TB2J-OB-002: an exchange table with only R != 0 bonds becomes {} (a
+    # saveable empty model), never None.
+    spinio = _chain_spinio(nnn=False)
+    del spinio.exchange_Jdict[((0, 0, 0), 0, 0)]
+    spinio.bruno_Jdict = {((1, 0, 0), 0, 0): 0.7}
+    open_boundary(spinio, ["a"])
+    assert spinio.exchange_Jdict == {}
+    assert spinio.bruno_Jdict == {}
+    out = tmp_path / "cut_exchange"
+    save(spinio, out)  # must not raise
+    assert load(str(out)).exchange_Jdict == {}
 def _pipeline_toml(tmp_path, name, extra):
     prim_dir = tmp_path / "prim"
     save(_chain_spinio(), prim_dir)
