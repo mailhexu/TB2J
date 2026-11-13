@@ -32,9 +32,9 @@ class MAEGreen(ExchangeNCL):
         """
         angles are defined as theta, phi pairs, where theta is the angle between the z-axis and the magnetization direction, and phi is the angle between the x-axis and the projection of the magnetization direction on the x-y plane.
         """
-        # MathDoc: tb2j/cfr2-integration-contract. The energy extraction below
-        # owns -Im/(2*pi); CFR2 supplies normalized integration, not that factor.
-        kwargs.setdefault("integration_method", "cfr2")
+        # MathDoc: tb2j/cfr-integration-contract. The energy extraction below
+        # owns -Im/(2*pi); CFR supplies normalized integration, not that factor.
+        kwargs.setdefault("integration_method", "cfr")
         super().__init__(**kwargs)
         self.natoms = len(self.atoms)
         if angles is None or angles == "xyz":

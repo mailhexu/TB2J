@@ -313,7 +313,7 @@ class ExchangePert2GPU(ExchangePert2):
         self._prepare_dGR_jax(Rpts, Rset, self.short_Rlist, self.epc, self.Ru)
 
         npole = len(self.contour.path)
-        # MathDoc: tb2j/cfr2-integration-contract; normalized weights include
+        # MathDoc: tb2j/cfr-integration-contract; normalized weights include
         # the moment sample for the metric-dressed density integrand.
         weights = self.contour.weights
 
@@ -354,7 +354,7 @@ class ExchangePert2GPU(ExchangePert2):
                         self.dA_ijR_orb[key] = result["dA_orb"][key] * w
 
         if compute_rho_gf:
-            # MathDoc: tb2j/cfr2-integration-contract; the overlap-dressed
+            # MathDoc: tb2j/cfr-integration-contract; the overlap-dressed
             # complex population intermediate owns the moment without a shift.
             self.rho = -1.0 / np.pi * self.rho
 

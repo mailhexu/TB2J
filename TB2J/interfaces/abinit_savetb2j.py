@@ -13,7 +13,7 @@ from TB2J.interfaces.gpaw_projector import (
     component_local_operators,
     write_projector_exchange_out,
 )
-from TB2J.mycfr import CFR2
+from TB2J.mycfr import CFR
 from TB2J.projector_green import (
     ProjectorGreen,
     ProjectorGreenData,
@@ -92,9 +92,9 @@ def _population_contour(data, nz, smearing_eV):
     temperature = smearing_eV / kB
     fermi = data.efermi if data.efermi_spin is None else data.efermi_spin[:, None, None]
     spectral_range = float(np.max(np.abs(data.eigenvalues - fermi)))
-    contour = CFR2(nz=nz, T=temperature)
+    contour = CFR(nz=nz, T=temperature)
     while np.max(np.abs(contour.path[:-1].imag)) < 4.0 * spectral_range:
-        contour = CFR2(nz=2 * contour.nz, T=temperature)
+        contour = CFR(nz=2 * contour.nz, T=temperature)
     return contour
 
 

@@ -1,4 +1,4 @@
-"""Consumer-visible CFR2 normalization, complex coherence and depth boundaries."""
+"""Consumer-visible CFR normalization, complex coherence and depth boundaries."""
 
 import numpy as np
 import pytest
@@ -6,19 +6,19 @@ from ase.units import kB
 from scipy.linalg import eigh
 from scipy.special import expit
 
-from TB2J.mycfr import CFR2
+from TB2J.mycfr import CFR
 
 
 @pytest.mark.parametrize("depth", [0, -2, 1, 3, 31, 81, 2.0, 2.5, True, "80"])
 def test_unsupported_depth_is_rejected(depth):
     with pytest.raises(ValueError):
-        CFR2(nz=depth, T=600)
+        CFR(nz=depth, T=600)
 
 
 def test_low_order_and_convergence():
     errors = []
     for depth in (2, 8, 20, np.int64(80)):
-        contour = CFR2(nz=depth, T=600)
+        contour = CFR(nz=depth, T=600)
         epsilon = 0.8
         integral = contour.integrate_values(1 / (contour.path - epsilon))
         errors.append(abs(-integral.imag / np.pi - expit(-epsilon / (kB * 600))))
@@ -31,7 +31,7 @@ def test_low_order_and_convergence():
 
 @pytest.mark.parametrize("entrypoint", ["values", "callback"])
 def test_scalar_occupations_and_energy_reference(entrypoint):
-    contour = CFR2(nz=80, T=600)
+    contour = CFR(nz=80, T=600)
     for epsilon in (-0.2, 0.2):
         if entrypoint == "values":
             result = contour.integrate_values(1 / (contour.path - epsilon))
@@ -47,7 +47,7 @@ def test_scalar_occupations_and_energy_reference(entrypoint):
 
 @pytest.mark.parametrize("entrypoint", ["values", "callback"])
 def test_complex_nonorthogonal_density_and_batched_operator_trace(entrypoint):
-    contour = CFR2(nz=80, T=600)
+    contour = CFR(nz=80, T=600)
     frame = np.array([[1, 0.2 + 0.1j], [0, 1.3]], complex)
     overlap = frame.conj().T @ frame
     hamiltonian = frame.conj().T @ np.diag([-0.2, 0.3]) @ frame
@@ -75,7 +75,7 @@ def test_complex_nonorthogonal_density_and_batched_operator_trace(entrypoint):
 
 @pytest.mark.parametrize("entrypoint", ["values", "callback"])
 def test_grand_potential_response_has_no_density_half_shift(entrypoint):
-    contour = CFR2(nz=80, T=600)
+    contour = CFR(nz=80, T=600)
     d, v = 0.2, 0.1
 
     def kernel(z, ef=0):

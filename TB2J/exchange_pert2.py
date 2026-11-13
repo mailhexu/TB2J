@@ -737,7 +737,7 @@ class ExchangePert2(ExchangeNCL):
             # Direct calculation from eigenvectors (like ExchangeCL2)
             self.rho = self.G.get_density_matrix()
         else:  # greens_function
-            # MathDoc: tb2j/cfr2-integration-contract; retain the metric-dressed
+            # MathDoc: tb2j/cfr-integration-contract; retain the metric-dressed
             # complex intermediate, with no additional half-occupation shift.
             self.rho = self.contour.integrate_values(rhoRs)
 

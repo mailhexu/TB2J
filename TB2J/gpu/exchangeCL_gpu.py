@@ -56,8 +56,8 @@ class ExchangeCL2GPU(ExchangeCL2):
         _require_jax()
 
         self.atoms = atoms
-        method = kwargs.pop("method", kwargs.pop("integration_method", "cfr2"))
-        self.integration_method = ("cfr2" if method is None else method).lower()
+        method = kwargs.pop("method", kwargs.pop("integration_method", "cfr"))
+        self.integration_method = ("cfr" if method is None else method).lower()
         from TB2J.exchange_params import ExchangeParams
 
         ExchangeParams.__init__(self, **kwargs)
@@ -242,7 +242,7 @@ class ExchangeCL2GPU(ExchangeCL2):
         self._prepare_jax_arrays()
 
         npole = len(self.contour.path)
-        # MathDoc: tb2j/cfr2-integration-contract; weights include the moment.
+        # MathDoc: tb2j/cfr-integration-contract; weights include the moment.
         # Exchange arrays have been transferred to the host before accumulation.
         weights = self.contour.weights
         self.Jorb = {}

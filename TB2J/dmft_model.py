@@ -16,7 +16,7 @@ class TBModelDMFT:
     Two modes:
     - Dynamic (default): uses full Σ(iωₙ) on Matsubara mesh
     - Static (use_static_sigma=True): uses only Σ(∞) or Σ(∞)-Vdc as a
-      frequency-independent shift; compatible with CFR2 contour
+      frequency-independent shift; compatible with CFR contour
     """
 
     def __init__(

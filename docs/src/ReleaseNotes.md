@@ -8,12 +8,9 @@ These are the new features and changes  not yet included in the official release
   Use `TB2J[pypao]` when needed; the existing `all` extra is unchanged and
   does not include `pypao`.
 
-- CFR2 is the sole continued-fraction engine and default. The legacy `CFR`
-  Python symbol and `"cfr"` selector are removed without aliases. Use `CFR2`
-  / `"cfr2"` with an even integer pole depth of at least2.
-- Streaming CPU/GPU exchange and q-space J/K/X use complete normalized CFR2
-  weights directly. Observable-specific physical prefactors remain separate;
-  dynamical Matsubara and geometric contours retain their own definitions.
+- The CFR continued-fraction engine was rewritten with normalized integration.
+  `nz` is now a pole depth and must be an even integer of at least 2; odd
+  values are rejected rather than rounded.
 - Static DMFT populations use the generalized Hermitian problem, configured
   Fermi width and correct collinear/spinor rank. Redundant legacy population
   half shifts are removed without reinterpreting metric-dressed intermediates.

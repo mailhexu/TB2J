@@ -3,11 +3,11 @@
 :warning: This feature is currently under development and internal test. Do not use it for production yet.
 :warning: This feature is only available with the ABACUS and SIESTA code.
 
-`TB2J/MAEGreen.py` evaluates the second-order SOC response with normalized CFR2 weights and the separate physical `-Im/(2*pi)` factor. At finite temperature and fixed chemical potential this is a grand-potential coefficient, not a general fixed-particle-number internal-energy difference. The optional eigenvalue calculation uses its own occupation prescription and is not an identical ensemble by construction.
+`TB2J/MAEGreen.py` evaluates the second-order SOC response. At finite temperature and fixed chemical potential this is a grand-potential coefficient, not a general fixed-particle-number internal-energy difference. The optional eigenvalue calculation uses its own occupation prescription and is not an identical ensemble by construction.
 
 The ABACUS LCAO basis is non-orthogonal. Generalized eigenvectors and the overlap matrix must remain consistent when forming the Green function and operator traces; an identity-metric replacement is not valid. A full-space inverse-overlap moment and a retained/projected spectral moment are distinct. Pole convergence alone does not establish retained-state or k-mesh convergence.
 
-Use an even integer `nz >= 2` and converge the pole depth at the selected temperature and spectral range. CLI temperatures in K are converted to an internal width in eV with the Boltzmann constant; no implicit spin-degeneracy factor is supplied by the contour. The implementation follows the continued-fraction representation of Ozaki, *Phys. Rev. B* **75**, 035123 (2007).
+Use an even integer `nz >= 2` and converge the pole depth at the selected temperature and spectral range. CLI temperatures in K are converted to an internal width in eV with the Boltzmann constant. The implementation follows the continued-fraction representation of Ozaki, *Phys. Rev. B* **75**, 035123 (2007).
 
 
 To compute the magnetocrystalline anisotropy energy (MAE) of a magnetic system with the magnetic force theorem, two steps of DFT calculations are needed.

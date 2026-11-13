@@ -1,6 +1,6 @@
-"""Independent CFR2 normalization, metric-moment and finite-T response proofs.
+"""Independent CFR normalization, metric-moment and finite-T response proofs.
 
-MathDoc: tb2j/cfr2-integration-contract
+MathDoc: tb2j/cfr-integration-contract
 Energies are in eV; beta is inverse eV. The response is a grand-potential
 coefficient at fixed chemical potential, not a general fixed-N band energy.
 """
@@ -14,7 +14,7 @@ from ase.units import kB
 from scipy.special import expit
 
 
-# MathDoc: tb2j/cfr2-integration-contract
+# MathDoc: tb2j/cfr-integration-contract
 def derive():
     beta, d = sp.symbols("beta d", positive=True)
     strength, lam, energy = sp.symbols("v lambda epsilon", real=True)
@@ -140,7 +140,7 @@ def numerical_checks():
     from TB2J import mycfr
 
     assert Path(mycfr.__file__).resolve() == root / "TB2J" / "mycfr.py"
-    contour = mycfr.CFR2(nz=80, T=600)
+    contour = mycfr.CFR(nz=80, T=600)
     beta = 1 / (kB * 600)
     scalar_error = 0.0
     for epsilon in (-0.2, 0.2):
@@ -189,7 +189,7 @@ def numerical_checks():
     response_error = abs(response - expected_response)
     assert response_error < 1e-10
     for nz, tolerance in ((12, 1e-7), (30, 1e-9)):
-        auxiliary_contour = mycfr.CFR2(nz=nz, T=0.05 / kB)
+        auxiliary_contour = mycfr.CFR(nz=nz, T=0.05 / kB)
         for fermi in (0.0, 6.3):
             levels = np.array([-1.0, 1.0]) + fermi
             g = 1 / (auxiliary_contour.path[:, None] + fermi - levels)
@@ -213,5 +213,5 @@ def main():
 if __name__ == "__main__":
     verified = main()
     print(
-        f"Verified {len(verified)} symbolic results and independent CFR2 numerical oracles"
+        f"Verified {len(verified)} symbolic results and independent CFR numerical oracles"
     )

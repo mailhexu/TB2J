@@ -205,7 +205,7 @@ class ExchangeNCLGPU(ExchangeNCL):
         self._prepare_jax_arrays()
 
         npole = len(self.contour.path)
-        # MathDoc: tb2j/cfr2-integration-contract; use normalized full weights.
+        # MathDoc: tb2j/cfr-integration-contract; use normalized full weights.
         # A tensors are transferred to the host before accumulation.
         weights = self.contour.weights
 

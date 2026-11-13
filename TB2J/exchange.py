@@ -12,7 +12,7 @@ from TB2J.exchange_params import ExchangeParams
 from TB2J.external import p_imap
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
-from TB2J.mycfr import CFR2
+from TB2J.mycfr import CFR
 from TB2J.orbmap import map_orbs_matrix
 from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
 from TB2J.utils import (
@@ -24,8 +24,8 @@ from TB2J.utils import (
 class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
-        method = params.pop("method", params.pop("integration_method", "cfr2"))
-        self.integration_method = ("cfr2" if method is None else method).lower()
+        method = params.pop("method", params.pop("integration_method", "cfr"))
+        self.integration_method = ("cfr" if method is None else method).lower()
         import inspect
 
         sig = inspect.signature(ExchangeParams.__init__)
@@ -87,7 +87,7 @@ class Exchange(ExchangeParams):
         The path has three segments:
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
-        method = ("cfr2" if method is None else method).lower()
+        method = ("cfr" if method is None else method).lower()
         # if method.lower() == "rectangle":
         #    self.contour.build_path_rectangle(
         #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
@@ -98,10 +98,10 @@ class Exchange(ExchangeParams):
         elif method == "legendre":
             self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
-        elif method == "cfr2":
-            # MathDoc: tb2j/cfr2-integration-contract; weights include the moment.
+        elif method == "cfr":
+            # MathDoc: tb2j/cfr-integration-contract; weights include the moment.
             T_kelvin = self.smearing / ase.units.kB
-            self.contour = CFR2(nz=self.nz, T=T_kelvin)
+            self.contour = CFR(nz=self.nz, T=T_kelvin)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
 

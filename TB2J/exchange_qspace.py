@@ -132,8 +132,8 @@ class ExchangeCLQspace(ExchangeCL2):
         self.Kq = np.zeros_like(self.Jq)
         self.Xq = np.zeros_like(self.Jq)
         self.Jnorm_q = np.zeros_like(self.Jq)
-        if self.integration_method == "cfr2":
-            # MathDoc: tb2j/cfr2-integration-contract; sample axis is leading.
+        if self.integration_method == "cfr":
+            # MathDoc: tb2j/cfr-integration-contract; sample axis is leading.
             self.Jq = self.contour.integrate_values(self.Jqe_list).imag
             self.Kq = self.contour.integrate_values(self.Kqe_list).imag
             self.Xq = self.contour.integrate_values(self.Xqe_list).imag

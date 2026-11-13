@@ -24,7 +24,7 @@ DISPLACEMENT = np.array([[0, 0.07], [0.07, 0]])
 def spectral_exchange(up=UP, down=DOWN):
     """Complete spectral sum, independent of contour and Green implementation.
 
-    Partial fractions are verified in cfr2_integration_contract.py. The
+    Partial fractions are verified in cfr_integration_contract.py. The
     collinear kernel owns 1/(4*pi); its extracted J has no extra spin factor.
     """
     eu, vu = np.linalg.eigh(up)
@@ -138,7 +138,7 @@ def test_exchange_and_orbitals_against_absolute_spectral_reference(kind):
 
 @pytest.mark.parametrize("method", ["SeMiCiRcLe", "LeGeNdRe"])
 def test_non_cfr_override_executes_geometric_contour(method):
-    calc = calculator("cl", integration_method="cfr2", method=method, nz=800)
+    calc = calculator("cl", integration_method="cfr", method=method, nz=800)
     calc.calculate_all()
     # This contour is a zero-temperature energy integral, not a Fermi-weighted
     # finite-temperature sum. Its independent reference uses step occupations.
@@ -153,15 +153,11 @@ def test_non_cfr_override_executes_geometric_contour(method):
     assert abs(calc.exchange_Jdict[PAIR] - expected) < 1e-7
 
 
-def test_explicit_cfr2_precedence_against_spectral_reference():
-    calc = calculator("cl", integration_method="semicircle", method="CfR2")
+def test_explicit_cfr_precedence_against_spectral_reference():
+    calc = calculator("cl", integration_method="semicircle", method="CfR")
     calc.calculate_all()
     assert abs(calc.exchange_Jdict[PAIR] - spectral_exchange()) < 1e-10
 
-
-def test_retired_legacy_selector_is_rejected():
-    with pytest.raises(ValueError):
-        calculator("cl", method="cfr")
 
 
 @pytest.mark.parametrize("gpu", [False, pytest.param(True, marks=pytest.mark.gpu)])

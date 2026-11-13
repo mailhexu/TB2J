@@ -6,12 +6,12 @@ from ase import Atoms
 from ase.units import kB
 from HamiltonIO.lcao_hamiltonian import LCAOHamiltonian
 from scipy.special import expit
-from test_cfr2_exchange import DOWN, ORIGIN, UP
+from test_cfr_exchange import DOWN, ORIGIN, UP
 
 from TB2J.exchange_qspace import ExchangeCLQspace
 
 
-def qspace_calculator(method="cfr2", nz=80, nk=1):
+def qspace_calculator(method="cfr", nz=80, nk=1):
     atoms = Atoms("Fe2", positions=[[0, 0, 0], [1, 0, 0]], cell=[10, 10, 10])
     models = tuple(
         LCAOHamiltonian(
@@ -42,7 +42,7 @@ def qspace_calculator(method="cfr2", nz=80, nk=1):
 def spectral_jkx(temperature=600):
     """Complete spectral pair sum, not samples of the implementation contour.
 
-    MathDoc: tb2j/cfr2-integration-contract verifies the divided difference.
+    MathDoc: tb2j/cfr-integration-contract verifies the divided difference.
     This intentionally preserves the existing K1+2*K2 kernel, not a physical
     redefinition of K or a validation of Bruno renormalization.
     """
@@ -66,7 +66,7 @@ def spectral_jkx(temperature=600):
 
 
 @pytest.mark.parametrize("nk", [1, 3])
-def test_actual_qspace_cfr2_against_all_spectral_observables(nk):
+def test_actual_qspace_cfr_against_all_spectral_observables(nk):
     calc = qspace_calculator(nk=nk)
     calc.calculate_all()
     for actual, expected in zip((calc.Jq, calc.Kq, calc.Xq), spectral_jkx()):

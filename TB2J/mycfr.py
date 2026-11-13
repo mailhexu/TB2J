@@ -10,7 +10,7 @@ from ase.units import kB
 from scipy.linalg import eig
 
 
-class CFR2:
+class CFR:
     """Normalized continued-fraction integral with its high-frequency moment.
 
     ``nz`` is an even integer >= 2; ``T`` is the positive temperature in K.
@@ -39,7 +39,7 @@ class CFR2:
         self.prepare_poles()
 
     def prepare_poles(self):
-        # MathDoc: tb2j/cfr2-integration-contract#finite_pole_normalization_ratio
+        # MathDoc: tb2j/cfr-integration-contract#finite_pole_normalization_ratio
         j = np.arange(1, self.nz)
         off_diagonal = 1 / (2 * np.sqrt((2 * j - 1) * (2 * j + 1)))
         matrix = np.diag(off_diagonal, -1) + np.diag(off_diagonal, 1)
@@ -55,7 +55,7 @@ class CFR2:
                 self.weights[index : index + 2] = -np.pi * 1j * residue / self.beta
                 index += 2
         self.npoles = self.nz
-        # MathDoc: tb2j/cfr2-integration-contract#moment_sample_contribution
+        # MathDoc: tb2j/cfr-integration-contract#moment_sample_contribution
         self.path[-1] = 1j * self.Rinf
         self.weights[-1] = np.pi * self.Rinf / 2
 
@@ -70,9 +70,9 @@ class CFR2:
 
 
 if __name__ == "__main__":
-    contour = CFR2(nz=80, T=600)
+    contour = CFR(nz=80, T=600)
     energy = 0.2
     occupation = -contour.integrate_values(1 / (contour.path - energy)).imag / np.pi
     expected = 1 / (1 + np.exp(energy / (kB * contour.T)))
     np.testing.assert_allclose(occupation, expected, atol=1e-10, rtol=0)
-    print(f"CFR2 occupation at {energy} eV, {contour.T} K: {occupation:.12g}")
+    print(f"CFR occupation at {energy} eV, {contour.T} K: {occupation:.12g}")

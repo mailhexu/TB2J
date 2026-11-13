@@ -427,7 +427,7 @@ class ExchangeCL2(ExchangeCL):
         print("Green's function Calculation started.")
 
         npole = len(self.contour.path)
-        # MathDoc: tb2j/cfr2-integration-contract; normalized full-path weights.
+        # MathDoc: tb2j/cfr-integration-contract; normalized full-path weights.
         weights = self.contour.weights
 
         if self.nproc == 1:

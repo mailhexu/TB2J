@@ -1,4 +1,4 @@
-"""Absolute spectral references for main's direct CFR2 projector consumers."""
+"""Absolute spectral references for main's direct CFR projector consumers."""
 
 import numpy as np
 from ase.units import kB
@@ -51,7 +51,7 @@ def test_collinear_projector_exchange_matches_complete_band_reference():
                 v_up[i].conj() * v_up[j],
                 v_down[j].conj() * v_down[i],
             )
-            # CFR2 integrates the divided difference with pi normalization;
+            # CFR integrates the divided difference with pi normalization;
             # 1/(4*pi) in the exchange trace therefore leaves the physical 1/4.
             expected = (
                 -delta[i] * delta[j] * np.sum(residues * fermi_difference).real / 4.0

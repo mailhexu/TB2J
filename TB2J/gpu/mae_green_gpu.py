@@ -176,7 +176,7 @@ class MAEGreenGPU(MAEGreen):
         evals_jax = numpy_to_jax(self.G.evals)
         evecs_jax = numpy_to_jax(self.G.evecs)
         na = len(thetas)
-        # MathDoc: tb2j/cfr2-integration-contract; transfer the full normalized
+        # MathDoc: tb2j/cfr-integration-contract; transfer the full normalized
         # rule once, including its moment sample, for either execution mode.
         path_jax = numpy_to_jax(self.contour.path)
         weights_jax = numpy_to_jax(self.contour.weights)

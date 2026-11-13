@@ -1,6 +1,6 @@
 """Actual MAEGreen response and output against finite-T spectral energies.
 
-MathDoc: tb2j/cfr2-integration-contract (fixed-mu grand potential).
+MathDoc: tb2j/cfr-integration-contract (fixed-mu grand potential).
 """
 
 import numpy as np
@@ -9,7 +9,7 @@ from ase import Atoms
 from ase.units import kB
 from HamiltonIO.lcao_hamiltonian import LCAOHamiltonian
 from scipy.special import expit
-from test_cfr2_exchange import ORIGIN, execution_context
+from test_cfr_exchange import ORIGIN, execution_context
 
 from TB2J.MAEGreen import MAEGreen
 

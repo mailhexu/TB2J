@@ -7,7 +7,7 @@ from ase.units import kB
 from HamiltonIO.lcao_hamiltonian import LCAOHamiltonian
 from scipy.linalg import eigh
 from scipy.special import expit
-from test_cfr2_exchange import DimerDisplacement, execution_context
+from test_cfr_exchange import DimerDisplacement, execution_context
 
 from TB2J.dmft_model import TBModelDMFT
 from TB2J.exchange import ExchangeNCL
@@ -65,7 +65,7 @@ def parameters(spinor=False):
         nz=80,
         nproc=1,
         Rcut=2,
-        method="cfr2",
+        method="cfr",
     )
 
 

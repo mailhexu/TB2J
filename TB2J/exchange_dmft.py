@@ -75,7 +75,7 @@ class ExchangeDMFTMixin:
         """Build static-sigma metric populations at the configured temperature."""
         from HamiltonIO.model.occupations import myfermi as fermi
 
-        # MathDoc: tb2j/cfr2-integration-contract#spectral_density_complex_nonorthogonal
+        # MathDoc: tb2j/cfr-integration-contract#spectral_density_complex_nonorthogonal
         sigma_static = np.asarray(self.tbmodel.get_sigma(0, ispin=None))
         spinor = sigma_static.ndim == 2
         sigmas = sigma_static[None, ...] if spinor else sigma_static
@@ -109,11 +109,11 @@ class ExchangeDMFTMixin:
             if self.dmft_mesh is None:
                 raise ValueError(
                     "Matsubara DMFT exchange requires a dynamic self-energy mesh. "
-                    "Use method='cfr2' for static-sigma mode."
+                    "Use method='cfr' for static-sigma mode."
                 )
             self.contour = MatsubaraContour(self.dmft_mesh, self.beta)
         else:
-            # For CFR2 and other contour methods, delegate to ExchangeCL
+            # For CFR and other contour methods, delegate to ExchangeCL
             super()._prepare_elist(method)
 
     def integrate(self, AijRs, AijRs_orb=None, rho_list=None, method="matsubara"):
@@ -143,7 +143,7 @@ class ExchangeDMFTMixin:
                 else:
                     self.rho = 0.5 * eye + 2.0 * T * np.real(rho_sum)
         else:
-            # For CFR2 and other contour methods, use contour weights
+            # For CFR and other contour methods, use contour weights
             for iR in self.R_ijatom_dict:
                 R_vec = self.short_Rlist[iR]
                 for iatom, jatom in self.R_ijatom_dict[iR]:

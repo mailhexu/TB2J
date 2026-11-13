@@ -44,7 +44,7 @@ def gen_exchange_Oiju_epw3(
     list_iatom: list = None,
     output_path: str = "TB2J_results",
     Jonly: bool = False,
-    integration_method: str = "cfr2",
+    integration_method: str = "cfr",
     density_method: str = "eigenvector",
     use_gpu: bool = False,
     vectorize_energy: bool = True,
@@ -108,7 +108,7 @@ def gen_exchange_Oiju_epw3(
         Path for output files
     Jonly : bool, default=False
         Whether to compute only isotropic J without derivatives
-    integration_method : str, default='cfr2'
+    integration_method : str, default='cfr'
         Integration method for contour integration
     density_method : str, default='eigenvector'
         Method for density calculation
