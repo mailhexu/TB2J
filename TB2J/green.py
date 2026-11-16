@@ -98,6 +98,7 @@ class TBGreen:
         initial_emin=-25,
         smearing_width=0.01,
         use_gpu=False,
+        eigen_emax=5.1,
     ):
         """
         :param tbmodel: A tight binding model
@@ -112,6 +113,9 @@ class TBGreen:
         :param nproc: number of processes to use
         :param emin: minimum energy relative to fermi level to consider
         :param use_gpu: if True, use TBGreenGPU for GPU acceleration
+        :param eigen_emax: upper energy limit (eV, relative to the Fermi energy) of
+            the eigenstates kept in the Green's function; bands entirely above it
+            are dropped. Use np.inf to keep all states.
         """
         # Use GPU-accelerated Green's function if requested
         if use_gpu:
@@ -132,6 +136,7 @@ class TBGreen:
                 nproc=nproc,
                 initial_emin=initial_emin,
                 smearing_width=smearing_width,
+                eigen_emax=eigen_emax,
             )
             # Copy all attributes from GPU instance to self
             self.__dict__.update(gpu_instance.__dict__)
@@ -139,6 +144,7 @@ class TBGreen:
 
         # CPU initialization
         self.initial_emin = initial_emin
+        self.eigen_emax = eigen_emax
         self.tbmodel = tbmodel
         self.is_orthogonal = tbmodel.is_orthogonal
         self.R2kfactor = tbmodel.R2kfactor
@@ -316,7 +322,7 @@ class TBGreen:
             self.evals,
             self.evecs,
             emin=self.efermi + self.adjusted_emin,
-            emax=self.efermi + 5.1,
+            emax=self.efermi + self.eigen_emax,
             # emin=self.efermi -10,
             # emax=self.efermi + 10,
         )

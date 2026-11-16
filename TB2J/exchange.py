@@ -385,6 +385,7 @@ class ExchangeNCL(Exchange):
             initial_emin=self.emin,
             smearing_width=self.smearing,
             use_gpu=self.use_gpu,
+            eigen_emax=self.eigen_emax,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi

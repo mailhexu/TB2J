@@ -30,6 +30,7 @@ class ExchangeCL2(ExchangeCL):
             use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
+            eigen_emax=self.eigen_emax,
         )
         self.Gdn = TBGreen(
             tbmodel=self.tbmodel_dn,
@@ -38,6 +39,7 @@ class ExchangeCL2(ExchangeCL):
             use_cache=self._use_cache,
             nproc=self.nproc,
             smearing_width=self.smearing,
+            eigen_emax=self.eigen_emax,
         )
         if self.write_density_matrix:
             self.Gup.write_rho_R(
