@@ -151,18 +151,25 @@ class ExchangeCL2(ExchangeCL):
                         Rij_done.add((iRm, jatom, iatom))
         return Jorb_list, JJ_list
 
-    def get_all_A_vectorized(self, Gup, Gdn):
+    def get_all_A_vectorized(self, Gup, Gdn, orb_indices_map=None):
         """
         Vectorized calculation of all A matrix elements for collinear exchange.
         Follows the pattern from TB2J/exchange.py get_all_A_vectorized method.
 
         :param Gup: Green's function array for spin up, shape (nR, nbasis, nbasis)
         :param Gdn: Green's function array for spin down, shape (nR, nbasis, nbasis)
+        :param orb_indices_map: Optional dictionary mapping global orbital indices
+            to indices into Gup and Gdn, if these hold only a block of the basis.
         :returns: tuple of (Jorb_list, JJ_list) with R vector keys
         """
         # Get magnetic sites and their orbital indices
         magnetic_sites = self.ind_mag_atoms
         iorbs = [self.iorb(site) for site in magnetic_sites]
+        if orb_indices_map is not None:
+            iorbs = [
+                np.array([orb_indices_map[int(o)] for o in orbs], dtype=int)
+                for orbs in iorbs
+            ]
 
         # Build the Delta matrices for all magnetic sites
         Delta = [self.get_Delta(site) for site in magnetic_sites]
@@ -260,20 +267,29 @@ class ExchangeCL2(ExchangeCL):
 
     def get_quantities_per_e(self, e):
         # short_Rlist now contains actual R vectors
-        GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
-        GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
-
-        # Save diagonal elements of Green's functions for charge and magnetic moment calculation
-        # Only if debug option is enabled
         if self.debug_options.get("compute_charge_moments", False):
+            # The charge and moment diagnostics need the full G(R).
+            GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
+            GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
             self.save_greens_function_diagonals_collinear(GR_up, GR_dn, e)
+            orb_indices_map = None
+        else:
+            # G(R) only on the magnetic-atom orbitals: exact, all eigenstates kept.
+            indices, orb_indices_map = self._magnetic_orbital_block()
+            GR_up = self.Gup.get_GR_block(self.short_Rlist, e, indices)
+            GR_dn = self.Gdn.get_GR_block(self.short_Rlist, e, indices)
 
         # Use vectorized method with fallback to original method
         try:
-            Jorb_list, JJ_list = self.get_all_A_vectorized(GR_up, GR_dn)
-            # Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
+            Jorb_list, JJ_list = self.get_all_A_vectorized(
+                GR_up, GR_dn, orb_indices_map=orb_indices_map
+            )
         except Exception as ex:
             print(f"Vectorized method failed: {ex}, falling back to original method")
+            if orb_indices_map is not None:
+                # get_all_A indexes the full basis.
+                GR_up = self.Gup.get_GR(self.short_Rlist, energy=e)
+                GR_dn = self.Gdn.get_GR(self.short_Rlist, energy=e)
             Jorb_list, JJ_list = self.get_all_A(GR_up, GR_dn)
         return dict(Jorb_list=Jorb_list, JJ_list=JJ_list)
 

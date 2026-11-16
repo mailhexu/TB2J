@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from TB2J.exchange import ExchangeNCL
+from TB2J.exchangeCL2 import ExchangeCL2
 from TB2J.green import TBGreen
 
 _ENERGIES = [0.3j, -1.0 + 0.5j, -0.2 + 1e-3j]
@@ -90,3 +91,34 @@ def test_ncl_magnetic_block_indices():
     indices, orb_map = ex._magnetic_orbital_block()
     np.testing.assert_array_equal(indices, np.r_[0:6, 12:18])
     assert orb_map == {int(g): i for i, g in enumerate(indices)}
+
+
+def _make_cl2(seed=0):
+    """Collinear: atoms 0 and 2 magnetic, 1 and 3 not; 3 orbitals each."""
+    rng = np.random.default_rng(seed)
+    norb_atom = 3
+    nbasis = 4 * norb_atom
+    ex = ExchangeCL2.__new__(ExchangeCL2)
+    ex.Gup = _make_green(nbasis, seed=seed)
+    ex.Gdn = _make_green(nbasis, efermi=-0.1, seed=seed + 1)
+    ex.orb_dict = {a: np.arange(a * norb_atom, (a + 1) * norb_atom) for a in range(4)}
+    ex.ind_mag_atoms = [0, 2]
+    ex.Delta = _random_hermitian(nbasis, rng)
+    ex.debug_options = {"compute_charge_moments": False}
+    ex.short_Rlist = _RLIST
+    ex.R_ijatom_dict = {
+        iR: [(i, j) for i in (0, 2) for j in (0, 2) if not (R == (0, 0, 0) and i == j)]
+        for iR, R in enumerate(_RLIST)
+    }
+    return ex
+
+
+def test_cl2_magnetic_block_matches_full_GR():
+    ex = _make_cl2()
+    for e in _ENERGIES:
+        ref_Jorb, ref_JJ = ex.get_all_A_vectorized(
+            ex.Gup.get_GR(_RLIST, energy=e), ex.Gdn.get_GR(_RLIST, energy=e)
+        )
+        out = ex.get_quantities_per_e(e)
+        _assert_same_dicts(out["Jorb_list"], ref_Jorb)
+        _assert_same_dicts(out["JJ_list"], ref_JJ)
