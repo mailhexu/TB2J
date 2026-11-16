@@ -530,6 +530,66 @@ class TBGreen:
 
         return GR
 
+    def get_GR_block(self, Rpts, energy, indices):
+        """Real-space Green's function restricted to a subset of the basis.
+
+        Returns the same values as ``get_GR(Rpts, energy)[:, indices][:, :, indices]``
+        without building the full ``(nR, nbasis, nbasis)`` array. Only the rows
+        ``indices`` of the eigenvectors enter,
+
+            G_ab(k) = sum_n V_an(k) conj(V_bn(k)) / (energy + efermi - e_n(k)),
+
+        and the sum runs over all eigenstates kept in the Green's function, so the
+        block is exact (no downfolding). The cost per k-point drops from
+        O(nbasis^2 * nstates) to O(nsub^2 * nstates), and the k sum is a single
+        matrix product with the phase factors instead of a broadcast over the full
+        basis.
+
+        :param Rpts: R points
+        :param energy: energy value relative to the Fermi energy
+        :param indices: basis indices of the block (1D integer array)
+        :returns: real space Green's function block for one energy.
+        :rtype: numpy array of shape (len(Rpts), len(indices), len(indices))
+        """
+        indices = np.asarray(indices, dtype=int)
+        Rvecs = np.array(Rpts)
+        kpts = np.asarray(self.kpts)
+        phase = np.exp(self.k2Rfactor * (Rvecs @ kpts.T))
+        phase *= np.asarray(self.kweights)[None, :]
+
+        nsub = len(indices)
+        Gk = np.empty((len(kpts), nsub, nsub), dtype=complex)
+        if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "get_sigma"):
+            # With a self-energy G(k) has no eigenvector form: slice the full G(k).
+            for ik in range(len(kpts)):
+                Gk[ik] = self.get_Gk(ik, energy)[np.ix_(indices, indices)]
+        else:
+            V = self._get_evecs_rows(indices)
+            for ik in range(len(kpts)):
+                Vf = V[ik] * (1.0 / (energy + self.efermi - self.get_evalue(ik)))
+                Gk[ik] = Vf @ V[ik].conj().T
+
+        GR = phase @ Gk.reshape(len(kpts), nsub * nsub)
+        return GR.reshape(len(Rvecs), nsub, nsub)
+
+    def _get_evecs_rows(self, indices):
+        """Rows ``indices`` of the eigenvectors at all k-points.
+
+        The result is cached, since the same block is used for every energy.
+
+        :param indices: basis indices (1D integer array)
+        :returns: array of shape (nkpts, len(indices), nstates)
+        """
+        key = indices.tobytes()
+        cached = getattr(self, "_evecs_rows_cache", None)
+        if cached is None or cached[0] != key:
+            nk = len(self.kpts)
+            rows = np.empty((nk, len(indices), self.evals.shape[1]), dtype=complex)
+            for ik in range(nk):
+                rows[ik] = self.get_evecs(ik)[indices, :]
+            self._evecs_rows_cache = (key, rows)
+        return self._evecs_rows_cache[1]
+
     def get_GR_and_dGRdx1(self, Rpts, energy, dHdx):
         """
         calculate G(R) and dG(R)/dx.
