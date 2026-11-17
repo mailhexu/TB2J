@@ -40,6 +40,12 @@ Welcome to TB2J's documentation!
    src/development.md
    src/ReleaseNotes.md
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Conferences and schools:
+
+   src/conferences_and_schools.rst
+
 
 Indices and tables
 ==================
