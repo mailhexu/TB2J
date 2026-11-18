@@ -30,6 +30,7 @@ SCRIPTS = [
     "site_boson_modes",
     "magnon_phonon_vertex",
     "born_scattering_spectra",
+    "harmonic_magnon_phonon",
 ]
 
 

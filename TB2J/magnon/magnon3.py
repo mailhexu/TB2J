@@ -13,6 +13,7 @@ from TB2J.magnon.eigenstates import (
     MagnonEigenstateData,
     SiteBosonDiagnostics,
     SiteBosonModes,
+    colpa_diagonalize_factor,
 )
 from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
@@ -420,20 +421,7 @@ class Magnon:
                 shifts[ik] = 1e-6
                 tiers[ik] = 1
                 Ki = np.linalg.cholesky(H[ik] + shifts[ik] * np.eye(2 * n))
-            KH = Ki.conj().T
-            eig_matrix = KH @ g @ Ki
-            eigvals, eigvecs = np.linalg.eigh(eig_matrix)
-            if np.any(eigvals[:n] >= 0) or np.any(eigvals[n:] <= 0):
-                raise ValueError(
-                    "Cannot construct site-boson modes: Cholesky metric spectrum "
-                    "does not have stable positive/negative branches."
-                )
-            # Since numpy returns a lower factor H=K K†, the eigenvectors of
-            # K†gK map to physical generalized eigenvectors via K^{-†}.
-            physical = np.linalg.solve(KH, eigvecs) * np.sqrt(np.abs(eigvals))[None, :]
-            paraunitary[ik] = np.concatenate(
-                (physical[:, n:], physical[:, :n][:, ::-1]), axis=1
-            )
+            _, paraunitary[ik] = colpa_diagonalize_factor(Ki, metric=g)
             n_zero, symmetry_residual[ik] = self._global_rotation_null_modes(
                 H[ik], kpoints[ik], self.Snorm, U, V, stability_tol[ik]
             )
