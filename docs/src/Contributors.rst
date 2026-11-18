@@ -5,11 +5,11 @@ The TB2J package was initially developed by:
 
 * Xu He (mailhexu@gmail.com)
 
-* Nicole Helbig
+* Nicole Helbig (University of Liège)
 
-* Matthieu Verstraete
+* Matthieu Verstraete (University of Liège)
 
-* Eric Bousquet
+* Eric Bousquet (University of Liège)
 
 from the Phythema and Nanomat groups at the University of Liège. 
 Part of the code was developed by Xu He when he was at ICN2 (Institut Catala de Nanociencia i Nanotecnologia) in Barcelona, Spain.
@@ -27,7 +27,7 @@ After the first public release, the following people have made significant contr
 
 * Zhenxiong Shen (University of Science and Technology of China)
 
-* Daniel Guterding (Technische Hochschule Brandenburg, Brandenburg an der Havel, Germany)
+* Daniel Guterding (Technische Hochschule Brandenburg)
 
 
 We thank all the other people who have contributed to the code, including the ones who have reported bugs or typos, 
