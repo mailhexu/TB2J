@@ -8,7 +8,7 @@ Welcome to TB2J's documentation!
 
  TB2J is an open-source Python package for the automatic computation of magnetic interactions (including exchange and Dzyaloshinskii-Moriya) between atoms of magnetic crystals from density functional Hamiltonians based on Wannier functions or linear combinations of atomic orbitals.  The program is based on the Green’s function method with the local rigid spin rotation treated as a perturbation.  As input, the package uses the output of either Wannier90, which is interfaced with many density functional theory packages, or of codes based on localized orbitals (SIESTA, OpenMX and Abacus).  A minimal user input is needed, which allows for easy integration into high-throughput workflows.
 
- The TB2J project was initiated in the PhyTheMa and Nanomat teams at the University of Liege.  
+ The TB2J project was initiated in the PhyTheMa and Nanomat teams at the University of Liège.  
 
  The source code can be found at `https://github.com/mailhexu/TB2J <https://github.com/mailhexu/TB2J>`_.
 

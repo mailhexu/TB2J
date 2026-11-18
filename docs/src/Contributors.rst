@@ -11,7 +11,7 @@ The TB2J package was initially developed by:
 
 * Eric Bousquet (University of Liège)
 
-from the Phythema and Nanomat groups at the University of Liège. 
+from the PhyTheMa and Nanomat groups at the University of Liège. 
 Part of the code was developed by Xu He when he was at ICN2 (Institut Catala de Nanociencia i Nanotecnologia) in Barcelona, Spain.
 
 

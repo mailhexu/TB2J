@@ -7,10 +7,10 @@
 
 TB2J is a open source python package for calculating the magnetic interaction parameters in Heisenberg models from DFT. It use the magnetic force theorem and take the local rigid spin rotation as a perturbation in the Green's function method. 
 
-The TB2J project is initialized in the PhyTheMa and Nanomat teams in the University of Liege.
+The TB2J project is initialized in the PhyTheMa and Nanomat teams in the University of Liège.
 
 The features include:
- - Calculates  parameters in Heisenberg model, including isotropic exchange, anisotropic exchange, Dyzanoshinskii-Moriya interaction.
+ - Calculates  parameters in Heisenberg model, including isotropic exchange, anisotropic exchange, Dzyaloshinskii-Moriya interaction.
  - Can use the input from many DFT codes with Wannier90, e.g. Abinit, Quantum Espresso, Siesta, VASP, etc.
  - Can use input from DFT codes with numerical orbitals from Siesta, OpenMX and ABACUS.
  - Supports DMFT exchange calculations using self-energies from DMFT solvers (e.g., w2dynamics).
