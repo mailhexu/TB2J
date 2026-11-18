@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- Story 013 material run (`TB2J/magnon_phonon.material`,
+  `scripts/s013_material_run.py`): the monolayer-CrI3 bare and coupled
+  spectral run on the hash-verified S001/S002 derivative stores and the
+  Story-012 qualified `s012-h005-3x` phonon dataset. The module adds no
+  physics: the declared first-neighbour FM magnon model, the
+  `load_cri3_blocks` hash-joined (q, mode) coverage loader (gates passed,
+  declared infrared cutoff), and coupled spectra composed from the
+  certified Story-009 vertex and Story-010 Born kernels with declared
+  per-channel internal meshes (the phonon loop excludes the M+M -> Gamma
+  goldstone channel; the anisotropy-regularized contribution is declared
+  unavailable). Bare magnons run on the Gamma-K-M-Gamma path; bare phonons
+  only at the covered commensurate points (M is incommensurate with the 3x
+  dataset and is not interpolated). Harmonic mixing is stated as
+  unavailable; the run script emits npz/JSON/PNG artifacts with a
+  provenance manifest (dataset hashes, mesh, T, eta, approximation
+  string), and TEST-001/002 live in
+  `tests/tests/test_material_spectra_run.py` on the cached fixture.
+
+- Story 010 magnon-phonon scattering: fixed the one-loop magnon kernel
+  contraction (the phonon branch index is now contracted between both
+  vertex operands; the external frequency stays a distinct output axis);
+  the phonon hot-band kernel returns the Dyson-partitioned self-energy
+  `Sigma_nu = D0^-1 deltaD D0^-1` separately from the additive coordinate
+  Green-function correction `delta D` (which is not a self-energy), and
+  linewidths are defined from the self-energy.  A nearest-grid sampling
+  offset is reported per on-shell evaluation (`grid_error`, mirrored in
+  metadata) separately from the linewidths.  The `scattering_spectra` seam
+  is attached unconditionally on package import, and a `scattering`
+  subcommand was added to `python -m TB2J.magnon_phonon.cli` (JSON
+  manifest in, JSON result out).  The Born scattering derivation script
+  keeps structure-factor detailed balance and commutator-spectrum oddness
+  distinct, replaces self-referential numeric checks with independently
+  constructed Fock/intermediate-state checks, and the phonon test oracle
+  rebuilds its double-pole weights from its own Fock-space interaction
+  and energy shifts.
 - Added the explicit collinear magnon-phonon vertex `MagnonPhononModel.vertex(k, q)`
   from canonical Story-006 site-boson modes, full-moment oriented-bond exchange
   derivatives, and mass-weighted phonon modes. The vertex applies the
@@ -363,3 +398,24 @@ Unreleased
 - No `WannierManager` API change; wsvec is auto-detected from the Wannier90
   output directory. To force scheme 1 for A/B comparison, temporarily move
   `{prefix}_wsvec.dat` aside.
+- Story 010 (in progress): added the one-shot Born scattering seam
+  `MagnonPhononModel.scattering_spectra(request)` with certified magnon
+  kernels (emission/absorption Bose structure, coordinate/commutator
+  observable normalization pinned by the free-boson pole, verified against
+  truncated-Fock Lehmann references with truncation convergence, g -> 0
+  exact bare recovery, threshold-gated absorptive parts, T = 0 and finite-T
+  Bose occupations, broadening/grid metadata reported separately from
+  calculated linewidths).  The phonon coordinate-channel correction is
+  derived and certified as a closed-form hot-band kernel: per channel the
+  `+-Omega_nu` second-order restructuring weight
+  `S = (n_{k+q,m} - n_{k,n}) deps / (Omega_nu (deps^2 - Omega_nu^2))` and
+  the hot-band pole weight
+  `W = 2 Omega_nu (n_{k,n} - n_{k+q,m}) / (deps^2 - Omega_nu^2)^2`
+  at `omega = +- deps`, both depending only on the magnon occupations
+  (exact T = 0 vanishing, exactly odd coordinate spectral function),
+  asserted to reproduce the truncated-Fock Lehmann intermediate-state sum
+  to machine precision at T = 0 and finite T; the consumer-facing test
+  compares the seam against an independent truncated-Fock Lehmann oracle
+  with truncation convergence.  Reported via `phonon_kernel_status` seam
+  metadata.  Asserted derivation: `docs/sympy/born_scattering_spectra.py`
+  + `.md`.
