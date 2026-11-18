@@ -27,6 +27,8 @@ After the first public release, the following people has made significant contri
 
 * Zhenxiong Shen (University of Science and Technology of China)
 
+* Daniel Guterding (Technische Hochschule Brandenburg, Brandenburg an der Havel, Germany)
+
 
 We thank all the other people who have contributed to the code, including the ones who have reported bugs or typos, 
  suggested improvements, and asked questions. 
