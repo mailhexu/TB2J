@@ -60,6 +60,7 @@ def run_abacus2J():
         Rcut=args.rcut,
         emin=args.emin,
         nz=args.nz,
+        eigen_emax=args.eigen_emax,
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,

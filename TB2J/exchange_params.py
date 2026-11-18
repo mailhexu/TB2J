@@ -21,6 +21,7 @@ class ExchangeParams:
     emin: float = -15
     emax: float = 0.05
     nz: int = 100
+    eigen_emax: float = 5.1
     exclude_orbs = []
     ne: int = 0
     Rcut: float = None
@@ -54,6 +55,7 @@ class ExchangeParams:
         emin=-15,
         emax=0.00,
         nz=100,
+        eigen_emax=5.1,
         ne=None,
         Rcut=None,
         use_cache=False,
@@ -104,6 +106,7 @@ class ExchangeParams:
         self.emin = emin
         self.emax = emax
         self.nz = nz
+        self.eigen_emax = eigen_emax
         self.exclude_orbs = exclude_orbs
         self.ne = ne
         self.Rcut = Rcut
@@ -226,6 +229,16 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         help="number of steps for semicircle contour, default: 100",
         default=100,
         type=int,
+    )
+    parser.add_argument(
+        "--eigen_emax",
+        help="upper energy limit (eV, relative to the Fermi energy) of the "
+        "eigenstates kept in the Green's function; bands entirely above it are "
+        "dropped to save memory. Use 'inf' to keep all states. A finite limit "
+        "can remove unoccupied magnetic states (e.g. upper Hubbard bands of "
+        "wide-gap insulators) and change J. Default: 5.1",
+        default=5.1,
+        type=float,
     )
     parser.add_argument(
         "--cutoff",
@@ -359,6 +372,7 @@ def parser_argument_to_dict(args) -> dict:
         "emin": args.emin,
         "emax": args.emax,
         "nz": args.nz,
+        "eigen_emax": args.eigen_emax,
         "exclude_orbs": args.exclude_orbs,
         "ne": args.ne,
         "Rcut": args.rcut,

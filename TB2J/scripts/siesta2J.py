@@ -62,6 +62,7 @@ def run_siesta2J():
         emin=args.emin,
         emax=args.emax,
         nz=args.nz,
+        eigen_emax=args.eigen_emax,
         description=args.description,
         output_path=args.output_path,
         use_cache=args.use_cache,

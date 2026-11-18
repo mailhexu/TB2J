@@ -34,6 +34,7 @@ class TBGreenGPU(TBGreen):
         nproc=1,
         initial_emin=-25,
         smearing_width=0.01,
+        eigen_emax=5.1,
     ):
         """
         Initialize TBGreenGPU.
@@ -43,6 +44,7 @@ class TBGreenGPU(TBGreen):
         """
         # Initialize base attributes (skip TBGreen.__init__ to avoid calling _prepare_eigen)
         self.initial_emin = initial_emin
+        self.eigen_emax = eigen_emax
         self.tbmodel = tbmodel
         self.is_orthogonal = tbmodel.is_orthogonal
         self.R2kfactor = tbmodel.R2kfactor
@@ -157,7 +159,7 @@ class TBGreenGPU(TBGreen):
             self.evals,
             self.evecs,
             emin=self.efermi + self.adjusted_emin,
-            emax=self.efermi + 5.1,
+            emax=self.efermi + self.eigen_emax,
         )
 
         # Handle caching if enabled
