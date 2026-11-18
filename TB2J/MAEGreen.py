@@ -3,7 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import tqdm
-from HamiltonIO.abacus.abacus_wrapper import AbacusSplitSOCParser
+from HamiltonIO.abacus import (
+    AbacusSingleStepSOCParser,
+    AbacusSplitSOCParser,
+)
 from HamiltonIO.model.occupations import GaussOccupations
 from typing_extensions import DefaultDict
 
@@ -149,15 +152,15 @@ class MAEGreen(ExchangeNCL):
         #          comparing to the maximum of {maxH0} eV of the spin part of the Hamiltonian.
         #          The SOC is too strong, the perturbation theory may not be valid.""")
 
+        # time the G0k calculation
         G0K = self.G.get_Gk_all(e)
-        Hsoc_k = self.tbmodel.get_Hk_soc(self.G.kpts)
         na = len(thetas)
         dE_angle = np.zeros(na, dtype=complex)
         dE_angle_matrix = np.zeros((na, self.natoms, self.natoms), dtype=complex)
         # dE_angle_orbitals = np.zeros((na, self.natoms, self.norb, self.norb), dtype=complex)
         dE_angle_atom_orb = DefaultDict(lambda: 0)
         for iangle, (theta, phi) in enumerate(zip(thetas, phis)):
-            for ik, dHk in enumerate(Hsoc_k):
+            for ik, dHk in enumerate(self.Hsoc_k):
                 dHi = rotate_spinor_matrix(dHk, theta, phi)
                 GdH = G0K[ik] @ dHi
                 # dE += np.trace(GdH @ G0K[i].T.conj() @ dHi) * self.kweights[i]
@@ -180,27 +183,29 @@ class MAEGreen(ExchangeNCL):
                 dE_angle[iangle] += dG2sum * self.G.kweights[ik]
 
                 # Calculate atom-atom matrix interactions
-                for iatom in range(self.natoms):
-                    iorb = self.iorb(iatom)
-                    for jatom in range(self.natoms):
-                        jorb = self.iorb(jatom)
-                        # Calculate cross terms between atoms i and j
-                        dE_ij_orb = dG2[np.ix_(iorb, jorb)] * self.G.kweights[ik]
-                        dE_ij_orb = (
-                            dE_ij_orb[::2, ::2]
-                            + dE_ij_orb[1::2, 1::2]
-                            + dE_ij_orb[1::2, ::2]
-                            + dE_ij_orb[::2, 1::2]
-                        )
-                        dE_ij = np.sum(dE_ij_orb)
-                        # Transform to local orbital basis
-                        mmat_i = self.mmats[iatom]
-                        mmat_j = self.mmats[jatom]
-                        dE_ij_orb = mmat_i.T @ dE_ij_orb @ mmat_j
-                        dE_angle_matrix[iangle, iatom, jatom] += dE_ij
-                        # Store orbital-resolved data for diagonal terms
-                        if iatom == jatom:
-                            dE_angle_atom_orb[(iangle, iatom)] += dE_ij_orb
+                self.decompose = False
+                if self.decompose:
+                    for iatom in range(self.natoms):
+                        iorb = self.iorb(iatom)
+                        for jatom in range(self.natoms):
+                            jorb = self.iorb(jatom)
+                            # Calculate cross terms between atoms i and j
+                            dE_ij_orb = dG2[np.ix_(iorb, jorb)] * self.G.kweights[ik]
+                            dE_ij_orb = (
+                                dE_ij_orb[::2, ::2]
+                                + dE_ij_orb[1::2, 1::2]
+                                + dE_ij_orb[1::2, ::2]
+                                + dE_ij_orb[::2, 1::2]
+                            )
+                            dE_ij = np.sum(dE_ij_orb)
+                            # Transform to local orbital basis
+                            mmat_i = self.mmats[iatom]
+                            mmat_j = self.mmats[jatom]
+                            dE_ij_orb = mmat_i.T @ dE_ij_orb @ mmat_j
+                            dE_angle_matrix[iangle, iatom, jatom] += dE_ij
+                            # Store orbital-resolved data for diagonal terms
+                            if iatom == jatom:
+                                dE_angle_atom_orb[(iangle, iatom)] += dE_ij_orb
         return dE_angle, dE_angle_matrix, dE_angle_atom_orb
 
     def get_perturbed_R(self, e, thetas, phis):
@@ -230,6 +235,8 @@ class MAEGreen(ExchangeNCL):
         #        )
 
         # rewrite the for loop above to use p_map
+        self.Hsoc_k = self.tbmodel.get_Hk_soc(self.G.kpts)
+
         def func(e):
             return self.get_perturbed(e, thetas, phis)
 
@@ -367,23 +374,34 @@ class MAEGreen(ExchangeNCL):
 
 
 def abacus_get_MAE(
-    path_nosoc,
-    path_soc,
-    kmesh,
-    thetas,
-    phis,
+    path_nosoc=None,
+    path_soc=None,
+    kmesh=None,
+    thetas=None,
+    phis=None,
     gamma=True,
     output_path="TB2J_anisotropy",
-    magnetic_elements=None,
     nel=None,
     width=0.1,
     with_eigen=False,
+    path_single=None,
+    split_soc=None,
     **kwargs,
 ):
-    """Get MAE from Abacus with magnetic force theorem. Two calculations are needed. First we do an calculation with SOC but the soc_lambda is set to 0. Save the density. The next calculatin we start with the density from the first calculation and set the SOC prefactor to 1. With the information from the two calcualtions, we can get the band energy with magnetic moments in the direction, specified in two list, thetas, and phis."""
-    parser = AbacusSplitSOCParser(
-        outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
-    )
+    if split_soc not in (None, "single", "two"):
+        raise ValueError("split_soc must be None, 'single', or 'two'")
+
+    if split_soc == "single" or (split_soc is None and path_single is not None):
+        single_path = path_single or path_soc or path_nosoc
+        if single_path is None:
+            raise ValueError("path_single is required for split_soc='single'")
+        parser = AbacusSingleStepSOCParser(outpath=single_path, binary=False)
+    else:
+        if path_nosoc is None or path_soc is None:
+            raise ValueError("path_nosoc and path_soc are required for two-step MAE")
+        parser = AbacusSplitSOCParser(
+            outpath_nosoc=path_nosoc, outpath_soc=path_soc, binary=False
+        )
     model = parser.parse()
     model.set_so_strength(0.0)
     if nel is not None:
@@ -395,7 +413,6 @@ def abacus_get_MAE(
         efermi=None,
         basis=model.basis,
         angles=[thetas, phis],
-        magnetic_elements=magnetic_elements,
         **kwargs,
     )
     mae.run(output_path=output_path, with_eigen=with_eigen)

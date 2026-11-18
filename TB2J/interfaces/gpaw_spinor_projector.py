@@ -1,0 +1,489 @@
+"""GPAW noncollinear+SOC spinor projector export (story 004).
+
+Converts a converged GPAW noncollinear (``soc=True``/``magmoms=[...]``)
+calculation into the TB2J spinor-native :class:`ProjectorGreenData`
+contract (``nspinor=2``):
+
+- coefficients ``P_ani[n, s, i]`` (spinor axis from GPAW's noncollinear
+  projections, shape ``(nband, 2, nproj)``) -> ``(1, nkpt, nband, 2, nproj)``;
+- eigenvalues ``myeig_n * Ha`` (GPAW new-API ``wfs.eig_n`` is Hartree,
+  gpaw/new/ibzwfs.py) -> eV, matching the eV ``efermi``;
+- site operator from ``dH_asii`` whose 4 components are the Pauli vector
+  ``(v, x, y, z)`` (gpaw/new/potential.py:45, stored transposed), i.e.
+  ``H_2x2 = v*I + x*sx + y*sy + z*sz`` with spin splitting
+  ``V_up - V_down = 2*z``.  The spin-dependent part is packed as the 2x2
+  matrix ``Delta = 2*Ha*(x*sigma_x + y*sigma_y + z*sigma_z)`` — the FULL
+  splitting with the identity part dropped.  The factor ``Ha`` matches the
+  GPAW collinear producer's ``delta_total``/``hij`` operator convention
+  (gpaw_projector stores GPAW operators times Ha), so the spinor exchange
+  reproduces the collinear exchange shell by shell on collinear data
+  (docs/sympy/spinor_projector_green.md validation note).
+
+Symmetry-unfolding (story 005) is not applied here: the k-point set is
+used as stored (run with ``symmetry='off'`` or via the unfolding adapter).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from pathlib import Path
+
+import numpy as np
+from ase.units import Ha, kB
+
+from TB2J.projector_green import (
+    SPINOR_OPERATOR_DEFINITION,
+    ProjectorGreenData,
+)
+
+SIGMA = np.array(
+    [
+        [[0, 1], [1, 0]],
+        [[0, -1j], [1j, 0]],
+        [[1, 0], [0, -1]],
+    ],
+    dtype=complex,
+)
+
+
+def _require_new_api(calc):
+    dft = getattr(calc, "dft", None)
+    if dft is None:
+        raise TypeError(
+            "spinor export requires a new-API GPAW calculation "
+            "(gpaw >= 22 with calc.dft); old-API calculators are not supported"
+        )
+    return dft
+
+
+def _iter_kpt_wfs(wfs):
+    """Yield (ibz_index, wfs) sorted by the IBZ k-point index."""
+    entries = []
+    for w in wfs._wfs_u:
+        k = int(getattr(w, "k"))
+        entries.append((k, w))
+    entries.sort(key=lambda item: item[0])
+    return entries
+
+
+def gpaw_spinor_calc_to_projector_green_data(calc) -> ProjectorGreenData:
+    """Convert a converged noncollinear+SOC GPAW calculation to spinor data."""
+    dft = _require_new_api(calc)
+    wfs = dft.ibzwfs
+    if wfs.collinear or wfs.ncomponents != 4:
+        raise ValueError(
+            "spinor export requires a noncollinear calculation "
+            f"(got collinear={wfs.collinear}, ncomponents={wfs.ncomponents})"
+        )
+    ibz = wfs.ibz
+    kpt_kc = np.asarray(ibz.kpt_kc, dtype=float)
+    weight_k = np.asarray(ibz.weight_k, dtype=float)
+    nkpt = len(kpt_kc)
+
+    # GPAW forces symmetry off for SC noncollinear PW runs
+    # (gpaw/new/builder.py asserts identity-only symmetry without time
+    # reversal), so the stored k-set must be the complete BZ grid. Guard
+    # against partially symmetrized data from other modes: every weight
+    # must be a whole multiple of 1/nkpt for a complete unsymmetrized grid.
+    grid_weight = 1.0 / nkpt
+    if not np.allclose(weight_k / grid_weight, np.round(weight_k / grid_weight)):
+        raise ValueError(
+            "spinor export requires a complete (unsymmetrized) BZ k-point "
+            "set; GPAW SC noncollinear calculations are symmetry-forced "
+            "off, so symmetrized k-weights indicate an unsupported mode"
+        )
+    nbands = wfs.nbands
+
+    setups = dft.setups
+    natoms = len(setups)
+    site_nproj = np.array([setup.ni for setup in setups], dtype=int)
+    nproj = int(site_nproj.sum())
+    site_projector_indices = np.full((natoms, int(site_nproj.max())), -1, dtype=int)
+    start = 0
+    for atom, ni in enumerate(site_nproj):
+        site_projector_indices[atom, :ni] = np.arange(start, start + ni)
+        start += ni
+    projector_site = np.repeat(np.arange(natoms), site_nproj)
+
+    entries = _iter_kpt_wfs(wfs)
+    if [k for k, _ in entries] != list(range(nkpt)):
+        raise ValueError(
+            "could not enumerate all IBZ k-point wavefunctions "
+            f"(found {len(entries)} of {nkpt})"
+        )
+    coefficients = np.empty((1, nkpt, nbands, 2, nproj), dtype=complex)
+    eigenvalues = np.empty((1, nkpt, nbands), dtype=float)
+    occupations = np.empty((1, nkpt, nbands), dtype=float)
+    for ik, w in entries:
+        # GPAW new-API wfs.eig_n/myeig_n are Hartree (gpaw/new/ibzwfs.py:206
+        # multiplies by Ha to expose eV); the ProjectorGreen denominator
+        # 1/(energy + efermi - evals) works in eV like the collinear exporter
+        # (gpaw_projector.py stores kpt.eps_n * Ha).
+        eig_n = np.asarray(w.myeig_n, dtype=float) * Ha
+        occ_n = np.asarray(w.myocc_n, dtype=float)
+        if eig_n.shape != (nbands,):
+            raise ValueError(f"k-point {ik}: eigenvalue shape {eig_n.shape}")
+        blocks = [
+            np.asarray(w.P_ani[atom])  # (nband, 2, ni)
+            for atom in range(natoms)
+        ]
+        for atom, block in enumerate(blocks):
+            ni = int(site_nproj[atom])
+            if block.shape != (nbands, 2, ni):
+                raise ValueError(
+                    f"k-point {ik}, atom {atom}: projections {block.shape} "
+                    f"!= ({nbands}, 2, {ni})"
+                )
+        coefficients[0, ik] = np.concatenate(blocks, axis=2)
+        eigenvalues[0, ik] = eig_n
+        occupations[0, ik] = occ_n
+
+    # Site operator: dH_asii components (v, x, y, z), stored transposed
+    # (gpaw/new/potential.py unpacks with .T).  GPAW's noncollinear
+    # Hamiltonian is H_2x2 = v*I + x*sx + y*sy + z*sz (potential.py deltaH:
+    # up gets v+z, down v-z), so the spin splitting V_up - V_down = 2*z.
+    # The spinor kernel contract (SPINOR_OPERATOR_DEFINITION) requires the
+    # FULL splitting as a Pauli operator, identity dropped:
+    # Delta = 2*(x*sx + y*sy + z*sz) — the abinao.spinor_export convention.
+    # The extra *Ha matches the GPAW collinear producer, which stores
+    # delta_total / hij as GPAW operators times Ha
+    # (gpaw_projector._collect_delta_xc_paw_xc / _collect_hij); the collinear
+    # reduction of the spinor kernel then reproduces the collinear exchange
+    # shell by shell (docs/sympy/spinor_projector_green.md validation note).
+    dH_asii = dft.potential.dH_asii
+    nproj_max = int(site_nproj.max())
+    spinor_operator = np.zeros((natoms, nproj_max, nproj_max, 2, 2), dtype=complex)
+    for atom in range(natoms):
+        ni = int(site_nproj[atom])
+        comps = [np.asarray(dH_asii[atom][i]).T for i in range(4)]
+        block = 2.0 * Ha * np.einsum("aij,ast->ijst", np.asarray(comps[1:]), SIGMA)
+        spinor_operator[atom, :ni, :ni] = block
+
+    atoms = dft.atoms
+    data = ProjectorGreenData(
+        kpoints=kpt_kc,
+        weights=weight_k,
+        eigenvalues=eigenvalues,
+        coefficients=coefficients,
+        efermi=float(calc.get_fermi_level()),
+        projector_site=projector_site,
+        projector_atom=projector_site.copy(),
+        cell=np.asarray(atoms.cell.array, dtype=float),
+        positions=atoms.get_positions(),
+        atomic_numbers=np.asarray(atoms.get_atomic_numbers(), dtype=int),
+        occupations=occupations,
+        site_nproj=site_nproj,
+        site_projector_indices=site_projector_indices,
+        nspinor=2,
+        spinor_operator=spinor_operator,
+        spinor_operator_definition=SPINOR_OPERATOR_DEFINITION,
+        coefficient_source="gpaw.noncollinear_P_ani",
+        coefficient_projector="native_paw_projector",
+        channel_interpretation="paw_projector_channel",
+        operator_basis="gpaw.dH_asii pauli (v,x,y,z), Delta=2*Ha*(x,y,z).sigma",
+        metadata={
+            "nspinor": 2,
+            "code": "gpaw",
+            "spinor_export": "gpaw_spinor_projector",
+            "units": {
+                "cell": "Angstrom",
+                "positions": "Angstrom",
+                "eigenvalues": "eV",
+                "efermi": "eV",
+                "spinor_operator": "eV",
+            },
+        },
+    )
+    data.validate(exchange_ready=True)
+    return data
+
+
+def save_gpaw_spinor_projector_netcdf(calc, filename, metadata=None):
+    """Save a converged noncollinear+SOC GPAW calculation as spinor NetCDF."""
+    data = gpaw_spinor_calc_to_projector_green_data(calc)
+    if metadata:
+        data.metadata.update(metadata)
+    data.save_netcdf(filename)
+    return data
+
+
+def compute_spinor_projector_exchange(
+    data,
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    sites=None,
+    overlap_mode=None,
+    overlap_rcond=None,
+):
+    """Return a single spinor reference's measured transverse exchange leg.
+
+    The input already includes SOC in its eigenstates. No second SOC insertion
+    is made. A single reference cannot determine Jiso/DMI/Jani; use three
+    independent x/y/z references and merge_transverse_legs for a full tensor.
+    """
+    from TB2J.interfaces.gpaw_projector import _R_grid
+    from TB2J.mycfr import CFR
+    from TB2J.projector_green import (
+        ProjectorGreen,
+        magnetic_tangent_vertices,
+        spinor_tangent_trace,
+    )
+
+    if data.nspinor != 2:
+        raise ValueError("spinor exchange requires nspinor=2 data")
+    if Rpts is None:
+        Rpts = _R_grid(nmax=1)
+    Rpts = np.asarray(Rpts, dtype=int)
+    sites = (
+        list(range(len(data.site_nproj))) if sites is None else [int(s) for s in sites]
+    )
+    if not sites:
+        raise ValueError("at least one magnetic site is required")
+    green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
+    operators = green.get_local_operators_spinor(sites=sites)
+    vert_info = {site: magnetic_tangent_vertices(op) for site, op in operators.items()}
+    vertices = {site: entry["vertices"] for site, entry in vert_info.items()}
+    if data.spinor_tangent_vertices is not None:
+        # Explicit frozen-source tangents (QE NC1.1): densify once per site
+        # and bypass the commutator entirely. No silent fallback.
+        from TB2J.projector_green import spinor_dense_block
+
+        for site in sites:
+            stack = data.spinor_tangent_vertices[int(site)]
+            vertices[site] = np.stack(
+                [spinor_dense_block(stack[axis]) for axis in range(3)]
+            )
+    directions = {site: entry["n"] for site, entry in vert_info.items()}
+    n0 = directions[sites[0]]
+    axis = int(np.argmax(np.abs(n0)))
+    axis_aligned = abs(abs(n0[axis]) - 1.0) < 1e-6 and all(
+        abs(abs(np.dot(n0, n)) - 1.0) < 1e-6 for n in directions.values()
+    )
+    frame = {"n": axis if axis_aligned else None, "axis": n0, "site_n": directions}
+    contour = CFR(nz=nz, T=smearing_eV / kB)
+    values = {}
+    for energy in contour.path:
+        trace = spinor_tangent_trace(
+            green, Rpts, energy=energy, vertices=vertices, sites=sites
+        )
+        for key, matrix in trace["K_ijR"].items():
+            values.setdefault(key, []).append(matrix)
+    exchange = {}
+    for key, matrices in values.items():
+        integrated = np.array(
+            [
+                [
+                    contour.integrate_values(np.asarray([m[a, b] for m in matrices]))
+                    for b in range(3)
+                ]
+                for a in range(3)
+            ]
+        )
+        j_leg = np.imag(integrated) / (2 * np.pi)
+        residual = 0.0
+        if axis_aligned:
+            residual = max(np.abs(j_leg[axis, :]).max(), np.abs(j_leg[:, axis]).max())
+            j_leg[axis, :] = 0
+            j_leg[:, axis] = 0
+        exchange[key] = {
+            "J_leg": j_leg,
+            "K_ijR": integrated,
+            "frame": frame,
+            "mask_residual": float(residual),
+        }
+    return exchange
+
+
+def write_spinor_projector_exchange_out(
+    data,
+    path="TB2J_results",
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+    description=None,
+    charges=None,
+    spinat=None,
+    Rcut=None,
+    overlap_mode=None,
+    overlap_rcond=None,
+    leg_consistency_atol_eV=None,
+):
+    """Write SpinIO only after x/y/z transverse legs determine rank nine.
+
+    ``leg_consistency_atol_eV`` (QE three-leg driver only) overrides the
+    merger's repeated-row gate; when given it must be finite, positive and
+    at most 1e-7 eV, and the measured worst repeated-row spread is appended
+    to the output description. The GPAW/ABINIT default (1e-8) is unchanged.
+    """
+    from ase import Atoms
+
+    from TB2J.interfaces.gpaw_projector import _magnetic_sites, _R_grid_for_cutoff
+    from TB2J.io_exchange.io_exchange import SpinIO
+    from TB2J.split_soc_kernel import merge_transverse_legs
+
+    if not isinstance(data, Mapping) or set(data) != {"x", "y", "z"}:
+        raise ValueError(
+            "full spinor exchange requires three independent x/y/z reference "
+            "datasets; a single SOC reference measures only a transverse leg. "
+            "For a frozen collinear GPAW checkpoint use gen_exchange_gpaw_split_soc."
+        )
+    references = data
+    data = references["z"]
+    for axis, reference in references.items():
+        if (
+            reference.nband != data.nband
+            or not np.array_equal(reference.atomic_numbers, data.atomic_numbers)
+            or not np.array_equal(reference.site_nproj, data.site_nproj)
+            or not np.allclose(reference.cell, data.cell)
+            or not np.allclose(reference.positions, data.positions)
+            or not np.allclose(reference.kpoints, data.kpoints)
+            or not np.allclose(reference.weights, data.weights)
+        ):
+            raise ValueError(
+                f"spinor reference {axis!r} differs in geometry, k mesh, or band window"
+            )
+    atoms = Atoms(
+        numbers=data.atomic_numbers,
+        positions=data.positions,
+        cell=data.cell,
+        pbc=True,
+    )
+    sites = _magnetic_sites(
+        data,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+    )
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(data, sites, Rcut if Rcut is not None else 10.0)
+    legs = {
+        axis: {
+            "exchange": compute_spinor_projector_exchange(
+                reference,
+                Rpts=Rpts,
+                nz=nz,
+                smearing_eV=smearing_eV,
+                sites=sites,
+                overlap_mode=overlap_mode,
+                overlap_rcond=overlap_rcond,
+            )
+        }
+        for axis, reference in references.items()
+    }
+    for axis, leg in legs.items():
+        expected_axis = "xyz".index(axis)
+        if any(
+            entry["frame"]["n"] != expected_axis for entry in leg["exchange"].values()
+        ):
+            raise ValueError(
+                f"spinor {axis!r} reference is not axis-aligned; cannot merge rank nine"
+            )
+    merge_atol = 1.0e-8
+    if leg_consistency_atol_eV is not None:
+        merge_atol = float(leg_consistency_atol_eV)
+        if not np.isfinite(merge_atol) or merge_atol <= 0.0 or merge_atol > 1.0e-7:
+            raise ValueError(
+                "leg_consistency_atol_eV must be finite, positive and at most "
+                f"1e-7 eV; got {leg_consistency_atol_eV!r}"
+            )
+    # Gate exactly the pairs written below. The grid includes a translation
+    # when *any* pair is in range; other pairs at that R can lie beyond Rcut.
+    # The onsite self pair is never an exchange interaction.
+    retained = {}
+    for key in legs["z"]["exchange"]:
+        R, i, j = key
+        vector = np.asarray(R) @ data.cell + atoms.positions[j] - atoms.positions[i]
+        distance = float(np.linalg.norm(vector))
+        if distance >= 1e-6 and (Rcut is None or distance < float(Rcut)):
+            retained[key] = (vector, distance)
+    for leg in legs.values():
+        leg["exchange"] = {
+            key: value for key, value in leg["exchange"].items() if key in retained
+        }
+    merged = merge_transverse_legs(legs, consistency_atol=merge_atol)
+    exchange = merged["exchange"]
+    worst_spread = float(merged["diagnostics"]["max_repeat_deviation"])
+    if charges is None:
+        charges = np.zeros(len(atoms), dtype=float)
+    if spinat is None:
+        spinat = np.zeros((len(atoms), 3), dtype=float)
+        from TB2J.projector_green import ProjectorGreen, site_magnetization_sign
+
+        ops = ProjectorGreen(data).get_local_operators_spinor(sites=sites)
+        for site in sites:
+            spinat[site, 2] = -site_magnetization_sign(ops[site])
+    index_spin = [-1] * len(atoms)
+    site_to_spin = {}
+    for ispin, site in enumerate(sites):
+        index_spin[site] = ispin
+        site_to_spin[site] = ispin
+    exchange_Jdict = {}
+    dmi_ddict = {}
+    Jani_dict = {}
+    distance_dict = {}
+    for (R, i, j), entry in exchange.items():
+        vector, distance = retained[(R, i, j)]
+        key = (tuple(int(x) for x in R), site_to_spin[i], site_to_spin[j])
+        distance_dict[key] = (vector, distance)
+        exchange_Jdict[key] = float(entry["Jiso"])
+        dmi_ddict[key] = np.asarray(entry["dmi"], dtype=float)
+        Jani_dict[key] = np.asarray(entry["jani"], dtype=float)
+    if description is None:
+        description = (
+            "Full rank-nine spinor exchange reconstructed from three independent "
+            "x/y/z magnetic references by raw transverse-leg merge.\n"
+        )
+    if leg_consistency_atol_eV is not None:
+        description = (
+            f"{description}\nleg_consistency_atol_eV={merge_atol:.3e}; worst "
+            f"repeated-row spread TB2J_TAN_LEG_SPREAD={worst_spread:.6e} eV."
+        )
+    output = SpinIO(
+        atoms=atoms,
+        charges=charges,
+        spinat=spinat,
+        index_spin=index_spin,
+        colinear=False,
+        distance_dict=distance_dict,
+        exchange_Jdict=exchange_Jdict,
+        dmi_ddict=dmi_ddict,
+        Jani_dict=Jani_dict,
+        description=description,
+    )
+    output.write_all(path=path)
+    return Path(path) / "exchange.out", exchange_Jdict
+
+
+def gen_exchange_gpaw_spinor_netcdf(
+    filename,
+    output_path="TB2J_results",
+    Rcut=10.0,
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+):
+    """Write three precomputed spinor NetCDF legs as one full tensor."""
+    from TB2J.projector_green import ProjectorGreenData
+
+    if not isinstance(filename, Mapping) or set(filename) != {"x", "y", "z"}:
+        raise ValueError(
+            "spinor NetCDF exchange requires a mapping of x/y/z reference "
+            "files; one SOC file determines only a transverse leg"
+        )
+    data = {
+        name: ProjectorGreenData.load_netcdf(path) for name, path in filename.items()
+    }
+    return write_spinor_projector_exchange_out(
+        data,
+        path=output_path,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+        Rcut=Rcut,
+    )

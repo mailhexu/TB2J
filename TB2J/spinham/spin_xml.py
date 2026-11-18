@@ -1,9 +1,11 @@
 import xml.etree.ElementTree as ET
-from ase.atoms import Atoms
+
 import numpy as np
-from ase.units import Bohr, eV, J
-from .constants import gyromagnetic_ratio
+from ase.atoms import Atoms
 from ase.data import atomic_masses
+from ase.units import Bohr, J, eV
+
+from .constants import gyromagnetic_ratio
 
 
 class BaseSpinModelParser(object):
@@ -25,6 +27,7 @@ class BaseSpinModelParser(object):
         self._exchange = {}
         self._dmi = {}
         self._bilinear = {}
+        self._sia_tensor = {}
         self._parse(fname)
         self.lattice = Atoms(
             positions=self.positions, masses=self.masses, cell=self.cell
@@ -80,6 +83,10 @@ class BaseSpinModelParser(object):
         return self._bilinear
 
     @property
+    def sia_tensor(self):
+        return self._sia_tensor
+
+    @property
     def has_exchange(self):
         return bool(len(self._exchange))
 
@@ -90,6 +97,10 @@ class BaseSpinModelParser(object):
     @property
     def has_bilinear(self):
         return bool(len(self._bilinear))
+
+    @property
+    def has_sia_tensor(self):
+        return bool(len(self._sia_tensor))
 
 
 class SpinXmlWriter(object):
@@ -174,15 +185,14 @@ class SpinXmlWriter(object):
                 uni_term = ET.SubElement(uni, "spin_uniaxial_SIA_term")
                 ET.SubElement(uni_term, "i").text = "%d " % (i + 1)
                 ET.SubElement(uni_term, "amplitude").text = "%.5e" % (k1 * J / eV)
-                ET.SubElement(
-                    uni_term, "direction"
-                ).text = "%.5e \t %.5e \t %.5e " % tuple(model.k1dir[i])
+                ET.SubElement(uni_term, "direction").text = (
+                    "%.5e \t %.5e \t %.5e " % tuple(model.k1dir[i])
+                )
 
         if model.has_bilinear:
-            bi = ET.SubElement()
             bilinear = ET.SubElement(root, "spin_bilinear_list", units="eV")
             ET.SubElement(bilinear, "nterms").text = "%d" % len(model.bilinear_J_dict)
-            for key, val in model.bilinear_Jdict.items():
+            for key, val in model.bilinear_J_dict.items():
                 bilinear_term = ET.SubElement(bilinear, "spin_bilinear_term")
                 ET.SubElement(bilinear_term, "ijR").text = "%d %d %d %d %d" % (
                     key[0] + 1,
@@ -193,6 +203,17 @@ class SpinXmlWriter(object):
                 )
                 ET.SubElement(bilinear_term, "data").text = "\t".join(
                     ["%.5e" % (x * J / eV) for x in val]
+                )
+
+        if model.has_sia_tensor:
+            sia = ET.SubElement(root, "spin_sia_tensor_list", units="eV")
+            ET.SubElement(sia, "nterms").text = "%d" % len(model.sia_tensor_dict)
+            for i, tensor in model.sia_tensor_dict.items():
+                sia_term = ET.SubElement(sia, "spin_sia_tensor_term")
+                ET.SubElement(sia_term, "i").text = "%d" % (i + 1)
+                tensor_flat = tensor.flatten()
+                ET.SubElement(sia_term, "data").text = "\t".join(
+                    ["%.5e" % (x * J / eV) for x in tensor_flat]
                 )
 
         tree = ET.ElementTree(root)
@@ -295,3 +316,14 @@ class SpinXmlParser(BaseSpinModelParser):
             assert (
                 len(self._bilinear) == n_bil
             ), f"Number of bilinear terms {len(self._bil)} different from nterms in xml file {n_bil}"
+
+        sia = root.find("spin_sia_tensor_list")
+        if sia is not None:
+            n_sia = int(sia.find("nterms").text)
+            for si in sia.findall("spin_sia_tensor_term"):
+                i = int(si.find("i").text) - 1
+                val = [float(x) for x in si.find("data").text.strip().split()]
+                self._sia_tensor[i] = np.array(val).reshape((3, 3)) * eV / J
+            assert (
+                len(self._sia_tensor) == n_sia
+            ), f"Number of SIA tensor terms {len(self._sia_tensor)} different from nterms in xml file {n_sia}"

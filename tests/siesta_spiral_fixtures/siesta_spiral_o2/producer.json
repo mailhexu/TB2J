@@ -1,0 +1,11 @@
+{
+  "executable_version": "5.4.2-23-g549d9de29",
+  "executable_sha256": "3b5f8078fe5113438f51f4c243dbe35ce80a1b200e323fdcabf144ac33adcf6d",
+  "sisl_version": "0.16.2",
+  "audited_checkout_sources": {
+    "Src/diag2kspiral.F90": "03915969991a9088e2b1e78743bf269f7bf59e84beb802390bd59b20c626dabd",
+    "Src/io_hsx.F90": "919c49ae7669813e5c543b128a40a0ee952a81013b34af460319a71dec4cf730",
+    "Src/final_H_f_stress.F": "f1a9067e949581de816d3f44beef99e2e649f9189dd4a845fabbe704d2932545",
+    "Src/bands.F": "d7946f47521c217b65c6ff860ef4c7153680e47155c46bfa17468c50d203113d"
+  }
+}

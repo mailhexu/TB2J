@@ -1,7 +1,9 @@
-### Computing Magnetocrystalline anisotropy energy (MAE) .
+### Computing Magnetocrystalline anisotropy energy (MAE)
 
 :warning: This feature is currently under development and internal test. Do not use it for production yet.
-:warning: This feature is only available with the ABACUS code. 
+:warning: This feature is only available with the ABACUS and SIESTA code.
+
+The MAE calculation is implemented in `TB2J/MAEGreen.py` using the magnetic force theorem with Green's function perturbation theory. The implementation provides both efficient perturbative and exact eigenvalue approaches for computing magnetocrystalline anisotropy energies. 
 
 
 To compute the magnetocrystalline anisotropy energy (MAE) of a magnetic system with the magnetic force theorem, two steps of DFT calculations are needed.
@@ -87,38 +89,76 @@ dft_functional                          PBE
 ```
 
 
-After the two steps of calculations, we can use the "abacus\_get\_MAE" function to compute the MAE. Essentially, the function reads the Hamiltonian from the two steps of calculations, and substract them to the the SOC part and the non-soc part. 
-Then the non-SOC part is rotated along the different directions, and the energy difference is computed. We can define the magnetic moment directions by list of thetas/psis in the spherical coordinates, and explore the energies.
+After the two steps of calculations, we can use the `abacus_get_MAE` function from `TB2J.MAEGreen` to compute the MAE. The function reads the Hamiltonian from the two steps of calculations and uses the magnetic force theorem to compute the band energy differences for different magnetization directions. 
+
+
+The non-SOC Hamiltonian is rotated along different magnetization directions (defined by theta, phi in spherical coordinates), and the energy differences are computed using second-order perturbation theory.
 
 Here is an example of the usage of the function.
 
 ```python
-
 import numpy as np
-from TB2J.MAE import abacus_get_MAE
+from TB2J.MAEGreen import abacus_get_MAE
 
 def run():
-    # theta, psi: along the xz plane, rotating from z to x. 
+    # theta, phi: along the xz plane, rotating from z to x. 
     thetas = np.linspace(0, 180, 19) * np.pi / 180
-    psis = np.zeros(19)
+    phis = np.zeros(19)
     abacus_get_MAE(
         path_nosoc= 'soc0/OUT.ABACUS',   
         path_soc= 'soc1/OUT.ABACUS',
         kmesh=[6,6,1],
         gamma=True,
         thetas=thetas, 
-        psis=psis,
+        phis=phis,
         nel = 16,
         )
-                                                                                        )
 
 if __name__ == '__main__':
     run()
 ```
 
+#### Advanced Usage
+
+The `MAEGreen` class also supports various angle presets and options:
+
+```python
+from TB2J.MAEGreen import MAEGreen
+
+# Use predefined angle sets
+mae = MAEGreen(
+    tbmodels=model,
+    atoms=model.atoms,
+    kmesh=[6,6,1],
+    angles="xyz",  # x, y, z axes
+    # angles="fib",  # Fibonacci sphere sampling
+    # angles="miller",  # Miller index directions
+    # angles="scan",  # Full angular scan
+)
+
+# Custom angle arrays
+mae = MAEGreen(
+    tbmodels=model,
+    atoms=model.atoms,
+    kmesh=[6,6,1],
+    angles=[thetas, phis],  # Custom theta, phi arrays
+)
+
+# Run with both perturbation and eigenvalue methods
+mae.run(output_path="my_mae_results", with_eigen=True)
+```
+
 
 Here the soc0 and soc1 directories are where the two ABACUS calculations are done. We use a 6x6x1 Gamma-centered k-mesh for the integration (which is too small for practical usage!). And explore the energy with the magnetic moments in the x-z plane.
-After running the python script aboves, a file named "MAE.txt" will be created, including the theta, psi, and the energies (in eV).  
+
+After running the python script above, several output files will be created in the `TB2J_anisotropy` directory:
+
+- **MAE.dat**: Contains theta, phi, and total MAE values (in meV)
+- **MAE_matrix.dat**: Atom-atom interaction matrices for each angle
+- **MAE_orb.dat**: Orbital-resolved MAE contributions for each atom
+- **MAE_eigen.dat**: (optional) Exact eigenvalue results if `with_eigen=True`
+
+The MAE values are computed using second-order perturbation theory and reported in meV relative to the reference magnetization direction.  
 
 
 

@@ -55,6 +55,8 @@ class SpinIO(object):
         write_experimental=True,
         description=None,
         standardize_Jani=False,
+        sia_tensor=None,
+        dJdx_orb=None,
     ):
         """
         :param atoms: Ase atoms structure.
@@ -80,6 +82,7 @@ class SpinIO(object):
         :param gyro_ratio:  gyromagnetic ratio
         :param write_experimental: write_experimental data to output files
         :param description: add some description into the xml file.
+        :param sia_tensor: single ion anisotropy tensor, dictionary {i: 3x3 tensor}
         """
         self.atoms = atoms  #: atomic structures, ase.Atoms object
         self.index_spin = index_spin
@@ -103,12 +106,10 @@ class SpinIO(object):
                 self._ind_atoms[ispin] = iatom
 
         if exchange_Jdict is not None:
-            self.has_exchange = True  #: whether there is isotropic exchange
             #: The dictionary of :math:`J_{ij}(R)`, the keys are (i,j, R),
             # where R is a tuple, and the value is the isotropic exchange
             self.exchange_Jdict = exchange_Jdict
         else:
-            self.has_exchange = False
             self.exchange_Jdict = None
 
         self.Jiso_orb = Jiso_orb
@@ -118,22 +119,39 @@ class SpinIO(object):
 
         self.dJdx = dJdx
         self.dJdx2 = dJdx2
+        self.dJdx_orb = dJdx_orb
 
         if dmi_ddict is not None:
-            self.has_dmi = True  #: Whether there is DMI.
             #: The dictionary of DMI. the key is the same as exchange_Jdict, the values are 3-d vectors (Dx, Dy, Dz).
             self.dmi_ddict = dmi_ddict
         else:
-            self.has_dmi = False
             self.dmi_ddict = None
 
         if Jani_dict is not None:
-            self.has_bilinear = True  #: Whether there is anisotropic exchange term
             #: The dictionary of anisotropic exchange. The vlaues are matrices of shape (3,3).
             self.Jani_dict = Jani_dict
         else:
-            self.has_bilinear = False
             self.Jani_dict = None
+
+        if k1 is not None and k1dir is not None:
+            # Convert uniaxial anisotropy to SIA tensor
+            if sia_tensor is None:
+                sia_tensor = {}
+            for i, (K, axis) in enumerate(zip(k1, k1dir)):
+                if abs(K) > 1e-10:
+                    e = np.array(axis)
+                    norm = np.linalg.norm(e)
+                    if norm > 1e-6:
+                        e = e / norm
+                        # A = K * e * e^T
+                        A = K * np.outer(e, e)
+                        if i in sia_tensor:
+                            sia_tensor[i] += A
+                        else:
+                            sia_tensor[i] = A
+            # Clear k1 and k1dir as they are now integrated into sia_tensor
+            k1 = None
+            k1dir = None
 
         if k1 is not None and k1dir is not None:
             self.has_uniaxial_anistropy = True
@@ -144,13 +162,18 @@ class SpinIO(object):
             self.k1 = None
             self.k1dir = None
 
-        self.has_bilinear = not (Jani_dict == {} or Jani_dict is None)
-
         self.has_biquadratic = not (
             biquadratic_Jdict == {} or biquadratic_Jdict is None
         )
 
         self.biquadratic_Jdict = biquadratic_Jdict
+
+        if sia_tensor is not None:
+            self.has_sia_tensor = True
+            self.sia_tensor = sia_tensor
+        else:
+            self.has_sia_tensor = False
+            self.sia_tensor = None
 
         if NJT_ddict is not None:
             self.has_NJT_dmi = True
@@ -188,6 +211,18 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
 
         self.orbital_names = orbital_names
         self.TB2J_version = __version__
+
+    @property
+    def has_exchange(self):
+        return self.exchange_Jdict is not None
+
+    @property
+    def has_dmi(self):
+        return self.dmi_ddict is not None
+
+    @property
+    def has_bilinear(self):
+        return self.Jani_dict is not None
 
     def _build_Rlist(self):
         Rset = set()
@@ -228,12 +263,14 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return self.index_spin[symdict[symnum]]
 
     def i_spin(self, i):
-        if isinstance(i, int):
-            return i
+        if isinstance(i, (int, np.integer)):
+            return int(i)
         elif isinstance(i, str):
             return self.get_symbol_number_ispin(i)
         else:
-            raise ValueError("i must be either an integer or a string.")
+            raise ValueError(
+                f"i must be either an integer or a string. Got {type(i)}: {i}"
+            )
 
     def get_charge_ispin(self, i):
         i = self.i_spin(i)
@@ -332,7 +369,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         else:
             return default
 
-    def get_J_tensor(self, i, j, R, Jiso=True, Jani=False, DMI=False):
+    def get_J_tensor(self, i, j, R, Jiso=True, Jani=True, DMI=True, SIA=True):
         """
         Return the full exchange tensor for atom i and j, and cell R.
         param i : spin index i
@@ -353,22 +390,32 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             if Ja is not None:
                 Ja *= 1
         Jtensor = combine_J_tensor(Jiso=J, D=D, Jani=Ja)
+        if SIA and i == j and np.linalg.norm(R) < 0.001:
+            if (
+                self.has_sia_tensor
+                and self.sia_tensor is not None
+                and i in self.sia_tensor
+            ):
+                Jtensor += self.sia_tensor[i]
+            elif (
+                self.has_uniaxial_anistropy
+                and self.k1 is not None
+                and self.k1dir is not None
+                and i < len(self.k1)
+                and abs(self.k1[i]) > 1e-12
+            ):
+                e = np.array(self.k1dir[i])
+                norm = np.linalg.norm(e)
+                if norm > 1e-10:
+                    e = e / norm
+                    A = self.k1[i] * np.outer(e, e)
+                    Jtensor += A
 
-        # if iso_only:
-        #    J = self.get_Jiso(i, j, R)
-        #    if J is not None:
-        #        Jtensor = np.eye(3) * self.get_J(i, j, R)
-        #    else:
-        #        Jtensor = np.eye(3) * 0
-        # else:
-        #    Jtensor = combine_J_tensor(
-        #        Jiso=self.get_J(i, j, R),
-        #        D=self.get_DMI(i, j, R),
-        #        Jani=self.get_Jani(i, j, R),
-        #    )
         return Jtensor
 
-    def get_full_Jtensor_for_one_R_i3j3(self, R, Jiso=True, Jani=True, DMI=True):
+    def get_full_Jtensor_for_one_R_i3j3(
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=True
+    ):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
@@ -380,11 +427,13 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for i in range(self.nspin):
             for j in range(self.nspin):
                 Jmat[i * 3 : i * 3 + 3, j * 3 : j * 3 + 3] = self.get_J_tensor(
-                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
         return Jmat
 
-    def get_full_Jtensor_for_one_R_ij33(self, R, Jiso=True, Jani=True, DMI=True):
+    def get_full_Jtensor_for_one_R_ij33(
+        self, R, Jiso=True, Jani=True, DMI=True, SIA=True
+    ):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
@@ -396,20 +445,27 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         for i in range(self.nspin):
             for j in range(self.nspin):
                 Jmat[i, j, :, :] = self.get_J_tensor(
-                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    i, j, R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
         return Jmat
 
-    def get_full_Jtensor_for_one_R_ij(self, R, Jiso=True, Jani=True, DMI=True):
+    def get_full_Jtensor_for_one_R_ij(
+        self,
+        R,
+        Jiso=True,
+        Jani=True,
+        DMI=True,
+        SIA=True,
+    ):
         """
         Return the full exchange tensor of all i and j for cell R.
         param R (tuple of integers): cell index R
         returns:
-            Jmat: (nspin,nspin,3,3) matrix.
+            Jmat: (nspin,nspin) matrix.
         """
-        if Jani or DMI:
+        if Jani or DMI or SIA:
             raise ValueError(
-                "Jani and DMI are not supported for this method. Use get_full_Jtensor_for_one_R_ij33 instead."
+                "Jani, DMI and SIA are not supported for this method. Use get_full_Jtensor_for_one_R_ij33 instead."
             )
         n = self.nspin
         Jmat = np.zeros((n, n), dtype=float)
@@ -421,7 +477,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         return Jmat
 
     def get_full_Jtensor_for_Rlist(
-        self, asr=False, Jiso=True, Jani=True, DMI=True, order="i3j3"
+        self, asr=False, Jiso=True, Jani=True, DMI=True, SIA=True, order="i3j3"
     ):
         n = self.nspin
         n3 = n * 3
@@ -430,7 +486,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n3, n3), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -443,7 +499,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n, n, 3, 3), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij33(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -454,8 +510,9 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         elif order == "i3j3_2D":
             Jmat = np.zeros((nR, n3, n3), dtype=float)
             for iR, R in enumerate(self.Rlist):
+                print(f"R={R}")
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_i3j3(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 ).reshape((n3, n3))
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -468,7 +525,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             Jmat = np.zeros((nR, n, n), dtype=float)
             for iR, R in enumerate(self.Rlist):
                 Jmat[iR] = self.get_full_Jtensor_for_one_R_ij(
-                    R, Jiso=Jiso, Jani=Jani, DMI=DMI
+                    R, Jiso=Jiso, Jani=Jani, DMI=DMI, SIA=SIA
                 )
             if asr:
                 iR0 = np.argmin(np.linalg.norm(self.Rlist, axis=1))
@@ -514,7 +571,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         self.write_pickle(path=path)
         self.atoms.write(os.path.join(path, "structure.vasp"), vasp5=True)
         self.write_txt(path=path)
-        if self.Jiso_orb:
+        if self.Jiso_orb or self.DMI_orb or self.Jani_orb or self.dJdx_orb:
             self.write_txt(
                 path=path,
                 fname="exchange_orb_decomposition.out",
@@ -565,17 +622,41 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         marker="o",
         fname=None,
         show=False,
+        by_species=False,
         **kwargs,
     ):
         if ax is None:
             fig, ax = plt.subplots()
-        ds = []
-        Js = []
-        for key, val in self.exchange_Jdict.items():
-            d = self.distance_dict[key][1]
-            ds.append(d)
-            Js.append(val * 1e3)
-        ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
+        if by_species:
+            groups = {}
+            for key, val in self.exchange_Jdict.items():
+                R, i, j = key
+                idx_i = self.ind_atoms[i]
+                idx_j = self.ind_atoms[j]
+                spec_i = self.atoms[idx_i].symbol
+                spec_j = self.atoms[idx_j].symbol
+                pair = tuple(sorted([spec_i, spec_j]))
+                pair_name = "-".join(pair)
+                if pair_name not in groups:
+                    groups[pair_name] = {"ds": [], "Js": []}
+                d = self.distance_dict[key][1]
+                groups[pair_name]["ds"].append(d)
+                groups[pair_name]["Js"].append(val * 1e3)
+
+            for pair_name, data in groups.items():
+                ax.scatter(
+                    data["ds"], data["Js"], marker=marker, label=pair_name, **kwargs
+                )
+            ax.legend()
+        else:
+            ds = []
+            Js = []
+            for key, val in self.exchange_Jdict.items():
+                d = self.distance_dict[key][1]
+                ds.append(d)
+                Js.append(val * 1e3)
+            ax.scatter(ds, Js, marker=marker, color=color, **kwargs)
+
         ax.axhline(color="gray")
         ax.set_xlabel(r"Distance ($\AA$)")
         ax.set_ylabel("J (meV)")
@@ -585,25 +666,68 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
-    def plot_DvsR(self, ax=None, fname=None, show=False):
+    def plot_DvsR(self, ax=None, fname=None, show=False, by_species=False):
         if ax is None:
             fig, ax = plt.subplots()
-        ds = []
-        Ds = []
-        for key, val in self.dmi_ddict.items():
-            d = self.distance_dict[key][1]
-            ds.append(d)
-            Ds.append(val * 1e3)
-        Ds = np.array(Ds)
-        ax.scatter(ds, Ds[:, 0], marker="s", color="r", label="Dx")
-        ax.scatter(
-            ds, Ds[:, 1], marker="o", edgecolors="g", facecolors="none", label="Dy"
-        )
-        ax.scatter(
-            ds, Ds[:, 2], marker="D", edgecolors="b", facecolors="none", label="Dz"
-        )
+        if by_species:
+            groups = {}
+            for key, val in self.dmi_ddict.items():
+                R, i, j = key
+                idx_i = self.ind_atoms[i]
+                idx_j = self.ind_atoms[j]
+                spec_i = self.atoms[idx_i].symbol
+                spec_j = self.atoms[idx_j].symbol
+                pair = tuple(sorted([spec_i, spec_j]))
+                pair_name = "-".join(pair)
+                if pair_name not in groups:
+                    groups[pair_name] = {"ds": [], "Ds": []}
+                d = self.distance_dict[key][1]
+                groups[pair_name]["ds"].append(d)
+                groups[pair_name]["Ds"].append(val * 1e3)
+
+            markers = ["s", "o", "D", "v", "^", "<", ">", "p", "*", "h", "H"]
+            for idx, (pair_name, data) in enumerate(groups.items()):
+                Ds = np.array(data["Ds"])
+                marker = markers[idx % len(markers)]
+                ax.scatter(
+                    data["ds"],
+                    Ds[:, 0],
+                    marker=marker,
+                    color="r",
+                    label=f"{pair_name} Dx",
+                )
+                ax.scatter(
+                    data["ds"],
+                    Ds[:, 1],
+                    marker=marker,
+                    color="g",
+                    label=f"{pair_name} Dy",
+                )
+                ax.scatter(
+                    data["ds"],
+                    Ds[:, 2],
+                    marker=marker,
+                    color="b",
+                    label=f"{pair_name} Dz",
+                )
+            ax.legend(ncol=3, fontsize="small")
+        else:
+            ds = []
+            Ds = []
+            for key, val in self.dmi_ddict.items():
+                d = self.distance_dict[key][1]
+                ds.append(d)
+                Ds.append(val * 1e3)
+            Ds = np.array(Ds)
+            ax.scatter(ds, Ds[:, 0], marker="s", color="r", label="Dx")
+            ax.scatter(
+                ds, Ds[:, 1], marker="o", edgecolors="g", facecolors="none", label="Dy"
+            )
+            ax.scatter(
+                ds, Ds[:, 2], marker="D", edgecolors="b", facecolors="none", label="Dz"
+            )
+            ax.legend(loc=1)
         ax.axhline(color="gray")
-        ax.legend(loc=1)
         ax.set_ylabel("D (meV)")
         ax.set_xlabel(r"Distance ($\AA$)")
         if fname is not None:
@@ -612,31 +736,71 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
-    def plot_JanivsR(self, ax=None, fname=None, show=False):
+    def plot_JanivsR(self, ax=None, fname=None, show=False, by_species=False):
         if ax is None:
             fig, ax = plt.subplots()
-        ds = []
-        Jani = []
-        for key, val in self.Jani_dict.items():
-            d = self.distance_dict[key][1]
-            ds.append(d)
-            # val = val - np.diag([np.trace(val) / 3] * 3)
-            Jani.append(val * 1e3)
-        Jani = np.array(Jani)
-        s = "xyz"
-        for i in range(3):
-            ax.scatter(ds, Jani[:, i, i], marker="s", label=f"J{s[i]}{s[i]}")
-        c = "rgb"
-        for ic, (i, j) in enumerate([(0, 1), (0, 2), (1, 2)]):
-            ax.scatter(
-                ds,
-                Jani[:, i, j],
-                edgecolors=c[ic],
-                facecolors="none",
-                label=f"J{s[i]}{s[j]}",
-            )
+        if by_species:
+            groups = {}
+            for key, val in self.Jani_dict.items():
+                R, i, j = key
+                idx_i = self.ind_atoms[i]
+                idx_j = self.ind_atoms[j]
+                spec_i = self.atoms[idx_i].symbol
+                spec_j = self.atoms[idx_j].symbol
+                pair = tuple(sorted([spec_i, spec_j]))
+                pair_name = "-".join(pair)
+                if pair_name not in groups:
+                    groups[pair_name] = {"ds": [], "Jani": []}
+                d = self.distance_dict[key][1]
+                groups[pair_name]["ds"].append(d)
+                groups[pair_name]["Jani"].append(val * 1e3)
+
+            markers = ["s", "o", "D", "v", "^", "<", ">", "p", "*", "h", "H"]
+            s = "xyz"
+            for idx, (pair_name, data) in enumerate(groups.items()):
+                Jani = np.array(data["Jani"])
+                marker = markers[idx % len(markers)]
+                # Diagonal
+                for i in range(3):
+                    ax.scatter(
+                        data["ds"],
+                        Jani[:, i, i],
+                        marker=marker,
+                        label=f"{pair_name} J{s[i]}{s[i]}",
+                    )
+                # Off-diagonal
+                for i, j in [(0, 1), (0, 2), (1, 2)]:
+                    ax.scatter(
+                        data["ds"],
+                        Jani[:, i, j],
+                        marker=marker,
+                        facecolors="none",
+                        label=f"{pair_name} J{s[i]}{s[j]}",
+                    )
+            ax.legend(ncol=3, fontsize="small")
+        else:
+            ds = []
+            Jani = []
+            for key, val in self.Jani_dict.items():
+                d = self.distance_dict[key][1]
+                ds.append(d)
+                # val = val - np.diag([np.trace(val) / 3] * 3)
+                Jani.append(val * 1e3)
+            Jani = np.array(Jani)
+            s = "xyz"
+            for i in range(3):
+                ax.scatter(ds, Jani[:, i, i], marker="s", label=f"J{s[i]}{s[i]}")
+            c = "rgb"
+            for ic, (i, j) in enumerate([(0, 1), (0, 2), (1, 2)]):
+                ax.scatter(
+                    ds,
+                    Jani[:, i, j],
+                    edgecolors=c[ic],
+                    facecolors="none",
+                    label=f"J{s[i]}{s[j]}",
+                )
+            ax.legend(loc=1, ncol=2)
         ax.axhline(color="gray")
-        ax.legend(loc=1, ncol=2)
         ax.set_xlabel(r"Distance ($\AA$)")
         ax.set_ylabel("Jani (meV)")
         if fname is not None:
@@ -645,7 +809,7 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
             plt.show()
         return ax
 
-    def plot_all(self, title=None, savefile=None, show=False):
+    def plot_all(self, title=None, savefile=None, show=False, by_species=False):
         if self.has_dmi and self.has_bilinear:
             naxis = 3
         else:
@@ -653,11 +817,11 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
         fig, axes = plt.subplots(naxis, 1, sharex=True, figsize=(5, 2.2 * naxis))
 
         if self.has_dmi and self.has_bilinear:
-            self.plot_JvsR(axes[0])
-            self.plot_DvsR(axes[1])
-            self.plot_JanivsR(axes[2])
+            self.plot_JvsR(axes[0], by_species=by_species)
+            self.plot_DvsR(axes[1], by_species=by_species)
+            self.plot_JanivsR(axes[2], by_species=by_species)
         else:
-            self.plot_JvsR(axes)
+            self.plot_JvsR(axes, by_species=by_species)
 
         if title is not None:
             fig.suptitle(title)

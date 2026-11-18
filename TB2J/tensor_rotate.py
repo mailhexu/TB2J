@@ -1,7 +1,6 @@
 import numpy as np
-from scipy.spatial.transform import Rotation
 from numpy.linalg import norm
-
+from scipy.spatial.transform import Rotation
 
 # Rotation from a to b
 Rxx = Rotation.from_euler("x", 0, degrees=True)
@@ -88,7 +87,6 @@ def remove_components(J, vec1, vec2, remove_indices=[[2, 2]]):
         Jback: the tensor with  removed components
         weigth_back: the weight of the Jback.
     """
-    z = np.array([0, 0, 1])
     w = np.ones_like(J)
     rot1, rot2, J_rotated = rotate_tensor(vec1, J, vec2)
     w_rotated = rot1 @ w @ rot2.T
@@ -150,7 +148,6 @@ def test_remove_component():
     # vec2=[0.3, 0.4, -0.5]
     vec1 = [0.0, 0.1, 0]
     vec2 = [0.0, 0.1, 0]
-    z = np.array([0, 0, 1])
     J = [[0.0, 0.1, 0.2], [0.1, 0.0, 0.3], [0.2, 0.3, 0.0]]
     J = [[0.0, 0.1, 0.2], [-0.1, 0.0, 0.3], [-0.2, -0.3, 0.0]]
     print(f"{J=}")
@@ -239,8 +236,6 @@ def test_rotate_tensor():
         vec1 = np.random.rand(3)
         vec2 = np.random.rand(3)
         rot1, rot2, J2 = rotate_tensor(vec1, J, vec2)
-        norm1 = norm(vec1)
-        norm2 = norm(vec2)
         assert np.allclose(np.linalg.norm(vec1 @ rot1.T), norm(vec1))
         assert np.allclose(vec1 @ J @ vec2, vec1 @ rot1.T @ J2 @ rot2 @ vec2)
         assert np.allclose(rot1 @ rot1.T, np.eye(3))
@@ -267,7 +262,6 @@ def test_find_rotation_matrix_to_z():
 
 
 def test_rotate_isotropic_tensor():
-    a = np.eye(3)
     b = rotate_tensor([0, 0, 1], np.eye(3), [1, 0, 0])
     print(b)
 

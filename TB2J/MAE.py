@@ -136,7 +136,14 @@ class MAEGreen(MAE):
         # occ.occupy(evals)
         efermi = occ.efermi(evals)
         print(f"{efermi=}")
-        self.G = TBGreen(model, kmesh, efermi=efermi, gamma=gamma, **kwargs)
+        self.G = TBGreen(
+            model,
+            kmesh,
+            efermi=efermi,
+            gamma=gamma,
+            smearing_width=self.width,
+            **kwargs,
+        )
         self.emin = -52
         self.emax = 0
         self.nz = 100

@@ -1,5 +1,6 @@
 """Module for magnon density of states calculations and plotting."""
 
+import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,13 @@ import numpy as np
 from ase.dft.dos import DOS
 
 from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.eigenstates import MagnonEigenstateData
+from TB2J.magnon.magnon_parameters import (
+    MagnonParameters,
+    add_common_magnon_args,
+    add_dos_specific_args,
+    prepare_magnon_from_params,
+)
 
 
 @dataclass
@@ -29,18 +37,21 @@ class MagnonDOS:
         filename : str
             Output filename (should end in .json)
         """
-        # Convert numpy arrays to lists for JSON serialization
-        data = {
-            "energies": self.energies.tolist(),
-            "dos": self.dos.tolist(),
-        }
-        if self.weights is not None:
-            data["weights"] = self.weights.tolist()
-        if self.kpoints is not None:
-            data["kpoints"] = self.kpoints.tolist()
-
-        with open(filename, "w") as f:
-            json.dump(data, f)
+        kpoints = self.kpoints if self.kpoints is not None else np.zeros((0, 3))
+        energies = np.zeros((len(kpoints), 0))
+        data = MagnonEigenstateData(
+            calculation_type="dos",
+            kpoints=kpoints,
+            energies=energies,
+            weights=self.weights,
+            metadata={"units": {"energies": "eV", "dos_energies": "meV"}},
+            plot={
+                "kind": "dos",
+                "dos": self.dos,
+                "dos_energies_mev": self.energies,
+            },
+        )
+        data.save_json(filename)
 
     @classmethod
     def load(cls, filename: str) -> "MagnonDOS":
@@ -58,6 +69,16 @@ class MagnonDOS:
         """
         with open(filename) as f:
             data = json.load(f)
+
+        if data.get("schema_name") == "tb2j.magnon.eigenstates":
+            eig = MagnonEigenstateData.from_dict(data)
+            plot = eig.plot or {}
+            return cls(
+                energies=np.array(plot["dos_energies_mev"]),
+                dos=np.array(plot["dos"]),
+                weights=eig.weights,
+                kpoints=eig.kpoints,
+            )
 
         # Convert lists back to numpy arrays
         data["energies"] = np.array(data["energies"])
@@ -261,6 +282,9 @@ def plot_magnon_dos(
     filename=None,
     save_data=True,
     show=True,
+    export_formats=None,
+    export_prefix=None,
+    save_wavefunctions=False,
 ):
     """Convenience function to calculate and plot magnon DOS.
 
@@ -298,11 +322,142 @@ def plot_magnon_dos(
     dos.plot(filename=filename, show=show)
 
     # Save data if requested
-    if save_data:
-        data_file = (
-            Path(filename).with_suffix(".json") if filename else Path("magnon_dos.json")
-        )
+    export_formats = ["json"] if export_formats is None else export_formats
+    if save_data and "json" in export_formats:
+        if export_prefix is not None:
+            data_file = Path(export_prefix + ".json")
+        else:
+            data_file = (
+                Path(filename).with_suffix(".json")
+                if filename
+                else Path("magnon_dos.json")
+            )
         dos.save(data_file)
         print(f"DOS data saved to {data_file}")
 
+    if "netcdf" in export_formats or save_wavefunctions:
+        if export_prefix is not None:
+            prefix = export_prefix
+        elif filename:
+            prefix = str(Path(filename).with_suffix(""))
+        else:
+            prefix = "magnon_dos"
+        eigenstates = magnon.get_magnon_eigenstates(
+            calculator.kpts,
+            calculation_type="dos",
+            include_wavefunctions=save_wavefunctions,
+            weights=calculator.weights,
+            plot={
+                "kind": "dos",
+                "dos": dos.dos,
+                "dos_energies_mev": dos.energies,
+            },
+        )
+        if "json" in export_formats and save_wavefunctions:
+            eigenstates.save_json(prefix + ".json")
+        if "netcdf" in export_formats:
+            eigenstates.save_netcdf(prefix + ".nc")
+
     return dos
+
+
+def plot_magnon_dos_from_TB2J(params: MagnonParameters):
+    """Calculate and plot magnon DOS from TB2J results.
+
+    Parameters
+    ----------
+    params : MagnonParameters
+        Parameters for the calculation
+
+    Returns
+    -------
+    MagnonDOS
+        The calculated DOS object
+    """
+    magnon = prepare_magnon_from_params(params)
+
+    window = None
+    if params.window is not None:
+        window = (params.window[0] / 1000, params.window[1] / 1000)
+
+    print("\nCalculating magnon DOS...")
+    dos = plot_magnon_dos(
+        magnon,
+        kmesh=params.kmesh,
+        gamma=params.gamma,
+        width=params.width,
+        window=window,
+        npts=params.npts,
+        filename=params.filename,
+        show=params.show,
+        export_formats=params.export_formats,
+        export_prefix=params.export_prefix,
+        save_wavefunctions=params.save_wavefunctions,
+    )
+
+    print(f"\nPlot saved to {params.filename}")
+    data_file = Path(params.filename).with_suffix(".json")
+    print(f"DOS data saved to {data_file}")
+
+    return dos
+
+
+def main():
+    """Command-line interface for magnon DOS calculation."""
+    parser = argparse.ArgumentParser(
+        description="Calculate and plot magnon DOS from TB2J results"
+    )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--config",
+        type=str,
+        help="Path to TOML configuration file",
+    )
+    group.add_argument(
+        "--save-config",
+        type=str,
+        help="Save default configuration to specified TOML file",
+    )
+
+    add_common_magnon_args(parser)
+    add_dos_specific_args(parser)
+
+    args = parser.parse_args()
+
+    if args.save_config:
+        params = MagnonParameters()
+        params.to_toml(args.save_config)
+        print(f"Saved default configuration to {args.save_config}")
+        return
+
+    if args.config:
+        params = MagnonParameters.from_toml(args.config)
+    else:
+        window = None
+        if args.window is not None:
+            window = tuple(args.window)
+        params = MagnonParameters(
+            path=args.path,
+            filename=args.output,
+            Jiso=args.Jiso,
+            Jani=args.Jani,
+            SIA=getattr(args, "SIA", True),
+            DMI=args.DMI,
+            Q=args.ordering_vector,
+            uz_file=args.uz_file,
+            spin_conf_file=args.spin_conf_file,
+            n=args.rotation_axis,
+            show=args.show,
+            kmesh=args.kmesh,
+            gamma=args.gamma,
+            width=args.width,
+            window=window,
+            npts=args.npts,
+        )
+
+    plot_magnon_dos_from_TB2J(params)
+
+
+if __name__ == "__main__":
+    main()

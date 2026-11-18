@@ -1,0 +1,58 @@
+SystemName          Fe3 spiral chain (fixture)
+SystemLabel          fe3
+NumberOfAtoms       3
+NumberOfSpecies     1
+
+%block ChemicalSpeciesLabel
+ 1  26  Fe_nc
+%endblock ChemicalSpeciesLabel
+
+LatticeConstant    1.0 Bohr
+%block LatticeVectors
+ 12.000   0.000   0.000
+  0.000  12.000   0.000
+  0.000   0.000  10.932
+%endblock LatticeVectors
+
+AtomicCoordinatesFormat  NotScaledCartesianBohr
+%block AtomicCoordinatesAndAtomicSpecies
+  0.000   0.000   0.000  1
+  0.000   0.000   3.644  1
+  0.000   0.000   7.288  1
+%endblock AtomicCoordinatesAndAtomicSpecies
+
+MeshCutoff        200. Ry
+PAO.BasisSize SZP
+
+XC.functional           GGA
+XC.authors              PBE
+
+Spin non-collinear
+Spin.Spiral.Scale ReciprocalLatticeVectors
+%block Spin.Spiral
+   0.0 0.0 0.25
+%endblock
+
+%block DM.InitSpin
+ 1  +3.0     0.   0.
+ 2  +3.0    90.   0.
+ 3  +3.0   180.   0.
+%endblock DM.InitSpin
+
+%block kgrid_Monkhorst_Pack
+   1  0  0  0.0
+   0  1  0  0.0
+   0  0  4  0.0
+%endblock kgrid_Monkhorst_Pack
+
+SCF.MustConverge        T
+SCF.H.Converge          F
+SCF.DM.Converge         T
+MaxSCFIterations        200
+DM.MixingWeight         0.02
+DM.NumberPulay          8
+DM.Tolerance            1.d-4
+DM.UseSaveDM            F
+
+SaveHS                  T
+WriteMullikenPop        1

@@ -1,5 +1,6 @@
-import numpy as np
 import os
+
+import numpy as np
 from ase.units import Ry
 
 
@@ -37,9 +38,7 @@ def write_uppasd_momfile(cls, fname):
             text = ""
             id_spin = cls.index_spin[i]
             if id_spin > -1:
-                pos = cls.atoms.get_scaled_positions()[i]
                 ms = np.sqrt(np.sum(np.array(cls.spinat[i]) ** 2))
-                spin = np.array(cls.spinat[i]) / ms
                 text = "{id_atom} {id_spin} {ms} 0.0 0.0 1.0\n".format(
                     id_atom=id_spin + 1, id_spin=id_spin + 1, ms=ms
                 )

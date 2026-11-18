@@ -1,65 +1,40 @@
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-import tomli
-import tomli_w
 from ase.dft.dos import DOS
 from ase.units import J, eV
 from scipy.spatial.transform import Rotation
 
 from TB2J.io_exchange import SpinIO
 from TB2J.kpoints import monkhorst_pack
+from TB2J.magnon.eigenstates import (
+    MagnonEigenstateData,
+    SiteBosonDiagnostics,
+    SiteBosonModes,
+)
 from TB2J.magnon.magnon_band import MagnonBand
 from TB2J.magnon.magnon_math import get_rotation_arrays
+from TB2J.magnon.magnon_parameters import (
+    MagnonParameters,
+    add_band_specific_args,
+    add_common_magnon_args,
+    prepare_magnon_from_params,
+)
 from TB2J.mathutils.auto_kpath import auto_kpath
 
+try:
+    from ase.cell import Cell as AseCell
+except ImportError:  # for compatibility with older ASE layout
+    from ase import Cell as AseCell
 
-@dataclass
-class MagnonParameters:
-    """Parameters for magnon band structure calculations"""
 
-    path: str = "TB2J_results"
-    kpath: str = None
-    npoints: int = 300
-    filename: str = "magnon_bands.png"
-    Jiso: bool = True
-    Jani: bool = False
-    DMI: bool = False
-    Q: Optional[List[float]] = None
-    uz_file: Optional[str] = None
-    n: Optional[List[float]] = None
-    spin_conf_file: Optional[str] = None
-    show: bool = False
-
-    @classmethod
-    def from_toml(cls, filename: str) -> "MagnonParameters":
-        """Load parameters from a TOML file"""
-        with open(filename, "rb") as f:
-            data = tomli.load(f)
-        return cls(**data)
-
-    def to_toml(self, filename: str):
-        """Save parameters to a TOML file"""
-        # Convert to dict and remove None values
-        data = {k: v for k, v in asdict(self).items() if v is not None}
-        with open(filename, "wb") as f:
-            tomli_w.dump(data, f)
-
-    def __post_init__(self):
-        """Validate parameters after initialization"""
-        if self.Q is not None and len(self.Q) != 3:
-            raise ValueError("Q must be a list of 3 numbers")
-        if self.n is not None and len(self.n) != 3:
-            raise ValueError("n must be a list of 3 numbers")
-
-        # Convert path to absolute path if uz_file is relative to it
-        if self.uz_file and not Path(self.uz_file).is_absolute():
-            self.uz_file = str(Path(self.path) / self.uz_file)
-        if self.spin_conf_file and not Path(self.spin_conf_file).is_absolute():
-            self.spin_conf_file = str(Path(self.path) / self.spin_conf_file)
+def _normalize_kpoint_label(label: str) -> str:
+    """Normalize Gamma variants to LaTeX display text."""
+    if label in {"G", "Gamma", r"$\Gamma$"}:
+        return r"$\Gamma$"
+    return label
 
 
 @dataclass
@@ -69,7 +44,6 @@ class Magnon:
     """
 
     nspin: int
-    # ind_atoms: list
     magmom: np.ndarray
     Rlist: np.ndarray
     JR: np.ndarray
@@ -78,6 +52,15 @@ class Magnon:
     _uz: np.ndarray
     _n: np.ndarray
     pbc: tuple = (True, True, True)
+    positions: Optional[np.ndarray] = None
+    symbols: Optional[list] = None
+    atom_positions: Optional[np.ndarray] = None
+    atom_symbols: Optional[list] = None
+    magnetic_atom_indices: Optional[list] = None
+    # Optional: set when the Magnon is built from a supercell SpinIO so that
+    # the primitive-cell BZ k-path can be used and folded back.
+    primitive_cell: np.ndarray = None
+    supercell_matrix: np.ndarray = None
 
     def set_reference(self, Q, uz, n, magmoms=None):
         """
@@ -93,14 +76,29 @@ class Magnon:
             Normal vector for rotation
         """
         self.set_propagation_vector(Q)
+        axis = np.asarray(n, dtype=float)
+        if axis.shape != (3,):
+            raise ValueError("Rotation axis n must have three components.")
+        if not np.all(np.isfinite(axis)):
+            raise ValueError("Rotation axis n must contain only finite values.")
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm == 0:
+            raise ValueError("Rotation axis n must be non-zero.")
         self._uz = np.array(uz, dtype=float)
-        self._n = np.array(n, dtype=float)
+        self._n = axis / axis_norm
         if magmoms is not None:
             self.magmom = np.array(magmoms, dtype=float)
+        self.Snorm = np.linalg.norm(self.magmom, axis=1) / 2
+        # self.Snorm=np.ones(self.nspin)
 
     def set_propagation_vector(self, Q):
-        """Set propagation vector"""
-        self._Q = np.array(Q)
+        """Set the known reference ordering/propagation vector."""
+        Q = np.asarray(Q, dtype=float)
+        if Q.shape != (3,):
+            raise ValueError("Propagation vector Q must have three components.")
+        if not np.all(np.isfinite(Q)):
+            raise ValueError("Propagation vector Q must contain only finite values.")
+        self._Q = Q
 
     @property
     def Q(self):
@@ -111,16 +109,31 @@ class Magnon:
 
     @Q.setter
     def Q(self, value):
-        if not isinstance(value, (list, np.ndarray)):
-            raise TypeError("Propagation vector Q must be a list or numpy array.")
-        if len(value) != 3:
-            raise ValueError("Propagation vector Q must have three components.")
-        self._Q = np.array(value)
+        self.set_propagation_vector(value)
+
+    def _exchange_state_key(self):
+        """Content key over every mutable input J(q) depends on.
+
+        Public Q/n/magmoms/Snorm/Rlist/JR arrays are mutable, so the key is
+        rebuilt from current bytes on every use; any change (including
+        in-place edits) produces a different key and invalidates the cache.
+        """
+        Q = (
+            None
+            if self._Q is None
+            else np.ascontiguousarray(self._Q, dtype=float).tobytes()
+        )
+        return (
+            Q,
+            np.ascontiguousarray(self._n, dtype=float).tobytes(),
+            np.ascontiguousarray(self.magmom, dtype=float).tobytes(),
+            np.ascontiguousarray(self.Snorm, dtype=float).tobytes(),
+            np.ascontiguousarray(self.Rlist, dtype=float).tobytes(),
+            np.ascontiguousarray(self.JR).tobytes(),
+        )
 
     def Jq(self, kpoints):
         """
-        Compute the exchange interactions in reciprocal space.
-
         The exchange interactions J(q) are computed using the Fourier transform:
         J(q) = ∑_R J(R) exp(iq·R)
 
@@ -147,34 +160,28 @@ class Magnon:
             First two indices are for magnetic atom pairs
             Last two indices are for 3x3 tensor components
         """
-        Rlist = np.array(self.Rlist)
-        JR = self.JR
-        JRprime = JR.copy()
-
-        for iR, R in enumerate(Rlist):
-            if self._Q is not None:
-                # Rotate exchange tensors based on propagation vector
-                phi = 2 * np.pi * R @ self._Q  # angle ϕ = 2π R·Q
-                rv = phi * self._n  # rotation vector
-                Rmat = Rotation.from_rotvec(rv).as_matrix()
-                # J'_mn(R) = R_m(ϕ)^T J(R) R_n(ϕ) using Einstein summation.
-                # Here m is always in the R=0, thus the rotation is only applied on the
-                # n , so only on the right.
-                JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
-
-        nkpt = kpoints.shape[0]
-        Jq = np.zeros((nkpt, self.nspin, self.nspin, 3, 3), dtype=complex)
-
-        for iR, R in enumerate(Rlist):
-            for iqpt, qpt in enumerate(kpoints):
-                # Fourier transform of exchange tensors
-                phase = 2 * np.pi * R @ qpt
-                Jq[iqpt] += np.exp(1j * phase) * JRprime[iR]
-
-        # Jq_copy = Jq.copy()
-        # Jq.swapaxes(-1, -2)  # swap xyz
-        # Jq.swapaxes(-3, -4)  # swap ij
-        # Jq = (Jq.conj() + Jq_copy) / 2.0
+        state = self._exchange_state_key()
+        cache = getattr(self, "_Jq_prepared_cache", None)
+        if cache is not None and cache[0] == state:
+            Rlist, JRprime = cache[1]
+        else:
+            Rlist = np.array(self.Rlist)
+            Snorm_inv = 1 / self.Snorm
+            JR = np.einsum("rijxy, i, j-> rijxy", self.JR, Snorm_inv, Snorm_inv)
+            JRprime = JR.copy()
+            for iR, R in enumerate(Rlist):
+                if self._Q is not None:
+                    # Rotate exchange tensors for the propagation vector.
+                    phi = 2 * np.pi * R @ self._Q
+                    Rmat = Rotation.from_rotvec(phi * self._n).as_matrix()
+                    JRprime[iR] = np.einsum(" ijxy, yb -> ijxb", JR[iR], Rmat)
+            self._Jq_prepared_cache = (state, (Rlist, JRprime))
+        kpoints = np.asarray(kpoints, dtype=float)
+        # Vectorized Fourier transform: identical sum, no (R, q) Python loop.
+        phase = 2 * np.pi * Rlist @ kpoints.T  # (nR, nkpt)
+        Jq = np.einsum("rq,rijxy->qijxy", np.exp(-1j * phase), JRprime)
+        if self._Q is not None:
+            Jq = Jq.astype(complex)
         return Jq
 
     def Hq(self, kpoints):
@@ -195,35 +202,57 @@ class Magnon:
         """
         magmoms = self.magmom.copy()
         magmoms /= np.linalg.norm(magmoms, axis=-1)[:, None]
-
         U, V = get_rotation_arrays(magmoms, u=self._uz)
-
-        J0 = -self.Jq(np.zeros((1, 3)))[0]
+        state = self._exchange_state_key()
+        cache = getattr(self, "_J0_cache", None)
+        if cache is not None and cache[0] == state:
+            J0 = cache[1]
+        else:
+            J0 = -self.Jq(np.zeros((1, 3)))[0]
+            self._J0_cache = (state, J0)
         # J0 = -Hermitize(J0)[:, :, 0]
         # Jq = -Hermitize(self.Jq(kpoints, anisotropic=anisotropic))
 
         Jq = -self.Jq(kpoints)
+        Jmq = Jq.swapaxes(-1, -2).swapaxes(1, 2)
 
-        C = np.diag(np.einsum("ix,ijxy,jy->i", V, 2 * J0, V))
-        B = np.einsum("ix,kijxy,jy->kij", U, Jq, U)
-        A1 = np.einsum("ix,kijxy,jy->kij", U, Jq, U.conj())
-        A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq, U)
+        Ssqrt = np.sqrt(self.Snorm)
+
+        # A1 = UT J(-k) U.conj()
+        A1 = np.einsum("ix,kijxy,jy->kij", U, Jmq, U.conj())
+        # A2 = [ UT J(-k) U.conj() ] .conj() = U.conj()^T J(k).conj() U
+        A2 = np.einsum("ix,kijxy,jy->kij", U.conj(), Jq.conj(), U)
+        # B = UT J(-k) U
+        B = np.einsum("ix,kijxy,jy->kij", U, Jmq, U)
+
+        # debug: check B(q) == B(-q).T
+        # Jmq = -self.Jq(-kpoints)
+        # B2 = np.einsum("jx,kjixy,iy->kij", U, Jmq, U)
+        # if not np.allclose(B, B2):
+        #    print("Warning: B and B2 are not consistent!")
+        #    print(f"Max difference: {np.max(np.abs(B - B2))}")
+
+        # C = \delta_ij \sum_l (S_l v_i^T J'_{il} v_l)
+        C = np.diag(np.einsum("ix,ijxy,jy, j->i", V, 2 * J0, V, self.Snorm))
+
+        # Apply the sqrt(Si Sj) ans Sl
+        A1 = np.einsum("kij, i, j-> kij", A1, Ssqrt, Ssqrt)
+        A2 = np.einsum("kij, i, j-> kij", A2, Ssqrt, Ssqrt)
+        B = np.einsum("kij, i, j-> kij", B, Ssqrt, Ssqrt)
 
         H = np.block([[A1 - C, B], [B.swapaxes(-1, -2).conj(), A2 - C]])
         return H
 
-    def _magnon_energies(self, kpoints, u=None):
-        """Calculate magnon energies"""
-        H = self.Hq(kpoints)
+    @staticmethod
+    def _cholesky_with_retries(H):
+        """Return the legacy lower Cholesky factor and its retry diagnostics."""
         n = H.shape[-1] // 2
-        I = np.eye(n)
-
         min_eig = 0.0
         try:
-            K = np.linalg.cholesky(H)
+            return np.linalg.cholesky(H), min_eig, 0
         except np.linalg.LinAlgError:
             try:
-                K = np.linalg.cholesky(H + 1e-6 * np.eye(2 * n))
+                return np.linalg.cholesky(H + 1e-6 * np.eye(2 * n)), min_eig, 1
             except np.linalg.LinAlgError:
                 from warnings import warn
 
@@ -232,12 +261,274 @@ class Magnon:
                 warn(
                     f"WARNING: The system may be far from the magnetic ground-state. Minimum eigenvalue: {min_eig}. The magnon energies might be unphysical."
                 )
+                return K, min_eig, 2
+
+    def _diagonalize_magnon_hamiltonian(self, kpoints, include_wavefunctions=False):
+        """Diagonalize magnon Hamiltonian and optionally return positive modes."""
+        H = self.Hq(kpoints)
+        n = H.shape[-1] // 2
+        I = np.eye(n)
+        K, min_eig, _tier = self._cholesky_with_retries(H)
 
         g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
         KH = K.swapaxes(-1, -2).conj()
-        # Why only n:?
-        return np.linalg.eigvalsh(KH @ g @ K)[:, n:] + min_eig
-        # return np.linalg.eigvalsh(KH @ g @ K)[:, :] + min_eig
+        eig_matrix = KH @ g @ K
+        if include_wavefunctions:
+            eigvals, eigvecs = np.linalg.eigh(eig_matrix)
+            return eigvals[:, n:] + min_eig, eigvecs[:, :, n:].swapaxes(1, 2)
+        return np.linalg.eigvalsh(eig_matrix)[:, n:] + min_eig, None
+
+    @staticmethod
+    def _global_rotation_null_modes(H, kpoint, spin_lengths, U, V, stability_tol):
+        """Certify Γ-point vanishing magnon branches from global rotations.
+
+        The candidate displacement for each Cartesian axis is the
+        Holstein--Primakoff image of a uniform rotation. Every candidate must
+        be a null vector of the unshifted Hessian within the numeric-zero
+        tolerance, and the certified candidates must span the whole null
+        space of the Hessian. The vanishing-branch count is half the
+        algebraic multiplicity of the zero eigenvalue of ``g @ H``; bosonic
+        particle-hole symmetry makes that multiplicity even. The count is
+        computed in the Hessian eigenbasis, where ``K diag(lambda)`` has one
+        zero column per null eigenvalue, so the multiplicity is
+        ``nullity(H)`` plus the zero count of the range block ``K_rr
+        Lambda_r``; that separation scales linearly with the gaps. The block
+        is similar to the Hermitian congruence form ``Lambda_r^{1/2} K_rr
+        Lambda_r^{1/2}``, so the zero count is recomputed through that form
+        with the Hermitian solver, and the nullity is rechecked through the
+        Hessian SVD rank: any mismatch refuses the zeroing. No exponentiating
+        power is taken, so resolved gaps cannot underflow. Returns
+        ``(n_zero_modes, worst_candidate_residual)``.
+        """
+        eps = np.finfo(float).eps
+        q_scale = max(1.0, float(np.max(np.abs(kpoint))))
+        if np.max(np.abs(kpoint - np.rint(kpoint))) > eps * q_scale:
+            return 0, np.nan
+
+        candidates = []
+        residuals = []
+        for axis in np.eye(3):
+            tangent = np.cross(axis, V)
+            beta = np.sqrt(spin_lengths / 2.0) * np.einsum(
+                "ix,ix->i", U.conj(), tangent
+            )
+            candidate = np.concatenate((beta, beta.conj()))
+            norm = np.linalg.norm(candidate)
+            if norm == 0.0:
+                continue
+            candidate = candidate / norm
+            candidates.append(candidate)
+            residuals.append(np.linalg.norm(H @ candidate))
+        if not candidates:
+            return 0, np.nan
+        residual = float(max(residuals))
+        if residual > stability_tol:
+            return 0, residual
+
+        dim = H.shape[0]
+        n = dim // 2
+        g = np.diag(np.r_[np.ones(n), -np.ones(n)])
+        scale = float(np.max(np.abs(np.linalg.eigvalsh(H))))
+        rank_tol = eps * dim * scale
+        lam, U = np.linalg.eigh(H)
+        K = U.conj().T @ g @ U
+        k_scale = max(1.0, float(np.max(np.abs(K))))
+        null_mask = lam <= rank_tol
+        nullity = int(np.count_nonzero(null_mask))
+        # Nullity cross-check through the Hessian SVD rank (linear scale).
+        if nullity != dim - np.linalg.matrix_rank(H, tol=rank_tol):
+            return 0, residual
+        algebraic_zero = nullity
+        if nullity < dim:
+            lam_r = lam[~null_mask]
+            K_rr = K[np.ix_(~null_mask, ~null_mask)]
+            block = K_rr * lam_r[None, :]
+            block_tol = eps * dim * scale * k_scale
+            algebraic_zero += int(
+                np.count_nonzero(np.abs(np.linalg.eigvals(block)) <= block_tol)
+            )
+            # Gap-preserving cross-check: eig(K_rr Lambda_r) equals
+            # eig(Lambda_r^{1/2} K_rr Lambda_r^{1/2}) (Hermitian, so its
+            # algebraic zeros are geometric and eigvalsh is backward stable).
+            lam_r_sqrt = np.sqrt(lam_r)
+            herm = lam_r_sqrt[:, None] * K_rr * lam_r_sqrt[None, :]
+            herm_tol = eps * dim * float(lam_r.max()) * k_scale
+            herm_zeros = int(
+                np.count_nonzero(np.abs(np.linalg.eigvalsh(herm)) <= herm_tol)
+            )
+            if algebraic_zero != nullity + herm_zeros:
+                return 0, residual
+        span = np.linalg.matrix_rank(np.column_stack(candidates), tol=rank_tol)
+        if span != nullity or algebraic_zero < nullity or algebraic_zero % 2:
+            return 0, residual
+        return algebraic_zero // 2, residual
+
+    def get_site_boson_modes(self, kpoints):
+        """Return canonical physical site-boson modes at fractional k-points.
+
+        The returned paraunitary has row order ``(b(k), b†(-k))`` and columns
+        ordered as positive-norm particles followed by negative-norm partners.
+        ``u`` and ``v`` are the particle and hole blocks of its positive-norm
+        columns, in ``(kpoint, mode, site)`` order.  They multiply unit-
+        commutator Holstein--Primakoff bosons; transverse spin amplitudes carry
+        the additional local factor ``sqrt(2 * spin_lengths[i])``.
+
+        A one-magnon energy is set to exact zero only when the global-rotation
+        HP displacement is a null vector of the unshifted Hessian within its
+        floating-point backward-error tolerance and the certified candidates
+        span the full null space; the number of vanishing branches is half
+        the even algebraic multiplicity of the zero eigenvalue of the
+        unshifted dynamical matrix. The reported stability and
+        symmetry residuals make both decisions auditable.
+        """
+        kpoints = np.asarray(kpoints, dtype=float)
+        H = self.Hq(kpoints)
+        n = H.shape[-1] // 2
+        h_eigenvalues = np.linalg.eigvalsh(H)
+        point_min = h_eigenvalues[:, 0]
+        h_scale = np.max(np.abs(h_eigenvalues), axis=1)
+        stability_tol = np.finfo(float).eps * (2 * n) * h_scale
+        unstable = point_min < -stability_tol
+        if np.any(unstable):
+            raise ValueError(
+                "Cannot construct site-boson modes for an unstable reference "
+                f"(minimum Hamiltonian eigenvalue {point_min.min():.6g} eV; "
+                f"numeric-zero tolerance {stability_tol.min():.3g} eV)."
+            )
+        K, energy_offset, tier = self._cholesky_with_retries(H)
+
+        g = np.diag(np.r_[np.ones(n), -np.ones(n)])
+        energies = (
+            np.linalg.eigvalsh(K.swapaxes(-1, -2).conj() @ g @ K)[:, n:] + energy_offset
+        )
+        paraunitary = np.empty((len(kpoints), 2 * n, 2 * n), dtype=complex)
+        global_shift = (
+            0.0 if tier == 0 else (1e-6 if tier == 1 else -energy_offset + 1e-6)
+        )
+        shifts = np.full(len(kpoints), global_shift)
+        tiers = np.full(len(kpoints), tier, dtype=int)
+        normalized_spins = self.magmom / np.linalg.norm(self.magmom, axis=-1)[:, None]
+        U, V = get_rotation_arrays(normalized_spins, u=self._uz)
+        symmetry_residual = np.full(len(kpoints), np.nan)
+        zero_mode = np.zeros((len(kpoints), n), dtype=bool)
+        for ik in range(len(kpoints)):
+            Ki = K[ik]
+            # A semidefinite Goldstone matrix can pass LAPACK Cholesky with a
+            # singular factor. Regularize only the mode reconstruction; keep
+            # the energy path identical to the established diagonalizer.
+            if tier == 0 and point_min[ik] <= stability_tol[ik]:
+                shifts[ik] = 1e-6
+                tiers[ik] = 1
+                Ki = np.linalg.cholesky(H[ik] + shifts[ik] * np.eye(2 * n))
+            KH = Ki.conj().T
+            eig_matrix = KH @ g @ Ki
+            eigvals, eigvecs = np.linalg.eigh(eig_matrix)
+            if np.any(eigvals[:n] >= 0) or np.any(eigvals[n:] <= 0):
+                raise ValueError(
+                    "Cannot construct site-boson modes: Cholesky metric spectrum "
+                    "does not have stable positive/negative branches."
+                )
+            # Since numpy returns a lower factor H=K K†, the eigenvectors of
+            # K†gK map to physical generalized eigenvectors via K^{-†}.
+            physical = np.linalg.solve(KH, eigvecs) * np.sqrt(np.abs(eigvals))[None, :]
+            paraunitary[ik] = np.concatenate(
+                (physical[:, n:], physical[:, :n][:, ::-1]), axis=1
+            )
+            n_zero, symmetry_residual[ik] = self._global_rotation_null_modes(
+                H[ik], kpoints[ik], self.Snorm, U, V, stability_tol[ik]
+            )
+            if n_zero:
+                energies[ik, :n_zero] = 0.0
+                zero_mode[ik, :n_zero] = True
+
+        positive = paraunitary[:, :n, :n].swapaxes(1, 2)
+        hole = paraunitary[:, n:, :n].swapaxes(1, 2)
+        return SiteBosonModes(
+            kpoints=kpoints,
+            energies=energies,
+            u=positive,
+            v=hole,
+            paraunitary=paraunitary,
+            spin_lengths=self.Snorm,
+            U=U,
+            V=V,
+            diagnostics=SiteBosonDiagnostics(
+                min_eig=point_min,
+                stability_tol=stability_tol,
+                symmetry_residual=symmetry_residual,
+                shift=shifts,
+                cholesky_tier=tiers,
+            ),
+            is_zero_mode=zero_mode,
+        )
+
+    def _magnon_energies(self, kpoints, u=None):
+        """Calculate magnon energies"""
+        energies, _ = self._diagonalize_magnon_hamiltonian(kpoints)
+        return energies
+
+    def get_magnon_eigenstates(
+        self,
+        kpoints,
+        calculation_type="generic",
+        include_wavefunctions=False,
+        weights=None,
+        metadata=None,
+        plot=None,
+    ):
+        """Return magnon energies and optional wavefunctions at k-points.
+
+        Parameters
+        ----------
+        kpoints : array_like
+            K-points with shape ``(nkpt, 3)`` in fractional reciprocal coordinates.
+        calculation_type : str, optional
+            Label for the calculation context, such as ``"band"`` or ``"dos"``.
+        include_wavefunctions : bool, optional
+            Whether to include positive-mode eigenvectors. Disabled by default.
+        weights : array_like, optional
+            K-point weights for mesh calculations.
+        metadata : dict, optional
+            Additional metadata to merge into the result.
+        plot : dict, optional
+            Plot-specific payload, such as band labels or DOS grids.
+        """
+        kpoints = np.asarray(kpoints, dtype=float)
+        energies, wavefunctions = self._diagonalize_magnon_hamiltonian(
+            kpoints,
+            include_wavefunctions=include_wavefunctions,
+        )
+        result_metadata = {
+            "nspin": self.nspin,
+            "units": {"energies": "eV"},
+            "kpoint_convention": "fractional_reciprocal",
+            "wavefunction_convention": "cholesky_metric_positive_modes",
+            "spin_rotation_normalization": "boson_1",
+            "spin_rotation_added_phase": 0.0,
+            "cell": np.asarray(self.cell, dtype=float),
+            "magmoms": self.magmom,
+        }
+        if self.positions is not None:
+            result_metadata["positions"] = self.positions
+        if self.symbols is not None:
+            result_metadata["symbols"] = self.symbols
+        if self.atom_positions is not None:
+            result_metadata["atom_positions"] = self.atom_positions
+        if self.atom_symbols is not None:
+            result_metadata["atom_symbols"] = self.atom_symbols
+        if self.magnetic_atom_indices is not None:
+            result_metadata["magnetic_atom_indices"] = self.magnetic_atom_indices
+        if metadata is not None:
+            result_metadata.update(metadata)
+        return MagnonEigenstateData(
+            calculation_type=calculation_type,
+            kpoints=kpoints,
+            energies=energies,
+            wavefunctions=wavefunctions,
+            weights=weights,
+            metadata=result_metadata,
+            plot=plot,
+        )
 
     def get_magnon_bands(
         self,
@@ -251,6 +542,7 @@ class Magnon:
         labels: list = None,
         anisotropic: bool = True,
         u: np.array = None,
+        use_primitive_kpath: bool = False,
     ):
         """Get magnon band structure.
 
@@ -276,6 +568,12 @@ class Magnon:
             Whether to include anisotropic interactions. Default is True.
         u : np.array, optional
             Quantization axis. Default is None.
+        use_primitive_kpath : bool, optional
+            If True and this Magnon was built from a supercell (i.e.
+            ``self.primitive_cell`` and ``self.supercell_matrix`` are set),
+            generate the high-symmetry k-path from the primitive cell's BZ
+            and fold the k-points into the supercell reciprocal lattice via
+            ``k_sc = k_prim @ sc_matrix.T``.  Default is False.
 
         Returns
         -------
@@ -287,22 +585,82 @@ class Magnon:
         pbc = self.pbc if pbc is None else pbc
         pbc = [True, True, True]
         u = self._uz if u is None else u
+        xlist = None  # default; overwritten when auto_kpath segments are used
+
+        # Determine whether to use the primitive-cell BZ for k-path generation.
+        _use_prim = (
+            use_primitive_kpath
+            and self.primitive_cell is not None
+            and self.supercell_matrix is not None
+        )
+
         if kpoints.size == 0:
-            if path is None:
+            if _use_prim:
+                # Build k-path in the primitive BZ, then fold to supercell
+                # fractional coordinates.  The primitive reciprocal lattice
+                # For a supercell A_sc = S @ A_prim, a supercell translation
+                # R_sc has primitive coordinates R_sc @ S.  Since Jq uses the
+                # phase R_sc · k_sc, primitive fractional k-points fold as
+                # k_sc = S @ k_prim, i.e. row-vector k_prim @ S.T.
+                prim_cell_array = np.array(self.primitive_cell.get_cell())
+                sc_mat = np.array(self.supercell_matrix, dtype=float)
+                fold_matrix = sc_mat.T  # row-vector k_sc = k_prim @ fold_matrix
+
+                if path is None:
+                    xlist, kptlist, Xs, knames, spk = auto_kpath(
+                        prim_cell_array,
+                        None,
+                        npoints=npoints,
+                        supercell_matrix=fold_matrix,
+                    )
+                    kpoints = np.concatenate(kptlist)
+                    # Use Xs (real distances) as label positions so they align
+                    # with the xlist real-distance x-axis.
+                    labels = [
+                        (x, _normalize_kpoint_label(name))
+                        for x, name in zip(Xs.tolist(), knames)
+                    ]
+                else:
+                    prim_ase_cell = AseCell(prim_cell_array)
+                    bandpath = prim_ase_cell.bandpath(
+                        path=path,
+                        npoints=npoints,
+                        special_points=special_points,
+                        eps=tol,
+                        pbc=pbc,
+                    )
+                    k_prim = bandpath.kpts
+                    kpoints = k_prim @ fold_matrix
+                    spk_prim = bandpath.special_points
+                    spk_prim["Gamma"] = spk_prim.pop("G", np.zeros(3))
+                    spk_prim = {
+                        _normalize_kpoint_label(name): value
+                        for name, value in spk_prim.items()
+                    }
+                    spk = {name: v @ fold_matrix for name, v in spk_prim.items()}
+                    labels = [
+                        (i, symbol)
+                        for symbol in spk
+                        for i in np.where(
+                            np.all(np.abs(kpoints - spk[symbol]) < tol, axis=1)
+                        )[0]
+                    ]
+                    labels = [
+                        (i, _normalize_kpoint_label(symbol)) for i, symbol in labels
+                    ]
+                    xlist = None
+            elif path is None:
                 # Use auto_kpath to generate path automatically
                 xlist, kptlist, Xs, knames, spk = auto_kpath(
                     self.cell, None, npoints=npoints
                 )
                 kpoints = np.concatenate(kptlist)
-                # Create labels from special points
-                labels = []
-                current_pos = 0
-                for i, (x, k) in enumerate(zip(xlist, kptlist)):
-                    for name in knames:
-                        matches = np.where((k == spk[name]).all(axis=1))[0]
-                        if matches.size > 0:
-                            labels.append((matches[0] + current_pos, name))
-                    current_pos += len(k)
+                # Use Xs (real distances) as label positions so they align
+                # with the xlist real-distance x-axis.
+                labels = [
+                    (x, _normalize_kpoint_label(name))
+                    for x, name in zip(Xs.tolist(), knames)
+                ]
             else:
                 bandpath = self.cell.bandpath(
                     path=path,
@@ -313,23 +671,25 @@ class Magnon:
                 )
                 kpoints = bandpath.kpts
                 spk = bandpath.special_points
-                spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+                spk["Gamma"] = spk.pop("G", np.zeros(3))
+                spk = {
+                    _normalize_kpoint_label(name): value for name, value in spk.items()
+                }
                 labels = [
                     (i, symbol)
                     for symbol in spk
                     for i in np.where((kpoints == spk[symbol]).all(axis=1))[0]
                 ]
+                labels = [(i, _normalize_kpoint_label(symbol)) for i, symbol in labels]
+                xlist = None
         elif cartesian:
             kpoints = np.linalg.solve(self.cell.T, kpoints.T).T
+            xlist = None
 
         bands = self._magnon_energies(kpoints)
-        print(f"bands shape: {bands.shape}")
+        # print(f"bands shape: {bands.shape}")
 
-        if path is None and kpoints.size == 0:  # Fixed condition
-            # When using auto_kpath, return xlist for segmented plotting
-            return labels, bands, xlist
-        else:
-            return labels, bands, None
+        return labels, bands, xlist
 
     def plot_magnon_bands(self, **kwargs):
         """
@@ -348,31 +708,70 @@ class Magnon:
                 Whether to show the plot on screen
         """
         filename = kwargs.pop("filename", None)
+        show = kwargs.pop("show", True)
+        ax = kwargs.pop("ax", None)
+        use_primitive_kpath = kwargs.get("use_primitive_kpath", False)
         kpath_labels, bands, xlist = self.get_magnon_bands(**kwargs)
 
-        # Get k-points and special points
-        if "path" in kwargs and kwargs["path"] is None:
-            _, kptlist, _, _, spk = auto_kpath(
-                self.cell, None, npoints=kwargs.get("npoints", 300)
-            )
+        # Reconstruct k-points and special points for MagnonBand.
+        # Must match exactly what get_magnon_bands used, including the
+        # primitive-kpath folding when use_primitive_kpath=True.
+        _use_prim = (
+            use_primitive_kpath
+            and self.primitive_cell is not None
+            and self.supercell_matrix is not None
+        )
+        npoints = kwargs.get("npoints", 300)
+        path = kwargs.get("path", None)
+        if _use_prim:
+            prim_cell_array = np.array(self.primitive_cell.get_cell())
+            sc_mat = np.array(self.supercell_matrix, dtype=float)
+            fold_matrix = sc_mat.T
+            if path is None:
+                _, kptlist, _, _, spk_prim = auto_kpath(
+                    prim_cell_array,
+                    None,
+                    npoints=npoints,
+                    supercell_matrix=fold_matrix,
+                )
+                kpoints = np.concatenate(kptlist)
+                spk = {
+                    _normalize_kpoint_label(name): v @ fold_matrix
+                    for name, v in spk_prim.items()
+                }
+            else:
+                bandpath = AseCell(prim_cell_array).bandpath(
+                    path=path,
+                    npoints=npoints,
+                    pbc=[True, True, True],
+                )
+                spk_prim = bandpath.special_points.copy()
+                spk_prim["Gamma"] = spk_prim.pop("G", np.zeros(3))
+                spk_prim = {
+                    _normalize_kpoint_label(name): value
+                    for name, value in spk_prim.items()
+                }
+                kpoints = bandpath.kpts @ fold_matrix
+                spk = {name: v @ fold_matrix for name, v in spk_prim.items()}
+        elif path is None:
+            _, kptlist, _, _, spk = auto_kpath(self.cell, None, npoints=npoints)
             kpoints = np.concatenate(kptlist)
         else:
-            bandpath = self.cell.bandpath(
-                path=kwargs.get("path", "GXMG"), npoints=kwargs.get("npoints", 300)
-            )
+            bandpath = self.cell.bandpath(path=path, npoints=npoints)
             kpoints = bandpath.kpts
             spk = bandpath.special_points.copy()
-            spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+            spk["Gamma"] = spk.pop("G", np.zeros(3))
+            spk = {_normalize_kpoint_label(name): value for name, value in spk.items()}
 
         bands_plot = MagnonBand(
             energies=bands * 1000,  # Convert to meV
             kpoints=kpoints,
             kpath_labels=kpath_labels,
             special_points=spk,
-            xcoords=xlist,
+            xcoords=None,  # use integer indices; xlist from auto_kpath not directly usable here
         )
 
-        return bands_plot.plot(filename=filename, **kwargs)
+        return bands_plot.plot(filename=filename, show=show, ax=ax)
 
     @classmethod
     def load_from_io(cls, exc: SpinIO, **kwargs):
@@ -391,23 +790,44 @@ class Magnon:
         Magnon
             Initialized Magnon instance
         """
+        # print(f"kwargs={kwargs}")
         # Get magnetic moments for magnetic atoms
         magmoms = exc.get_magnetic_moments()
         # nspin = len(magmoms)  # Number of magnetic atoms
 
         cell = exc.atoms.get_cell()
         pbc = exc.atoms.get_pbc()
+        atom_indices = getattr(exc, "ind_atoms", range(exc.nspin))
+        ind_atoms = [atom_indices[i] for i in range(exc.nspin)]
+        positions = exc.atoms.get_positions()[ind_atoms]
+        atom_symbols = exc.atoms.get_chemical_symbols()
+        symbols = [atom_symbols[i] for i in ind_atoms]
+
+        # Extract SIA from kwargs, default True if not present
+        include_SIA = kwargs.pop("SIA", True)
+
+        JR = exc.get_full_Jtensor_for_Rlist(
+            order="ij33", asr=False, SIA=include_SIA, **kwargs
+        )
+        # print(JR)
 
         return cls(
             nspin=exc.nspin,
             magmom=magmoms,
             Rlist=exc.Rlist,
-            JR=exc.get_full_Jtensor_for_Rlist(order="ij33", asr=False, **kwargs),
+            JR=JR,
             cell=cell,
             _Q=np.zeros(3),  # Default propagation vector
             _uz=np.array([[0.0, 0.0, 1.0]]),  # Default quantization axis
-            _n=np.array([0.0, 0.0, 1.0]),  # Default rotation axis
+            _n=np.array([1.0, 0.0, 0.0]),  # Default rotation axis
             pbc=pbc,
+            positions=positions,
+            symbols=symbols,
+            atom_positions=exc.atoms.get_positions(),
+            atom_symbols=atom_symbols,
+            magnetic_atom_indices=ind_atoms,
+            primitive_cell=getattr(exc, "primitive_cell", None),
+            supercell_matrix=getattr(exc, "supercell_matrix", None),
         )
 
     @classmethod
@@ -491,22 +911,26 @@ def test_magnon(path="TB2J_results"):
     return magnon, Jq, energies
 
 
-def create_plot_script(filename: str):
+def create_plot_script(base_name: str, output_dir: str = "."):
     """Create a Python script for plotting the saved band structure data.
 
     Parameters
     ----------
-    filename : str
-        Base filename (without extension) to use for the plot script
+    base_name : str
+        Base name (without extension) for the default data and plot files
+    output_dir : str
+        Directory to write the script to (default: current directory)
     """
-    script_name = f"plot_{filename}.py"
-    script = '''#!/usr/bin/env python3
+    from pathlib import Path
+
+    script_path = Path(output_dir) / "plot_magnon_band.py"
+    script = f'''#!/usr/bin/env python3
 """Simple script to plot magnon band structure from saved data."""
 
 from TB2J.magnon.magnon_band import MagnonBand
 import matplotlib.pyplot as plt
 
-def plot_magnon_bands(input_file, output_file=None, ax=None, color='blue', show=True):
+def plot_magnon_bands(input_file="{base_name}.json", output_file="{base_name}.png", ax=None, color='blue', show=True):
     """Load and plot magnon band structure.
     
     Parameters
@@ -540,8 +964,6 @@ def plot_magnon_bands(input_file, output_file=None, ax=None, color='blue', show=
     return ax
 
 if __name__ == "__main__":
-    # Usage example
-    # Example usage
     import matplotlib.pyplot as plt
     
     # Create a figure and axis (optional)
@@ -549,20 +971,20 @@ if __name__ == "__main__":
     
     # Plot bands with custom color on given axis
     plot_magnon_bands(
-        input_file="magnon_bands.json",
-        output_file="magnon_bands.png",
+        input_file="{base_name}.json",
+        output_file="{base_name}.png",
         ax=ax,
         color='red',
         show=True
     )
 '''
 
-    with open(script_name, "w") as f:
+    with open(script_path, "w") as f:
         f.write(script)
 
     import os
 
-    os.chmod(script_name, 0o755)  # Make executable
+    os.chmod(script_path, 0o755)  # Make executable
 
 
 def save_bands_data(
@@ -601,14 +1023,17 @@ def save_bands_data(
     )
     bands.save(filename)
 
-    # Create plotting script
-    base_name = filename.rsplit(".", 1)[0]
-    create_plot_script(base_name)
+    # Create plotting script in the same directory as the data file
+    from pathlib import Path
 
-    print(f"Band structure data saved to {filename}")
-    print(f"Created plotting script: plot_{base_name}.py")
-    print("Usage: ")
-    print(f"See plot_{base_name}.py for example usage")
+    filepath = Path(filename)
+    script_name = filepath.parent / "plot_magnon_band.py"
+    create_plot_script(filepath.stem, str(filepath.parent))
+
+    print("Generated magnon band files:")
+    print(f"  data: {filename}")
+    print(f"  plotting script: {script_name}")
+    print(f"Run {script_name} to replot the saved band data.")
 
     return bands
 
@@ -651,84 +1076,112 @@ def plot_magnon_bands_from_TB2J(
     magnon : Magnon
         The Magnon instance used for calculations
     """
-    # Load magnon calculator from TB2J results
-    print(f"Loading exchange parameters from {params.path}...")
-    magnon = Magnon.from_TB2J_results(
-        path=params.path, Jiso=params.Jiso, Jani=params.Jani, DMI=params.DMI
-    )
-
-    # Set reference vectors if provided
-    Q = [0, 0, 0] if params.Q is None else params.Q
-    n = [0, 0, 1] if params.n is None else params.n
-
-    # Handle quantization axes
-    if params.uz_file is not None:
-        uz = np.loadtxt(params.uz_file)
-        if uz.shape[1] != 3:
-            raise ValueError(
-                f"Quantization axes file should contain a natom×3 array. Got shape {uz.shape}"
-            )
-        if uz.shape[0] != magnon.nspin:
-            raise ValueError(
-                f"Number of spins in uz file ({uz.shape[0]}) does not match the system ({magnon.nspin})"
-            )
-    else:
-        # Default: [0, 0, 1] for all spins
-        # uz = np.array([[0.0, 0.0, 1.0] for _ in range(magnon.nspin)])
-        uz = np.array([[0, 0, 1]], dtype=float)
-
-    print(params)
-    if params.spin_conf_file is not None:
-        magmoms = np.loadtxt(params.spin_conf_file)
-        if magmoms.shape[1] != 3:
-            raise ValueError(
-                f"Spin configuration file should contain a nspin×3 array. Got shape {magmoms.shape}"
-            )
-        if magmoms.shape[0] != magnon.nspin:
-            raise ValueError(
-                f"Number of spins in spin configuration file ({magmoms.shape[0]}) does not match the system ({magnon.nspin})"
-            )
-    else:
-        magmoms = None
-
-    magnon.set_reference(Q, uz, n, magmoms)
+    magnon = prepare_magnon_from_params(params)
 
     # Get band structure data
     print(f"\nCalculating bands along path {params.kpath}...")
     kpath_labels, bands, xlist = magnon.get_magnon_bands(
         path=params.kpath,
         npoints=params.npoints,
+        special_points=params.qpoints if params.qpoints else None,
+        use_primitive_kpath=getattr(params, "use_primitive_kpath", False),
     )
 
     # Convert energies to meV
     bands_meV = bands * 1000
 
     # Save band structure data and create plot
-    data_file = params.filename.rsplit(".", 1)[0] + ".json"
-    print(f"\nSaving band structure data to {data_file}")
+    export_prefix = params.export_prefix or params.filename.rsplit(".", 1)[0]
+    data_file = export_prefix + ".json"
 
-    # Get k-points and special points
-    if params.kpath is None:
+    # Get k-points and special points (mirrors logic in get_magnon_bands)
+    _use_prim = (
+        getattr(params, "use_primitive_kpath", False)
+        and magnon.primitive_cell is not None
+        and magnon.supercell_matrix is not None
+    )
+    if _use_prim:
+        prim_cell_array = np.array(magnon.primitive_cell.get_cell())
+        sc_mat = np.array(magnon.supercell_matrix, dtype=float)
+        fold_matrix = sc_mat.T
+        if params.kpath is None:
+            _, kptlist, _, _, spk_prim = auto_kpath(
+                prim_cell_array,
+                None,
+                npoints=params.npoints,
+                supercell_matrix=fold_matrix,
+            )
+            kpoints = np.concatenate(kptlist)
+            spk_prim = {
+                _normalize_kpoint_label(name): value for name, value in spk_prim.items()
+            }
+        else:
+            bp = AseCell(prim_cell_array).bandpath(
+                path=params.kpath,
+                npoints=params.npoints,
+                special_points=params.qpoints if params.qpoints else None,
+            )
+            k_prim = bp.kpts
+            kpoints = k_prim @ fold_matrix
+            spk_prim = bp.special_points
+            spk_prim["Gamma"] = spk_prim.pop("G", np.zeros(3))
+            spk_prim = {
+                _normalize_kpoint_label(name): value for name, value in spk_prim.items()
+            }
+        spk = {name: v @ fold_matrix for name, v in spk_prim.items()}
+    elif params.kpath is None:
         _, kptlist, _, _, spk = auto_kpath(magnon.cell, None, npoints=params.npoints)
         kpoints = np.concatenate(kptlist)
+        spk = {_normalize_kpoint_label(name): value for name, value in spk.items()}
     else:
-        bandpath = magnon.cell.bandpath(path=params.kpath, npoints=params.npoints)
+        bandpath = magnon.cell.bandpath(
+            path=params.kpath,
+            npoints=params.npoints,
+            special_points=params.qpoints if params.qpoints else None,
+        )
         kpoints = bandpath.kpts
         spk = bandpath.special_points
-        spk[r"$\Gamma$"] = spk.pop("G", np.zeros(3))
+        spk["Gamma"] = spk.pop("G", np.zeros(3))
+        spk = {_normalize_kpoint_label(name): value for name, value in spk.items()}
 
-    magnon_bands = save_bands_data(
-        kpoints=kpoints,
+    magnon_bands = MagnonBand(
         energies=bands_meV,
+        kpoints=kpoints,
         kpath_labels=kpath_labels,
         special_points=spk,
         xcoords=xlist,
-        filename=data_file,
     )
+    if "json" in params.export_formats:
+        print(f"\nSaving band structure data to {data_file}")
+        save_bands_data(
+            kpoints=kpoints,
+            energies=bands_meV,
+            kpath_labels=kpath_labels,
+            special_points=spk,
+            xcoords=xlist,
+            filename=data_file,
+        )
+    if "netcdf" in params.export_formats or params.save_wavefunctions:
+        eigenstates = magnon.get_magnon_eigenstates(
+            kpoints,
+            calculation_type="band",
+            include_wavefunctions=params.save_wavefunctions,
+            plot={
+                "kind": "band",
+                "energies_mev": bands_meV,
+                "kpath_labels": kpath_labels,
+                "special_points": spk,
+                "xcoords": xlist,
+            },
+        )
+        if "json" in params.export_formats and params.save_wavefunctions:
+            eigenstates.save_json(export_prefix + ".json")
+        if "netcdf" in params.export_formats:
+            eigenstates.save_netcdf(export_prefix + ".nc")
 
     # Plot band structure
     print(f"Plotting bands to {params.filename}")
-    magnon_bands.plot(filename=params.filename)
+    magnon_bands.plot(filename=params.filename, show=params.show)
 
     return magnon
 
@@ -756,7 +1209,6 @@ def plot_magnon_bands_cli():
         description="Plot magnon band structure from TB2J results"
     )
 
-    # Add a mutually exclusive group for config file vs. command line arguments
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
         "--config",
@@ -769,111 +1221,20 @@ def plot_magnon_bands_cli():
         help="Save default configuration to specified TOML file",
     )
 
-    # Command line arguments (used if no config file is provided)
-    parser.add_argument(
-        "-p",
-        "--path",
-        default="TB2J_results",
-        help="Path to TB2J results directory (default: TB2J_results)",
-    )
-    parser.add_argument(
-        "-k",
-        "--kpath",
-        default=None,
-        help="k-path specification (default: auto-detected from type of cell)",
-    )
-    parser.add_argument(
-        "-n",
-        "--npoints",
-        type=int,
-        default=300,
-        help="Number of k-points along the path (default: 300)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        default="magnon_bands.png",
-        help="Output file name (default: magnon_bands.png)",
-    )
-    parser.add_argument(
-        "-j",
-        "--Jiso",
-        action="store_true",
-        default=True,
-        help="Include isotropic exchange interactions (default: True)",
-    )
-    parser.add_argument(
-        "--no-Jiso",
-        action="store_false",
-        dest="Jiso",
-        help="Exclude isotropic exchange interactions",
-    )
-    parser.add_argument(
-        "-a",
-        "--Jani",
-        action="store_true",
-        default=False,
-        help="Include anisotropic exchange interactions (default: False)",
-    )
-    parser.add_argument(
-        "-d",
-        "--DMI",
-        action="store_true",
-        default=False,
-        help="Include Dzyaloshinskii-Moriya interactions (default: False)",
-    )
-    parser.add_argument(
-        "-q",
-        "--Q",
-        nargs=3,
-        type=float,
-        metavar=("Qx", "Qy", "Qz"),
-        help="Propagation vector [Qx, Qy, Qz] (default: [0, 0, 0])",
-    )
-    parser.add_argument(
-        "-u",
-        "--uz-file",
-        type=str,
-        help="Path to file containing quantization axes for each spin (nspin×3 array)",
-    )
-    parser.add_argument(
-        "-c",
-        "--spin-conf-file",
-        type=str,
-        help="Path to file containing magnetic moments for each spin (nspin×3 array)",
-    )
-    parser.add_argument(
-        "-v",
-        "--n",
-        nargs=3,
-        type=float,
-        metavar=("nx", "ny", "nz"),
-        help="Normal vector for rotation [nx, ny, nz] (default: [0, 0, 1])",
-    )
-
-    parser.add_argument(
-        "-s",
-        "--show",
-        action="store_true",
-        default=False,
-        help="show figure on screen.",
-    )
+    add_common_magnon_args(parser)
+    add_band_specific_args(parser)
 
     args = parser.parse_args()
 
-    # Handle configuration file options
     if args.save_config:
-        # Create default parameters and save to file
         params = MagnonParameters()
         params.to_toml(args.save_config)
         print(f"Saved default configuration to {args.save_config}")
         return
 
     if args.config:
-        # Load parameters from config file
         params = MagnonParameters.from_toml(args.config)
     else:
-        # Create parameters from command line arguments
         params = MagnonParameters(
             path=args.path,
             kpath=args.kpath,
@@ -881,15 +1242,20 @@ def plot_magnon_bands_cli():
             filename=args.output,
             Jiso=args.Jiso,
             Jani=args.Jani,
+            SIA=args.SIA,
             DMI=args.DMI,
-            Q=args.Q if args.Q is not None else None,
+            Q=args.ordering_vector,
             uz_file=args.uz_file,
             spin_conf_file=args.spin_conf_file,
-            n=args.n if args.n is not None else None,
+            n=args.rotation_axis,
             show=args.show,
         )
 
     plot_magnon_bands_from_TB2J(params)
+
+
+def main():
+    plot_magnon_bands_cli()
 
 
 class MagnonASEWrapper:

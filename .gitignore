@@ -1,10 +1,13 @@
 doc/refs/*.pdf
 
+debug/
 
 uv.lock
 
 # vim files
 *.swp
+
+.tmp
 
 # Latex
 *.aux
@@ -17,6 +20,12 @@ uv.lock
 .cline
 # roo coder
 .roo
+.opencode
+openspec/
+AGENTS.md
+agent_files/
+*/agent_files/
+CLAUDE.md
 
 
 # xyz files
@@ -142,3 +151,4 @@ ENV/
 
 # mypy
 .mypy_cache/
+tests/_spiral_integration_cache/

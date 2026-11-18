@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import warnings
 from itertools import combinations_with_replacement
@@ -51,48 +52,50 @@ class SpinIO_merge(SpinIO):
         super(SpinIO_merge, self).__init__(*args, **kwargs)
         self.projv = None
 
-    def _set_projection_vectors(self):
+    def _set_projection_vectors(self, collinear_tol=1e-2):
         norm = np.linalg.norm(self.spinat, axis=-1).reshape(-1, 1)
         spinat = self.spinat / norm
         idx = [self.ind_atoms[i] for i in self.index_spin if i >= 0]
         projv = {}
         for i, j in combinations_with_replacement(range(self.nspin), 2):
             a, b = spinat[idx][[i, j]]
-            projv[i, j] = get_projections(a, b)
+            projv[i, j] = get_projections(a, b, tol=collinear_tol)
             projv[j, i] = projv[i, j]
 
         self.projv = projv
 
     @classmethod
-    def load_pickle(cls, path="TB2J_results", fname="TB2J.pickle"):
+    def load_pickle(cls, path="TB2J_results", fname="TB2J.pickle", collinear_tol=1e-2):
         obj = super(SpinIO_merge, cls).load_pickle(path=path, fname=fname)
-        obj._set_projection_vectors()
+        obj._set_projection_vectors(collinear_tol=collinear_tol)
 
         return obj
 
 
-def read_pickle(path):
+def read_pickle(path, collinear_tol=1e-2):
     p1 = os.path.join(path, "TB2J_results", "TB2J.pickle")
     p2 = os.path.join(path, "TB2J.pickle")
     if os.path.exists(p1) and os.path.exists(p2):
         print(f" WARNING!: Both file {p1} and {p2} exist. Use default {p1}.")
     if os.path.exists(p1):
-        ret = SpinIO_merge.load_pickle(os.path.join(path, "TB2J_results"))
+        ret = SpinIO_merge.load_pickle(
+            os.path.join(path, "TB2J_results"), collinear_tol=collinear_tol
+        )
     elif os.path.exists(p2):
-        ret = SpinIO_merge.load_pickle(path)
+        ret = SpinIO_merge.load_pickle(path, collinear_tol=collinear_tol)
     else:
         raise FileNotFoundError(f"Cannot find either file {p1} or {p2}")
     return ret
 
 
 class Merger:
-    def __init__(self, *paths, main_path=None):
-        self.dat = [read_pickle(path) for path in paths]
+    def __init__(self, *paths, main_path=None, collinear_tol=1e-2):
+        self.dat = [read_pickle(path, collinear_tol=collinear_tol) for path in paths]
 
         if main_path is None:
             self.main_dat = copy.deepcopy(self.dat[-1])
         else:
-            self.main_dat = read_pickle(main_path)
+            self.main_dat = read_pickle(main_path, collinear_tol=collinear_tol)
             self.dat.append(copy.deepcopy(self.main_dat))
 
         self._set_projv()
@@ -107,22 +110,23 @@ class Merger:
         projv = {}
         coeff_matrix = {}
         projectors = {}
-        for key in self.main_dat.projv.keys():
-            vectors = [obj.projv[key] for obj in self.dat]
-            coefficients, u, v = zip(
-                *[get_Jani_coefficients(vectors[i], R=R[i]) for i in indices]
-            )
-            projectors[key] = np.vstack([u[i] @ R[i].T for i in indices])
-            coeff_matrix[key] = np.vstack(coefficients)
-            proju[key] = np.stack(u)
-            projv[key] = np.stack(v)
-            if np.linalg.matrix_rank(coeff_matrix[key], tol=1e-2) < 6:
-                warnings.warn("""
-                    WARNING: The matrix of equations to reconstruct the exchange tensors is
-                    close to being singular. This happens when the magnetic moments between
-                    different configurations are cloes to being parallel. You need to consider 
-                    more rotated spin configurations, otherwise the results might have a large 
-                    error.""")
+        if self.main_dat.projv is not None:
+            for key in self.main_dat.projv.keys():
+                vectors = [obj.projv[key] for obj in self.dat]
+                coefficients, u, v = zip(
+                    *[get_Jani_coefficients(vectors[i], R=R[i]) for i in indices]
+                )
+                projectors[key] = np.vstack([u[i] @ R[i].T for i in indices])
+                coeff_matrix[key] = np.vstack(coefficients)
+                proju[key] = np.stack(u)
+                projv[key] = np.stack(v)
+                if np.linalg.matrix_rank(coeff_matrix[key], tol=1e-2) < 6:
+                    warnings.warn("""
+                        WARNING: The matrix of equations to reconstruct the exchange tensors is
+                        close to being singular. This happens when the magnetic moments between
+                        different configurations are cloes to being parallel. You need to consider 
+                        more rotated spin configurations, otherwise the results might have a large 
+                        error.""")
 
         self.proju = proju
         self.projv = projv
@@ -134,13 +138,23 @@ class Merger:
         proju = self.proju
         projv = self.projv
         coeff_matrix = self.coeff_matrix
-        for key in self.main_dat.Jani_dict.keys():
+        for key in self.main_dat.exchange_Jdict.keys():
             try:
                 R, i, j = key
                 u = proju[i, j]
                 v = projv[i, j]
-                Jani = np.stack([sio.Jani_dict[key] for sio in self.dat])
-                projections = np.einsum("nmi,nij,nmj->nm", u, Jani, v).flatten()
+                projections = []
+                for idx, sio in enumerate(self.dat):
+                    if sio.has_bilinear and key in sio.Jani_dict:
+                        Jmat = sio.get_J_tensor(
+                            i, j, R, Jiso=False, Jani=True, DMI=False
+                        )
+                    else:
+                        # J_scalar = sio.exchange_Jdict.get(key, 0.0)
+                        Jmat = np.eye(3) * 0.0
+                    proj = np.einsum("mi,ij,mj->m", u[idx], Jmat, v[idx])
+                    projections.append(proj)
+                projections = np.concatenate(projections)
             except KeyError as err:
                 raise KeyError(
                     "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
@@ -158,28 +172,36 @@ class Merger:
 
     def merge_Jiso(self):
         Jdict = {}
-        for key in self.main_dat.exchange_Jdict.keys():
-            try:
-                J = np.mean([obj.exchange_Jdict[key] for obj in self.dat])
-            except KeyError as err:
-                raise KeyError(
-                    "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
-                    % err
-                )
-            Jdict[key] = J
-        self.main_dat.exchange_Jdict = Jdict
+        if self.main_dat.exchange_Jdict is not None:
+            for key in self.main_dat.exchange_Jdict.keys():
+                try:
+                    J = np.mean([obj.exchange_Jdict[key] for obj in self.dat])
+                except KeyError as err:
+                    raise KeyError(
+                        "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
+                        % err
+                    )
+                Jdict[key] = J
+            self.main_dat.exchange_Jdict = Jdict
 
     def merge_DMI(self):
         dmi_ddict = {}
-        if all(obj.has_dmi for obj in self.dat):
+        if any(obj.has_dmi for obj in self.dat):
             projectors = self.projectors
             proju = self.proju
-            for key in self.main_dat.dmi_ddict.keys():
+            for key in self.main_dat.exchange_Jdict.keys():
                 try:
                     R, i, j = key
                     u = proju[i, j]
-                    DMI = np.stack([sio.dmi_ddict[key] for sio in self.dat])
-                    projections = np.einsum("nmi,ni->nm", u, DMI).flatten()
+                    projections = []
+                    for idx, sio in enumerate(self.dat):
+                        if sio.has_dmi and key in sio.dmi_ddict:
+                            DMI = sio.dmi_ddict[key]
+                        else:
+                            DMI = np.zeros(3)
+                        proj = np.einsum("mi,i->m", u[idx], DMI)
+                        projections.append(proj)
+                    projections = np.concatenate(projections)
                 except KeyError as err:
                     raise KeyError(
                         "Can not find key: %s, Please make sure the three calculations use the same k-mesh and same Rcut."
@@ -193,21 +215,51 @@ class Merger:
         # make sure that the Jani has the trace of zero
         Jdict = self.main_dat.exchange_Jdict
         Jani_dict = self.main_dat.Jani_dict
-        for key in self.main_dat.Jani_dict.keys():
-            Jani = self.main_dat.Jani_dict[key]
-            shift = np.trace(Jani) / 3.0
-            Jani_dict[key] -= shift * np.eye(3)
-            Jdict[key] += shift
-        self.main_dat.Jani_dict = Jani_dict
-        self.main_dat.exchange_Jdict = Jdict
+        if Jani_dict is not None:
+            for key in Jani_dict.keys():
+                Jani = Jani_dict[key]
+                shift = np.trace(Jani) / 3.0
+                Jani_dict[key] -= shift * np.eye(3)
+                Jdict[key] += shift
+            self.main_dat.Jani_dict = Jani_dict
+            self.main_dat.exchange_Jdict = Jdict
 
 
-def merge(*paths, main_path=None, save=True, write_path="TB2J_results"):
-    m = Merger(*paths, main_path=main_path)
+def merge(
+    *paths,
+    main_path=None,
+    save=True,
+    write_path="TB2J_results",
+    collinear_tol=1e-2,
+    merged_provenance=None,
+):
+    m = Merger(*paths, main_path=main_path, collinear_tol=collinear_tol)
     m.merge_Jiso()
     m.merge_DMI()
     m.merge_Jani()
     m.standardize()
+    if merged_provenance is None:
+        inputs = [
+            {"path": str(path), "provenance": obj.split_soc_provenance}
+            for path, obj in zip((*paths, *((main_path,) if main_path else ())), m.dat)
+            if hasattr(obj, "split_soc_provenance")
+        ]
+        if inputs and len(inputs) == len(m.dat):
+            merged_provenance = {"merge_mode": "generic_merge", "inputs": inputs}
+        elif inputs:
+            # An incomplete provenance set must never inherit the last leg
+            # as if its source, frame, and window described the merged tensor.
+            m.main_dat.__dict__.pop("split_soc_provenance", None)
+            m.main_dat.description = (
+                f"Merged TB2J exchange from {len(m.dat)} inputs; "
+                "split-SOC provenance incomplete (an input has no record)."
+            )
+    if merged_provenance is not None:
+        m.main_dat.split_soc_provenance = merged_provenance
+        m.main_dat.description = (
+            f"Merged TB2J exchange from {len(m.dat)} input legs.\n"
+            "split_soc_provenance: " + json.dumps(merged_provenance, sort_keys=True)
+        )
 
     if save:
         m.main_dat.write_all(path=write_path)

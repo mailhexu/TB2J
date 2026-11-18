@@ -1,18 +1,18 @@
 import argparse
-from dataclasses import dataclass
 
+import ase.units
 import yaml
 
 __all__ = ["ExchangeParams", "add_exchange_args_to_parser", "parser_argument_to_dict"]
 
 
-@dataclass
 class ExchangeParams:
     """
     A class to store the parameters for exchange calculation.
     """
 
     efermi: float
+    smearing: float = 600.0 * ase.units.kB
     basis = []
     magnetic_elements = []
     index_magnetic_atoms = None
@@ -29,10 +29,13 @@ class ExchangeParams:
     description: str = ""
     write_density_matrix: bool = False
     orb_decomposition: bool = False
-    output_path: str = "TB2J_results"
+    group_by_zeta: bool = False
     mae_angles = None
     orth = False
     ibz = False
+    use_gpu = False
+    vectorize_energy = False
+    e_batch_size = None
     # Debug options
     debug_options = {
         "compute_charge_moments": False,  # Whether to compute charge and magnetic moments with Green's function method
@@ -43,6 +46,7 @@ class ExchangeParams:
     def __init__(
         self,
         efermi=-10.0,
+        smearing=600.0 * ase.units.kB,
         basis=None,
         magnetic_elements=None,
         include_orbs=None,
@@ -57,15 +61,40 @@ class ExchangeParams:
         description="",
         write_density_matrix=False,
         orb_decomposition=False,
+        group_by_zeta=False,
         output_path="TB2J_results",
         exclude_orbs=[],
         mae_angles=None,
         orth=False,
         ibz=False,
         index_magnetic_atoms=None,
+        use_gpu=None,
+        vectorize_energy=False,
+        e_batch_size=None,
         debug_options=None,
+        **kwargs,
     ):
+        # Only check for GPU if use_gpu is explicitly True or None
+        # Note: setting use_gpu=None no longer auto-detects GPU to avoid
+        # importing JAX when not needed (which allocates GPU memory)
+        if use_gpu is True:
+            from TB2J.gpu.jax_utils import _is_gpu_available
+
+            platform = _is_gpu_available()
+            if platform:
+                print(f"Using GPU ({platform}) for acceleration.")
+            else:
+                print("GPU requested but not available, falling back to CPU.")
+                use_gpu = False
+        else:
+            platform = None
+            use_gpu = False
+
+        if not use_gpu:
+            print("Using CPU for calculation.")
+
         self.efermi = efermi
+        self.smearing = smearing
         self.basis = basis
         # self.magnetic_elements = magnetic_elements
         # self.include_orbs = include_orbs
@@ -84,11 +113,19 @@ class ExchangeParams:
         self.description = description
         self.write_density_matrix = write_density_matrix
         self.orb_decomposition = orb_decomposition
+        self.group_by_zeta = group_by_zeta
         self.output_path = output_path
         self.mae_angles = mae_angles
         self.orth = orth
         self.ibz = ibz
         self.index_magnetic_atoms = index_magnetic_atoms
+        self.use_gpu = use_gpu
+        self.vectorize_energy = vectorize_energy
+        self.e_batch_size = e_batch_size
+
+        # Save other kwargs
+        for key, val in kwargs.items():
+            setattr(self, key, val)
 
         # Initialize debug options
         if debug_options is None:
@@ -157,6 +194,12 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         type=float,
     )
     parser.add_argument("--efermi", help="Fermi energy in eV", default=None, type=float)
+    parser.add_argument(
+        "--smearing",
+        help="Fermi smearing width for density computation and CFR. Units: K (default) or eV. Example: '600K', '0.2eV'. Default: 600K.",
+        default="600K",
+        type=str,
+    )
     parser.add_argument(
         "--ne",
         help="number of electrons in the unit cell. If not given, TB2J will use the fermi energy to compute it.",
@@ -229,6 +272,13 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
     )
 
     parser.add_argument(
+        "--group_by_zeta",
+        default=False,
+        action="store_true",
+        help="Retain per-zeta orbital contributions instead of summing over radial zeta. Only affects LCAO backends (SIESTA/ABACUS).",
+    )
+
+    parser.add_argument(
         "--output_path",
         help="The path of the output directory, default is TB2J_results",
         type=str,
@@ -269,6 +319,24 @@ def add_exchange_args_to_parser(parser: argparse.ArgumentParser):
         nargs="*",
         default=None,
     )
+    parser.add_argument(
+        "--use_gpu",
+        help="Whether to use GPU acceleration (requires JAX). Default is True if JAX/CUDA is found.",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--vectorize_energy",
+        help="Whether to vectorize over the entire energy contour on GPU. Default: False",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--e_batch_size",
+        help="Batch size for energy points on GPU. Default: None",
+        type=int,
+        default=None,
+    )
 
     return parser
 
@@ -279,8 +347,22 @@ def parser_argument_to_dict(args) -> dict:
         ind_mag_atoms = [int(i) - 1 for i in ind_mag_atoms]
     else:
         ind_mag_atoms = None
+
+    smearing_str = args.smearing
+    if smearing_str is None:
+        smearing = 600.0 * ase.units.kB
+    else:
+        s = smearing_str.strip().lower()
+        if s.endswith("ev"):
+            smearing = float(s[:-2])
+        elif s.endswith("k"):
+            smearing = float(s[:-1]) * ase.units.kB
+        else:
+            smearing = float(s) * ase.units.kB
+
     return {
         "efermi": args.efermi,
+        "smearing": smearing,
         "magnetic_elements": args.elements,
         "kmesh": args.kmesh,
         "emin": args.emin,
@@ -294,7 +376,11 @@ def parser_argument_to_dict(args) -> dict:
         "description": args.description,
         "write_density_matrix": args.write_dm,
         "orb_decomposition": args.orb_decomposition,
+        "group_by_zeta": args.group_by_zeta,
         "output_path": args.output_path,
         "orth": args.orth,
         "index_magnetic_atoms": ind_mag_atoms,
+        "use_gpu": args.use_gpu,
+        "vectorize_energy": args.vectorize_energy,
+        "e_batch_size": args.e_batch_size,
     }

@@ -1,0 +1,574 @@
+#!/usr/bin/env python
+"""
+Command-line interface for TB2J_edit.
+
+Usage:
+    # Load and save
+    TB2J_edit load -i INPUT.pickle -o OUTPUT_DIR
+
+    # Uniaxial anisotropy
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -d "0 0 1" -o OUTPUT_DIR
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 -s Fe 1.0 -o OUTPUT_DIR
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm 5.0 "0 0 1" --mev -o OUTPUT_DIR
+
+    # Tensor anisotropy (3 values = diagonal, 9 values = full)
+    TB2J_edit set-anisotropy -i INPUT.pickle -t "1 2 3" -s Sm -s Fe -o OUTPUT_DIR  # diagonal tensor (default)
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm "1 2 3" --mev -o OUTPUT_DIR      # per-species diagonal tensor
+    TB2J_edit set-anisotropy -i INPUT.pickle -s Sm "1 0 0 0 2 0 0 0 3" -o OUTPUT_DIR  # full 3x3 tensor
+
+    # Toggle interactions
+    TB2J_edit toggle-dmi -i INPUT.pickle --disable -o OUTPUT_DIR
+    TB2J_edit toggle-jani -i INPUT.pickle --disable -o OUTPUT_DIR
+    TB2J_edit toggle-exchange -i INPUT.pickle --disable -o OUTPUT_DIR
+
+    # Symmetrize
+    TB2J_edit symmetrize -i INPUT.pickle -S STRUCTURE.cif -o OUTPUT_DIR
+"""
+
+import argparse
+import sys
+
+import numpy as np
+
+
+def cmd_load(args):
+    """Load TB2J results and save to output directory."""
+    from TB2J.io_exchange.edit import load, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+    print(f"  Loaded {len(spinio.atoms)} atoms")
+    print(f"  Has DMI: {spinio.has_dmi}")
+    print(f"  Has Jani: {spinio.has_bilinear}")
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_set_anisotropy(args):
+    """Set single ion anisotropy for one or more species."""
+    from TB2J.io_exchange.edit import load, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    use_tensor = bool(args.tensor)
+    if not use_tensor:
+        for spec_list in args.species:
+            if len(spec_list) >= 2:
+                val_str = spec_list[1].replace(",", " ")
+                vals = val_str.split()
+                if len(vals) in (3, 9):
+                    try:
+                        [float(x) for x in vals]
+                        use_tensor = True
+                        break
+                    except ValueError:
+                        pass
+
+    if use_tensor:
+        _set_anisotropy_tensor(args, spinio)
+    else:
+        _set_anisotropy_uniaxial(args, spinio)
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def _parse_tensor_values(tensor_str, mev=False):
+    """Parse tensor string into a 3x3 numpy array.
+
+    Parameters
+    ----------
+    tensor_str : str
+        String with 3 (diagonal) or 9 (full tensor) values, comma or space separated.
+    mev : bool
+        If True, values are in meV and will be converted to eV.
+
+    Returns
+    -------
+    np.ndarray
+        3x3 tensor in eV.
+    """
+    values_str = tensor_str.replace(",", " ")
+    values = [float(x) for x in values_str.split()]
+
+    if len(values) == 3:
+        tensor = np.diag(values)
+    elif len(values) == 9:
+        tensor = np.array(values).reshape(3, 3)
+    else:
+        raise ValueError(
+            f"Tensor must have 3 (diagonal) or 9 (full) values, got {len(values)}"
+        )
+
+    if mev:
+        tensor = tensor * 1e-3
+
+    return tensor
+
+
+def _set_anisotropy_tensor(args, spinio):
+    """Set anisotropy tensor for species."""
+    from TB2J.io_exchange.edit import set_sia_tensor
+
+    default_tensor = None
+    if args.tensor:
+        default_tensor = _parse_tensor_values(args.tensor, mev=args.mev)
+
+    specs = []
+    for spec_list in args.species:
+        if len(spec_list) < 1:
+            print(
+                f"Error: Invalid specification {spec_list}. Expected: species [tensor]"
+            )
+            sys.exit(1)
+
+        species = spec_list[0]
+        if len(spec_list) >= 2:
+            tensor_str = spec_list[1].replace(",", " ")
+            tensor_vals = [float(x) for x in tensor_str.split()]
+            if len(tensor_vals) == 3:
+                tensor = np.diag(tensor_vals)
+            elif len(tensor_vals) == 9:
+                tensor = np.array(tensor_vals).reshape(3, 3)
+            else:
+                print(
+                    f"Error: Tensor for {species} must have 3 or 9 values, got {len(tensor_vals)}"
+                )
+                sys.exit(1)
+            if args.mev:
+                tensor = tensor * 1e-3
+        else:
+            if default_tensor is None:
+                print(
+                    f"Error: No tensor specified for {species} and no default tensor provided"
+                )
+                sys.exit(1)
+            tensor = default_tensor
+
+        specs.append((species, tensor))
+
+    print(f"Setting anisotropy tensor for {len(specs)} species:")
+    for species, tensor in specs:
+        unit = "meV" if args.mev else "eV"
+        tensor_display = tensor * 1000 if args.mev else tensor
+        print(f"  {species}:")
+        for row in tensor_display:
+            print(f"    [{row[0]:.6f}, {row[1]:.6f}, {row[2]:.6f}] {unit}")
+
+    for species, tensor in specs:
+        set_sia_tensor(spinio, species=species, tensor=tensor)
+
+
+def _set_anisotropy_uniaxial(args, spinio):
+    """Set uniaxial anisotropy (k1, k1dir) for species."""
+    from TB2J.io_exchange.edit import set_anisotropy
+
+    specs = []
+    default_dir = None
+    if args.dir:
+        default_dir = [float(x) for x in args.dir.split()]
+
+    for spec_list in args.species:
+        if len(spec_list) < 2:
+            print(
+                f"Error: Invalid specification {spec_list}. Expected: species k1 [dir]"
+            )
+            sys.exit(1)
+
+        species = spec_list[0]
+        k1_val = float(spec_list[1])
+        k1_eV = k1_val * 1e-3 if args.mev else k1_val
+
+        k1dir = default_dir
+        if len(spec_list) >= 3:
+            dir_str = spec_list[2].replace(",", " ")
+            k1dir = [float(x) for x in dir_str.split()]
+
+        specs.append((species, k1_eV, k1dir))
+
+    print(f"Setting anisotropy for {len(specs)} species:")
+    for species, k1, k1dir in specs:
+        unit = "meV" if args.mev else "eV"
+        k1_display = k1 * 1000 if args.mev else k1
+        print(f"  {species}: k1 = {k1_display:.4f} {unit}", end="")
+        if k1dir is not None:
+            print(f", k1dir = {k1dir}")
+        else:
+            print()
+
+    for species, k1, k1dir in specs:
+        set_anisotropy(spinio, species=species, k1=k1, k1dir=k1dir)
+
+
+def cmd_toggle_dmi(args):
+    """Toggle DMI on/off."""
+    from TB2J.io_exchange.edit import load, save, toggle_DMI
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    if args.disable:
+        enabled = False
+        action = "Disabling"
+    elif args.enable:
+        enabled = True
+        action = "Enabling"
+    else:
+        enabled = None
+        action = "Toggling"
+
+    print(f"{action} DMI...")
+    toggle_DMI(spinio, enabled=enabled)
+    print(f"  DMI is now: {'enabled' if spinio.has_dmi else 'disabled'}")
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_toggle_jani(args):
+    """Toggle anisotropic exchange on/off."""
+    from TB2J.io_exchange.edit import load, save, toggle_Jani
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    if args.disable:
+        enabled = False
+        action = "Disabling"
+    elif args.enable:
+        enabled = True
+        action = "Enabling"
+    else:
+        enabled = None
+        action = "Toggling"
+
+    print(f"{action} anisotropic exchange...")
+    toggle_Jani(spinio, enabled=enabled)
+    print(f"  Jani is now: {'enabled' if spinio.has_bilinear else 'disabled'}")
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_toggle_exchange(args):
+    """Toggle isotropic exchange on/off."""
+    from TB2J.io_exchange.edit import load, save, toggle_exchange
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    if args.disable:
+        enabled = False
+        action = "Disabling"
+    elif args.enable:
+        enabled = True
+        action = "Enabling"
+    else:
+        enabled = None
+        action = "Toggling"
+
+    print(f"{action} isotropic exchange...")
+    toggle_exchange(spinio, enabled=enabled)
+    print(
+        f"  Isotropic exchange is now: {'enabled' if spinio.has_exchange else 'disabled'}"
+    )
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_symmetrize(args):
+    """Symmetrize exchange using a reference structure."""
+    from ase.io import read
+
+    from TB2J.io_exchange.edit import load, save, symmetrize_exchange
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    print(f"Loading reference structure from: {args.structure}")
+    atoms_ref = read(args.structure)
+    print(f"  Loaded {len(atoms_ref)} atoms")
+
+    print(f"Symmetrizing exchange (symprec={args.symprec})...")
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        symmetrize_exchange(spinio, atoms=atoms_ref, symprec=args.symprec)
+    print("  Done!")
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_supercell(args):
+    """Map TB2J results to a supercell."""
+    from TB2J.io_exchange.edit import load, make_supercell, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    if len(args.matrix) not in (3, 9):
+        print("Error: --matrix must contain either 3 or 9 integers")
+        sys.exit(1)
+
+    print(f"Mapping to supercell with matrix values: {args.matrix}")
+    sc_spinio = make_supercell(spinio, args.matrix, center=args.center)
+    print(f"  Atoms: {len(spinio.atoms)} -> {len(sc_spinio.atoms)}")
+    print(
+        "  Magnetic spins: "
+        f"{max(spinio.index_spin) + 1 if max(spinio.index_spin) >= 0 else 0} -> "
+        f"{max(sc_spinio.index_spin) + 1 if max(sc_spinio.index_spin) >= 0 else 0}"
+    )
+
+    print(f"Saving to: {args.output}")
+    save(sc_spinio, args.output)
+    print("  Done!")
+
+
+def cmd_remove_sublattice(args):
+    """Remove interactions associated with a sublattice."""
+    from TB2J.io_exchange.edit import load, remove_sublattice, save
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    print(f"Removing sublattice: {args.sublattice}")
+    remove_sublattice(spinio, args.sublattice)
+
+    print(f"Saving to: {args.output}")
+    save(spinio, args.output)
+    print("  Done!")
+
+
+def cmd_info(args):
+    """Show information about TB2J results."""
+    from TB2J.io_exchange.edit import load
+
+    print(f"Loading TB2J results from: {args.input}")
+    spinio = load(args.input)
+
+    print("\n" + "=" * 60)
+    print("TB2J Results Information")
+    print("=" * 60)
+
+    print(f"\nAtoms: {len(spinio.atoms)}")
+    print(f"Chemical formula: {spinio.atoms.get_chemical_formula()}")
+
+    # Count atoms by species
+    symbols = spinio.atoms.get_chemical_symbols()
+    from collections import Counter
+
+    counts = Counter(symbols)
+    print(
+        f"Composition: {', '.join(f'{sym}: {count}' for sym, count in sorted(counts.items()))}"
+    )
+
+    # Magnetic atoms
+    mag_atoms = [i for i, idx in enumerate(spinio.index_spin) if idx >= 0]
+    print(f"Magnetic atoms: {len(mag_atoms)}")
+
+    # Exchange info
+    print("\nExchange parameters:")
+    print(
+        f"  Isotropic exchange: {len(spinio.exchange_Jdict) if spinio.exchange_Jdict else 0} pairs"
+    )
+    print(f"  DMI: {'enabled' if spinio.has_dmi else 'disabled'}")
+    print(f"  Anisotropic exchange: {'enabled' if spinio.has_bilinear else 'disabled'}")
+
+    # Anisotropy
+    if spinio.k1:
+        print("\nSingle ion anisotropy:")
+        for i, (sym, idx) in enumerate(zip(symbols, spinio.index_spin)):
+            if idx >= 0 and idx < len(spinio.k1):
+                if spinio.k1[idx] != 0:
+                    print(f"  {sym}{i}: k1={spinio.k1[idx]:.4f} eV")
+    else:
+        print("\nSingle ion anisotropy: None")
+
+    # Cell info
+    print("\nCell parameters:")
+    cell = spinio.atoms.get_cell()
+    a, b, c = [np.linalg.norm(v) for v in cell]
+    print(f"  a = {a:.4f} Å")
+    print(f"  b = {b:.4f} Å")
+    print(f"  c = {c:.4f} Å")
+
+    print("=" * 60)
+
+
+def main():
+    """Main CLI entry point."""
+    parser = argparse.ArgumentParser(
+        prog="TB2J_edit",
+        description="Command-line interface for modifying TB2J results",
+    )
+    parser.set_defaults(func=None)
+
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # load command
+    parser_load = subparsers.add_parser("load", help="Load and save TB2J results")
+    parser_load.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_load.add_argument(
+        "-o", "--output", default="output", help="Output directory"
+    )
+    parser_load.set_defaults(func=cmd_load)
+
+    # set-anisotropy command
+    parser_aniso = subparsers.add_parser(
+        "set-anisotropy", help="Set single ion anisotropy", aliases=["set-aniso"]
+    )
+    parser_aniso.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_aniso.add_argument("-o", "--output", required=True, help="Output directory")
+    parser_aniso.add_argument(
+        "-s",
+        "--species",
+        action="append",
+        nargs="+",
+        required=True,
+        help="Species and k1 value: -s species k1 [dir] (uniaxial) or -s species tensor (tensor mode)",
+    )
+    parser_aniso.add_argument("-d", "--dir", help='Default direction vector as "x y z"')
+    parser_aniso.add_argument(
+        "-t",
+        "--tensor",
+        help='Use tensor mode. Default tensor as "xx yy zz" (diagonal) or "xx xy xz yx yy yz zx zy zz" (full 3x3)',
+    )
+    parser_aniso.add_argument(
+        "-m",
+        "--mev",
+        action="store_true",
+        help="Interpret k1/tensor values in meV (default: eV)",
+    )
+    parser_aniso.set_defaults(func=cmd_set_anisotropy)
+
+    # toggle-dmi command
+    parser_dmi = subparsers.add_parser(
+        "toggle-dmi", help="Enable/disable DMI", aliases=["dmi"]
+    )
+    parser_dmi.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_dmi.add_argument("-o", "--output", required=True, help="Output directory")
+    parser_dmi.add_argument("-e", "--enable", action="store_true", help="Enable DMI")
+    parser_dmi.add_argument("-d", "--disable", action="store_true", help="Disable DMI")
+    parser_dmi.set_defaults(func=cmd_toggle_dmi)
+
+    # toggle-jani command
+    parser_jani = subparsers.add_parser(
+        "toggle-jani", help="Enable/disable anisotropic exchange", aliases=["jani"]
+    )
+    parser_jani.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_jani.add_argument("-o", "--output", required=True, help="Output directory")
+    parser_jani.add_argument(
+        "-e", "--enable", action="store_true", help="Enable anisotropic exchange"
+    )
+    parser_jani.add_argument(
+        "-d", "--disable", action="store_true", help="Disable anisotropic exchange"
+    )
+    parser_jani.set_defaults(func=cmd_toggle_jani)
+
+    parser_exchange = subparsers.add_parser(
+        "toggle-exchange",
+        help="Enable/disable isotropic exchange",
+        aliases=["exchange"],
+    )
+    parser_exchange.add_argument(
+        "-i", "--input", required=True, help="Input pickle file"
+    )
+    parser_exchange.add_argument(
+        "-o", "--output", required=True, help="Output directory"
+    )
+    parser_exchange.add_argument(
+        "-e", "--enable", action="store_true", help="Enable isotropic exchange"
+    )
+    parser_exchange.add_argument(
+        "-d", "--disable", action="store_true", help="Disable isotropic exchange"
+    )
+    parser_exchange.set_defaults(func=cmd_toggle_exchange)
+
+    # symmetrize command
+    parser_symm = subparsers.add_parser(
+        "symmetrize", help="Symmetrize exchange parameters", aliases=["symm"]
+    )
+    parser_symm.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_symm.add_argument("-o", "--output", required=True, help="Output directory")
+    parser_symm.add_argument(
+        "-S",
+        "--structure",
+        required=True,
+        help="Reference structure file (CIF, VASP, etc.)",
+    )
+    parser_symm.add_argument(
+        "-p",
+        "--symprec",
+        type=float,
+        default=1e-3,
+        help="Symmetry precision in Angstrom (default: 1e-3)",
+    )
+    parser_symm.set_defaults(func=cmd_symmetrize)
+
+    parser_supercell = subparsers.add_parser(
+        "supercell", help="Map exchange parameters to a supercell"
+    )
+    parser_supercell.add_argument(
+        "-i", "--input", required=True, help="Input result directory or TB2J.pickle"
+    )
+    parser_supercell.add_argument(
+        "-o", "--output", required=True, help="Output directory"
+    )
+    parser_supercell.add_argument(
+        "--matrix",
+        nargs="+",
+        type=int,
+        required=True,
+        help="Supercell matrix as 3 diagonal integers or 9 full-matrix integers",
+    )
+    parser_supercell.add_argument(
+        "--center",
+        action="store_true",
+        help="Use centered supercell vectors from supercellmap",
+    )
+    parser_supercell.set_defaults(func=cmd_supercell)
+
+    parser_rm_sub = subparsers.add_parser(
+        "remove-sublattice",
+        help="Remove all interactions for a sublattice",
+        aliases=["rm-sub"],
+    )
+    parser_rm_sub.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_rm_sub.add_argument("-o", "--output", required=True, help="Output directory")
+    parser_rm_sub.add_argument(
+        "-s", "--sublattice", required=True, help="Sublattice name (species symbol)"
+    )
+    parser_rm_sub.set_defaults(func=cmd_remove_sublattice)
+
+    # info command
+    parser_info = subparsers.add_parser(
+        "info", help="Show information about TB2J results"
+    )
+    parser_info.add_argument("-i", "--input", required=True, help="Input pickle file")
+    parser_info.set_defaults(func=cmd_info)
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # If no command specified, show help
+    if args.func is None:
+        parser.print_help()
+        sys.exit(1)
+
+    # Execute command
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

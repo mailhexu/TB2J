@@ -3,12 +3,13 @@ import pickle
 from collections import defaultdict
 from itertools import product
 
+import ase.units
 import numpy as np
 from tqdm import tqdm
 
 from TB2J.contour import Contour
 from TB2J.exchange_params import ExchangeParams
-from TB2J.external import p_map
+from TB2J.external import p_imap
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
 from TB2J.mycfr import CFR
@@ -23,20 +24,26 @@ from TB2J.utils import (
 class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
-        super().__init__(**params)
+        self.integration_method = params.pop("integration_method", "CFR")
+        import inspect
+
+        sig = inspect.signature(ExchangeParams.__init__)
+        params_for_init = {k: v for k, v in params.items() if k in sig.parameters}
+        super().__init__(**params_for_init)
         self._prepare_kmesh(self._kmesh)
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        # self._prepare_elist(method="CFR")
-        self._prepare_elist(method="legendre")
+        method = params.get("method", self.integration_method)
+        self._prepare_elist(method=method)
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
 
-        # whether to calculate J and DMI with NJt method.
-        # self._prepare_NijR()
-        self._is_collinear = True
+        if hasattr(self, "backend_name") and self.backend_name == "DMFT":
+            pass  # Keep what was set in set_tbmodels
+        else:
+            self._is_collinear = True
         self.has_elistc = False
 
         # Store overlap matrix before cleaning tbmodels
@@ -74,12 +81,14 @@ class Exchange(ExchangeParams):
         for k in kmesh:
             self.kmesh = list(map(lambda x: x // 2 * 2 + 1, kmesh))
 
-    def _prepare_elist(self, method="CFR"):
+    def _prepare_elist(self, method=None):
         """
         prepare list of energy for integration.
         The path has three segments:
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
+        if method is None:
+            method = "CFR"
         # if method.lower() == "rectangle":
         #    self.contour.build_path_rectangle(
         #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
@@ -91,7 +100,15 @@ class Exchange(ExchangeParams):
             self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
         elif method.lower() == "cfr":
-            self.contour = CFR(nz=self.nz, T=600)
+            # Convert smearing from eV to temperature (K) for CFR
+            # smearing = kB * T => T = smearing / kB
+            T_kelvin = self.smearing / ase.units.kB
+            self.contour = CFR(nz=self.nz, T=T_kelvin)
+        elif method.lower() == "cfr2":
+            T_kelvin = self.smearing / ase.units.kB
+            from TB2J.mycfr import CFR2
+
+            self.contour = CFR2(nz=self.nz, T=T_kelvin)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
 
@@ -212,10 +229,14 @@ class Exchange(ExchangeParams):
                         orbs,
                         spinor=not (self._is_collinear),
                         include_only=self.include_orbs[syms[iatom]],
+                        group_by_zeta=self.group_by_zeta,
                     )
                 else:
                     mmat, reduced_orbs = map_orbs_matrix(
-                        orbs, spinor=not (self._is_collinear), include_only=None
+                        orbs,
+                        spinor=not (self._is_collinear),
+                        include_only=None,
+                        group_by_zeta=self.group_by_zeta,
                     )
 
                 self.mmats[iatom] = mmat
@@ -359,6 +380,8 @@ class ExchangeNCL(Exchange):
             use_cache=self._use_cache,
             nproc=self.nproc,
             initial_emin=self.emin,
+            smearing_width=self.smearing,
+            use_gpu=self.use_gpu,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -366,7 +389,6 @@ class ExchangeNCL(Exchange):
         self.nbasis = self.G.nbasis
         # self.rho = np.zeros((self.nbasis, self.nbasis), dtype=complex)
         self.rho = self.G.get_density_matrix()
-        self.A_ijR_list = defaultdict(lambda: [])
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
         self.A_ijR_orb = dict()
         # self.HR0 = self.tbmodel.get_H0()
@@ -379,6 +401,9 @@ class ExchangeNCL(Exchange):
         self.Pdict = {}
         if self.write_density_matrix:
             self.G.write_rho_R()
+
+    def finalize(self):
+        self.G.clean_cache()
 
     def get_MAE(self, thetas, phis):
         """
@@ -503,19 +528,30 @@ class ExchangeNCL(Exchange):
                 Aorb_ijR_list[(R_vec, iatom, jatom)] = A_orb
         return A_ijR_list, Aorb_ijR_list
 
-    def get_all_A_vectorized(self, GR):
+    def get_all_A_vectorized(self, GR, orb_indices_map=None):
         """
         Vectorized calculation of all A matrix elements.
         Fully vectorized version based on TB2J_optimization_prototype.ipynb.
         Now works with properly ordered short_Rlist.
 
         :param GR: Green's function array of shape (nR, nbasis, nbasis)
+        :param orb_indices_map: Optional dictionary mapping global orbital indices to reduced indices.
         :returns: tuple of (A_ijR_list, Aorb_ijR_list) with R vector keys
         """
 
         # Get magnetic sites and their orbital indices
         magnetic_sites = self.ind_mag_atoms
         iorbs = [self.iorb(site) for site in magnetic_sites]
+
+        if orb_indices_map is not None:
+            # Map global indices to reduced indices
+            new_iorbs = []
+            for site_orbs in iorbs:
+                new_orbs = np.array(
+                    [orb_indices_map[orb_idx] for orb_idx in site_orbs], dtype=int
+                )
+                new_iorbs.append(new_orbs)
+            iorbs = new_iorbs
 
         # Build the P matrices for all magnetic sites using the same method as original
         P = [self.get_P_iatom(site) for site in magnetic_sites]
@@ -558,13 +594,14 @@ class ExchangeNCL(Exchange):
 
             # Store results for each R vector
             for iR, R_vec in enumerate(self.short_Rlist):
-                A_val = A_val_tensor[iR]  # Shape: (4, 4)
-                A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
+                if (R_vec, i, j) in self.distance_dict:
+                    A_val = A_val_tensor[iR]  # Shape: (4, 4)
+                    A_orb_val = A_orb_tensor[iR] if A_orb_tensor is not None else None
 
-                # Store with R vector key for compatibility
-                A[(R_vec, mi, mj)] = A_val
-                if A_orb_val is not None:
-                    A_orb[(R_vec, mi, mj)] = A_orb_val
+                    # Store with R vector key for compatibility
+                    A[(R_vec, mi, mj)] = A_val
+                    if A_orb_val is not None:
+                        A_orb[(R_vec, mi, mj)] = A_orb_val
 
         return A, A_orb
 
@@ -581,8 +618,8 @@ class ExchangeNCL(Exchange):
                 R, iatom, jatom = key
                 # Rm = tuple(-x for x in R)
                 # valm = self.A_ijR_orb[(Rm, jatom, iatom)]
-                ni = self.norb_reduced[iatom]
-                nj = self.norb_reduced[jatom]
+                ni = val.shape[2]
+                nj = val.shape[3]
 
                 is_nonself = not (R == (0, 0, 0) and iatom == jatom)
                 ispin = self.ispin(iatom)
@@ -715,40 +752,16 @@ class ExchangeNCL(Exchange):
         self.rho_dict = rho
         return self.rho_dict
 
-    def integrate(self, AijRs, AijRs_orb=None, method="simpson"):
-        """
-        AijRs: a list of AijR,
-        wherer AijR: array of ((nR, n, n, 4,4), dtype=complex)
-        """
-        # if method == "trapezoidal":
-        #    integrate = trapezoidal_nonuniform
-        # elif method == "simpson":
-        #    integrate = simpson_nonuniform
-        #
-
-        # self.rho = integrate(self.contour.path, rhoRs)
-        for iR in self.R_ijatom_dict:
-            R_vec = self.short_Rlist[iR]
-            for iatom, jatom in self.R_ijatom_dict[iR]:
-                f = AijRs[(R_vec, iatom, jatom)]
-                # self.A_ijR[(R_vec, iatom, jatom)] = integrate(self.contour.path, f)
-                self.A_ijR[(R_vec, iatom, jatom)] = self.contour.integrate_values(f)
-
-                if self.orb_decomposition:
-                    # self.A_ijR_orb[(R_vec, iatom, jatom)] = integrate(
-                    #    self.contour.path, AijRs_orb[(R_vec, iatom, jatom)]
-                    # )
-                    self.A_ijR_orb[(R_vec, iatom, jatom)] = (
-                        self.contour.integrate_values(AijRs_orb[(R_vec, iatom, jatom)])
-                    )
-
     def get_quantities_per_e(self, e):
-        Gk_all = self.G.get_Gk_all(e)
+        # Gk_all = self.G.get_Gk_all(e)
         # mae = self.get_mae_kspace(Gk_all)
         mae = None
         # TODO: get the MAE from Gk_all
         # short_Rlist now contains actual R vectors
-        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=Gk_all)
+
+        # Note: Using Gk_all=None to rely on iterative accumulation in get_GR
+        # to save memory (Optimization 1)
+        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=None)
 
         # Save diagonal elements of Green's function for charge and magnetic moment calculation
         # Only if debug option is enabled
@@ -907,47 +920,44 @@ class ExchangeNCL(Exchange):
         """
         print("Green's function Calculation started.")
 
-        AijRs = {}
-        AijRs_orb = {}
-
         self.validate()
 
         npole = len(self.contour.path)
+        weights = self.contour.weights
+
         if self.nproc > 1:
-            results = p_map(
+            results = p_imap(
                 self.get_quantities_per_e, self.contour.path, num_cpus=self.nproc
             )
         else:
-            results = map(
-                self.get_quantities_per_e, tqdm(self.contour.path, total=npole)
+            results = (
+                self.get_quantities_per_e(e)
+                for e in tqdm(self.contour.path, total=npole)
             )
 
         for i, result in enumerate(results):
-            for iR in self.R_ijatom_dict:
-                R_vec = self.short_Rlist[iR]
-                for iatom, jatom in self.R_ijatom_dict[iR]:
-                    if (R_vec, iatom, jatom) in AijRs:
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
-                        if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
+            w = weights[i]
+            for key, val in result["AijR"].items():
+                self.A_ijR[key] += val * w
 
+            if self.orb_decomposition:
+                for key, val in result["AijR_orb"].items():
+                    if key in self.A_ijR_orb:
+                        self.A_ijR_orb[key] += val * w
                     else:
-                        AijRs[(R_vec, iatom, jatom)] = []
-                        AijRs[(R_vec, iatom, jatom)].append(
-                            result["AijR"][(R_vec, iatom, jatom)]
-                        )
-                        if self.orb_decomposition:
-                            AijRs_orb[(R_vec, iatom, jatom)] = []
-                            AijRs_orb[(R_vec, iatom, jatom)].append(
-                                result["AijR_orb"][(R_vec, iatom, jatom)]
-                            )
+                        self.A_ijR_orb[key] = val * w
 
-        # self.save_AijRs(AijRs)
-        self.integrate(AijRs, AijRs_orb)
+        # Apply integration factor (e.g. -pi/2 for CFR)
+        if npole > 0:
+            dummy = np.zeros(npole)
+            dummy[0] = 1.0
+            factor = self.contour.integrate_values(dummy) / weights[0]
+            for key in self.A_ijR:
+                self.A_ijR[key] *= factor
+            if self.orb_decomposition:
+                for key in self.A_ijR_orb:
+                    self.A_ijR_orb[key] *= factor
+
         self.get_rho_atom()
 
         # Compute charge and magnetic moments from Green's function diagonals
@@ -996,9 +1006,6 @@ class ExchangeNCL(Exchange):
         #    pickle.dump({'Jiso_orb': self.Jiso_orb,
         #                 'DMI_orb': self.DMI_orb, 'Jani_orb': self.Jani_orb}, myfile)
 
-    def finalize(self):
-        self.G.clean_cache()
-
     def run(self, path="TB2J_results"):
         self.calculate_all()
         self.write_output(path=path)
@@ -1006,11 +1013,11 @@ class ExchangeNCL(Exchange):
 
 
 class ExchangeCL(ExchangeNCL):
-    def set_tbmodels(self, tbmodel):
+    def set_tbmodels(self, tbmodels):
         """
         only difference is a colinear tag.
         """
-        super().set_tbmodels(tbmodel)
+        super().set_tbmodels(tbmodels)
         self._is_collinear = True
 
     def write_output(self, path="TB2J_results"):

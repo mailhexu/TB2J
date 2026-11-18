@@ -4,6 +4,7 @@ import sys
 import numpy as np
 from numpy import array_str
 
+from TB2J.Jtensor import combine_J_tensor
 from TB2J.utils import symbol_number
 
 
@@ -84,6 +85,24 @@ def write_atom_section(cls, myfile):
             )
         )
 
+    # write single ion anisotropy
+    if cls.k1 is not None and cls.k1dir is not None:
+        myfile.write("\n")
+        myfile.write("-" * 90 + "\n")
+        myfile.write("Single Ion Anisotropy (meV): \n")
+        myfile.write("(k1 is the anisotropy constant, k1dir is the direction vector)\n")
+        myfile.write("{:^12s} {:^12s} {:^24s}\n".format("Atom number", "k1", "k1dir"))
+        for i, s in enumerate(symnum):
+            ispin = cls.index_spin[i]
+            if ispin >= 0:
+                k1 = cls.k1[ispin] * 1e3
+                k1dir = cls.k1dir[ispin]
+                myfile.write(
+                    "{:<12s} {:12.4f} ({:7.4f}, {:7.4f}, {:7.4f})\n".format(
+                        s, k1, k1dir[0], k1dir[1], k1dir[2]
+                    )
+                )
+
     myfile.write("\n")
 
 
@@ -161,17 +180,17 @@ def write_exchange_section(
 
         if cls.has_biquadratic and write_experimental:
             Jprime, B = cls.biquadratic_Jdict[ll]
-            myfile.write(f"[Testing!] Jprime: {Jprime*1e3:.3f},  B: {B*1e3:.3f}\n")
+            myfile.write(f"[Testing!] Jprime: {Jprime * 1e3:.3f},  B: {B * 1e3:.3f}\n")
 
         if cls.dJdx is not None:
             dJdx = cls.dJdx[ll]
-            myfile.write(f"dJ/dx: {dJdx*1e3:.3f}\n")
+            myfile.write(f"dJ/dx: {dJdx * 1e3:.3f}\n")
 
         if cls.dJdx2 is not None:
             dJdx2 = cls.dJdx2[ll]
-            myfile.write(f"d2J/dx2: {dJdx2*1e3:.3f}\n")
+            myfile.write(f"d2J/dx2: {dJdx2 * 1e3:.3f}\n")
 
-        if cls.dmi_ddict is not None:
+        if cls.dmi_ddict is not None and ll in cls.dmi_ddict:
             DMI = cls.dmi_ddict[ll] * 1e3
             myfile.write(
                 "[Testing!] DMI: ({:7.4f} {:7.4f} {:7.4f})\n".format(
@@ -190,13 +209,22 @@ def write_exchange_section(
             except Exception as e:
                 myfile.write(f"[Debug!] DMI2 not available: {e}\n")
 
-        if cls.Jani_dict is not None:
+        if cls.Jani_dict is not None and ll in cls.Jani_dict:
             J = cls.Jani_dict[ll] * 1e3
             myfile.write(
                 f"[Testing!]J_ani:\n{array_str(J, precision=3, suppress_small=True)}\n"
             )
 
-        if cls.NJT_ddict is not None:
+        Jiso_val = cls.exchange_Jdict[ll]
+        DMI_val = cls.dmi_ddict.get(ll) if cls.dmi_ddict is not None else None
+        Jani_val = cls.Jani_dict.get(ll) if cls.Jani_dict is not None else None
+        Jtensor = combine_J_tensor(Jiso=Jiso_val, D=DMI_val, Jani=Jani_val)
+        myfile.write(
+            "Combined J tensor (meV) [J = Jiso*I + DMI_antisymmetric + Jani_symmetric]:\n"
+        )
+        myfile.write(f"{array_str(Jtensor * 1e3, precision=3, suppress_small=True)}\n")
+
+        if cls.NJT_ddict is not None and ll in cls.NJT_ddict:
             DMI = cls.NJT_ddict[ll] * 1e3
             myfile.write(
                 "[Experimental!] DMI_NJt: ({:7.4f} {:7.4f} {:7.4f})\n".format(
@@ -204,7 +232,7 @@ def write_exchange_section(
                 )
             )
 
-        if cls.NJT_Jdict is not None:
+        if cls.NJT_Jdict is not None and ll in cls.NJT_Jdict:
             J = cls.NJT_Jdict[ll] * 1e3
             myfile.write(
                 "[Testing!] Jani_NJt: ({:7.4f} {:7.4f} {:7.4f})\n".format(
@@ -245,6 +273,17 @@ def write_exchange_section(
                             )
                         )
                         myfile.write("\n")
+
+            if cls.dJdx_orb and ll in cls.dJdx_orb:
+                myfile.write(
+                    "Orbital contributions to dJ/dx (meV/displacement unit):\n"
+                )
+                myfile.write(
+                    np.array_str(
+                        cls.dJdx_orb[ll] * 1e3, precision=3, suppress_small=True
+                    )
+                )
+                myfile.write("\n")
 
 
 def to_str(arr):
@@ -307,6 +346,50 @@ def write_Jq_info(cls, kpts, evals, evecs, myfile, special_kpoints={}):
         print(f"{sns[cls.ind_atoms[i]]}, {v[0]: 8.3f}, {v[2]: 8.3f}, {v[2]: 8.3f}\n")
 
 
+def write_sia_section(cls, myfile):
+    """
+    Write single ion anisotropy tensor section.
+    """
+    if cls.has_sia_tensor and cls.sia_tensor is not None:
+        myfile.write("\n")
+        myfile.write("=" * 90 + "\n")
+        myfile.write("Single Ion Anisotropy: \n")
+        symnum = symbol_number(cls.atoms)
+        sns = list(symnum.keys())
+        myfile.write(
+            "{:^12s} {:^13s} {:^13s} {:^13s}\n".format(
+                "Atom_number", "A_xx", "A_xy", "A_xz"
+            )
+        )
+        myfile.write(
+            "{:^12s} {:^13s} {:^13s} {:^13s}\n".format("", "A_yx", "A_yy", "A_yz")
+        )
+        myfile.write(
+            "{:^12s} {:^13s} {:^13s} {:^13s}\n".format("", "A_zx", "A_zy", "A_zz")
+        )
+        for i, tensor in cls.sia_tensor.items():
+            iatom = cls.ind_atoms[i]
+            myfile.write(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f}\n".format(
+                    sns[iatom],
+                    tensor[0, 0] * 1e3,
+                    tensor[0, 1] * 1e3,
+                    tensor[0, 2] * 1e3,
+                )
+            )
+            myfile.write(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f}\n".format(
+                    "", tensor[1, 0] * 1e3, tensor[1, 1] * 1e3, tensor[1, 2] * 1e3
+                )
+            )
+            myfile.write(
+                "{:<12s} {:13.8f} {:13.8f} {:13.8f}\n".format(
+                    "", tensor[2, 0] * 1e3, tensor[2, 1] * 1e3, tensor[2, 2] * 1e3
+                )
+            )
+            myfile.write("-" * 88 + "\n")
+
+
 def write_txt(
     cls,
     path="TB2J_results",
@@ -323,6 +406,7 @@ def write_txt(
         write_info_section(cls, myfile)
         write_atom_section(cls, myfile)
         write_orbital_section(cls, myfile)
+        write_sia_section(cls, myfile)
         write_exchange_section(
             cls,
             myfile,

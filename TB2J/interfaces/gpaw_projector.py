@@ -1,0 +1,1143 @@
+"""GPAW PAW-projector NetCDF export and projector exchange interface."""
+
+from __future__ import annotations
+
+import hashlib
+from importlib import import_module
+from pathlib import Path
+
+import numpy as np
+from ase import Atoms
+from ase.units import Ha, kB
+
+from TB2J.io_exchange import SpinIO
+from TB2J.mycfr import CFR
+from TB2J.paw_projector import (
+    PawOperatorComponent,
+    PawOperatorComponents,
+    PawProjectorChannel,
+    PawProjectorSnapshot,
+    PawSiteLayout,
+)
+from TB2J.projector_green import (
+    ProjectorGreen,
+    ProjectorGreenData,
+    projector_exchange_trace,
+)
+
+
+def _pack_density(matrix):
+    matrix = np.asarray(matrix)
+    packed = []
+    for row in range(matrix.shape[0]):
+        packed.append(matrix[row, row])
+        for col in range(row + 1, matrix.shape[1]):
+            packed.append(matrix[row, col] + matrix[col, row])
+    return np.asarray(packed)
+
+
+def _setup_projector_metadata(setups):
+    projector_l = []
+    projector_m = []
+    projector_radial = []
+    projector_atom = []
+    projector_site = []
+    site_nproj = []
+    site_projector_indices = []
+    paw_N0_p = []
+    overlap_blocks = []
+    offset = 0
+    for atom, setup in enumerate(setups):
+        atom_indices = []
+        radial_count = {}
+        for l in setup.l_j:
+            radial = radial_count.get(l, 0)
+            radial_count[l] = radial + 1
+            for m in range(-l, l + 1):
+                projector_l.append(l)
+                projector_m.append(m)
+                projector_radial.append(radial)
+                projector_atom.append(atom)
+                projector_site.append(atom)
+                atom_indices.append(offset)
+                offset += 1
+        site_nproj.append(len(atom_indices))
+        site_projector_indices.append(atom_indices)
+        paw_N0_p.append(np.asarray(setup.N0_p, dtype=float).tolist())
+        overlap_blocks.append(np.asarray(setup.dO_ii, dtype=complex))
+
+    nmax = max(site_nproj)
+    nproj = offset
+    overlap_metric = np.zeros((nproj, nproj), dtype=complex)
+    padded = -np.ones((len(site_nproj), nmax), dtype=int)
+    for site, indices in enumerate(site_projector_indices):
+        padded[site, : len(indices)] = indices
+        overlap_metric[np.ix_(indices, indices)] = overlap_blocks[site]
+
+    return {
+        "projector_l": np.array(projector_l, dtype=int),
+        "projector_m": np.array(projector_m, dtype=int),
+        "projector_radial": np.array(projector_radial, dtype=int),
+        "projector_atom": np.array(projector_atom, dtype=int),
+        "projector_site": np.array(projector_site, dtype=int),
+        "site_nproj": np.array(site_nproj, dtype=int),
+        "site_projector_indices": padded,
+        "paw_N0_p": paw_N0_p,
+        "overlap_metric": overlap_metric,
+    }
+
+
+def _collect_kpoint_data(calc):
+    wfs = calc.wfs
+    kd = wfs.kd
+    nspin = wfs.nspins
+    bz_kpoints = np.asarray(getattr(kd, "bzk_kc", calc.get_bz_k_points()), dtype=float)
+    nkpt = len(bz_kpoints)
+    ibz2bz = None
+    if getattr(kd, "nibzkpts", nkpt) != nkpt:
+        ibz2bz = _make_ibz2bz_maps(calc)
+    first = _source_kpoint(wfs, spin=0, ibz_index=0)
+    nband = len(first.eps_n)
+    nproj = sum(P_ni.shape[1] for P_ni in _projection_blocks(first.P_ani))
+
+    eigenvalues = np.empty((nspin, nkpt, nband), dtype=float)
+    occupations = np.empty((nspin, nkpt, nband), dtype=float)
+    coefficients = np.empty((nspin, nkpt, nband, nproj), dtype=complex)
+    output_weight = 1.0 / nkpt
+    for spin in range(nspin):
+        for bz_index in range(nkpt):
+            ibz_index = int(kd.bz2ibz_k[bz_index])
+            kpt = _source_kpoint(wfs, spin=spin, ibz_index=ibz_index)
+            eigenvalues[spin, bz_index] = kpt.eps_n * Ha
+            kpt_weight = float(getattr(kpt, "weight", output_weight))
+            occupations[spin, bz_index] = kpt.f_n * output_weight / kpt_weight
+            coefficients[spin, bz_index] = np.concatenate(
+                _full_bz_projection_blocks(wfs, bz_index, spin, ibz2bz, kpt), axis=1
+            )
+
+    weights = np.full(nkpt, 1.0 / nkpt)
+    return bz_kpoints, weights, eigenvalues, occupations, coefficients
+
+
+def _collect_fermi_levels(calc):
+    if hasattr(calc, "get_fermi_levels"):
+        try:
+            levels = getattr(calc, "get_fermi_levels")()
+        except (ValueError, TypeError, AttributeError):
+            levels = None
+        if levels is not None:
+            levels = np.asarray(levels, dtype=float)
+            if levels.ndim == 0:
+                levels = levels.reshape(1)
+            if levels.size:
+                return levels * Ha
+
+    if hasattr(calc, "wfs") and hasattr(calc.wfs, "fermi_levels"):
+        levels = getattr(calc.wfs, "fermi_levels")
+        if levels is not None:
+            levels = np.asarray(levels, dtype=float)
+            if levels.ndim == 0:
+                levels = levels.reshape(1)
+            if levels.size:
+                return levels * Ha
+
+    if hasattr(calc, "get_fermi_level"):
+        return np.array([float(getattr(calc, "get_fermi_level")())], dtype=float)
+
+    raise AttributeError("Unable to read Fermi level from GPAW calculator")
+
+
+def _source_kpoint(wfs, spin, ibz_index):
+    if hasattr(wfs, "kpt_qs"):
+        return wfs.kpt_qs[ibz_index][spin]
+    for kpt in wfs.kpt_u:
+        if kpt.s == spin and kpt.q == ibz_index:
+            return kpt
+    raise KeyError(f"missing GPAW k-point for spin={spin}, ibz_index={ibz_index}")
+
+
+def _projection_blocks(projections):
+    items = list(projections.items())
+    return [
+        np.asarray(block) for _, block in sorted(items, key=lambda item: int(item[0]))
+    ]
+
+
+def _full_bz_projection_blocks(wfs, bz_index, spin, ibz2bz, source_kpt):
+    if ibz2bz is None:
+        return _projection_blocks(source_kpt.P_ani)
+    projections = _map_projections_in_bz(wfs, bz_index, spin, ibz2bz)
+    return _projection_blocks(projections)
+
+
+def _make_ibz2bz_maps(calc):
+    from gpaw.ibz2bz import IBZ2BZMaps
+
+    return IBZ2BZMaps.from_calculator(calc)
+
+
+def _projection_mapper():
+    """Return GPAW's full-BZ PAW-projection mapper across supported layouts."""
+    for module_name in ("gpaw.wannier.wannier90", "gpaw.wannier90"):
+        try:
+            return import_module(module_name).get_projections_in_bz
+        except ModuleNotFoundError as error:
+            if error.name != module_name:
+                raise
+    raise ModuleNotFoundError(
+        "GPAW does not provide a full-BZ PAW-projection mapper; "
+        "install a GPAW build with its Wannier projection support"
+    )
+
+
+def _map_projections_in_bz(wfs, bz_index, spin, ibz2bz):
+    return _projection_mapper()(wfs, bz_index, spin, ibz2bz, bcomm=None)
+
+
+def _collect_hubbard_metadata(calc):
+    """Return normalized per-site GPAW PAW+U setup metadata."""
+    records = []
+    for atom, setup in enumerate(calc.wfs.setups):
+        hubbard_u = getattr(setup, "hubbard_u", None)
+        if hubbard_u is None:
+            continue
+        l_values = list(hubbard_u.l)
+        u_values = list(hubbard_u.U)
+        scales = list(hubbard_u.scale)
+        if not (len(l_values) == len(u_values) == len(scales)):
+            raise ValueError(
+                f"inconsistent Hubbard metadata for GPAW atom {atom}: "
+                "l, U, and scale must have equal lengths"
+            )
+        records.append(
+            {
+                "atom_index": atom,
+                "l": [int(l) for l in l_values],
+                "U_eV": [float(u) * Ha for u in u_values],
+                "scale": [bool(scale) for scale in scales],
+            }
+        )
+    return records
+
+
+def _unpack_gpaw_density(density):
+    from gpaw.utilities import unpack_density
+
+    return unpack_density(density)
+
+
+def _validate_gpaw_hubbard_prerequisites(calc, hubbard_metadata):
+    """Fail before XC collection when a PAW+U prerequisite is absent."""
+    if calc.wfs.nspins != 2:
+        raise ValueError(
+            "GPAW PAW+U exchange requires exactly two collinear spin channels"
+        )
+    density_blocks = getattr(getattr(calc, "density", None), "D_asp", None)
+    if density_blocks is None:
+        raise ValueError("GPAW PAW+U exchange requires converged PAW density D_asp")
+    for record in hubbard_metadata:
+        atom = int(record["atom_index"])
+        try:
+            density_blocks[atom]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError(
+                "GPAW PAW+U exchange requires converged PAW density "
+                f"for correlated atom {atom}"
+            ) from error
+        if not callable(getattr(calc.wfs.setups[atom].hubbard_u, "calculate", None)):
+            raise ValueError(
+                "GPAW PAW+U exchange requires a Hubbard evaluator "
+                f"for correlated atom {atom}"
+            )
+
+
+def _build_gpaw_total_delta(calc, delta_xc, site_nproj, hubbard_metadata):
+    """Build a covariant PAW XC-plus-Hubbard spin splitting once per site."""
+    _validate_gpaw_hubbard_prerequisites(calc, hubbard_metadata)
+    density_blocks = calc.density.D_asp
+
+    total = np.array(delta_xc, dtype=complex, copy=True)
+    for record in hubbard_metadata:
+        atom = int(record["atom_index"])
+        try:
+            packed_density = density_blocks[atom]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError(
+                "GPAW PAW+U exchange requires converged PAW density "
+                f"for correlated atom {atom}"
+            ) from error
+        hubbard_u = getattr(calc.wfs.setups[atom], "hubbard_u", None)
+        calculate = getattr(hubbard_u, "calculate", None)
+        if not callable(calculate):
+            raise ValueError(
+                "GPAW PAW+U exchange requires a Hubbard evaluator "
+                f"for correlated atom {atom}"
+            )
+        _, dHU_sii = calculate(
+            calc.wfs.setups[atom], _unpack_gpaw_density(packed_density)
+        )
+        nproj = int(site_nproj[atom])
+        dHU_sii = np.asarray(dHU_sii)
+        if dHU_sii.shape != (2, nproj, nproj):
+            raise ValueError(
+                "GPAW Hubbard evaluator returned incompatible PAW matrix "
+                f"shape {dHU_sii.shape} for correlated atom {atom}; "
+                f"expected {(2, nproj, nproj)}"
+            )
+        total[atom, :nproj, :nproj] += (dHU_sii[0] - dHU_sii[1]) * Ha
+    return total
+
+
+def _collect_hij(calc, site_nproj):
+    from gpaw.utilities import unpack_hermitian
+
+    nspin = calc.wfs.nspins
+    nsite = len(site_nproj)
+    nmax = int(np.max(site_nproj))
+    hij = np.zeros((nspin, nsite, nmax, nmax), dtype=complex)
+    for atom, dH_sp in calc.hamiltonian.dH_asp.items():
+        atom = int(atom)
+        nproj = site_nproj[atom]
+        for spin in range(nspin):
+            hij[spin, atom, :nproj, :nproj] = unpack_hermitian(dH_sp[spin]) * Ha
+    return hij
+
+
+def _collect_delta_xc_paw_xc(calc, site_nproj):
+    """Atom-centered XC exchange field in the PAW partial-wave basis.
+
+    Per atom, evaluate the spin splitting of the PAW XC energy derivative matrix
+    dE_xc/dD_sp via GPAW ``hamiltonian.xc.calculate_paw_correction``.  For
+    LSDA/GGA this is the explicit partial-wave matrix element of the
+    exchange-correlation spin field V_xc^up - V_xc^down restricted to the XC
+    contribution (paper eq:pseudo-partial-delta).  Hartree, ionic, and scalar
+    external PAW terms are spin independent, so for plain collinear DFT this
+    coincides with the full dH_asp spin splitting (verified on bcc Fe); it
+    cleanly isolates the XC exchange field for +U/SOC/general cases.
+    """
+    from gpaw.utilities import unpack_hermitian
+
+    nspin = calc.wfs.nspins
+    nsite = len(site_nproj)
+    nmax = int(np.max(site_nproj))
+    delta_xc = np.zeros((nsite, nmax, nmax), dtype=complex)
+    if nspin != 2:
+        return delta_xc
+    xc = calc.hamiltonian.xc
+    for atom, D_sp in calc.density.D_asp.items():
+        atom = int(atom)
+        setup = calc.wfs.setups[atom]
+        D_sp = np.asarray(D_sp)
+        dEdD_sp = np.zeros_like(D_sp)
+        xc.calculate_paw_correction(setup, D_sp, dEdD_sp)
+        delta = (unpack_hermitian(dEdD_sp[0]) - unpack_hermitian(dEdD_sp[1])) * Ha
+        nproj = site_nproj[atom]
+        delta_xc[atom, :nproj, :nproj] = delta[:nproj, :nproj]
+    return delta_xc
+
+
+def _legacy_gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
+    """Convert a converged GPAW PAW calculation to ProjectorGreenData."""
+    if atoms is None:
+        atoms = calc.get_atoms()
+    kpoints, weights, eigenvalues, occupations, coefficients = _collect_kpoint_data(
+        calc
+    )
+    nspin = calc.wfs.nspins
+    if nspin != 2:
+        raise ValueError(
+            "GPAW PAW exchange requires a supported collinear two-spin calculation; "
+            "noncollinear/SOC or spinless states are not accepted"
+        )
+    fermi_levels = _collect_fermi_levels(calc)
+    fermi_spin = None
+    if fermi_levels.shape[0] == nspin and nspin > 1:
+        fermi_spin = fermi_levels
+    elif fermi_levels.shape[0] != 1:
+        raise ValueError(
+            "unexpected number of GPAW fermi levels: "
+            f"{int(fermi_levels.shape[0])}; expected 1 or nspin"
+        )
+    efermi = float(np.mean(fermi_levels))
+    projector_metadata = _setup_projector_metadata(calc.wfs.setups)
+    hubbard_metadata = _collect_hubbard_metadata(calc)
+    if hubbard_metadata:
+        _validate_gpaw_hubbard_prerequisites(calc, hubbard_metadata)
+    hij = _collect_hij(calc, projector_metadata["site_nproj"])
+    delta_xc = _collect_delta_xc_paw_xc(calc, projector_metadata["site_nproj"])
+    delta_total = (
+        _build_gpaw_total_delta(
+            calc,
+            delta_xc,
+            projector_metadata["site_nproj"],
+            hubbard_metadata,
+        )
+        if hubbard_metadata
+        else None
+    )
+    operator_components = {"delta_xc": delta_xc} if nspin == 2 else None
+    operator_component_metadata = (
+        {
+            "delta_xc": {
+                "units": "eV",
+                "definition": (
+                    "explicit V_xc^up - V_xc^down PAW partial-wave matrix "
+                    "(GPAW xc.calculate_paw_correction spin splitting)"
+                ),
+                "source": "GPAW hamiltonian.xc.calculate_paw_correction",
+                "operator_basis": "paw_partial_wave_channel",
+            }
+        }
+        if nspin == 2
+        else None
+    )
+    if delta_total is not None:
+        operator_components["delta_total"] = delta_total
+        operator_component_metadata["delta_total"] = {
+            "units": "eV",
+            "definition": (
+                "explicit PAW XC spin difference plus GPAW Hubbard "
+                "derivative spin difference"
+            ),
+            "source": (
+                "GPAW hamiltonian.xc.calculate_paw_correction + "
+                "setup.hubbard_u.calculate"
+            ),
+            "operator_basis": "paw_partial_wave_channel",
+            "hubbard_included": "true",
+            "hubbard_evaluation_count": str(len(hubbard_metadata)),
+            "hubbard_evaluation_count_per_site": "1",
+            "completeness": "complete",
+            "exchange_ready": "true",
+        }
+    metadata = {} if metadata is None else dict(metadata)
+    metadata.update(
+        {
+            "source": "GPAW PAW projector workflow",
+            "projector_basis_type": "paw",
+            "source_code": "gpaw",
+            "gpaw_mode": str(calc.wfs.mode),
+            "gpaw_nbzkpts": int(calc.wfs.kd.nbzkpts),
+            "gpaw_nibzkpts": int(calc.wfs.kd.nibzkpts),
+            "symmetry_unfolded_to_full_bz": bool(
+                calc.wfs.kd.nbzkpts != calc.wfs.kd.nibzkpts
+            ),
+            "paw_N0_p": projector_metadata["paw_N0_p"],
+            "overlap_metric": (
+                "GPAW PAW onsite dO_ii correction, block diagonal by site"
+            ),
+            "population_method": "GPAW PAW occupation projector density with N0_p",
+            "magnetic_moment_total": calc.get_magnetic_moment(),
+            "magnetic_moments": calc.get_magnetic_moments().tolist(),
+        }
+    )
+    if hubbard_metadata:
+        metadata["gpaw_hubbard"] = hubbard_metadata
+    return ProjectorGreenData(
+        kpoints=kpoints,
+        weights=weights,
+        eigenvalues=eigenvalues,
+        coefficients=coefficients,
+        efermi=efermi,
+        efermi_spin=fermi_spin,
+        projector_site=projector_metadata["projector_site"],
+        projector_atom=projector_metadata["projector_atom"],
+        cell=atoms.cell.array,
+        positions=atoms.positions,
+        atomic_numbers=atoms.numbers,
+        occupations=occupations,
+        projector_l=projector_metadata["projector_l"],
+        projector_m=projector_metadata["projector_m"],
+        projector_radial=projector_metadata["projector_radial"],
+        overlap_metric=projector_metadata["overlap_metric"],
+        site_nproj=projector_metadata["site_nproj"],
+        site_projector_indices=projector_metadata["site_projector_indices"],
+        hij=hij,
+        hij_definition="paw_dh_asp_projector_hamiltonian",
+        hij_units="eV",
+        hij_source="GPAW dH_asp",
+        hij_projection="native PAW projector Hamiltonian matrix",
+        coefficient_source="gpaw.P_ani",
+        coefficient_projector="dual_paw_projector",
+        channel_interpretation="paw_partial_wave_channel",
+        overlap_metric_definition=(
+            "GPAW PAW onsite dO_ii correction, block diagonal by site"
+        ),
+        population_metric="GPAW PAW N0_p packed density contraction",
+        operator_basis="native_paw_projector_hamiltonian",
+        operator_components=operator_components,
+        operator_component_metadata=operator_component_metadata,
+        metadata=metadata,
+    )
+
+
+def gpaw_calc_to_paw_snapshot(calc, atoms=None, metadata=None) -> PawProjectorSnapshot:
+    """Collect GPAW PAW exchange state in the shared immutable snapshot form."""
+    data = _legacy_gpaw_calc_to_projector_green_data(
+        calc, atoms=atoms, metadata=metadata
+    )
+    layout = []
+    for site, nproj in enumerate(data.site_nproj):
+        indices = data.site_projector_indices[site, :nproj]
+        channels = tuple(
+            PawProjectorChannel(
+                l=int(data.projector_l[index]),
+                m=int(data.projector_m[index]),
+                radial=int(data.projector_radial[index]),
+                label=(
+                    f"l{int(data.projector_l[index])}"
+                    f"m{int(data.projector_m[index])}"
+                    f"r{int(data.projector_radial[index])}"
+                ),
+            )
+            for index in indices
+        )
+        setup = calc.wfs.setups[site]
+        setup_identity = repr(
+            (getattr(setup, "symbol", ""), getattr(setup, "l_j", ()), channels)
+        ).encode()
+        layout.append(
+            PawSiteLayout(
+                source_site=site,
+                species=str(getattr(setup, "symbol", data.atomic_numbers[site])),
+                atomic_number=int(data.atomic_numbers[site]),
+                projector_slice=slice(int(indices[0]), int(indices[-1]) + 1),
+                channels=channels,
+                setup_hash=hashlib.sha256(setup_identity).hexdigest(),
+            )
+        )
+    xc = np.asarray(data.operator_components["delta_xc"], dtype=complex) / Ha
+    components = [
+        PawOperatorComponent(
+            name="xc",
+            values=xc,
+            units="Hartree",
+            basis_id="native_paw_projector_hamiltonian",
+            definition=data.operator_component_metadata["delta_xc"]["definition"],
+            source=data.operator_component_metadata["delta_xc"]["source"],
+        )
+    ]
+    selected_names = ("xc",)
+    if "delta_total" in data.operator_components:
+        total = np.asarray(data.operator_components["delta_total"], dtype=complex) / Ha
+        components.append(
+            PawOperatorComponent(
+                name="hubbard",
+                values=total - xc,
+                units="Hartree",
+                basis_id="native_paw_projector_hamiltonian",
+                definition="GPAW evaluated Hubbard derivative spin difference",
+                source="GPAW setup.hubbard_u.calculate",
+            )
+        )
+        selected_names = ("xc", "hubbard")
+    provenance = dict(data.metadata)
+    provenance.update(
+        {
+            "source_code": "gpaw",
+            "source_version": str(getattr(calc, "version", "unknown") or "unknown"),
+            "functional": str(
+                getattr(
+                    getattr(getattr(calc, "hamiltonian", None), "xc", None),
+                    "name",
+                    "unknown",
+                )
+            ),
+            "setup_hashes": [site.setup_hash for site in layout],
+            "u_eV": float(
+                sum(
+                    sum(record["U_eV"]) for record in provenance.get("gpaw_hubbard", [])
+                )
+            ),
+            "j_eV": 0.0,
+            "correlated_shells": [
+                f"{record['atom_index']}:{record['l']}"
+                for record in provenance.get("gpaw_hubbard", [])
+            ],
+        }
+    )
+    provenance["operator_component_metadata"] = data.operator_component_metadata
+    return PawProjectorSnapshot(
+        kpoints=data.kpoints,
+        weights=data.weights,
+        eigenvalues=data.eigenvalues,
+        occupations=data.occupations,
+        coefficients=data.coefficients,
+        efermi=data.efermi,
+        cell=data.cell,
+        overlap_metric=data.overlap_metric,
+        hij=data.hij,
+        hij_definition=data.hij_definition,
+        hij_units=data.hij_units,
+        hij_source=data.hij_source,
+        efermi_spin=data.efermi_spin,
+        population_metric=data.population_metric,
+        positions=data.positions,
+        atomic_numbers=data.atomic_numbers,
+        site_layout=tuple(layout),
+        operators=PawOperatorComponents(
+            components=tuple(components),
+            policy="compose",
+            selected_names=selected_names,
+        ),
+        kpoint_mode="full_bz",
+        selected_source_sites=tuple(range(len(layout))),
+        provenance=provenance,
+    )
+
+
+def gpaw_calc_to_projector_green_data(calc, atoms=None, metadata=None):
+    """Build GPAW projector Green data through the shared PAW snapshot seam."""
+    from TB2J.paw_projector import build_projector_green_data
+
+    return build_projector_green_data(
+        gpaw_calc_to_paw_snapshot(calc, atoms=atoms, metadata=metadata)
+    )
+
+
+def save_gpaw_projector_netcdf(calc, filename, atoms=None, metadata=None):
+    """Save a converged GPAW calculation as TB2J projector Green NetCDF."""
+    data = gpaw_calc_to_projector_green_data(calc, atoms=atoms, metadata=metadata)
+    data.save_netcdf(filename)
+    return data
+
+
+def _R_grid(nmax=1):
+    return np.array(
+        [
+            (i, j, k)
+            for i in range(-nmax, nmax + 1)
+            for j in range(-nmax, nmax + 1)
+            for k in range(-nmax, nmax + 1)
+        ],
+        dtype=int,
+    )
+
+
+def _infer_kmesh(kpoints, decimals=6):
+    """Infer the regular k-mesh divisions from fractional k-points.
+
+    The Bloch-sum Green function built from these k-points is exactly
+    periodic in the k-mesh supercell, so this mesh defines the largest
+    meaningful R window (the same convention as ``kmesh_to_R`` in the
+    Wannier path).  The gcd spacing of the projected fractional
+    coordinates is invariant under IBZ reduction, so an IBZ list infers
+    the same mesh as the full BZ.
+    """
+    kpts = np.asarray(kpoints, dtype=float)
+    if kpts.ndim != 2 or kpts.shape[1] != 3:
+        raise ValueError("kpoints must have shape (nkpt, 3)")
+    mesh = []
+    for d in range(3):
+        vals = np.sort(np.mod(np.round(kpts[:, d], decimals), 1.0))
+        vals = np.mod(vals + 0.5, 1.0) - 0.5
+        vals = np.sort(vals)
+        keep = np.concatenate(([True], np.diff(vals) > 10.0**-decimals))
+        vals = vals[keep]
+        if len(vals) <= 1:
+            mesh.append(1)
+            continue
+        spacing = np.diff(np.concatenate((vals, vals[:1] + 1.0)))
+        s = float(np.min(spacing))
+        n = int(round(1.0 / s))
+        if n < 1 or abs(n * s - 1.0) > 1.0e-4:
+            raise ValueError(
+                "k-points are not a regular mesh along axis %d "
+                "(spacing %.6g); cannot bound the R list by the "
+                "k-mesh supercell" % (d, s)
+            )
+        mesh.append(n)
+    return tuple(mesh)
+
+
+def _R_grid_for_cutoff(data, sites, Rcut):
+    """Build the lattice-vector grid needed to cover all pairs within Rcut.
+
+    The R list is bounded by the k-mesh supercell: G(R) from the Bloch
+    sum is exactly periodic under supercell translations, so cells
+    beyond it are aliases of cells inside it and listing both would
+    double-count those pairs.  Rcut only selects which pairs inside the
+    supercell window are kept; if Rcut reaches beyond the window, a
+    warning is emitted because distinct physical neighbours then fold
+    onto single table entries (the k mesh is too coarse for this Rcut).
+    """
+    cell = np.asarray(data.cell, dtype=float)
+    cell_lengths = np.linalg.norm(cell, axis=1)
+    positions = np.asarray(data.positions, dtype=float)
+    max_pair = 0.0
+    for i in sites:
+        for j in sites:
+            max_pair = max(max_pair, float(np.linalg.norm(positions[j] - positions[i])))
+
+    kmesh = _infer_kmesh(data.kpoints)
+    reach = (float(Rcut) + max_pair) / cell_lengths
+    # symmetric, alias-free fundamental window per axis: for even n the
+    # +-n/2 classes are congruent modulo the supercell (G(n/2)=G(-n/2)
+    # exactly), so keeping either would duplicate those pair rows while
+    # dropping the other breaks the kernel's R -> -R closure; both are
+    # excluded instead.  Odd n loses nothing.
+    windows = [
+        [0] if n <= 1 else list(range(-(n // 2) + (1 - n % 2), n // 2 + n % 2))
+        for n in kmesh
+    ]
+    folded = any(reach[d] > max(abs(x) for x in windows[d]) for d in range(3))
+    if folded:
+        print(
+            "WARNING: Rcut (%.3f A) exceeds the k-mesh supercell %dx%dx%d; "
+            "R vectors are truncated to the supercell and distinct "
+            "neighbours beyond it alias onto single entries. Use a denser "
+            "k mesh for a trustworthy exchange table at this Rcut."
+            % (float(Rcut), *kmesh)
+        )
+
+    Rpts = np.array(
+        [(i, j, k) for i in windows[0] for j in windows[1] for k in windows[2]],
+        dtype=int,
+    )
+    selected = set()
+    for R in Rpts:
+        for sign in (1, -1):
+            Rs = sign * R
+            for i in sites:
+                for j in sites:
+                    vector = Rs @ cell + positions[j] - positions[i]
+                    if float(np.linalg.norm(vector)) < float(Rcut):
+                        selected.add(tuple(int(x) for x in R))
+                        selected.add(tuple(int(-x) for x in R))
+                        break
+                else:
+                    continue
+                break
+    return np.asarray(sorted(selected), dtype=int)
+
+
+def _magnetic_sites(
+    data, magnetic_elements=None, index_magnetic_atoms=None, threshold=1e-3
+):
+    if index_magnetic_atoms is not None:
+        return [int(site) for site in index_magnetic_atoms]
+    if magnetic_elements is not None:
+        from ase.data import chemical_symbols
+
+        elements = set(magnetic_elements)
+        return [
+            i
+            for i, number in enumerate(data.atomic_numbers)
+            if chemical_symbols[int(number)] in elements
+        ]
+    moments = data.metadata.get("magnetic_moments")
+    if moments is not None:
+        return [i for i, moment in enumerate(moments) if abs(moment) > threshold]
+    return list(range(len(data.site_nproj)))
+
+
+def _paw_N0_from_data_or_setups(data):
+    if "paw_N0_p" in data.metadata:
+        return [np.asarray(values, dtype=float) for values in data.metadata["paw_N0_p"]]
+
+    from gpaw import GPAW, PW, FermiDirac
+
+    atoms = Atoms(
+        numbers=data.atomic_numbers,
+        positions=data.positions,
+        cell=data.cell,
+        pbc=True,
+    )
+    calc = GPAW(
+        mode=PW(200),
+        xc=data.metadata.get("xc", "PBE"),
+        kpts=(1, 1, 1),
+        spinpol=True,
+        occupations=FermiDirac(0.05),
+        nbands=max(data.nband, len(atoms)),
+        symmetry="off",
+        txt=None,
+    )
+    calc.initialize(atoms)
+    return [np.asarray(setup.N0_p, dtype=float) for setup in calc.wfs.setups]
+
+
+def compute_paw_projected_charges_moments(data):
+    """Compute PAW local populations from stored occupations and projectors."""
+    if data.occupations is None:
+        raise ValueError("PAW projected populations require occupations in NetCDF")
+    paw_N0_p = _paw_N0_from_data_or_setups(data)
+    nsite = len(data.site_nproj)
+    density_by_spin = np.zeros((data.nspin, nsite), dtype=float)
+    for spin in range(data.nspin):
+        rho = np.einsum(
+            "k,kb,kbp,kbq->pq",
+            data.weights,
+            data.occupations[spin],
+            data.coefficients[spin].conj(),
+            data.coefficients[spin],
+            optimize="optimal",
+        )
+        for site, nproj in enumerate(data.site_nproj):
+            indices = data.site_projector_indices[site, :nproj]
+            block = rho[np.ix_(indices, indices)]
+            density_by_spin[spin, site] = np.real(
+                np.dot(_pack_density(block.real), paw_N0_p[site])
+            )
+    charges = np.sum(density_by_spin, axis=0)
+    spinat = np.zeros((nsite, 3), dtype=float)
+    if data.nspin >= 2:
+        spinat[:, 2] = density_by_spin[0] - density_by_spin[1]
+    return charges, spinat, density_by_spin
+
+
+def compute_projected_charges_moments(data):
+    """Compute local populations for projector exchange output metadata."""
+    if "paw_N0_p" in data.metadata:
+        return compute_paw_projected_charges_moments(data)
+    if data.occupations is None:
+        raise ValueError("projected populations require occupations")
+
+    nsite = len(data.site_nproj)
+    density_by_spin = np.zeros((data.nspin, nsite), dtype=float)
+    for spin in range(data.nspin):
+        rho = np.einsum(
+            "k,kb,kbp,kbq->pq",
+            data.weights,
+            data.occupations[spin],
+            data.coefficients[spin].conj(),
+            data.coefficients[spin],
+            optimize="optimal",
+        )
+        for site, nproj in enumerate(data.site_nproj):
+            indices = data.site_projector_indices[site, :nproj]
+            block = rho[np.ix_(indices, indices)]
+            if data.population_metric_matrix is not None:
+                metric = data.population_metric_matrix[np.ix_(indices, indices)]
+                density_by_spin[spin, site] = float(np.real(np.trace(block @ metric)))
+            elif data.overlap_metric is not None:
+                metric = data.overlap_metric[np.ix_(indices, indices)]
+                density_by_spin[spin, site] = float(np.real(np.trace(block @ metric)))
+            else:
+                density_by_spin[spin, site] = float(np.real(np.trace(block)))
+    charges = np.sum(density_by_spin, axis=0)
+    spinat = np.zeros((nsite, 3), dtype=float)
+    if data.nspin >= 2:
+        spinat[:, 2] = density_by_spin[0] - density_by_spin[1]
+    return charges, spinat, density_by_spin
+
+
+def component_local_operators(data, component_name, sites, source_label="projector"):
+    """Return exchange-ready site-local blocks from an operator component."""
+    if component_name is None:
+        component_name = "delta_total"
+    if not data.has_operator_component(component_name):
+        raise ValueError(
+            f"{source_label} operator component is unavailable: {component_name}"
+        )
+    metadata = (data.operator_component_metadata or {}).get(component_name, {})
+    completeness = metadata.get("completeness")
+    exchange_ready = str(metadata.get("exchange_ready", "")).lower()
+    if exchange_ready in {"false", "0", "no"}:
+        raise ValueError(
+            f"{source_label} operator component is not exchange-ready: "
+            f"{component_name} exchange_ready={metadata.get('exchange_ready')!r}"
+        )
+    if completeness not in {
+        None,
+        "complete",
+        "zero_by_symmetry",
+    } and exchange_ready not in {"true", "1", "yes"}:
+        raise ValueError(
+            f"{source_label} operator component is not exchange-ready: "
+            f"{component_name} completeness={completeness!r}"
+        )
+    blocks = {
+        int(site): data.get_operator_component(component_name, site=site)
+        for site in sites
+    }
+    if any(block.ndim != 2 for block in blocks.values()):
+        raise ValueError(
+            f"{source_label} operator component {component_name} is a "
+            "spinor (pauli_2x2) operator; it enters the split-SOC "
+            "propagator, not the collinear exchange vertex (use the "
+            "split-SOC leg builder)"
+        )
+    return blocks
+
+
+def compute_projector_exchange_jdict(
+    data,
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    sites=None,
+    local_operators=None,
+    operator_component=None,
+    overlap_mode=None,
+    overlap_rcond=None,
+):
+    """Compute TB2J-style isotropic exchange dictionary from projector trace."""
+    if Rpts is None:
+        Rpts = _R_grid(nmax=1)
+    Rpts = np.asarray(Rpts, dtype=int)
+    if sites is None:
+        sites = list(range(len(data.site_nproj)))
+    sites = [int(site) for site in sites]
+    if operator_component is not None and local_operators is None:
+        local_operators = component_local_operators(
+            data, operator_component, sites, "projector exchange"
+        )
+    green = ProjectorGreen(data, overlap_mode=overlap_mode, overlap_rcond=overlap_rcond)
+    if local_operators is None:
+        local_operators = {int(site): green.get_local_operator(site) for site in sites}
+    site_to_spin = {site: ispin for ispin, site in enumerate(sites)}
+    contour = CFR(nz=nz, T=smearing_eV / kB)
+    values = {
+        (tuple(int(x) for x in R), i, j): [] for R in Rpts for i in sites for j in sites
+    }
+    for energy in contour.path:
+        if local_operators is not None:
+            trace = projector_exchange_trace(
+                green,
+                Rpts,
+                energy=energy,
+                local_operators=local_operators,
+                sites=sites,
+            )
+        else:
+            trace = projector_exchange_trace(green, Rpts, energy=energy, sites=sites)
+        for key in values:
+            values[key].append(trace["trace"][key])
+
+    exchange_Jdict = {}
+    sign_cache = {}
+    for (R, i, j), vals in values.items():
+        integrated = contour.integrate_values(np.asarray(vals))
+        if i not in sign_cache:
+            tr_i = (
+                float(np.real(np.trace(local_operators[i]))) if local_operators else 0.0
+            )
+            sign_cache[i] = 1.0 if tr_i >= 0 else -1.0
+        if j not in sign_cache:
+            tr_j = (
+                float(np.real(np.trace(local_operators[j]))) if local_operators else 0.0
+            )
+            sign_cache[j] = 1.0 if tr_j >= 0 else -1.0
+        sign = sign_cache[i] * sign_cache[j]
+        exchange_Jdict[(R, site_to_spin[i], site_to_spin[j])] = (
+            float(np.imag(integrated)) / sign
+        )
+    return exchange_Jdict
+
+
+def write_projector_exchange_out(
+    data,
+    path="TB2J_results",
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+    description=None,
+    population_mode="projector",
+    charges=None,
+    spinat=None,
+    Rcut=None,
+    local_operators=None,
+    operator_component=None,
+    overlap_mode=None,
+    overlap_rcond=None,
+):
+    """Write TB2J exchange.out from projector Green data."""
+    atoms = Atoms(
+        numbers=data.atomic_numbers,
+        positions=data.positions,
+        cell=data.cell,
+        pbc=True,
+    )
+    sites = _magnetic_sites(
+        data,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+    )
+    exchange_Jdict = compute_projector_exchange_jdict(
+        data,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        sites=sites,
+        local_operators=local_operators,
+        operator_component=operator_component,
+        overlap_mode=overlap_mode,
+        overlap_rcond=overlap_rcond,
+    )
+    if charges is not None or spinat is not None:
+        if charges is None or spinat is None:
+            raise ValueError("charges and spinat must be provided together")
+        charges = np.asarray(charges, dtype=float)
+        spinat = np.asarray(spinat, dtype=float)
+        if charges.shape != (len(atoms),):
+            raise ValueError("charges must have one value per atom")
+        if spinat.shape != (len(atoms), 3):
+            raise ValueError("spinat must have shape (natom, 3)")
+    elif population_mode == "none":
+        charges = np.zeros(len(atoms), dtype=float)
+        spinat = np.zeros((len(atoms), 3), dtype=float)
+    elif population_mode == "projector":
+        charges, spinat, _ = compute_projected_charges_moments(data)
+    else:
+        raise ValueError(f"unsupported population_mode: {population_mode}")
+    index_spin = [-1] * len(atoms)
+    for ispin, site in enumerate(sites):
+        index_spin[site] = ispin
+    spin_to_site = {ispin: site for ispin, site in enumerate(sites)}
+    distance_dict = {}
+    filtered_exchange_Jdict = {}
+    for R, i, j in exchange_Jdict:
+        site_i = spin_to_site[i]
+        site_j = spin_to_site[j]
+        vector = (
+            np.asarray(R) @ data.cell
+            + atoms.positions[site_j]
+            - atoms.positions[site_i]
+        )
+        distance = float(np.linalg.norm(vector))
+        if Rcut is None or distance < float(Rcut):
+            distance_dict[(R, i, j)] = (vector, distance)
+            filtered_exchange_Jdict[(R, i, j)] = exchange_Jdict[(R, i, j)]
+    exchange_Jdict = filtered_exchange_Jdict
+
+    if description is None:
+        description = (
+            "Projector Green workflow using GPAW PAW projections and native dH_asp "
+            "as H_ij. Values are from the controlled projector exchange-like trace, "
+            "not yet a production PAW MFT benchmark.\n"
+        )
+    output = SpinIO(
+        atoms=atoms,
+        charges=charges,
+        spinat=spinat,
+        index_spin=index_spin,
+        colinear=True,
+        distance_dict=distance_dict,
+        exchange_Jdict=exchange_Jdict,
+        description=description,
+    )
+    output.write_all(path=path)
+    return Path(path) / "exchange.out", exchange_Jdict
+
+
+def gen_exchange_projector_netcdf(
+    filename,
+    output_path="TB2J_results",
+    Rcut=10.0,
+    Rpts=None,
+    nz=30,
+    smearing_eV=0.05,
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+    operator_component=None,
+):
+    """Python interface for projector-NetCDF exchange calculation."""
+    data = ProjectorGreenData.load_netcdf(filename)
+    if getattr(data, "nspinor", 1) == 2:
+        from TB2J.interfaces.gpaw_spinor_projector import (
+            gen_exchange_gpaw_spinor_netcdf,
+        )
+
+        return gen_exchange_gpaw_spinor_netcdf(
+            filename,
+            output_path=output_path,
+            Rcut=Rcut,
+            Rpts=Rpts,
+            nz=nz,
+            smearing_eV=smearing_eV,
+            magnetic_elements=magnetic_elements,
+            index_magnetic_atoms=index_magnetic_atoms,
+        )
+    sites = None
+    if index_magnetic_atoms is not None:
+        sites = [int(site) for site in index_magnetic_atoms]
+    if Rpts is None:
+        Rpts = _R_grid_for_cutoff(
+            data, sites or list(range(len(data.site_nproj))), Rcut
+        )
+    if operator_component is None and data.has_operator_component("delta_total"):
+        operator_component = "delta_total"
+    if operator_component is not None:
+        component_name = operator_component
+        local_operators = component_local_operators(
+            data,
+            component_name,
+            sites or list(range(len(data.site_nproj))),
+            "GPAW NetCDF",
+        )
+        description = (
+            "Projector Green workflow using GPAW PAW projections and operator "
+            f"component {component_name} in basis {data.operator_basis}. Values are "
+            "from the controlled projector exchange-like trace, not yet a "
+            "production PAW MFT benchmark.\n"
+        )
+    return write_projector_exchange_out(
+        data,
+        path=output_path,
+        Rpts=Rpts,
+        nz=nz,
+        smearing_eV=smearing_eV,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+        Rcut=Rcut,
+        local_operators=local_operators if operator_component is not None else None,
+        description=description if operator_component is not None else None,
+    )
+
+
+def gen_exchange_gpaw(
+    calc,
+    atoms=None,
+    output_path="TB2J_results",
+    magnetic_elements=None,
+    index_magnetic_atoms=None,
+    operator_component=None,
+    Rcut=10.0,
+    nz=30,
+    smearing_eV=0.05,
+    save_netcdf=None,
+    metadata=None,
+):
+    """High-level GPAW projector-Green exchange API.
+
+    Take a *converged* GPAW calculator, build the projector-Green data (which
+    collects the explicit pseudo-partial-wave ``delta_xc`` exchange field
+    V_xc^up - V_xc^down via ``hamiltonian.xc.calculate_paw_correction``),
+    optionally save the NetCDF to ``save_netcdf``, and evaluate the controlled
+    projector exchange trace, writing the standard ``exchange.out``.
+
+    Operator selection: by default ``ProjectorGreen.get_local_operator`` prefers
+    the ``delta_xc`` component exported here, then ``delta_total``, then the
+    ``hij`` spin splitting. Pass ``operator_component`` (e.g. ``"delta_xc"``,
+    ``"delta_total"``) to force a specific component.
+
+    Returns ``(exchange_out_path, exchange_Jdict)``.
+    """
+    data = gpaw_calc_to_projector_green_data(calc, atoms=atoms, metadata=metadata)
+    if save_netcdf is not None:
+        data.save_netcdf(save_netcdf)
+    if operator_component is None and data.has_operator_component("delta_total"):
+        operator_component = "delta_total"
+    sites = None
+    if index_magnetic_atoms is not None:
+        sites = [int(site) for site in index_magnetic_atoms]
+    Rpts = _R_grid_for_cutoff(data, sites or list(range(len(data.site_nproj))), Rcut)
+    return write_projector_exchange_out(
+        data,
+        path=output_path,
+        Rpts=Rpts,
+        nz=nz,
+        magnetic_elements=magnetic_elements,
+        index_magnetic_atoms=index_magnetic_atoms,
+        Rcut=Rcut,
+        operator_component=operator_component,
+        description=(
+            "Projector Green workflow using GPAW PAW projections and operator "
+            f"component {operator_component or 'delta_xc (auto)'} in basis "
+            f"{data.operator_basis}. Values are from the controlled projector "
+            "exchange-like trace, not yet a production PAW MFT benchmark.\n"
+        ),
+    )

@@ -1,0 +1,34 @@
+&CONTROL
+ calculation='nscf'
+ prefix='fe_y'
+ outdir='./tmp'
+ pseudo_dir='./pseudo'
+/
+&SYSTEM
+ ibrav=3
+ celldm(1)=5.42
+ nat=1
+ ntyp=1
+ ecutwfc=80
+ ecutrho=800
+ noncolin=.true.
+ lspinorb=.true.
+ starting_magnetization(1)=0.4
+ angle1(1)=90.0
+ angle2(1)=90.0
+ occupations='smearing'
+ smearing='fd'
+ degauss=0.01
+ nbnd=48
+ nosym=.true.
+ noinv=.true.
+/
+&ELECTRONS
+ conv_thr=1.0d-8
+/
+ATOMIC_SPECIES
+Fe 55.845 Fe.rel-pbe-spn-rrkjus_psl.1.0.0.UPF
+ATOMIC_POSITIONS crystal
+Fe 0.0 0.0 0.0
+K_POINTS automatic
+12 12 12 0 0 0

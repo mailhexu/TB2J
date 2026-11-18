@@ -5,6 +5,7 @@ Tutorial
    :caption: Contents:
 
    wannier.rst
+   tbupy.rst
    siesta.rst
    openmx.rst
    abacus.rst
@@ -15,4 +16,3 @@ Tutorial
    orbital_contribution.md
    symmetry.md
    output.rst
-

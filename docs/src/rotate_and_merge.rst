@@ -33,7 +33,7 @@ After producing the TB2J results for the rotated structures, we can merge the re
 
 ::
 
-   TB2J_merge.py BiFeO3_1 BiFeO3_2 BiFeO3_0
+   TB2J_merge.py BiFeO3_0 BiFeO3_1 BiFeO3_2
 
 Here the last directory will be taken as the reference structure. Note that the whole structure are rotated w.r.t. the laboratory axis but not to the cell axis. Therefore, the k-points should not be changed in both the DFT calculation and the TB2J calculation. 
 

@@ -92,7 +92,7 @@ def rotate_spinor_matrix_einsum(M, theta, phi):
     Rotate the spinor matrix M by theta and phi,
     """
     shape = M.shape
-    n1 = np.product(shape[:-1]) // 2
+    n1 = np.prod(shape[:-1]) // 2
     n2 = M.shape[-1] // 2
     Mnew = np.reshape(M, (n1, 2, n2, 2))  # .swapaxes(1, 2)
     U = rotation_matrix(theta, phi)
@@ -203,15 +203,15 @@ def test_rotate_spinor_M():
     Mrot4 = rotate_spinor_matrix_kron(M, np.pi / 2, np.pi / 2)
     Mrot5 = rotate_spinor_matrix_spkron(M, np.pi / 2, np.pi / 2)
     print(f"Rotated M with jit:\n {Mrot1}")
-    print(f"Rotated M with einsum:\n {Mrot2-Mrot1}")
-    print(f"Rotated M with reshape:\n {Mrot3-Mrot1}")
-    print(f"Rotated M with kron:\n {Mrot4-Mrot1}")
-    print(f"Rotated M with spkron:\n {Mrot5-Mrot1}")
+    print(f"Rotated M with einsum:\n {Mrot2 - Mrot1}")
+    print(f"Rotated M with reshape:\n {Mrot3 - Mrot1}")
+    print(f"Rotated M with kron:\n {Mrot4 - Mrot1}")
+    print(f"Rotated M with spkron:\n {Mrot5 - Mrot1}")
 
     M_rot00 = rotate_spinor_matrix(M, 0, 0)
     M_rot00_sph = rotate_Matrix_from_z_to_spherical(M, 0, 0)
-    print(f"Rotated M with theta=0, phi=0 compared with M:\n {M_rot00-M}")
-    print(f"Rotated M with theta=0, phi=0 compared with M:\n {M_rot00_sph-M}")
+    print(f"Rotated M with theta=0, phi=0 compared with M:\n {M_rot00 - M}")
+    print(f"Rotated M with theta=0, phi=0 compared with M:\n {M_rot00_sph - M}")
 
 
 def test_rotate_spinor_oneblock():

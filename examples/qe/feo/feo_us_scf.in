@@ -1,0 +1,36 @@
+&CONTROL
+  calculation = 'scf'
+  prefix = 'feo_us'
+  outdir = './tmp'
+  pseudo_dir = './pseudo'
+  tprnfor = .true.
+/
+&SYSTEM
+  ibrav = 0
+  nat = 2
+  ntyp = 2
+  ecutwfc = 60
+  ecutrho = 720
+  nspin = 2
+  starting_magnetization(1) = 0.4
+  occupations = 'smearing'
+  smearing = 'fd'
+  degauss = 0.01
+  nbnd = 24
+/
+&ELECTRONS
+  conv_thr = 1e-8
+  mixing_beta = 0.2
+/
+ATOMIC_SPECIES
+Fe 55.845 Fe.pbe-spn-rrkjus_psl.1.0.0.UPF
+O 15.999 O.pbe-rrkjus.UPF
+CELL_PARAMETERS bohr
+ 0.000000  4.095000  4.095000
+ 4.095000  0.000000  4.095000
+ 4.095000  4.095000  0.000000
+ATOMIC_POSITIONS crystal
+Fe 0.00 0.00 0.00
+O  0.50 0.50 0.50
+K_POINTS automatic
+  8 8 8 0 0 0

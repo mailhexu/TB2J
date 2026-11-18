@@ -71,6 +71,9 @@ def run_siesta2J():
         read_H_soc=args.split_soc,
         orth=args.orth,
         index_magnetic_atoms=index_magnetic_atoms,
+        use_gpu=args.use_gpu,
+        vectorize_energy=args.vectorize_energy,
+        e_batch_size=args.e_batch_size,
     )
 
 

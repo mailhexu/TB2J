@@ -38,6 +38,7 @@ class WannierManager(Manager):
             )
 
         description = self.description(path, prefix_up, prefix_dn, prefix_SOC, colinear)
+        description += self._ws_scheme_note(tbmodels)
         kwargs["description"] = description
 
         super().__init__(atoms, tbmodels, basis, colinear=colinear, **kwargs)
@@ -110,6 +111,21 @@ e.g. if the spins are along z, the xz, yz, zz, zx, zy components and the z compo
 If you need these component, try to do three calculations with spin along x, y, z,  or use structure with z rotated to x, y and z. And then use TB2J_merge.py to get the full set of parameters.\n"""
 
         return description
+
+    @staticmethod
+    def _ws_scheme_note(tbmodels):
+        """Record which Wigner-Seitz interpolation scheme was auto-detected.
+
+        Auto-detection lives in HamiltonIO's ``read_from_wannier_dir``; this
+        only records the outcome in the run description. Accepts either a single
+        model or a ``(up, dn)`` tuple.
+        """
+        model = tbmodels[0] if isinstance(tbmodels, (tuple, list)) else tbmodels
+        if getattr(model, "use_ws", False):
+            scheme = "per-orbital-pair Wigner-Seitz weights (_wsvec.dat, scheme 2)"
+        else:
+            scheme = "global ndegen Wigner-Seitz weights (scheme 1)"
+        return f"Wannier90 WS interpolation: {scheme}.\n"
 
 
 gen_exchange = WannierManager

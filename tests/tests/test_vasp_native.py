@@ -1,0 +1,687 @@
+"""Tests for the VASP native PAW export reader."""
+
+import io
+
+import numpy as np
+import pytest
+
+from TB2J.interfaces.vasp_native import (
+    HARTREE_TO_EV,
+    VaspIbzExpansionPlan,
+    _read_v6_expansion_plan,
+    read_vasp_native,
+)
+
+
+def _write_test_native(path, version=4, lps_typ=None, nprod_padding=0):
+    """Write a minimal VASP stream in the Fortran array order."""
+    nspin = 2
+    ncdij = 2
+    nkpt = 8  # 2x2x2 mesh
+    nband = 4
+    nprod = 4 + nprod_padding  # 2 ions × 2 channels, potentially padded by VASP
+    nions = 2
+    ntyp = 1
+    lmdim_max = 2
+
+    kpts_3d = np.array(
+        [
+            [i * 0.5, j * 0.5, k * 0.5]
+            for i in range(2)
+            for j in range(2)
+            for k in range(2)
+        ]
+    )
+    wts = np.ones(nkpt) / nkpt
+
+    with open(path, "wb") as f:
+
+        def wi(value):
+            f.write(np.array(value, dtype="<i4").tobytes())
+
+        def wr(value):
+            f.write(np.asarray(value, dtype="<f8").tobytes(order="F"))
+
+        wi(20260812)
+        wi(version)
+        wi(nspin)
+        wi(ncdij)
+        wi(nkpt)
+        wi(nband)
+        wi(nprod)
+        wi(nions)
+        wi(ntyp)
+        wi(lmdim_max)
+        if version == 5:
+            lps_typ = (0, 0) if lps_typ is None else tuple(lps_typ)
+            wi(len(lps_typ))
+        wr(np.eye(3) * 5.0)
+        wr(np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]]).T)
+        wi([0, 2])
+        wi([2, 2])
+        wi([1, 1])
+        wi([2])
+        if version == 5:
+            wi(lps_typ)
+            qtot = np.zeros((len(lps_typ), len(lps_typ), 1), dtype=float)
+            qtot[:2, :2, 0] = [[0.8, 0.1], [0.1, 0.6]]
+            wr(qtot)
+        wr([26.0])
+        f.write(b"Fe")
+        wr(kpts_3d.T)
+        wr(wts)
+        wr(5.0)
+
+        eigenvalues = np.arange(nband * nkpt * nspin, dtype=float).reshape(
+            nband, nkpt, nspin, order="F"
+        )
+        wr(eigenvalues)
+        wr(np.full((nband, nkpt, nspin), 0.5, dtype=float))
+
+        cproj = (
+            np.arange(nprod * nband * nkpt * nspin, dtype=float)
+            .reshape(nprod, nband, nkpt, nspin, order="F")
+            .astype(np.complex128)
+        )
+        cproj += 1j * (cproj + 1)
+        f.write(cproj.astype("<c16").tobytes(order="F"))
+
+        cdij = np.zeros(
+            (lmdim_max, lmdim_max, nions, ncdij), dtype=np.complex128, order="F"
+        )
+        for spin in range(ncdij):
+            for ion in range(nions):
+                cdij[0, 0, ion, spin] = 1.0 + spin * 0.5
+                cdij[1, 1, ion, spin] = 2.0 + spin * 0.5
+                cdij[0, 1, ion, spin] = 0.3
+                cdij[1, 0, ion, spin] = 0.3
+        f.write(cdij.astype("<c16").tobytes(order="F"))
+
+    return path
+
+
+def test_read_vasp_native_decodes_fortran_layout(tmp_path):
+    snapshot = read_vasp_native(_write_test_native(tmp_path / "test.bin"))
+
+    assert snapshot.kpoints.shape == (8, 3)
+    assert np.allclose(snapshot.kpoints[1], [0.0, 0.0, 0.5])
+    assert snapshot.eigenvalues.shape == (2, 8, 4)
+    assert snapshot.eigenvalues[1, 7, 3] == 63.0
+    assert snapshot.coefficients.shape == (2, 8, 4, 4)
+    assert snapshot.coefficients.dtype == complex
+    assert snapshot.population_metric_matrix is None
+    assert snapshot.coefficients[1, 7, 3, 3] == pytest.approx(256 - 255j)
+    assert len(snapshot.site_layout) == 2
+    assert snapshot.atomic_numbers.tolist() == [26, 26]
+    assert snapshot.operators.policy == "authoritative_total"
+    assert snapshot.provenance["source_code"] == "vasp"
+
+
+def test_read_vasp_native_preserves_site_spin_difference(tmp_path):
+    snapshot = read_vasp_native(_write_test_native(tmp_path / "test.bin"))
+
+    for operator in snapshot.operators.components[0].values:
+        assert np.allclose(operator, np.eye(2) * (-0.5 / HARTREE_TO_EV))
+
+
+def test_read_vasp_native_v5_builds_qtot_population_metric(tmp_path):
+    snapshot = read_vasp_native(_write_test_native(tmp_path / "test.bin", version=5))
+
+    expected = np.zeros((4, 4))
+    expected[:2, :2] = [[0.8, 0.1], [0.1, 0.6]]
+    expected[2:, 2:] = [[0.8, 0.1], [0.1, 0.6]]
+    np.testing.assert_allclose(snapshot.population_metric_matrix, expected)
+    assert snapshot.population_metric == "VASP PAW AE partial-wave overlap QTOT"
+    assert [
+        (channel.l, channel.radial) for channel in snapshot.site_layout[0].channels
+    ] == [
+        (0, 0),
+        (0, 1),
+    ]
+
+
+def test_read_vasp_native_v5_discards_padded_cproj_rows(tmp_path):
+    snapshot = read_vasp_native(
+        _write_test_native(
+            tmp_path / "test.bin",
+            version=5,
+            lps_typ=(0, 0, -1),
+            nprod_padding=2,
+        )
+    )
+
+    assert snapshot.coefficients.shape == (2, 8, 4, 4)
+    assert [
+        (layout.projector_slice.start, layout.projector_slice.stop)
+        for layout in snapshot.site_layout
+    ] == [(0, 2), (2, 4)]
+    assert [
+        (channel.l, channel.radial) for channel in snapshot.site_layout[0].channels
+    ] == [
+        (0, 0),
+        (0, 1),
+    ]
+    expected_metric = np.kron(
+        np.eye(2), np.array([[0.8, 0.1], [0.1, 0.6]], dtype=float)
+    )
+    np.testing.assert_allclose(snapshot.population_metric_matrix, expected_metric)
+    for operator in snapshot.operators.components[0].values:
+        np.testing.assert_allclose(operator, -0.5 * np.eye(2) / HARTREE_TO_EV)
+
+
+def test_read_vasp_native_rejects_stream_shorter_than_ion_layout(tmp_path):
+    with pytest.raises(ValueError, match="shorter than its ion projector layout"):
+        read_vasp_native(
+            _write_test_native(
+                tmp_path / "test.bin",
+                version=5,
+                lps_typ=(0, 0, -1),
+                nprod_padding=-1,
+            )
+        )
+
+
+def test_read_vasp_native_rejects_bad_magic(tmp_path):
+    path = tmp_path / "bad.bin"
+    path.write_bytes(np.array(999, dtype="<i4").tobytes())
+
+    with pytest.raises(ValueError, match="invalid magic"):
+        read_vasp_native(path)
+
+
+# ---------------------------------------------------------------------------
+# V6 IBZ expansion plan decoder tests
+# ---------------------------------------------------------------------------
+
+
+def _write_v6_expansion_section(
+    f,
+    nspin,
+    nproj,
+    nkpt_bz,
+    nkpt_ibz,
+    *,
+    bad_kpoint_mode=False,
+    bad_parent=False,
+    bad_spin=False,
+    conjugate_flags=None,
+    spinflip_flags=None,
+    action_factory=None,
+):
+    """Write a v6 IBZ expansion section to an open binary file."""
+
+    def wi(value):
+        f.write(np.array(value, dtype="<i4").tobytes())
+
+    def wr(value):
+        f.write(np.asarray(value, dtype="<f8").tobytes(order="F"))
+
+    def wc(value):
+        f.write(np.asarray(value, dtype=complex).astype("<c16").tobytes(order="F"))
+
+    kpt_mode = 999 if bad_kpoint_mode else 1
+    wi(kpt_mode)
+    wi(nkpt_bz)
+
+    bz_kpts = np.array(
+        [
+            [i * 0.5, j * 0.5, k * 0.5]
+            for i in range(2)
+            for j in range(2)
+            for k in range(2)
+        ]
+    )[:nkpt_bz]
+    wr(bz_kpts.T)
+
+    if bad_parent:
+        parent = np.full(nkpt_bz, nkpt_ibz + 5, dtype="<i4")
+    else:
+        parent = (np.arange(nkpt_bz) % nkpt_ibz).astype("<i4")
+    f.write(parent.tobytes())
+
+    if bad_spin:
+        src_spin = np.full((nspin, nkpt_bz), nspin + 5, dtype="<i4")
+    else:
+        src_spin = np.tile(np.arange(nspin, dtype="<i4")[:, None], (1, nkpt_bz))
+    f.write(np.asarray(src_spin, dtype="<i4").tobytes(order="F"))
+
+    if conjugate_flags is None:
+        conjugate_flags = np.zeros((nspin, nkpt_bz), dtype="<i4")
+    f.write(np.asarray(conjugate_flags, dtype="<i4").tobytes(order="F"))
+
+    if action_factory is not None:
+        actions = action_factory(nproj, nspin, nkpt_bz)
+    else:
+        actions = np.zeros((nproj, nproj, nspin, nkpt_bz), dtype=np.complex128)
+        for s in range(nspin):
+            for k in range(nkpt_bz):
+                actions[:, :, s, k] = np.eye(nproj, dtype=np.complex128)
+    wc(actions)
+
+    wi(np.zeros(nkpt_bz, dtype="<i4"))
+
+    if spinflip_flags is None:
+        spinflip_flags = np.zeros(nkpt_bz, dtype="<i4")
+    f.write(spinflip_flags.tobytes())
+
+
+def _write_test_native_v6(path, *, nprod_padding=0, **kwargs):
+    """Write a minimal VASP v6 IBZ stream for testing."""
+    nspin = 2
+    ncdij = 2
+    nkpt_ibz = 2
+    nband = 4
+    nprod_stream = 4 + nprod_padding
+    nprod_physical = 4
+    nions = 2
+    ntyp = 1
+    lmdim_max = 2
+    lmax_max = 2
+    nkpt_bz = 8
+
+    ibz_kpts = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
+    ibz_wts = np.array([0.5, 0.5])
+
+    with open(path, "wb") as f:
+
+        def wi(value):
+            f.write(np.array(value, dtype="<i4").tobytes())
+
+        def wr(value):
+            f.write(np.asarray(value, dtype="<f8").tobytes(order="F"))
+
+        def wc(value):
+            f.write(np.asarray(value, dtype=complex).astype("<c16").tobytes(order="F"))
+
+        wi(20260812)
+        wi(6)
+        wi(nspin)
+        wi(ncdij)
+        wi(nkpt_ibz)
+        wi(nband)
+        wi(nprod_stream)
+        wi(nions)
+        wi(ntyp)
+        wi(lmdim_max)
+        wi(lmax_max)
+        wr(np.eye(3) * 5.0)
+        wr(np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]]).T)
+        wi([0, 2])
+        wi([2, 2])
+        wi([1, 1])
+        wi([2])
+        wi([0, 0])
+        qtot = np.zeros((lmax_max, lmax_max, ntyp), dtype=float)
+        qtot[:2, :2, 0] = [[0.8, 0.1], [0.1, 0.6]]
+        wr(qtot)
+        wr([26.0])
+        f.write(b"Fe")
+
+        _write_v6_expansion_section(
+            f, nspin, nprod_physical, nkpt_bz, nkpt_ibz, **kwargs
+        )
+
+        wr(ibz_kpts.T)
+        wr(ibz_wts)
+        wr(5.0)
+        eigenvalues = np.arange(nband * nkpt_ibz * nspin, dtype=float).reshape(
+            nband, nkpt_ibz, nspin, order="F"
+        )
+        wr(eigenvalues)
+        wr(np.full((nband, nkpt_ibz, nspin), 0.5, dtype=float))
+
+        cproj = (
+            np.arange(nprod_stream * nband * nkpt_ibz * nspin, dtype=float)
+            .reshape(nprod_stream, nband, nkpt_ibz, nspin, order="F")
+            .astype(np.complex128)
+        )
+        cproj += 1j * (cproj + 1)
+        wc(cproj)
+
+        cdij = np.zeros(
+            (lmdim_max, lmdim_max, nions, ncdij),
+            dtype=np.complex128,
+            order="F",
+        )
+        for spin in range(ncdij):
+            for ion in range(nions):
+                cdij[0, 0, ion, spin] = 1.0 + spin * 0.5
+                cdij[1, 1, ion, spin] = 2.0 + spin * 0.5
+                cdij[0, 1, ion, spin] = 0.3
+                cdij[1, 0, ion, spin] = 0.3
+        wc(cdij)
+
+    return path
+
+
+def test_v6_read_expansion_plan_identity(tmp_path):
+    """Identity expansion plan decodes with exact documented shapes."""
+    path = tmp_path / "plan.bin"
+    nspin, nproj, nkpt_bz, nkpt_ibz = 2, 4, 8, 2
+    with open(path, "wb") as f:
+        _write_v6_expansion_section(f, nspin, nproj, nkpt_bz, nkpt_ibz)
+    with open(path, "rb") as f:
+        plan = _read_v6_expansion_plan(f, nspin, nproj, nkpt_ibz)
+
+    assert isinstance(plan, VaspIbzExpansionPlan)
+    assert plan.kpoint_storage_mode == 1
+    np.testing.assert_allclose(plan.bz_kpoints[1], [0.0, 0.0, 0.5])
+    assert plan.source_spin.shape == (nspin, nkpt_bz)
+    assert plan.source_spin.dtype == np.intp
+    assert plan.conjugate.shape == (nspin, nkpt_bz)
+    assert plan.conjugate.dtype == bool
+    assert plan.projector_actions.shape == (nspin, nkpt_bz, nproj, nproj)
+    assert plan.projector_actions.dtype == complex
+    assert plan.symmetry_operation.shape == (nkpt_bz,)
+    assert plan.spinflip.shape == (nkpt_bz,)
+    assert plan.spinflip.dtype == bool
+    np.testing.assert_array_equal(
+        plan.source_spin, np.tile(np.arange(nspin)[:, None], (1, nkpt_bz))
+    )
+    assert not np.any(plan.conjugate)
+    assert not np.any(plan.spinflip)
+    for s in range(nspin):
+        for k in range(nkpt_bz):
+            np.testing.assert_allclose(
+                plan.projector_actions[s, k], np.eye(nproj, dtype=complex)
+            )
+
+
+def test_v6_read_expansion_plan_conjugate_and_spinflip(tmp_path):
+    """Conjugation and spinflip flags decode as booleans."""
+    path = tmp_path / "plan.bin"
+    nspin, nproj, nkpt_bz, nkpt_ibz = 2, 4, 8, 2
+    conj_flags = np.zeros((nspin, nkpt_bz), dtype="<i4")
+    conj_flags[1, 3] = 1
+    conj_flags[0, 5] = 1
+    spinflip_flags = np.zeros(nkpt_bz, dtype="<i4")
+    spinflip_flags[2] = 1
+    with open(path, "wb") as f:
+        _write_v6_expansion_section(
+            f,
+            nspin,
+            nproj,
+            nkpt_bz,
+            nkpt_ibz,
+            conjugate_flags=conj_flags,
+            spinflip_flags=spinflip_flags,
+        )
+    with open(path, "rb") as f:
+        plan = _read_v6_expansion_plan(f, nspin, nproj, nkpt_ibz)
+
+    assert plan.conjugate[1, 3]
+    assert plan.conjugate[0, 5]
+    assert not plan.conjugate[0, 0]
+    assert plan.spinflip[2]
+    assert not plan.spinflip[0]
+
+
+def test_v6_read_expansion_plan_custom_action(tmp_path):
+    """Non-identity action values survive the Fortran round-trip."""
+    path = tmp_path / "plan.bin"
+    nspin, nproj, nkpt_bz, nkpt_ibz = 2, 2, 4, 2
+
+    def custom_actions(nproj, nspin, nkpt_bz):
+        acts = np.zeros((nproj, nproj, nspin, nkpt_bz), dtype=np.complex128)
+        acts[0, 0, 0, 0] = 0.5 + 0.5j
+        acts[1, 0, 0, 0] = -0.5 + 0.5j
+        acts[0, 1, 0, 0] = 0.5 - 0.5j
+        acts[1, 1, 0, 0] = 0.5 + 0.5j
+        return acts
+
+    with open(path, "wb") as f:
+        _write_v6_expansion_section(
+            f, nspin, nproj, nkpt_bz, nkpt_ibz, action_factory=custom_actions
+        )
+    with open(path, "rb") as f:
+        plan = _read_v6_expansion_plan(f, nspin, nproj, nkpt_ibz)
+
+    expected = np.array([[0.5 + 0.5j, 0.5 - 0.5j], [-0.5 + 0.5j, 0.5 + 0.5j]])
+    np.testing.assert_allclose(plan.projector_actions[0, 0], expected)
+
+
+def test_v6_read_expansion_plan_rejects_bad_kpoint_mode(tmp_path):
+    path = tmp_path / "plan.bin"
+    with open(path, "wb") as f:
+        _write_v6_expansion_section(f, 2, 4, 8, 2, bad_kpoint_mode=True)
+    with open(path, "rb") as f:
+        with pytest.raises(ValueError, match="kpoint_storage_mode"):
+            _read_v6_expansion_plan(f, 2, 4, 2)
+
+
+def test_v6_read_expansion_plan_rejects_bad_parent(tmp_path):
+    path = tmp_path / "plan.bin"
+    with open(path, "wb") as f:
+        _write_v6_expansion_section(f, 2, 4, 8, 2, bad_parent=True)
+    with open(path, "rb") as f:
+        with pytest.raises(ValueError, match="parent_ibz"):
+            _read_v6_expansion_plan(f, 2, 4, 2)
+
+
+def test_v6_read_expansion_plan_rejects_bad_spin(tmp_path):
+    path = tmp_path / "plan.bin"
+    with open(path, "wb") as f:
+        _write_v6_expansion_section(f, 2, 4, 8, 2, bad_spin=True)
+    with open(path, "rb") as f:
+        with pytest.raises(ValueError, match="source_spin"):
+            _read_v6_expansion_plan(f, 2, 4, 2)
+
+
+def test_read_vasp_native_v6_expands_to_full_bz(tmp_path):
+    """v6 stream expands to a valid full-BZ PawProjectorSnapshot."""
+    snapshot = read_vasp_native(_write_test_native_v6(tmp_path / "test_v6.bin"))
+
+    assert snapshot.kpoint_mode == "full_bz"
+    assert snapshot.kpoints.shape == (8, 3)
+    assert snapshot.eigenvalues.shape == (2, 8, 4)
+    assert snapshot.coefficients.shape == (2, 8, 4, 4)
+    assert np.isclose(snapshot.weights.sum(), 1.0)
+    assert np.allclose(snapshot.weights, 1.0 / 8)
+    assert snapshot.provenance["kpoint_storage"] == "ibz"
+    assert snapshot.provenance["expanded_by"] == "tb2j.vasp_native"
+    assert snapshot.provenance["nkpt_ibz"] == 2
+    assert snapshot.provenance["nkpt_bz"] == 8
+
+
+def test_read_vasp_native_v6_padded_stream_uses_physical_proj_count(tmp_path):
+    """NPROD padding consumed for CPROJ alignment but actions use ion layout."""
+    path = _write_test_native_v6(tmp_path / "test_v6_pad.bin", nprod_padding=2)
+    snapshot = read_vasp_native(path)
+
+    assert snapshot.coefficients.shape == (2, 8, 4, 4)
+    assert snapshot.provenance["stream_projector_capacity"] == 6
+    assert snapshot.provenance["nkpt_bz"] == 8
+
+
+def test_read_vasp_native_v6_rejects_truncated_header(tmp_path):
+    path = tmp_path / "trunc.bin"
+    path.write_bytes(np.array([20260812, 6], dtype="<i4").tobytes())
+    with pytest.raises(Exception):
+        read_vasp_native(path)
+
+
+def test_read_vasp_native_v6_expansion_applies_action_correctly(tmp_path):
+    """Non-trivial action and conjugation route through to expanded coefficients."""
+    path = tmp_path / "test_v6_action.bin"
+
+    nspin = 2
+    nproj = 4
+    nkpt_ibz = 2
+    nkpt_bz = 8
+    nband = 3
+    nprod_stream = nproj
+    nions = 2
+    ntyp = 1
+    lmdim_max = 2
+    lmax_max = 2
+
+    # Parent CPROJ: fill IBZ point 0 spin-0 with a known pattern.
+    cproj_ibz = np.zeros((nprod_stream, nband, nkpt_ibz, nspin), dtype=np.complex128)
+    for n in range(nband):
+        for p in range(nproj):
+            cproj_ibz[p, n, 0, 0] = complex(n + 1, p + 1)
+
+    # Action for spin=0, kpt=0: swap projector pairs (0↔2, 1↔3).
+    swap = np.array(
+        [[0, 0, 1, 0], [0, 0, 0, 1], [1, 0, 0, 0], [0, 1, 0, 0]],
+        dtype=np.complex128,
+    )
+
+    def custom_actions(nproj, nspin, nkpt_bz):
+        acts = np.zeros((nproj, nproj, nspin, nkpt_bz), dtype=np.complex128)
+        for s in range(nspin):
+            for k in range(nkpt_bz):
+                acts[:, :, s, k] = np.eye(nproj, dtype=np.complex128)
+        # Override spin=0, kpt=0 with the swap.
+        acts[:, :, 0, 0] = swap
+        return acts
+
+    # Conjugation for spin=1, kpt=0.
+    conj_flags = np.zeros((nspin, nkpt_bz), dtype="<i4")
+    conj_flags[1, 0] = 1
+
+    with open(path, "wb") as f:
+
+        def wi(v):
+            f.write(np.array(v, dtype="<i4").tobytes())
+
+        def wr(v):
+            f.write(np.asarray(v, dtype="<f8").tobytes(order="F"))
+
+        def wc(v):
+            f.write(np.asarray(v, dtype=complex).astype("<c16").tobytes(order="F"))
+
+        wi(20260812)
+        wi(6)
+        wi(nspin)
+        wi(2)  # ncdij
+        wi(nkpt_ibz)
+        wi(nband)
+        wi(nprod_stream)
+        wi(nions)
+        wi(ntyp)
+        wi(lmdim_max)
+        wi(lmax_max)
+        wr(np.eye(3) * 5.0)
+        wr(np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]]).T)
+        wi([0, 2])
+        wi([2, 2])
+        wi([1, 1])
+        wi([2])
+        wi([0, 0])
+        wr(np.zeros((lmax_max, lmax_max, ntyp), dtype=float))
+        wr([26.0])
+        f.write(b"Fe")
+        _write_v6_expansion_section(
+            f,
+            nspin,
+            nproj,
+            nkpt_bz,
+            nkpt_ibz,
+            conjugate_flags=conj_flags,
+            action_factory=custom_actions,
+        )
+        ibz_kpts = np.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
+        wr(ibz_kpts.T)
+        wr(np.array([0.5, 0.5]))
+        wr(5.0)
+        wr(np.zeros((nband, nkpt_ibz, nspin), dtype=float))
+        wr(np.full((nband, nkpt_ibz, nspin), 0.5, dtype=float))
+        wc(cproj_ibz)
+        wc(
+            np.zeros(
+                (lmdim_max, lmdim_max, nions, 2),
+                dtype=np.complex128,
+                order="F",
+            )
+        )
+
+    snapshot = read_vasp_native(path)
+
+    # Verify swap action at spin=0, kpt=0.
+    expected_parent = cproj_ibz[:nproj, :, 0, 0]  # (nproj, nband)
+    expected_swapped = (swap @ expected_parent).T  # (nband, nproj)
+    # Remove Bloch phase at k=0 (identity, no phase).
+    np.testing.assert_allclose(
+        snapshot.coefficients[0, 0], expected_swapped, atol=1e-10
+    )
+
+    # Verify identity action at spin=0, kpt=1 (parent=1, empty CPROJ).
+    np.testing.assert_allclose(snapshot.coefficients[0, 1], 0.0, atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Merged single-file export: CSO section appended after the native stream
+# ---------------------------------------------------------------------------
+
+
+def _cso_section_bytes() -> bytes:
+    """Serialize a minimal v3 CSO dump exactly as ``TB2J_CSO_WRITE_DUMP`` does.
+
+    This mirrors the section the patched VASP export appends to the end of
+    ``tb2j_native.bin`` in single-file mode (magic 20260927, version 3,
+    then the record stream).  Kept inline so this suite does not depend on
+    the VASP_TB2J_patch repository.
+    """
+    nions, ntyp, lmdim, nmax = 2, 1, 2, 8
+    nkpts, nbands = 1, 1
+    buf = io.BytesIO()
+
+    def wi(v):
+        buf.write(np.array(v, dtype="<i4").tobytes())
+
+    def wr(v):
+        buf.write(np.array(v, dtype="<f8").tobytes())
+
+    wi([20260927, 3])
+    wi([nions, ntyp, lmdim, nmax, 4, 1])
+    wr([0.0, 0.0, 1.0])
+    wr([0.0, 0.0])
+    wi([2, nkpts, nbands, nbands])  # ispin, nkpts, nbands, nb_tot
+    wr([6.25])  # efermi
+    wi([20260812, 7])  # companion native identity
+    wi([2, 1])  # lmmax, lmax
+    wi([2])  # lps
+    wr([2.0, 4.0])  # zcore, zvalf_orig
+    buf.write(b"Fe")
+    wi([1, 1])  # ityp
+    wi([nmax, nmax])  # nmax_ion
+    wr(np.zeros(3 * nkpts))
+    wr(np.full(nkpts, 1.0 / nkpts))
+    buf.write(np.zeros((nions, 4, lmdim, lmdim), dtype="<c16").tobytes())
+    buf.write(np.zeros((nions, 4, lmdim, lmdim), dtype="<c16").tobytes())
+    wr(np.zeros(nmax * nions))
+    wr([14.39964, 7.45596e-6, 0.529177249])  # felect, invmc2, autoa
+    wr(np.zeros(nmax * nions))
+    return buf.getvalue()
+
+
+def test_read_vasp_native_tolerates_appended_cso_section(tmp_path):
+    """Merged single-file export leaves the native snapshot byte-for-byte.
+
+    The CSO dump section is appended after the native records; the reader
+    consumes declared counts only, so the trailing section must be invisible.
+    """
+    pristine = _write_test_native_v6(tmp_path / "pristine.bin")
+    merged = tmp_path / "tb2j_native.bin"
+    merged.write_bytes(pristine.read_bytes() + _cso_section_bytes())
+
+    expected = read_vasp_native(pristine)
+    snapshot = read_vasp_native(merged)
+
+    assert snapshot.kpoint_mode == expected.kpoint_mode
+    for name in (
+        "kpoints",
+        "weights",
+        "eigenvalues",
+        "occupations",
+        "coefficients",
+        "cell",
+        "positions",
+        "atomic_numbers",
+    ):
+        np.testing.assert_allclose(
+            getattr(snapshot, name), getattr(expected, name), atol=0, err_msg=name
+        )
+    assert snapshot.site_layout == expected.site_layout
+    assert dict(snapshot.provenance) == dict(expected.provenance)

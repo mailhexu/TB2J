@@ -27,6 +27,20 @@ Welcome to TB2J's documentation!
    src/convention.rst
    src/tutorial.rst
    src/applications.rst
+   src/magnon_theory.md
+   src/magnon_band.rst
+   src/projector_green.rst
+   src/spiral.rst
+   src/spiral_response.md
+   src/siesta_spiral_cli.md
+   src/qe_projector.rst
+   src/split_soc_gpaw.rst
+   src/split_soc_abinit_paw.rst
+   src/split_soc_abinit_nc.rst
+   src/split_soc_vasp.rst
+   src/abinit_savetb2j_schema.rst
+   src/sprkkr_magnon.md
+   src/edit.md
    src/extend.rst
    src/roadmap.md
    src/ecosystem.md
@@ -41,4 +55,3 @@ Indices and tables
 ==================
 
 * :ref:`genindex`
-
