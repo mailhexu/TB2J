@@ -427,6 +427,7 @@ class ExchangeCL2(ExchangeCL):
         print("Green's function Calculation started.")
 
         npole = len(self.contour.path)
+        # MathDoc: tb2j/cfr2-integration-contract; normalized full-path weights.
         weights = self.contour.weights
 
         if self.nproc == 1:
@@ -450,16 +451,6 @@ class ExchangeCL2(ExchangeCL):
 
             for key, val in JJ_list.items():
                 self.JJ[key] += val * w
-
-        # Apply integration factor (e.g. -pi/2 for CFR)
-        if npole > 0:
-            dummy = np.zeros(npole)
-            dummy[0] = 1.0
-            factor = self.contour.integrate_values(dummy) / weights[0]
-            for key in self.Jorb:
-                self.Jorb[key] *= factor
-            for key in self.JJ:
-                self.JJ[key] *= factor
 
         self.get_rho_atom()
 

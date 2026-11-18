@@ -313,6 +313,8 @@ class ExchangePert2GPU(ExchangePert2):
         self._prepare_dGR_jax(Rpts, Rset, self.short_Rlist, self.epc, self.Ru)
 
         npole = len(self.contour.path)
+        # MathDoc: tb2j/cfr2-integration-contract; normalized weights include
+        # the moment sample for the metric-dressed density integrand.
         weights = self.contour.weights
 
         self.A_ijR = defaultdict(lambda: np.zeros((4, 4), dtype=complex))
@@ -352,24 +354,9 @@ class ExchangePert2GPU(ExchangePert2):
                         self.dA_ijR_orb[key] = result["dA_orb"][key] * w
 
         if compute_rho_gf:
+            # MathDoc: tb2j/cfr2-integration-contract; the overlap-dressed
+            # complex population intermediate owns the moment without a shift.
             self.rho = -1.0 / np.pi * self.rho
-            if (
-                hasattr(self, "integration_method")
-                and self.integration_method.lower() == "cfr"
-            ):
-                self.rho = self.rho + 0.5j * np.eye(self.nbasis)
-
-        if npole > 0:
-            dummy = np.zeros(npole)
-            dummy[0] = 1.0
-            factor = self.contour.integrate_values(dummy) / weights[0]
-            for key in self.A_ijR:
-                self.A_ijR[key] *= factor
-                self.dA_ijR[key] *= factor
-            if self.orb_decomposition:
-                for key in self.A_ijR_orb:
-                    self.A_ijR_orb[key] *= factor
-                    self.dA_ijR_orb[key] *= factor
 
         self.get_rho_atom()
         self.A_to_Jtensor()

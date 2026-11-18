@@ -41,7 +41,7 @@ Energy Integration Parameters
     - wann2J.py: Must be provided from DFT calculation
     - For insulators: Can be within band gap
     - For metals: Should match the DFT value
-* smearing: Fermi smearing width for density computation and CFR. Controls the temperature used in numerical integration. Accepts values like "600K" or "0.2eV". Default: 600K.
+* smearing: Fermi smearing width for density computation and CFR2. Controls the temperature used in numerical integration. Accepts values like "600K" or "0.2eV". Default: 600K.
 
 * emin, emax: Energy range for integration, relative to efermi:
    - emin: Should be low enough to include all magnetically relevant states
@@ -49,7 +49,9 @@ Energy Integration Parameters
    - emax: Usually 0.0 (Fermi level). Can be adjusted for charge doping studies
    - Note: Direct DFT doping is preferred over emax adjustment
 
-* nz: Number of energy points for numerical integration of :math:`\int_{emin}^{emax} d\epsilon`
+* nz: Number of geometric-contour energy points or CFR2 pole depth. CFR2 requires an even integer at least 2; odd depths are rejected rather than rounded. Converge the depth for the energy range and temperature.
+
+The default continued-fraction engine is CFR2. The legacy Python ``CFR`` symbol and ``"cfr"`` selector are removed without aliases; use ``CFR2`` / ``"cfr2"``. Hamiltonians, energies and internal smearing widths use eV; a temperature in K is converted with the Boltzmann constant. Normalized weights include the moment sample, not an observable's physical prefactor or a spin-degeneracy factor. Non-orthogonal and projected moments depend on their metric/representation. Existing geometric and dynamical Matsubara methods retain their separate definitions.
 
 Performance and Output Controls
 ^^^^^^^^^^^^^^^^^^^^^^^^^^

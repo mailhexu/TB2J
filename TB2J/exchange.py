@@ -12,7 +12,7 @@ from TB2J.exchange_params import ExchangeParams
 from TB2J.external import p_imap
 from TB2J.green import TBGreen
 from TB2J.io_exchange import SpinIO
-from TB2J.mycfr import CFR
+from TB2J.mycfr import CFR2
 from TB2J.orbmap import map_orbs_matrix
 from TB2J.pauli import pauli_block_all, pauli_block_sigma_norm
 from TB2J.utils import (
@@ -24,7 +24,8 @@ from TB2J.utils import (
 class Exchange(ExchangeParams):
     def __init__(self, tbmodels, atoms, **params):
         self.atoms = atoms
-        self.integration_method = params.pop("integration_method", "CFR")
+        method = params.pop("method", params.pop("integration_method", "cfr2"))
+        self.integration_method = ("cfr2" if method is None else method).lower()
         import inspect
 
         sig = inspect.signature(ExchangeParams.__init__)
@@ -34,8 +35,7 @@ class Exchange(ExchangeParams):
         self._prepare_Rlist()
         self.set_tbmodels(tbmodels)
         self._adjust_emin()
-        method = params.get("method", self.integration_method)
-        self._prepare_elist(method=method)
+        self._prepare_elist(method=self.integration_method)
         self._prepare_basis()
         self._prepare_orb_dict()
         self._prepare_distance()
@@ -87,27 +87,20 @@ class Exchange(ExchangeParams):
         The path has three segments:
          emin --1-> emin + 1j*height --2-> emax+1j*height --3-> emax
         """
-        if method is None:
-            method = "CFR"
+        method = ("cfr2" if method is None else method).lower()
         # if method.lower() == "rectangle":
         #    self.contour.build_path_rectangle(
         #        height=self.height, nz1=self.nz1, nz2=self.nz2, nz3=self.nz3
         #    )
-        if method.lower() == "semicircle":
+        if method == "semicircle":
             self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_semicircle(npoints=self.nz, endpoint=True)
-        elif method.lower() == "legendre":
+        elif method == "legendre":
             self.contour = Contour(self.emin, self.emax)
             self.contour.build_path_legendre(npoints=self.nz, endpoint=True)
-        elif method.lower() == "cfr":
-            # Convert smearing from eV to temperature (K) for CFR
-            # smearing = kB * T => T = smearing / kB
+        elif method == "cfr2":
+            # MathDoc: tb2j/cfr2-integration-contract; weights include the moment.
             T_kelvin = self.smearing / ase.units.kB
-            self.contour = CFR(nz=self.nz, T=T_kelvin)
-        elif method.lower() == "cfr2":
-            T_kelvin = self.smearing / ase.units.kB
-            from TB2J.mycfr import CFR2
-
             self.contour = CFR2(nz=self.nz, T=T_kelvin)
         else:
             raise ValueError(f"The path cannot be of type {method}.")
@@ -954,17 +947,6 @@ class ExchangeNCL(Exchange):
                         self.A_ijR_orb[key] += val * w
                     else:
                         self.A_ijR_orb[key] = val * w
-
-        # Apply integration factor (e.g. -pi/2 for CFR)
-        if npole > 0:
-            dummy = np.zeros(npole)
-            dummy[0] = 1.0
-            factor = self.contour.integrate_values(dummy) / weights[0]
-            for key in self.A_ijR:
-                self.A_ijR[key] *= factor
-            if self.orb_decomposition:
-                for key in self.A_ijR_orb:
-                    self.A_ijR_orb[key] *= factor
 
         self.get_rho_atom()
 

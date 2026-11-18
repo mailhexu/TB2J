@@ -104,7 +104,16 @@ class MAEGreenGPU(MAEGreen):
         )
 
     def _run_angles_batched(
-        self, thetas, phis, e_batch_size, evals_jax, evecs_jax, Hsoc_k, kweights_jax
+        self,
+        thetas,
+        phis,
+        e_batch_size,
+        path_jax,
+        weights_jax,
+        evals_jax,
+        evecs_jax,
+        Hsoc_k,
+        kweights_jax,
     ):
         """
         Inner loop: iterate over angles (Python) and energy batches (JAX).
@@ -115,15 +124,7 @@ class MAEGreenGPU(MAEGreen):
             Real-valued energy contributions for each angle.
         """
         na = len(thetas)
-        npole = len(self.contour.path)
-
-        if e_batch_size >= npole:
-            batches = [range(npole)]
-        else:
-            batches = [
-                range(i, min(i + e_batch_size, npole))
-                for i in range(0, npole, e_batch_size)
-            ]
+        npole = len(path_jax)
 
         es_result = np.zeros(na, dtype=float)
         for ia, (theta, phi) in enumerate(
@@ -136,10 +137,10 @@ class MAEGreenGPU(MAEGreen):
             )(Hsoc_k)
 
             es_angle = np.float64(0.0)
-            for batch_indices in batches:
-                idx = np.array(list(batch_indices))
-                energy_jax = numpy_to_jax(self.contour.path[idx])
-                batch_weights_jax = numpy_to_jax(self.contour.weights[idx])
+            for start in range(0, npole, e_batch_size):
+                stop = min(start + e_batch_size, npole)
+                energy_jax = path_jax[start:stop]
+                batch_weights_jax = weights_jax[start:stop]
 
                 G0K_batch = _eigen_to_G_jax(
                     evals_jax[None, ...],
@@ -175,6 +176,10 @@ class MAEGreenGPU(MAEGreen):
         evals_jax = numpy_to_jax(self.G.evals)
         evecs_jax = numpy_to_jax(self.G.evecs)
         na = len(thetas)
+        # MathDoc: tb2j/cfr2-integration-contract; transfer the full normalized
+        # rule once, including its moment sample, for either execution mode.
+        path_jax = numpy_to_jax(self.contour.path)
+        weights_jax = numpy_to_jax(self.contour.weights)
 
         if not vectorize_energy:
             print("Computing MAE energy-by-energy on GPU.")
@@ -187,18 +192,18 @@ class MAEGreenGPU(MAEGreen):
                     lambda Hk: _rotate_spinor_matrix_einsum_jax(Hk, theta_jax, phi_jax)
                 )(Hsoc_k)
                 es_angle = 0.0
-                for ie, e in enumerate(self.contour.path):
+                for ie in range(len(path_jax)):
                     G0K = _eigen_to_G_jax(
                         evals_jax[None, ...],
                         evecs_jax[None, ...],
                         self.G.efermi,
-                        numpy_to_jax(np.array([e]))[:, None, None],
+                        path_jax[ie : ie + 1, None, None],
                     )  # (1, nk, nb, nb)
                     dE = _get_perturbed_single_angle_jax(
                         G0K, dHi_k, kweights_jax
                     )  # (1,)
-                    w = self.contour.weights[ie]
-                    es_angle += -np.imag(complex(jax_to_numpy(dE[0])) * w) / (2 * np.pi)
+                    es_contribution = jax_to_numpy(dE[0] * weights_jax[ie])
+                    es_angle += -np.imag(complex(es_contribution)) / (2 * np.pi)
                 self.es[ia] += es_angle
         else:
             if e_batch_size is None:
@@ -217,6 +222,8 @@ class MAEGreenGPU(MAEGreen):
                         thetas,
                         phis,
                         e_batch_size,
+                        path_jax,
+                        weights_jax,
                         evals_jax,
                         evecs_jax,
                         Hsoc_k,

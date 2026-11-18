@@ -557,6 +557,8 @@ class ExchangeCLDMFTGPU(ExchangeCLDMFT):
                                         AijRs_orb[key] = [val_orb]
 
         if getattr(self.tbmodel, "is_static", False):
+            # MathDoc: tb2j/cfr2-integration-contract; static density comes
+            # from the shared generalized spectral D*S population.
             self.integrate(
                 AijRs, AijRs_orb, rho_list=None, method=self._exchange_method
             )
@@ -740,6 +742,8 @@ class ExchangeDMFTNCLGPU(ExchangeDMFTNCL):
                                         AijRs_orb[key] = [val_orb]
 
         if getattr(self.tbmodel, "is_static", False):
+            # MathDoc: tb2j/cfr2-integration-contract; static spinor density
+            # uses the shared spectral population and real population traces.
             self.integrate(
                 AijRs, AijRs_orb, rho_list=None, method=self._exchange_method
             )

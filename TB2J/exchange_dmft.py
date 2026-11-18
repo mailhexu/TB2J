@@ -2,6 +2,7 @@ from collections import defaultdict
 from itertools import product
 
 import numpy as np
+from scipy.linalg import eigh
 
 from TB2J.exchange import ExchangeCL, ExchangeNCL
 from TB2J.external import p_map
@@ -71,62 +72,34 @@ class ExchangeDMFTMixin:
             self._compute_static_sigma_density()
 
     def _compute_static_sigma_density(self):
-        """
-        Compute density matrix from eigenvalues of (H+sigma) for static-sigma DMFT.
-        This is more accurate than contour integration for density.
-        """
+        """Build static-sigma metric populations at the configured temperature."""
         from HamiltonIO.model.occupations import myfermi as fermi
 
-        rho_up = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-        rho_dn = np.zeros((self.nbasis, self.nbasis), dtype=complex)
-
-        sigma_static = self.tbmodel.get_sigma(0, ispin=None)
-
-        for ik in range(len(self.G.kpts)):
-            Hk_base = self.tbmodel.get_hamiltonian(self.G.kpts[ik], ispin=0)
-            Hk_up = Hk_base + sigma_static[0]
-            Hk_dn = Hk_base + sigma_static[1]
-
-            # Diagonalize
-            evals_up, evecs_up = np.linalg.eigh(Hk_up)
-            evals_dn, evecs_dn = np.linalg.eigh(Hk_dn)
-
-            # Compute density matrix contribution from this k-point
-            # nspin=2 because we're computing per-spin-channel occupancy (not spin-degenerate)
-            occ_up = fermi(evals_up, self.efermi, width=0.01, nspin=2)
-            occ_dn = fermi(evals_dn, self.efermi, width=0.01, nspin=2)
-
-            Sk = self.G.get_Sk(ik)
-            if Sk is None:
-                # Orthogonal basis
-                rho_up += (
-                    np.einsum("ib,b,jb->ij", evecs_up, occ_up, evecs_up.conj())
-                    * self.G.kweights[ik]
+        # MathDoc: tb2j/cfr2-integration-contract#spectral_density_complex_nonorthogonal
+        sigma_static = np.asarray(self.tbmodel.get_sigma(0, ispin=None))
+        spinor = sigma_static.ndim == 2
+        sigmas = sigma_static[None, ...] if spinor else sigma_static
+        rho = np.zeros((len(sigmas), self.nbasis, self.nbasis), dtype=complex)
+        for ik, kpt in enumerate(self.G.kpts):
+            overlap = self.G.get_Sk(ik)
+            for ispin, sigma in enumerate(sigmas):
+                hamiltonian = (
+                    self.tbmodel.get_hamiltonian(kpt, ispin=0 if spinor else ispin)
+                    + sigma
                 )
-                rho_dn += (
-                    np.einsum("ib,b,jb->ij", evecs_dn, occ_dn, evecs_dn.conj())
-                    * self.G.kweights[ik]
+                eigenvalues, eigenvectors = eigh(hamiltonian, overlap)
+                occupations = fermi(
+                    eigenvalues, self.efermi, width=self.smearing, nspin=2
                 )
-            else:
-                # Non-orthogonal basis
-                rho_up += (
-                    np.einsum("ib,b,jb->ij", evecs_up, occ_up, evecs_up.conj())
-                    @ Sk
-                    * self.G.kweights[ik]
-                )
-                rho_dn += (
-                    np.einsum("ib,b,jb->ij", evecs_dn, occ_dn, evecs_dn.conj())
-                    @ Sk
-                    * self.G.kweights[ik]
-                )
+                density = (eigenvectors * occupations) @ eigenvectors.conj().T
+                # Local population fields use right-metric D*S, not a Hermitian D.
+                if overlap is not None:
+                    density = density @ overlap
+                rho[ispin] += density * self.G.kweights[ik]
 
-        # Store as rho with spin dimension
-        self.rho = np.array([rho_up, rho_dn])
-        total_charge = np.real(np.trace(self.rho[0]) + np.trace(self.rho[1]))
-        total_spin = np.real(np.trace(self.rho[0]) - np.trace(self.rho[1]))
-        print(
-            f"Static sigma density computed from eigenvalues. Total charge: {total_charge:.4f}, Total spin: {total_spin:.4f}"
-        )
+        self.rho = rho[0] if spinor else rho
+        total_charge = np.trace(rho, axis1=-2, axis2=-1).real.sum()
+        print(f"Static sigma spectral density. Total charge: {total_charge:.4f}")
 
     def _prepare_elist(self, method="matsubara"):
         self._exchange_method = method.lower()
@@ -136,11 +109,11 @@ class ExchangeDMFTMixin:
             if self.dmft_mesh is None:
                 raise ValueError(
                     "Matsubara DMFT exchange requires a dynamic self-energy mesh. "
-                    "Use method='cfr' for static-sigma mode."
+                    "Use method='cfr2' for static-sigma mode."
                 )
             self.contour = MatsubaraContour(self.dmft_mesh, self.beta)
         else:
-            # For CFR and other contour methods, delegate to ExchangeCL
+            # For CFR2 and other contour methods, delegate to ExchangeCL
             super()._prepare_elist(method)
 
     def integrate(self, AijRs, AijRs_orb=None, rho_list=None, method="matsubara"):
@@ -170,7 +143,7 @@ class ExchangeDMFTMixin:
                 else:
                     self.rho = 0.5 * eye + 2.0 * T * np.real(rho_sum)
         else:
-            # For CFR and other contour methods, use contour weights
+            # For CFR2 and other contour methods, use contour weights
             for iR in self.R_ijatom_dict:
                 R_vec = self.short_Rlist[iR]
                 for iatom, jatom in self.R_ijatom_dict[iR]:
@@ -211,7 +184,9 @@ class ExchangeDMFTMixin:
                 from TB2J.pauli import pauli_block_all
 
                 rho_pauli = np.array([np.trace(x) * 2 for x in pauli_block_all(tmp)])
-                if getattr(self, "_exchange_method", "").lower() == "matsubara":
+                if getattr(self.tbmodel, "is_static", False) or (
+                    getattr(self, "_exchange_method", "").lower() == "matsubara"
+                ):
                     self.charges[iatom] = np.real(rho_pauli[0])
                     self.spinat[iatom, :] = np.real(rho_pauli[1:])
                 else:

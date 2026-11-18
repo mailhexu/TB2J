@@ -205,6 +205,8 @@ class ExchangeNCLGPU(ExchangeNCL):
         self._prepare_jax_arrays()
 
         npole = len(self.contour.path)
+        # MathDoc: tb2j/cfr2-integration-contract; use normalized full weights.
+        # A tensors are transferred to the host before accumulation.
         weights = self.contour.weights
 
         for i, e in enumerate(
@@ -220,16 +222,6 @@ class ExchangeNCLGPU(ExchangeNCL):
                         self.A_ijR_orb[key] += val * w
                     else:
                         self.A_ijR_orb[key] = val * w
-
-        if npole > 0:
-            dummy = np.zeros(npole)
-            dummy[0] = 1.0
-            factor = self.contour.integrate_values(dummy) / weights[0]
-            for key in self.A_ijR:
-                self.A_ijR[key] *= factor
-            if self.orb_decomposition:
-                for key in self.A_ijR_orb:
-                    self.A_ijR_orb[key] *= factor
 
         self.get_rho_atom()
         self.compute_charge_and_magnetic_moments()

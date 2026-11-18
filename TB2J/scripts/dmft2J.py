@@ -113,7 +113,7 @@ Examples:
         action="store_true",
         help=(
             "Use only the static part of self-energy (Σ(∞) or Σ(∞)-Vdc). "
-            "This enables using CFR contour instead of Matsubara. "
+            "This enables using CFR2 contour instead of Matsubara. "
             "Useful for quick calculations or when frequency dependence is negligible."
         ),
     )
@@ -319,8 +319,8 @@ Examples:
         params.pop("static_sigma", None)
 
         if args.static_sigma:
-            params["method"] = "cfr"
-            logger.info("Using CFR contour for static self-energy mode")
+            params["method"] = "cfr2"
+            logger.info("Using CFR2 contour for static self-energy mode")
         else:
             params["method"] = "matsubara"
         if magnetic_elements:
