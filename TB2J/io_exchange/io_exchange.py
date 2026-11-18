@@ -418,9 +418,16 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     ):
         """
         Return the full exchange tensor of all i and j for cell R.
-        param R (tuple of integers): cell index R
-        returns:
-            Jmat: (3*nspin,3*nspin) matrix.
+
+        Parameters
+        ----------
+        R : tuple of integers
+            cell index R
+
+        Returns
+        -------
+        Jmat : numpy.ndarray
+            (3*nspin, 3*nspin) matrix.
         """
         n3 = self.nspin * 3
         Jmat = np.zeros((n3, n3), dtype=float)
@@ -436,9 +443,16 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     ):
         """
         Return the full exchange tensor of all i and j for cell R.
-        param R (tuple of integers): cell index R
-        returns:
-            Jmat: (nspin,nspin,3,3) matrix.
+
+        Parameters
+        ----------
+        R : tuple of integers
+            cell index R
+
+        Returns
+        -------
+        Jmat : numpy.ndarray
+            (nspin, nspin, 3, 3) matrix.
         """
         n = self.nspin
         Jmat = np.zeros((n, n, 3, 3), dtype=float)
@@ -459,9 +473,16 @@ Generation time: {now.strftime("%y/%m/%d %H:%M:%S")}
     ):
         """
         Return the full exchange tensor of all i and j for cell R.
-        param R (tuple of integers): cell index R
-        returns:
-            Jmat: (nspin,nspin) matrix.
+
+        Parameters
+        ----------
+        R : tuple of integers
+            cell index R
+
+        Returns
+        -------
+        Jmat : numpy.ndarray
+            (nspin, nspin) matrix.
         """
         if Jani or DMI or SIA:
             raise ValueError(
