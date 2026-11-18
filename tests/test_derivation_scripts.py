@@ -21,13 +21,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SYMPY_DIR = REPO_ROOT / "docs" / "sympy"
 TIMEOUT_S = 600.0
 
-#: normative assertion-checked derivation scripts
+#: normative assertion-checked derivation scripts (mode and vertex contracts)
 SCRIPTS = [
     "spin_spiral_generalized_bloch",
     "spiral_force_theorem_J",
     "spiral_green_function_mft",
     "spiral_state_mft",
     "site_boson_modes",
+    "magnon_phonon_vertex",
 ]
 
 
