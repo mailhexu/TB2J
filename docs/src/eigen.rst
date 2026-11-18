@@ -1,11 +1,11 @@
-Writting eigen values and eigenvectors of J(q)
+Writing eigen values and eigenvectors of J(q)
 ================================================
 
 In this section we show how to write the eigen values and eigen vectors for a given q-point mesh.
-With this information, we can estimate the lowest energy spin configuration in the supercells conmensurate to the q-point mesh.
+With this information, we can estimate the lowest energy spin configuration in the supercells commensurate with the q-point mesh.
 
 There is a script within the TB2J package: TB2J_eigen.py, which can be
-write the eigen value and eigen vectors. The command should be run under the TB2J_results directory.
+used to write the eigen values and eigen vectors. The command should be run under the TB2J_results directory.
 
 We can show its usage by:
 

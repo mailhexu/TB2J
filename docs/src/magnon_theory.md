@@ -102,11 +102,6 @@ transforms $\mathbf{J}'(\mathbf{R})$ at each independent $\mathbf{k}$ to build
 the existing $A(\mathbf{k})$, $B(\mathbf{k})$, and $C$ matrices. TB2J accepts a
 known $\mathbf{Q}$; it does not determine the ground-state ordering vector.
 
-```{figure} magnon_band.assets/afm_zone_folding.png
-:alt: Alternating G-type antiferromagnetic chemical cells and directional folding between chemical Gamma/R and magnetic Gamma.
-:width: 100%
-:align: center
-
 For $\mathbf{Q}=(\tfrac12,\tfrac12,\tfrac12)$, alternate chemical cells differ
 by a $\pi$ rotation. **Folding** maps chemical-cell $\Gamma$ and R, which differ
 by $\mathbf{Q}$, to the same magnetic-zone $\Gamma$. Conversely, **unfolding**
@@ -114,12 +109,6 @@ that magnetic-$\Gamma$ mode gives chemical-zone representatives at both
 $\Gamma$ and R$=\mathbf{Q}$. Thus
 $\omega(\Gamma)=\omega(\mathrm{R})$ when the combined translation–spin-rotation
 symmetry is present, although their spectral intensities can differ.
-```
-
-```{figure} magnon_band.assets/afm_magnon_unfolding.png
-:alt: A magnetic-Gamma antiferromagnetic magnon whose uniform transverse x component is at chemical Gamma and staggered transverse y component is at chemical R.
-:width: 100%
-:align: center
 
 This is one magnetic-$\Gamma$ normal mode, drawn in two phases separated by a
 quarter period. With the B sublattice related to A by
@@ -128,7 +117,6 @@ $\delta S_A^x=\delta S_B^x$ and $\delta S_A^y=-\delta S_B^y$. The first is a
 chemical-$\Gamma$ Fourier component and the second is a chemical-R component;
 they are quadratures of the same mode and therefore have the same frequency
 $\omega$.
-```
 
 ## Magnon Hamiltonian Construction
 
@@ -254,7 +242,7 @@ $$
 g(\omega) = \frac{1}{N_k} \sum_{\mathbf{k},n} \frac{1}{\sqrt{2\pi}\sigma} \exp\left(-\frac{(\omega - \omega_{n\mathbf{k}})^2}{2\sigma^2}\right)
 $$
 
-where $\sigma$ is the smearing width (typically 0.001 eV ≈ 0.08 meV).
+where $\sigma$ is the smearing width (typically 0.001 eV, i.e. 1 meV).
 
 ### k-Mesh Sampling
 

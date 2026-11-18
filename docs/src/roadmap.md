@@ -1,6 +1,6 @@
-### Roadmap of TB2J
+# Roadmap of TB2J
 
-#### Features to be implemented
+## Features to be implemented
 - [ ] Magnon band structure for non-FM structures.
 - [ ] Downfolding of ligand-contribution in non-collinear case.
 - [ ] Generalize the merge method.

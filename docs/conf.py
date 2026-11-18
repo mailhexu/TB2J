@@ -75,5 +75,4 @@ html_static_path = ["_static"]
 html_logo = "_static/logo_TB2J_horizon.png"
 html_theme_options = {
     "logo_only": True,
-    "display_version": False,
 }

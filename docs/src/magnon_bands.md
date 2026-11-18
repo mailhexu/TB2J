@@ -253,9 +253,9 @@ TB2J results. You can override this for several reasons:
    the spin wave theory is internally consistent.
 
 2. **Explore Different Magnetic States**: Calculate magnon dispersion for 
-   FM state even if DFT used AFM ordering.
+   the FM state even if DFT used AFM ordering.
 
-3. **Rotate Spin Directions**: DFT calculated with spins along $z$, explore 
+3. **Rotate Spin Directions**: If DFT is calculated with spins along $z$, explore 
    magnons with spins along $x$.
 
 ### Methods to Specify
@@ -299,7 +299,7 @@ The moment values are in $\mu_B$. For spin $S$, use $m = 2S\,\mu_B$.
 
 ### File Format
 
-The `--spin-conf-file` should contain a nspin×3 array with magnetic moments:
+The `--spin-conf-file` should contain an nspin×3 array with magnetic moments:
 
 ```
 0.0  0.0  3.0   # atom 1: 3 μB along +z

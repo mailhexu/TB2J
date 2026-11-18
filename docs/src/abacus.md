@@ -1,13 +1,13 @@
-### Use TB2J with ABACUS
+# Use TB2J with ABACUS
 
-In this tutorial we will learn how to use TB2J with ABACUS.  The TB2J-ABACUS interface is available since TB2J version 0.8.0. There are three types of basis set in ABACUS, the plane-wave (PW), the linear-combinatio of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. For the other type of basis set, the Wannier90 interace can be used instead.  In this tutorial we will use LCAO. 
+In this tutorial we will learn how to use TB2J with ABACUS.  The TB2J-ABACUS interface is available since TB2J version 0.8.0. There are three types of basis set in ABACUS, the plane-wave (PW), the linear-combination of atomic orbitals (LCAO), and the LCAO-in-PW. With the LCAO basis set, TB2J can directly take the output and compute the exchange parameters. For the other type of basis set, the Wannier90 interface can be used instead.  In this tutorial we will use LCAO. 
 
 
-#### Collinear calculation without SOC
+## Collinear calculation without SOC
 
-Let's start from the example of Fe. The example files can be found here: https://github.com/mailhexu/TB2J_examples/tree/master/Abacus/Fe_no_SOC . 
+Let's start from the example of Fe. The example files can be found here: https://github.com/mailhexu/TB2J_examples/tree/master/Abacus/Fe_no_SOC.
 
-First do the ABACUS calculation. Note that the Kohn-Sham Hamiltonian and the overlap matrix is needed as the input to TB2J. We need to put 
+First do the ABACUS calculation. Note that the Kohn-Sham Hamiltonian and the overlap matrix are needed as the input to TB2J. We need to put 
 
 ``` 
 out_mat_hs2  1 
@@ -21,7 +21,7 @@ sufffix Fe
 
 specifies the suffix of the output. Thus the output will be in the directory OUT.Fe when the DFT calculation is finished.
 
- In this calculation, we set the  path to the directory of the DFT calculation, which is the current directory (". ") and the suffix to Fe. 
+ In this calculation, we set the path to the directory of the DFT calculation, which is the current directory (". ") and the suffix to Fe.
 
 Now we can run the abacus2J.py command to calculate the exchange parameters:
 
@@ -29,14 +29,14 @@ Now we can run the abacus2J.py command to calculate the exchange parameters:
 abacus2J.py --path . --suffix Fe --elements Fe  --kmesh 7 7 7
 ```
 
-This first read the atomic structures from th STRU file,  then read the Hamiltonian and the overlap matrices stored in the files named starting from "data-HR-" and "data-SR-" files.  It also read the fermi energy from the OUT.Fe/running\_scf.log file.  
+This first reads the atomic structures from the STRU file, then reads the Hamiltonian and the overlap matrices stored in the "data-HR-" and "data-SR-" files. It also reads the Fermi energy from the OUT.Fe/running\_scf.log file.  
 
-With the command above, we can calculate the J with a 7x7x7 k-point grid. This allows for the calculation of exchange between spin pairs between 7x7x7 supercell.  Note: the kmesh is not dense enough for a practical calculation. For a very dense k-mesh, the --rcut option can be used to set the maximum distance of the magnetic interactions and thus reduce the computation cost. But be sure that the cutoff is not too small. 
+With the command above, we can calculate the J with a 7x7x7 k-point grid. This allows for the calculation of exchange between spin pairs in a 7x7x7 supercell.  Note: the kmesh is not dense enough for a practical calculation. For a very dense k-mesh, the --rcut option can be used to set the maximum distance of the magnetic interactions and thus reduce the computation cost. But be sure that the cutoff is not too small. 
 
-#### Non-collinear calculation with SOC
+## Non-collinear calculation with SOC
 
-The DMI and anisotropic exchange are result of the SOC, therefore requires the DFT calculation to be done with SOC enabled. To get the full set of exchange parameters, a "rotate and merge" procedure is needed, in which several DFT calculations with either the structure or the spin rotated are needed. 
-For each of the non-collinear calcualtion, we compute the exchange parameters from the DFT calculation with the  same command as in the collienar case. 
+The DMI and anisotropic exchange are the result of the SOC and therefore require the DFT calculation to be done with SOC enabled. To get the full set of exchange parameters, a "rotate and merge" procedure is needed, in which several DFT calculations with either the structure or the spins rotated are needed.
+For each of the non-collinear calculations, we compute the exchange parameters from the DFT calculation with the same command as in the collinear case.
 
 ```bash
 abacus2J.py --path . --suffix Fe --elements Fe  --kmesh 7 7 7
@@ -45,7 +45,7 @@ abacus2J.py --path . --suffix Fe --elements Fe  --kmesh 7 7 7
 And then the "TB2J_merge.py" command can be used to get the final spin interaction parameters. 
 
 
-#### Split SOC workflow
+## Split SOC workflow
 
 TB2J supports two split-SOC modes for non-collinear exchange calculations with ABACUS, selected with the `--split_soc` flag:
 
@@ -71,7 +71,7 @@ abacus2J.py --path . --suffix Fe --elements Fe --kmesh 7 7 7 --split_soc two --p
 In both modes, `--output_path` selects the directory where TB2J writes the exchange results.
 
 
-#### Parameters of abacus2J.py
+## Parameters of abacus2J.py
 
 We can use the command 
 

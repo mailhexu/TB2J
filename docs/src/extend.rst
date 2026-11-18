@@ -4,9 +4,9 @@ In this section we show how to extend TB2J to interface with other first princip
 
 Interface TB2J with other first principles or similar codes.
 ------------------------------------------------------------
-To interface a DFT code with TB2J, one has only to implement a tight-binding-like model which has certain methods and properties implemented. TB2J make use of the duck type feature of python, thus any class which has these things can be plugged in. Then the object can be inputted to the TB2J.Exchange class.
+To interface a DFT code with TB2J, one has only to implement a tight-binding-like model which has certain methods and properties implemented. TB2J makes use of the duck type feature of Python, thus any class which has these things can be plugged in. Then the object can be inputted to the TB2J.Exchange class.
 
-The methods and properties of AbstractTB class is listed as below. 
+The methods and properties of the AbstractTB class are listed below.
 
 .. autoclass:: TB2J.myTB.AbstractTB
    :members:
@@ -34,11 +34,11 @@ To pass the tight-binding-like model to the Exchange class is quite simple, here
         description=description)
     exchange.run()
 
-In which the SislWrapper is a AbstractTB-like class which use sisl to read the Hamiltonian and overlap matrix from Siesta output. 
+In which the SislWrapper is an AbstractTB-like class which uses sisl to read the Hamiltonian and overlap matrix from Siesta output. 
 
 Extend the output to other formats
 ----------------------------------
-The calculated magnetic interaction parameters, together with other informations, such as the atomic structure and some metadata, are saved in "SpinIO" object. By making use of it, it is easy to output the parameters to the file format needed. Some parameters, which cannot be calculated in TB2J can also be inputted so that they can be written to the files. The list of stored data is listed below, by using which it should be easy to write the output function as a member of the SpinIO class. A method write_some_format(path) can be implemented and called in the write_all method. Then the format is automatically written after the TB2J calculation.
+The calculated magnetic interaction parameters, together with other information, such as the atomic structure and some metadata, are saved in "SpinIO" object. By making use of it, it is easy to output the parameters to the file format needed. Some parameters, which cannot be calculated in TB2J, can also be inputted so that they can be written to the files. The list of stored data is listed below, by using which it should be easy to write the output function as a member of the SpinIO class. A method write_some_format(path) can be implemented and called in the write_all method. Then the format is automatically written after the TB2J calculation.
 
 .. autoclass:: TB2J.io_exchange.SpinIO
    :members:

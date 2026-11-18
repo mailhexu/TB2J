@@ -1,4 +1,4 @@
-### Symmetrization of the exchange parameters 
+# Symmetrization of the exchange parameters 
 
 The exchange parameters obtained from the output of TB2J may not preserve the symmetry of the crystal. This can be attributed to two reasons:
 
@@ -38,5 +38,5 @@ An example:
 TB2J_symmetrize.py -i TB2J_results -o TB2J_symmetrized -s 1e-4
 ```
 
-The script can read the data from TB2J\_results and write the symmetrized exchange parameters to a new directory TB2J\_symmetrized. The precistion for detecting the symmetry is 1e-4 angstrom. 
+The script can read the data from TB2J\_results and write the symmetrized exchange parameters to a new directory TB2J\_symmetrized. The precision for detecting the symmetry is 1e-4 angstrom. 
 

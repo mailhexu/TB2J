@@ -1,8 +1,8 @@
 Application: Spin Dynamics
 =====================================
 
-The output of TB2J can be directly readed by several atomistic spin
-dynamics and Monte Carlo code. Currently TB2J can provide output for
+The output of TB2J can be directly read by several atomistic spin
+dynamics and Monte Carlo codes. Currently TB2J can provide output for
 MULTIBINIT and Vampire. 
 
 
@@ -10,15 +10,12 @@ Interface with Multibinit
 ------------------------------------------
 Here we show how to use MULTIBINIT, a
 second principles code which can do spin dynamics. It is a part of the
-`ABINIT <ABINIT>`_ package since version 9.0. The tutorial of the spin dynamics can be found
-on `MULTIBINIT tutorial page <MULTIBINIT>`_.
+`ABINIT <https://www.abinit.org/>`_ package since version 9.0. The tutorial of the spin dynamics can be found
+on `MULTIBINIT tutorial page <https://docs.abinit.org/tutorial/spin_model/>`_.
 
-.. _ABINIT: https://www.abinit.org
-.. _MULTIBINIT: https://docs.abinit.org/tutorial/spin_model
+Here we briefly describe how to run spin dynamics with MULTIBINIT from the TB2J outputs, with an example of BiFeO3. The example files can be found in the examples/Siesta/BiFeO3 directory.
 
-Here we briefly describe how to run spin dynamics with MULTIBINIT from the TB2J outputs to with an example of BiFeO3. The example files can be found from the examples/Siesta/BiFeO3 directory.
-
-In the TB2J\_results/Mutlbinit directory, there are three files: exchange.xml, mb.in, and mb.files file. The exchange.xml file contains the Heisenberg parameters, the mb.in file is an input to the MULTIBINIT code, in which the parameters for the spin dynamics are given::
+In the TB2J\_results/Multibinit directory, there are three files: exchange.xml, mb.in, and mb.files. The exchange.xml file contains the Heisenberg parameters, the mb.in file is an input to the MULTIBINIT code, in which the parameters for the spin dynamics are given::
 
   prt_model = 0
 
@@ -56,7 +53,7 @@ We can modify the default supercell size (ncell) and the temperature range to do
 
   mpirun -np 4 multibinit --F03 < mb.files
 
-to run the spin dynamics. A mb.out.varT file is then generated, which has the volume heat capacit :math:`C_v`, magnetic susceptibility :math:`\\chi`, and normalized total magnetic moment. They can be plotted as function of temperature as below, from which we can find the Neel temperature.
+to run the spin dynamics. A mb.out.varT file is then generated, which has the volume heat capacity :math:`C_v`, magnetic susceptibility :math:`\chi`, and normalized total magnetic moment. They can be plotted as a function of temperature as below, from which we can find the Neel temperature.
 
 .. figure:: ./BFOvarT.png
    :alt: BFOvarT
@@ -67,11 +64,11 @@ to run the spin dynamics. A mb.out.varT file is then generated, which has the vo
 
 Interface with Vampire
 --------------------------------------
-Warning: there might be compatibility issues in the TB2J-Vampire interface for some versions, please contact the developpers if you encounter some of them. 
+Warning: there might be compatibility issues in the TB2J-Vampire interface for some versions, please contact the developers if you encounter some of them. 
 
 A few notes about the Vampire input format:
 
-There are 6 exchange interaction format in Vampire. 
+There are 6 exchange interaction formats in Vampire. 
 
 * isotropic
 
@@ -85,5 +82,5 @@ There are 6 exchange interaction format in Vampire.
 
 * normalised-tensorial
 
-Since version 0.7.1, the TB2J-Vampire output take the "tensorial" format, in which the exchange values are 2 times that in the convention of TB2J exchange.out file. This convention is automatically applied in the TB2J-Vampire interface.
+Since version 0.7.1, the TB2J-Vampire output takes the "tensorial" format, in which the exchange values are 2 times that in the convention of TB2J exchange.out file. This convention is automatically applied in the TB2J-Vampire interface.
 The anisotropic exchange and DMI are not written before version 0.7.2. They are included since then. 

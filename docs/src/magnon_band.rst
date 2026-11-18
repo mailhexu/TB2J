@@ -34,12 +34,12 @@ Quick Start
        --rotation-axis 0 0 1 --kpath GX
 
 Legacy Interface
---------------
+----------------
 
 There are also older scripts within the TB2J package for magnon calculations:
 
 TB2J_magnon.py (Legacy)
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 This script can be used to plot magnon band structure from the Multibinit XML format:
 

@@ -1,7 +1,7 @@
 Contributors
 ============
 
-The TB2J package is initially developed:
+The TB2J package was initially developed by:
 
 * Xu He (mailhexu@gmail.com)
 
@@ -12,10 +12,10 @@ The TB2J package is initially developed:
 * Eric Bousquet
 
 from the Phythema and Nanomat groups at the University of Liège. 
-Part of the code is developped by Xu He during he was at ICN2 (Institut Catala de Nanociencia i Nanotecnologia) in Barcelona, Spain.
+Part of the code was developed by Xu He when he was at ICN2 (Institut Catala de Nanociencia i Nanotecnologia) in Barcelona, Spain.
 
 
-After the first public release, the following people has made significant contribution to the code:
+After the first public release, the following people have made significant contributions to the code:
 
 * Andres Tellez Mora  (West Virginia University)
 
@@ -43,4 +43,4 @@ We welcome contributions. You can help us with:
 - testing the validity of the methods implemented.
 - improving the documentation.
 
-Please also feel free to contact us if you think there are other things you can help.
+Please also feel free to contact us if you think there are other things you can help with.

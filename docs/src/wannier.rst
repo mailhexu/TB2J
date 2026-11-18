@@ -11,7 +11,7 @@ a basic knowledge of maximally localized WFs and the Wannier90 package
 Functions <https://doi.org/10.1103/RevModPhys.84.1419>`__,
 `Wannier90 <http://wannier90.org/>`__).
 
-*Before beginning, you might consider to work in a subdirectory for this
+*Before beginning, you might consider working in a subdirectory for this
 tutorial. Why not Work_tb2j?*
 
 The input files for the tutorial can be found inside examples/abinit-w90/SrMnO3 in your TB2J directory. Please
@@ -19,7 +19,7 @@ copy abinit.in, abinit.files and the three pseudopotential files (inside
 the psp directory) to *Work_tb2j*. You also need the two files
 abinito_w90_down.win and abinito_w90_up.win which provide additional
 input for Wannier90. The names of these two files are \_w90\_.win with
-the prefix being given in the forth line of the .files file. Modify the
+the prefix being given in the fourth line of the .files file. Modify the
 .files file such that the entries match the location of your files.
 
 Step 0: Find the orbitals and energy range to be used in the Wannier Function Hamiltonian.
@@ -50,14 +50,14 @@ Step 1: Construct WF Hamiltonian from DFT.
 The Wannier90 code makes use of two energy windows to disentangle the
 bands. An outer window (the disentangle window), which contains all the
 required orbitals, and an inner window (the frozen window), which only
-contain the required orbitals, should be provided. From the DOS we find
-that all the Mn 3d and O 2p bands are between -10 and 10 eV, the Sr 4d
-bands above 6 eV, which should be excluded from the frozen window. Thus
+contains the required orbitals, should be provided. From the DOS we find
+that all the Mn 3d and O 2p bands are between -10 and 10 eV, and
+the Sr 4d bands above 6 eV, which should be excluded from the frozen window. Thus
 we can select the energy window (-10, 10) eV and the frozen window of
 (-9, 5) eV. Note that the energy defined in Wannier90 is not relative to
 :math:`E_F`, so we need to add the Fermi energy (here: 6.15 eV) to the
 energies. We use Mn d and O p orbitals as an initial guess for the WFs.
-This information can be found in the .win files
+This information can be found in the .win files.
 
 ::
 
@@ -85,8 +85,8 @@ functions.
    # write the WF Hamiltonian (Note for W90 version<2.1, it is hr_plot)
    write_hr = true                 
 
-Alternatively, the Wannier hamiltonian and the position operator can be
-written into one "_tb.dat" file, which can be read by TB2J since version 0.8.2
+Alternatively, the Wannier Hamiltonian and the position operator can be
+written into one "_tb.dat" file, which can be read by TB2J since version 0.8.2.
 
 ::
 
@@ -127,7 +127,7 @@ automatically generated due to a bug. To get the files, the following command is
 
     wannier90.x abinito_w90_down
 
-To get localized WFs can be tricky sometimes. It is necessary to check
+Getting localized WFs can be tricky sometimes. It is necessary to check
 if the WFs are localized by looking at the .wout file. For example, we
 have
 
@@ -160,12 +160,12 @@ Before running TB2J, an extra file, which contains the atomic structure,
 needs to be prepared. It can be either a VASP POSCAR file. (For abinit,
 the abinit.in file is also fine if no fancy feature is used, like use of
 \*, or units. POSCAR files are recommended because they are simple. Note that 
-the file extension are used to identify the format, for example, Quantum ESPRESSO
-input should be name with \*.pwi) The supported file format are can be found on the list in:
-https://wiki.fysik.dtu.dk/ase/ase/io/io.html
+the file extension is used to identify the format, for example, Quantum ESPRESSO
+input should be named with \*.pwi) The supported file formats can be found in the list at:
+https://docs.ase-lib.org/ase/io/io.html
 
-(From version 0.6.2 this file is no more necessary as TB2J can read the atomic structures from 
-the Wannier90 .win file). The --posfile option will still be used by default if it is specified.)
+(From version 0.6.2 this file is no longer necessary as TB2J can read the atomic structures from
+the Wannier90 .win file). The --posfile option will still be used by default if it is specified.
 
 With the WF Hamiltonian generated, we can calculate the exchange
 parameters now. In the scripts directory inside your TB2J directory you
@@ -185,7 +185,7 @@ The parameters are:
 -  prefix_down: prefix for spin down channel of Wannier90 output.
 -  emin: the lower limit of the electron energy. (in eV, relative to
    Fermi energy.)
--  emax: the upper limit of the electron energy. Should be zero. (Note: this parameter is no more useful will be deprecated soon). 
+-  emax: the upper limit of the electron energy. Should be zero. (Note: this parameter is no longer useful and will be deprecated soon).
 
 Now we should have the files containing the J parameters in the
 TB2J_results directory.
@@ -209,15 +209,13 @@ TB2J_results directory.
 -  exchange.txt: A human readable file.
 -  Multibinit directory: the files file, input file and xml file, which
    can be used as templates to run spin dynamics in Multibinit.
--  The input for a few spin dynamics codes (Tom’s ASD, and Vampire) are
+-  The inputs for a few spin dynamics codes (Tom’s ASD and Vampire) are
    also included.
 
 
 Noncollinear calculation
 ----------------------------------
-For calculations with non-collinear spin, the --spinor option should be used. It is also necessary to specify whether in the Hamiltonian the 
-order of the basis, either group by spin (orb1_up, orb2_up, ... orb1_down, orb2_down, ...)  or by orbital (orb1_up, orb1_down, orb2_up, orb2_down,...), with 
-the --groupby option (either spin or orbital). The --prefix_spinor option is used to specify the prefix of the Wannier90 outputs.
+For calculations with non-collinear spin, the --spinor option should be used. It is also necessary to specify the order of the basis in the Hamiltonian, either grouped by spin (orb1_up, orb2_up, ... orb1_down, orb2_down, ...)  or by orbital (orb1_up, orb1_down, orb2_up, orb2_down,...), with the --groupby option (either spin or orbital). The --prefix_spinor option is used to specify the prefix of the Wannier90 outputs.
 Here is an example of the command:
 
 ::

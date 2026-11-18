@@ -1,19 +1,19 @@
-### Computing Magnetocrystalline anisotropy energy (MAE)
+# Computing Magnetocrystalline anisotropy energy (MAE)
 
-:warning: This feature is currently under development and internal test. Do not use it for production yet.
-:warning: This feature is only available with the ABACUS and SIESTA code.
+:warning: This feature is currently under development and internal testing. Do not use it for production yet.
+:warning: This feature is only available with the ABACUS and SIESTA codes.
 
 The MAE calculation is implemented in `TB2J/MAEGreen.py` using the magnetic force theorem with Green's function perturbation theory. The implementation provides both efficient perturbative and exact eigenvalue approaches for computing magnetocrystalline anisotropy energies. 
 
 
 To compute the magnetocrystalline anisotropy energy (MAE) of a magnetic system with the magnetic force theorem, two steps of DFT calculations are needed.
 
-- The first step is to do  an collinear spin calculation. The density and the Hamiltonian is saved at this step. Note that the current implementation requires the SOC to be turned on in ABACUS, but setting the SOC strength to zero (soc_lambda=0).
+- The first step is to do a collinear spin calculation. The density and the Hamiltonian are saved at this step. Note that the current implementation requires the SOC to be turned on in ABACUS, but with the SOC strength set to zero (soc_lambda=0).
 
 - The second step is to do a non-SCF non-collinear spin calculation with SOC turned on. The density is read from the previous step. In practice, one step of SCF calculation is done (as the current implementation does not write the Hamiltonian and the energy). The Hamiltonian should be saved in this step, too. 
 
 Here is one example: 
-Step one: collinear spin calculation.  Note that  instead of using  nspin=2, we use nspin=4, and  lspinorb=1 to enable the SOC but set the soc\_lambda  to 0.0 to turn off the SOC.  This is to make the Hamiltonian saved in the spinor form, so it can be easily compared with the next step of a real calculation with SOC. 
+Step one: collinear spin calculation. Note that instead of using nspin=2, we use nspin=4, and lspinorb=1 to enable the SOC but set the soc\_lambda to 0.0 to turn off the SOC. This is to save the Hamiltonian in the spinor form, so it can be easily compared with the next step of a real calculation with SOC. 
 
 
 ``` text
@@ -50,12 +50,13 @@ dft_functional                          PBE
 
 - Step two: non-SCF non-collinear spin calculation. 
 
-In this step, we need to start from the density saved in the previous step. So we can copy the output directory of the previous step to a the present directory.
-To mimic the non-SCF calculation: 
-    * The scf\_nmax should be set to 1 to end the scf calculation in one step.
-    * The "scf\_thr" should be set to a large value to make the calculation "converge" in one step.
-    * The mixing\_beta should be set to a small value to suppress the density mixing.
-    * Then we can set the "init\_chg" to "file" to read the density from the previous step. The lspionorb should be set to 1, and the soc_lambda should be set to a 1.0 to enable the SOC. 
+In this step, we need to start from the density saved in the previous step. So we can copy the output directory of the previous step to the present directory.
+To mimic the non-SCF calculation:
+
+* The scf\_nmax should be set to 1 to end the scf calculation in one step.
+* The "scf\_thr" should be set to a large value to make the calculation "converge" in one step.
+* The mixing\_beta should be set to a small value to suppress the density mixing.
+* Then we can set the "init\_chg" to "file" to read the density from the previous step. The lspionorb should be set to 1, and the soc_lambda should be set to 1.0 to enable the SOC. 
 The "out\_mat\_hs2" should be set to 1 to save the Hamiltonian.
 
 :warning: Once ABACUS can output the Hamiltonian in the non-SCF calculation, we can use a "calculation=nscf" to do the non-SCF calculation.
@@ -118,7 +119,7 @@ if __name__ == '__main__':
     run()
 ```
 
-#### Advanced Usage
+## Advanced Usage
 
 The `MAEGreen` class also supports various angle presets and options:
 
@@ -149,7 +150,7 @@ mae.run(output_path="my_mae_results", with_eigen=True)
 ```
 
 
-Here the soc0 and soc1 directories are where the two ABACUS calculations are done. We use a 6x6x1 Gamma-centered k-mesh for the integration (which is too small for practical usage!). And explore the energy with the magnetic moments in the x-z plane.
+Here the soc0 and soc1 directories are where the two ABACUS calculations are done. We use a 6x6x1 Gamma-centered k-mesh for the integration (which is too small for practical usage!). And we explore the energy with the magnetic moments in the x-z plane.
 
 After running the python script above, several output files will be created in the `TB2J_anisotropy` directory:
 
