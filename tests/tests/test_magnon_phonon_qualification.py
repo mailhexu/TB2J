@@ -1,0 +1,512 @@
+"""Consumer-facing tests for Story-008 mode qualification diagnostics."""
+
+import json
+
+import numpy as np
+import pytest
+
+from TB2J.magnon.magnon3 import Magnon
+from TB2J.magnon_phonon.qualification import (
+    degenerate_subspace_determinism,
+    magnon_determinism_per_point,
+    phonon_determinism,
+    qualification_report,
+    qualify_magnon_modes,
+    qualify_phonon_modes,
+    verify_structure_identity,
+)
+
+
+def _magnon(nspin, spins, bonds):
+    """Build isotropic exchange models; bonds are (R, i, j, J)."""
+    Rlist = np.asarray([bond[0] for bond in bonds], dtype=int)
+    JR = np.zeros((len(bonds), nspin, nspin, 3, 3), dtype=float)
+    for ir, (_r, i, j, value) in enumerate(bonds):
+        JR[ir, i, j] = np.eye(3) * value * spins[i] * spins[j]
+    mags = np.zeros((nspin, 3))
+    mags[:, 2] = 2.0 * np.asarray(spins)
+    mags[1::2, 2] *= -1.0
+    magnon = Magnon(
+        nspin=nspin,
+        magmom=mags,
+        Rlist=Rlist,
+        JR=JR,
+        cell=np.eye(3),
+        _Q=np.zeros(3),
+        _uz=np.array([[0.0, 0.0, 1.0]]),
+        _n=np.array([0.0, 1.0, 0.0]),
+    )
+    magnon.set_reference(
+        np.zeros(3), np.array([[0.0, 0.0, 1.0]]), np.array([0.0, 1.0, 0.0])
+    )
+    return magnon
+
+
+def _fm_chain():
+    return _magnon(
+        1,
+        [1.0],
+        [((0, 0, 0), 0, 0, 1.0), ((1, 0, 0), 0, 0, 1.0), ((-1, 0, 0), 0, 0, 1.0)],
+    )
+
+
+def _two_sublattice_afm():
+    return _magnon(
+        2,
+        [1.0, 1.0],
+        [
+            ((0, 0, 0), 0, 1, -1.0),
+            ((0, 0, 0), 1, 0, -1.0),
+            ((1, 0, 0), 0, 1, -0.6),
+            ((-1, 0, 0), 1, 0, -0.6),
+        ],
+    )
+
+
+class DuckPhononModes:
+    """Duck-typed fixture mirroring the Story-007 PhononModes dataclass."""
+
+    def __init__(
+        self,
+        q,
+        eigenvalues,
+        eigenvectors,
+        force_constants,
+        diagnostics,
+        masses_amu,
+        atom_map,
+        corrected_force_constants=None,
+    ):
+        self.q = np.asarray(q, float)
+        self.eigenvalues_eV_per_Ang2_per_amu = np.asarray(eigenvalues, float)
+        self.frequencies_thz = (
+            np.sign(eigenvalues) * np.sqrt(np.abs(eigenvalues)) * 15.633302
+        )
+        self.frequencies_meV = self.frequencies_thz * 4.135667696
+        self.eigenvectors = np.asarray(eigenvectors, complex)
+        self.cartesian_patterns = np.asarray(eigenvectors, complex)
+        self.force_constants = np.asarray(force_constants, float)
+        self.corrected_force_constants = (
+            None
+            if corrected_force_constants is None
+            else np.asarray(corrected_force_constants, float)
+        )
+        self.masses_amu = np.asarray(masses_amu, float)
+        self.atom_map = atom_map
+        self.normalization = {"frequency_factor": 15.633302}
+        self.diagnostics = diagnostics
+
+    @property
+    def instabilities(self):
+        return list(self.diagnostics["instabilities"])
+
+    def to_dict(self):
+        return {"q_reduced": self.q.tolist()}
+
+
+def _duck_phonon_gamma(force_constant=0.0, mass=1.0, symbols=("Cr",)):
+    """One atom per cell, 1D harmonic chain: exact acoustic zero at Gamma.
+
+    Real-space force constants Phi(+/-a) = -k give D(q) = 2k(1-cos 2pi q),
+    i.e. D(Gamma) = 0 (acoustic) and the Gamma force-constant tensor is 0.
+    A nonzero onsite term k0 shifts the Gamma branch gapped.
+    """
+    k0 = force_constant
+    # Full 1x1 "supercell" tensor; translation residual 0 exactly.
+    fc = np.zeros((1, 1, 3, 3))
+    fc[0, 0, 0, 0] = k0
+    diag = {
+        "raw_reciprocity_residual_eV_per_Ang2": 0.0,
+        "translation_residual_eV_per_Ang2": 0.0,
+        "instabilities": [],
+        "symmetrization": None,
+        "raw_frequency_conversion_factor_THz": 15.633302,
+    }
+    dyn_gamma = np.array([[k0]])
+    evals, evecs = np.linalg.eigh(dyn_gamma)
+    return DuckPhononModes(
+        q=np.zeros(3),
+        eigenvalues=evals,
+        eigenvectors=evecs,
+        force_constants=fc,
+        diagnostics=diag,
+        masses_amu=[mass],
+        atom_map={
+            "symbols_primitive_order": list(symbols),
+            "primitive_atom": [0],
+            "atom_cells": [[0, 0, 0]],
+        },
+    )
+
+
+# ---------------------------------------------------------------- magnon side
+
+
+def test_magnon_report_has_per_point_stability_and_goldstone_residuals():
+    magnon = _fm_chain()
+    modes = magnon.get_site_boson_modes([[0.0, 0.0, 0.0], [0.17, 0.0, 0.0]])
+    report = qualify_magnon_modes(modes)
+    assert len(report["per_point"]) == 2
+    for point, record in zip(modes.kpoints, report["per_point"]):
+        assert record["kpoint"] == pytest.approx(point.tolist())
+        assert record["min_eig_ev"] >= -record["stability_tol_ev"]
+        assert record["stability_margin_ev"] == pytest.approx(
+            record["min_eig_ev"] + record["stability_tol_ev"]
+        )
+        assert record["cholesky_tier"] in (0, 1, 2)
+        assert record["shift_ev"] >= 0.0
+        assert isinstance(record["n_zero_modes"], int)
+    # Gamma FM chain: one certified Goldstone zero with a residual.
+    gamma = report["per_point"][0]
+    assert gamma["n_zero_modes"] == 1
+    assert 0.0 <= gamma["symmetry_residual_ev"] <= gamma["stability_tol_ev"]
+    assert report["provenance"]["reciprocal_convention"] == modes.reciprocal_convention
+    assert report["units"]["energies"] == "eV"
+
+
+def test_magnon_report_flags_afm_double_goldstone_and_no_warning_when_stable():
+    modes = _two_sublattice_afm().get_site_boson_modes([[0.0, 0.0, 0.0]])
+    report = qualify_magnon_modes(modes)
+    assert report["per_point"][0]["n_zero_modes"] == 2
+    assert report["warnings"] == []
+
+
+# ---------------------------------------------------------------- phonon side
+
+
+def test_phonon_report_has_acoustic_and_reciprocity_translation_diagnostics():
+    modes = _duck_phonon_gamma()
+    report = qualify_phonon_modes(modes)
+    assert report["per_point"][0]["acoustic_count"] == 1
+    assert report["per_point"][0]["acoustic_residual_thz"] == pytest.approx(
+        0.0, abs=1e-10
+    )
+    assert report["raw_reciprocity_residual_eV_per_Ang2"] == 0.0
+    assert report["translation_residual_eV_per_Ang2"] == 0.0
+    assert report["instabilities"] == []
+    assert report["units"]["frequencies"] == "THz"
+
+
+def test_phonon_report_records_instabilities():
+    diag = dict(_duck_phonon_gamma().diagnostics)
+    diag["instabilities"] = [
+        {"index": 0, "eigenvalue_eV_per_Ang2_per_amu": -0.5, "frequency_THz": 0.0}
+    ]
+    fc = np.zeros((1, 1, 3, 3))
+    fc[0, 0, 0, 0] = 1.0
+    evals, evecs = np.linalg.eigh(fc[0, 0, :, :].reshape(3, 3) * 0 - 0.5 * np.eye(3))
+    modes = DuckPhononModes(
+        q=np.zeros(3),
+        eigenvalues=evals,
+        eigenvectors=evecs,
+        force_constants=fc,
+        diagnostics=diag,
+        masses_amu=[1.0],
+        atom_map={"symbols_primitive_order": ["Cr"]},
+    )
+    report = qualify_phonon_modes(modes)
+    assert report["instabilities"] == diag["instabilities"]
+    assert any("instability" in w for w in report["warnings"])
+
+
+def test_phonon_report_exposes_corrected_residuals_when_symmetrized():
+    modes = _duck_phonon_gamma()
+    modes.diagnostics = dict(modes.diagnostics)
+    modes.diagnostics["symmetrization"] = {
+        "method": "phonopy traditional translational+permutation symmetrization (level 1)",
+        "corrected_reciprocity_residual_eV_per_Ang2": 0.0,
+        "corrected_translation_residual_eV_per_Ang2": 0.0,
+        "correction_norm_max_eV_per_Ang2": 1e-4,
+    }
+    report = qualify_phonon_modes(modes)
+    assert report["corrected_reciprocity_residual_eV_per_Ang2"] == 0.0
+    assert report["corrected_translation_residual_eV_per_Ang2"] == 0.0
+
+
+# ------------------------------------------------------------------ cross: gauge
+
+
+def test_degenerate_subspace_comparison_is_gauge_invariant():
+    rng = np.random.default_rng(7)
+    a = np.linalg.qr(rng.normal(size=(6, 6)))[0].astype(complex)
+    energies = np.array([1.0, 1.0, 2.0, 2.0, 3.0, 4.0])
+    # Mix each degenerate pair by a different unitary: gauge change.
+    block1 = np.array(
+        [[np.exp(0.3j), np.exp(0.7j)], [-np.exp(0.7j).conj(), np.exp(0.3j).conj()]]
+    )
+    block1 /= np.sqrt(2)
+    b = a.copy()
+    b[:, 0:2] = a[:, 0:2] @ block1
+    b[:, 2:4] = a[:, 2:4] @ block1.conj()
+    result = degenerate_subspace_determinism(energies, a, energies, b)
+    assert result["ok"]
+    assert result["max_projector_deviation"] < 1e-12
+    assert len(result["clusters"]) == 4
+    # A non-degenerate-mixing perturbation must be flagged.
+    c = b.copy()
+    c[:, 4] = a[:, 4] + 0.1 * a[:, 5]
+    c[:, 4] /= np.linalg.norm(c[:, 4])
+    result = degenerate_subspace_determinism(energies, a, energies, c)
+    assert not result["ok"]
+
+
+def test_magnon_degenerate_subspace_determinism_under_repeated_diagonalization():
+    magnon = _two_sublattice_afm()
+    first = magnon.get_site_boson_modes([[0.13, 0.0, 0.0]])
+    second = magnon.get_site_boson_modes([[0.13, 0.0, 0.0]])
+    n = first.energies.shape[1]
+    result = degenerate_subspace_determinism(
+        first.energies[0],
+        first.paraunitary[0][:, :n],
+        second.energies[0],
+        second.paraunitary[0][:, :n],
+    )
+    assert result["ok"]
+    assert result["max_projector_deviation"] < 1e-10
+
+
+def test_phonon_determinism_under_repeated_diagonalization():
+    modes = _duck_phonon_gamma(force_constant=3.0)
+    result = phonon_determinism(modes, repeats=3)
+    assert result["ok"]
+    assert result["repeats"] == 3
+    assert result["max_projector_deviation"] < 1e-12
+
+
+# ------------------------------------------------------------------ map identity
+
+
+def _structured_magnon():
+    """Two magnetic Cr spins sharing a structure with one nonmagnetic I atom."""
+    magnon = _two_sublattice_afm()
+    magnon.atom_symbols = ["Cr", "Cr", "I"]
+    magnon.atom_positions = np.array(
+        [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.25, 0.25, 0.5]]
+    )
+    magnon.magnetic_atom_indices = [0, 1]
+    magnon.positions = magnon.atom_positions[:2]
+    magnon.symbols = ["Cr", "Cr"]
+    return magnon
+
+
+def _structured_phonon(positions=None, masses=None, symbols=("Cr", "Cr", "I")):
+    from ase import Atoms
+
+    modes = _duck_phonon_gamma(symbols=symbols)
+    modes.masses_amu = (
+        np.array(masses, float) if masses is not None else Atoms(symbols).get_masses()
+    )
+    if positions is None:
+        positions = np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.25, 0.25, 0.5]])
+    modes.structure = {
+        "symbols": list(symbols),
+        "positions": np.asarray(positions, float),
+    }
+    return modes
+
+
+def test_structure_identity_verifies_symbols_positions_masses_bond_map():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    report = verify_structure_identity(magnon, modes)
+    assert report["status"] == "verified"
+    assert report["ok"]
+    assert report["checks"]["natom"] and report["checks"]["symbols"]
+    assert report["checks"]["positions"]
+    assert report["checks"]["masses"]
+    assert report["bond_map"]["n_directed_bonds"] == 4
+    assert report["bond_map"]["indices_valid"]
+    assert report["bond_map"]["bijection"]
+
+
+def test_structure_identity_is_unverified_without_phonon_coordinates():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    del modes.structure
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert report["status"] == "unverified"
+    assert report["checks"]["positions"] is None
+
+
+def test_structure_identity_rejects_wrong_geometry():
+    magnon = _structured_magnon()
+    wrong = np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.4, 0.1, 0.5]])
+    report = verify_structure_identity(magnon, _structured_phonon(positions=wrong))
+    assert not report["ok"]
+    assert report["status"] == "failed"
+    assert not report["checks"]["positions"]
+
+
+def test_structure_identity_with_nonmagnetic_atoms_is_not_falsely_rejected():
+    magnon = _structured_magnon()
+    report = verify_structure_identity(magnon, _structured_phonon())
+    assert report["ok"]
+    assert report["bond_map"]["resolved_atom_indices"] == [0, 1]
+
+
+def test_structure_identity_rejects_wrong_bond_map():
+    magnon = _structured_magnon()
+    # Phonon map knows only one atom: the resolved magnetic indices [0, 1]
+    # cannot all resolve, and the bond indices must fail.
+    modes = _structured_phonon(symbols=("Cr",))
+    modes.masses_amu = modes.masses_amu[:1]
+    modes.structure = {"symbols": ["Cr"], "positions": np.zeros((1, 3))}
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert not report["bond_map"]["bijection"]
+
+
+def test_structure_identity_rejects_uniform_wrong_masses():
+    magnon = _structured_magnon()
+    modes = _structured_phonon(masses=[99.0, 99.0, 99.0])
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert not report["checks"]["masses"]
+
+
+def test_structure_identity_detects_symbol_mismatch():
+    magnon = _structured_magnon()
+    modes = _structured_phonon(symbols=("Cr", "Cr", "Cr"))
+    modes.structure["symbols"] = ["Cr", "Cr", "Cr"]
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert not report["checks"]["symbols"]
+
+
+def test_structure_identity_rejects_structure_symbol_atom_map_mismatch():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    modes.structure["symbols"] = ["Cr", "Cr", "Sn"]
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert report["status"] == "failed"
+    assert not report["checks"]["phonon_structure_symbols"]
+
+
+def test_structure_without_symbols_key_is_unverified():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    del modes.structure["symbols"]
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert report["status"] == "unverified"
+    assert report["checks"]["phonon_structure_symbols"] is None
+
+
+def test_structure_identity_rejects_wrong_spin_to_atom_mapping():
+    magnon = _structured_magnon()
+    # Spin 1 is remapped from Cr (atom 1) to nonmagnetic I (atom 2).
+    magnon.magnetic_atom_indices = [0, 2]
+    report = verify_structure_identity(magnon, _structured_phonon())
+    assert not report["ok"]
+    assert report["status"] == "failed"
+    assert not report["bond_map"]["bijection"]
+
+
+def test_structure_without_positions_key_is_unverified():
+    magnon = _structured_magnon()
+    modes = _structured_phonon()
+    modes.structure = {"symbols": ["Cr", "Cr", "I"]}
+    report = verify_structure_identity(magnon, modes)
+    assert not report["ok"]
+    assert report["status"] == "unverified"
+    assert report["checks"]["positions"] is None
+
+
+def test_structure_position_tolerance_is_absolute():
+    magnon = _structured_magnon()
+    positions = np.array(magnon.atom_positions, copy=True)
+    positions[1, 0] += 5e-6
+    report = verify_structure_identity(
+        magnon, _structured_phonon(positions=positions), position_tol=1e-8
+    )
+    assert not report["ok"]
+    assert not report["checks"]["positions"]
+
+
+def test_negative_phonon_eigenvalues_are_not_counted_as_acoustic():
+    modes = _duck_phonon_gamma()
+    modes.eigenvalues_eV_per_Ang2_per_amu = np.array([-0.5, -0.2])
+    modes.frequencies_thz = np.array([-15.0, -10.0])
+    report = qualify_phonon_modes(modes)
+    point = report["per_point"][0]
+    assert point["acoustic_count"] == 0
+    assert point["acoustic_residual_thz"] == pytest.approx(10.0)
+
+
+# ------------------------------------------------------------------ full report
+
+
+def test_qualification_report_json_roundtrip_with_units_and_provenance():
+    magnon = _structured_magnon()
+    kpoints = [[0.0, 0.0, 0.0], [0.2, 0.0, 0.0]]
+    report = qualification_report(
+        spin_model=magnon,
+        kpoints=kpoints,
+        phonon_modes=_structured_phonon(),
+    )
+    assert report["schema"] == "tb2j.magnon_phonon.qualification"
+    assert report["units"]["energies"] == "eV"
+    assert report["units"]["frequencies"] == "THz"
+    assert report["units"]["masses"] == "u"
+    assert "magnon" in report and "phonon" in report
+    determinism = report["cross_checks"]["determinism"]
+    assert [point["kpoint"] for point in determinism["per_point"]] == kpoints
+    assert all(point["ok"] for point in determinism["per_point"])
+    assert report["cross_checks"]["structure_identity"]["ok"]
+    assert report["cross_checks"]["structure_identity"]["status"] == "verified"
+    # JSON-serializable (JSON result convention).
+    text = json.dumps(report)
+    assert "symmetry_residual_ev" in text
+
+
+def test_determinism_covers_every_requested_kpoint_with_degenerate_zeros():
+    magnon = _two_sublattice_afm()
+    kpoints = [[0.0, 0.0, 0.0], [0.13, 0.0, 0.0], [0.25, 0.0, 0.0]]
+    determinism = magnon_determinism_per_point(magnon.get_site_boson_modes, kpoints)
+    assert [point["kpoint"] for point in determinism["per_point"]] == kpoints
+    assert all(point["ok"] for point in determinism["per_point"])
+    gamma = determinism["per_point"][0]
+    assert gamma["n_zero_modes"] == 2  # degenerate Goldstone pair included
+
+
+def test_determinism_survives_gauge_rotation_within_degenerate_cluster():
+    from dataclasses import replace
+
+    magnon = _two_sublattice_afm()
+    rng = np.random.default_rng(3)
+    calls = {"n": 0}
+
+    def producer(kpoint):
+        modes = magnon.get_site_boson_modes(kpoint)
+        calls["n"] += 1
+        if calls["n"] % 2 == 0 and modes.is_zero_mode[0].any():
+            zeros = np.flatnonzero(modes.is_zero_mode[0])
+            paraunitary = modes.paraunitary[0].copy()
+            block = paraunitary[:, zeros]
+            rotation, _ = np.linalg.qr(
+                rng.normal(size=(zeros.size, zeros.size))
+                + 1j * rng.normal(size=(zeros.size, zeros.size))
+            )
+            paraunitary[:, zeros] = block @ rotation
+            modes = replace(modes, paraunitary=paraunitary[None, :, :])
+        return modes
+
+    result = magnon_determinism_per_point(producer, [[0.0, 0.0, 0.0]])
+    point = result["per_point"][0]
+    assert point["n_zero_modes"] == 2
+    assert point["ok"]
+    assert point["max_projector_deviation"] < 1e-10
+
+
+def test_failed_acoustic_check_still_reports_smallest_eigenvalue_magnitude():
+    modes = _duck_phonon_gamma(force_constant=3.0)  # gapped Gamma, no acoustic branch
+    report = qualify_phonon_modes(modes)
+    point = report["per_point"][0]
+    assert point["acoustic_count"] == 0
+    assert point["acoustic_residual_thz"] == pytest.approx(
+        np.min(np.abs(modes.frequencies_thz))
+    )
+    assert point["acoustic_residual_thz"] > 0.0
+    assert any("acoustic" in w for w in report["warnings"])
