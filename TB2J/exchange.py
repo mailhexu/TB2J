@@ -371,7 +371,7 @@ class ExchangeNCL(Exchange):
         """
         self.tbmodel = tbmodels
         self.backend_name = self.tbmodel.name
-        self.G = TBGreen(
+        self.G = getattr(self, "_green_class", TBGreen)(
             tbmodel=self.tbmodel,
             kmesh=self.kmesh,
             ibz=self.ibz,

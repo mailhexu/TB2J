@@ -661,7 +661,9 @@ class TBGreen:
         if not J_only:
             # Use real-space dGR calculation (matches reference TB2J_spinphon)
             # This avoids the 3x overcounting issue in k-space Lambda approach
-            dGRijdx, dGRjidx = self.get_dGR(GR, Rpts, Rjlist, epc, Ru, cutoff=cutoff)
+            dGRijdx, dGRjidx = self.get_dGR(
+                GR, Rpts, Rjlist, epc, Ru, cutoff=cutoff, energy=energy
+            )
 
             # Convert to arrays for compatibility with vectorized code
             dGRij_array = np.array([dGRijdx[R] for R in Rpts])
@@ -669,7 +671,35 @@ class TBGreen:
 
         return GR, dGRijdx, dGRjidx, rhoR, GR_array, dGRij_array, dGRji_array
 
-    def get_dGR(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, cutoff=4.0, diag=False):
+    def _get_dV(self, epc, Rq, Rk, energy, diag=False):
+        """Displacement vertex matrix for the (Rq, Rk) R-map entry.
+
+        Energy-dependent providers (``get_vertex_two_spin(Rq, Rk, z)``)
+        return V(z)=dH-z dS already in contraction orientation; the legacy
+        EPW path keeps its raw matrix + transpose contract unchanged.
+        """
+        if hasattr(epc, "get_vertex_two_spin"):
+            if energy is None:
+                raise ValueError(
+                    "energy-dependent displacement vertex requires the "
+                    "contour energy"
+                )
+            raw = epc.get_vertex_two_spin(Rq, Rk, self.efermi + energy)
+            return np.diag(np.diag(raw)) if diag else raw
+        raw = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)
+        return np.diag(np.diag(raw)) if diag else raw.T
+
+    def get_dGR(
+        self,
+        GR,
+        Rpts,
+        Rjlist,
+        epc: EpmatOneMode,
+        Ru,
+        cutoff=4.0,
+        diag=False,
+        energy=None,
+    ):
         Rpts = [tuple(R) for R in Rpts]
         Rset = set(Rpts)
 
@@ -704,24 +734,18 @@ class TBGreen:
         dGRdxij = defaultdict(lambda: 0.0 + 0j)
         dGRdxji = defaultdict(lambda: 0.0 + 0j)
         for Rq, Rk, Rm, Rnj, Rj in self._Rmap:
-            if diag:
-                dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
-            else:
-                dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+            dV = self._get_dV(epc, Rq, Rk, energy, diag=diag)
             dG = GR[Rm] @ dV @ GR[Rnj]
             dGRdxij[Rj] += dG
 
         for Rq, Rk, Rjn, Rmi, Rj in self._Rmap_rev:
-            if diag:
-                dV = np.diag(np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False)))
-            else:
-                dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
+            dV = self._get_dV(epc, Rq, Rk, energy, diag=diag)
             dG = GR[Rjn] @ dV @ GR[Rmi]
             dGRdxji[Rj] += dG
 
         return dGRdxij, dGRdxji
 
-    def get_dGR_vectorized(self, GR, Rpts, Rjlist, epc: EpmatOneMode, Ru, diag=False):
+    def get_dGR_vectorized(self, GR, Rpts, Rjlist, epc, Ru, diag=False, energy=None):
         """
         Vectorized version of get_dGR using einsum for performance.
         No cutoff is applied - processes all Rk vectors.
@@ -751,13 +775,7 @@ class TBGreen:
                 for idx, (Rq, Rk, Rm, Rnj) in enumerate(entries):
                     GRm_array[idx] = GR[Rm]
                     GRnj_array[idx] = GR[Rnj]
-                    if diag:
-                        dV = np.diag(
-                            np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False))
-                        )
-                    else:
-                        dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
-                    dV_array[idx] = dV
+                    dV_array[idx] = self._get_dV(epc, Rq, Rk, energy, diag=diag)
 
                 dGRdxij[Rj] = np.einsum(
                     "nij,njk,nkl->il", GRm_array, dV_array, GRnj_array
@@ -778,13 +796,7 @@ class TBGreen:
                 for idx, (Rq, Rk, Rjn, Rmi) in enumerate(entries):
                     GRjn_array[idx] = GR[Rjn]
                     GRmi_array[idx] = GR[Rmi]
-                    if diag:
-                        dV = np.diag(
-                            np.diag(epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False))
-                        )
-                    else:
-                        dV = epc.get_epmat_RgRk_two_spin(Rq, Rk, avg=False).T
-                    dV_array[idx] = dV
+                    dV_array[idx] = self._get_dV(epc, Rq, Rk, energy, diag=diag)
 
                 dGRdxji[Rj] = np.einsum(
                     "nij,njk,nkl->il", GRjn_array, dV_array, GRmi_array
@@ -846,7 +858,7 @@ class TBGreen:
                     rhoR[R] += rhok * (phase * self.kweights[ik])
 
         dGRijdx, dGRjidx = self.get_dGR_vectorized(
-            GR, Rpts, Rjlist, epc, Ru, diag=False
+            GR, Rpts, Rjlist, epc, Ru, diag=False, energy=energy
         )
 
         return GR, dGRijdx, dGRjidx, rhoR
