@@ -26,6 +26,26 @@ def generate_grid(kmesh, sort=True):
 #        Rot = Rotation.from_rotvec(rv.reshape(-1, 3)).as_matrix().reshape(R.shape[0], 3, 3)
 #
 
+def _cholesky_magnon_hamiltonian(H):
+    """Factor a stable BdG Hessian, regularizing only roundoff-scale zeros."""
+    try:
+        return np.linalg.cholesky(H)
+    except np.linalg.LinAlgError:
+        eigenvalues = np.linalg.eigvalsh(H)
+        minimum = np.min(eigenvalues)
+        scale = max(np.max(np.abs(eigenvalues)), 1e-12)
+        tolerance = 64 * np.finfo(float).eps * H.shape[-1] * scale
+        if minimum < -tolerance:
+            kindex = np.unravel_index(np.argmin(eigenvalues), eigenvalues.shape)[0]
+            raise ValueError(
+                f"Magnon Hessian is not positive semidefinite at k-point index "
+                f"{kindex}: minimum eigenvalue {minimum:.6g} eV "
+                f"(roundoff tolerance {tolerance:.3g} eV)."
+            )
+        return np.linalg.cholesky(
+            H + (tolerance - min(minimum, 0.0)) * np.eye(H.shape[-1])
+        )
+
 
 def get_rotation_arrays(magmoms, u=uz):
     dim = magmoms.shape[0]

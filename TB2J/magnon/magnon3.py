@@ -11,7 +11,7 @@ from TB2J.io_exchange import SpinIO
 from TB2J.kpoints import monkhorst_pack
 from TB2J.magnon.eigenstates import MagnonEigenstateData
 from TB2J.magnon.magnon_band import MagnonBand
-from TB2J.magnon.magnon_math import get_rotation_arrays
+from TB2J.magnon.magnon_math import _cholesky_magnon_hamiltonian, get_rotation_arrays
 from TB2J.magnon.magnon_parameters import (
     MagnonParameters,
     add_band_specific_args,
@@ -65,11 +65,14 @@ class Magnon:
         Parameters
         ----------
         Q : array_like
-            Propagation vector
+            Propagation vector between cells. Use zero when a commensurate
+            spiral is already represented by site moments in a supercell.
         uz : array_like
             Quantization axis
         n : array_like
             Normal vector for rotation
+        magmoms : array_like, optional
+            Cartesian magnetic moments in μB, in magnetic-site order.
         """
         self.set_propagation_vector(Q)
         axis = np.asarray(n, dtype=float)
@@ -245,28 +248,15 @@ class Magnon:
         n = H.shape[-1] // 2
         I = np.eye(n)
 
-        min_eig = 0.0
-        try:
-            K = np.linalg.cholesky(H)
-        except np.linalg.LinAlgError:
-            try:
-                K = np.linalg.cholesky(H + 1e-6 * np.eye(2 * n))
-            except np.linalg.LinAlgError:
-                from warnings import warn
-
-                min_eig = np.min(np.linalg.eigvalsh(H))
-                K = np.linalg.cholesky(H - (min_eig - 1e-6) * np.eye(2 * n))
-                warn(
-                    f"WARNING: The system may be far from the magnetic ground-state. Minimum eigenvalue: {min_eig}. The magnon energies might be unphysical."
-                )
+        K = _cholesky_magnon_hamiltonian(H)
 
         g = np.block([[1 * I, 0 * I], [0 * I, -1 * I]])
         KH = K.swapaxes(-1, -2).conj()
         eig_matrix = KH @ g @ K
         if include_wavefunctions:
             eigvals, eigvecs = np.linalg.eigh(eig_matrix)
-            return eigvals[:, n:] + min_eig, eigvecs[:, :, n:].swapaxes(1, 2)
-        return np.linalg.eigvalsh(eig_matrix)[:, n:] + min_eig, None
+            return eigvals[:, n:], eigvecs[:, :, n:].swapaxes(1, 2)
+        return np.linalg.eigvalsh(eig_matrix)[:, n:], None
 
     def _magnon_energies(self, kpoints, u=None):
         """Calculate magnon energies"""
@@ -298,6 +288,12 @@ class Magnon:
             Additional metadata to merge into the result.
         plot : dict, optional
             Plot-specific payload, such as band labels or DOS grids.
+
+        Raises
+        ------
+        ValueError
+            If a sampled magnon Hessian has a negative eigenvalue beyond
+            roundoff, indicating that the reference is energetically unstable.
         """
         kpoints = np.asarray(kpoints, dtype=float)
         energies, wavefunctions = self._diagonalize_magnon_hamiltonian(

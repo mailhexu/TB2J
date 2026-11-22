@@ -197,7 +197,7 @@ $$
 \mathbf{g} = \begin{pmatrix} \mathbf{I}_N & 0 \\ 0 & -\mathbf{I}_N \end{pmatrix}
 $$
 
-Using Cholesky decomposition $\mathbf{H} = \mathbf{K}^\dagger \mathbf{K}$, we solve:
+With NumPy's lower-triangular Cholesky factor $\mathbf{H} = \mathbf{K}\mathbf{K}^\dagger$, we solve:
 
 $$
 \mathbf{K}^\dagger \mathbf{g} \mathbf{K} \mathbf{v} = \omega \mathbf{v}
@@ -296,24 +296,22 @@ dos_states_per_meV = dos_states_per_eV / 1000
 
 ## Validation and Quality Checks
 
-### Positive Definiteness
+### Sampled stability and Goldstone modes
 
-The Hamiltonian should be positive semi-definite at all q-points. If not:
+The reference must be stationary; check its classical torques independently.
+At sampled wavevectors the magnon Hessian must be positive semidefinite.
+If Cholesky fails, TB2J checks its eigenvalues. With
+$\epsilon$ the floating-point machine epsilon, $d=2N$, and
+$s=\max(\max|\lambda(\mathbf H)|,10^{-12}\ \mathrm{eV})$, the roundoff
+tolerance is $64\epsilon d s$. A minimum eigenvalue below the negative of
+that tolerance raises `ValueError`; the code does not turn an instability
+into physical energies with an absolute value or a large spectral shift.
+Otherwise it adds just enough diagonal regularization for Cholesky. This may
+move exact Goldstone energies slightly above zero, and individual
+wavefunctions at a zero mode can be ill-conditioned.
 
-```python
-try:
-    K = np.linalg.cholesky(H)
-except np.linalg.LinAlgError:
-    min_eig = np.min(np.linalg.eigvalsh(H))
-    warn(f"WARNING: The system may be far from the magnetic ground-state. "
-         f"Minimum eigenvalue: {min_eig}")
-```
-
-### Stability Indicators
-
-1. **Zero Goldstone mode**: Expected for ferromagnets
-2. **No negative energies**: Indicates ground state stability
-3. **Smooth band dispersion**: Validates k-path continuity
+These checks cover only the sampled wavevectors. They do not establish
+stationarity or exclude instabilities at unsampled wavevectors.
 
 ## Spin Quantization
 

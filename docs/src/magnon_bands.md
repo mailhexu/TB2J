@@ -205,30 +205,39 @@ params = MagnonParameters(
 plot_magnon_bands_from_TB2J(params)
 ```
 
-### Advanced Usage with Magnetic Structure
+### Commensurate spiral in a supercell
+
+For a periodic supercell, the moments themselves encode the spiral. Set the
+solver's propagation vector to **zero**; passing the original primitive-cell
+spiral vector again would rotate the exchange between supercells a second time.
+For example, with a six-site supercell whose magnetic sites are in chain order:
 
 ```python
 import numpy as np
-from TB2J.magnon.magnon_parameters import MagnonParameters
-from TB2J.magnon.magnon3 import plot_magnon_bands_from_TB2J
+from TB2J.magnon.magnon3 import Magnon
 
-# Create quantization axes file for non-collinear magnetism
-nspin = 4
-uz = np.array([
-    [0.0, 0.0, 1.0],   # atom 1: spin up
-    [0.0, 0.0, -1.0],  # atom 2: spin down
-    [1.0, 0.0, 0.0],   # atom 3: spin along x
-    [-1.0, 0.0, 0.0],  # atom 4: spin along -x
-])
-np.savetxt("spins.txt", uz)
-
-# Plot with custom magnetic configuration
-params = MagnonParameters(
-    kpath="GXMR",
-    uz_file="spins.txt",
+model = Magnon.from_TB2J_results(path="TB2J_results")
+theta = np.arange(6) * np.pi / 3
+moments = 2 * np.column_stack((np.cos(theta), np.sin(theta), np.zeros(6)))
+model.set_reference(Q=[0, 0, 0], uz=[[0, 0, 1]], n=[0, 0, 1],
+                    magmoms=moments)
+states = model.get_magnon_eigenstates(
+    [[0.2, 0, 0]], include_wavefunctions=True  # supercell reciprocal units
 )
-plot_magnon_bands_from_TB2J(params)
 ```
+
+The example assumes the exchange data have six magnetic sites in that order
+and are expressed in a common Cartesian frame. Magnetic moments are in μB;
+`2` corresponds to `S=1`. For real materials use the converged site moments
+and exchange tensors for the same periodic noncollinear configuration.
+
+The reference must be stationary: independently check the classical torques.
+At every sampled wavevector TB2J rejects a Hessian with a negative eigenvalue
+beyond roundoff, instead of replacing an instability with shifted or absolute
+frequencies. Cholesky-failed positive-semidefinite Goldstone matrices receive
+a scale-dependent roundoff shift. This can give an exact zero a tiny positive
+energy and makes its individual eigenvectors ill-conditioned; it does not
+certify stationarity or stability at unsampled wavevectors.
 
 ## Output Files
 

@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Magnon eigensolvers now reject sampled negative Hessians beyond floating-point
+  roundoff instead of shifting unstable references into a physical-looking
+  spectrum. Positive-semidefinite Goldstone points use a scale-aware roundoff
+  regularization shared with the unfolding adapter.
 - Multi-site convention fix for the reciprocal-space driver (Story 009,
   authority `docs/sympy/qspace_multisite_transform.py`): `q_to_r` now
   transforms the complex per-q kernel integrals with the PLUS phase

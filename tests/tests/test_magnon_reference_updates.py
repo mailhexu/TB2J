@@ -1,6 +1,7 @@
 """H(q) must use the current public exchange and reference state."""
 
 import numpy as np
+import pytest
 
 from TB2J.magnon.magnon3 import Magnon
 
@@ -65,3 +66,22 @@ def test_repeated_calls_reuse_prepared_exchange_without_staleness():
         model.JR[0, 0, 0, 2, 1] -= 0.3
         model.Jq = original
     np.testing.assert_array_equal(model.Hq(q), first)
+
+
+def test_public_eigenstates_keep_goldstone_and_finite_q_in_one_batch():
+    model = chain()
+    kpoints = np.array([[0.0, 0.0, 0.0], [0.17, 0.0, 0.0]])
+    states = model.get_magnon_eigenstates(kpoints, include_wavefunctions=True)
+    expected = 4 * (1 - np.cos(2 * np.pi * kpoints[:, 0]))
+    np.testing.assert_allclose(states.energies[:, 0], expected, atol=1e-11)
+    assert states.wavefunctions.shape == (2, 1, 2)
+    np.testing.assert_allclose(model._magnon_energies(kpoints), states.energies)
+
+
+@pytest.mark.parametrize("wavefunctions", [False, True])
+def test_public_eigenstates_reject_unstable_reference(wavefunctions):
+    model = chain()
+    model.JR *= -1
+    kpoints = np.array([[0.0, 0.0, 0.0], [0.25, 0.0, 0.0]])
+    with pytest.raises(ValueError, match=r"not positive semidefinite.*index 1"):
+        model.get_magnon_eigenstates(kpoints, include_wavefunctions=wavefunctions)
