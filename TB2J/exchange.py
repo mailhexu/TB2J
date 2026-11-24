@@ -385,6 +385,7 @@ class ExchangeNCL(Exchange):
             initial_emin=self.emin,
             smearing_width=self.smearing,
             use_gpu=self.use_gpu,
+            eigen_emax=self.eigen_emax,
         )
         if self.efermi is None:
             self.efermi = self.G.efermi
@@ -760,6 +761,25 @@ class ExchangeNCL(Exchange):
         self.rho_dict = rho
         return self.rho_dict
 
+    def _magnetic_orbital_block(self):
+        """Basis indices of all magnetic-atom orbitals and their map into that block.
+
+        Only the blocks of G(R) between orbitals of magnetic atoms enter the
+        exchange tensors, so the Green's function is computed on this block.
+
+        :returns: tuple (indices, orb_indices_map): the sorted basis indices and a
+            dict mapping each of them to its position in the block.
+        """
+        if getattr(self, "_mag_orb_block", None) is None:
+            indices = np.unique(
+                np.concatenate(
+                    [np.asarray(self.iorb(i), dtype=int) for i in self.ind_mag_atoms]
+                )
+            )
+            orb_indices_map = {int(g): i for i, g in enumerate(indices)}
+            self._mag_orb_block = (indices, orb_indices_map)
+        return self._mag_orb_block
+
     def get_quantities_per_e(self, e):
         # Gk_all = self.G.get_Gk_all(e)
         # mae = self.get_mae_kspace(Gk_all)
@@ -767,23 +787,26 @@ class ExchangeNCL(Exchange):
         # TODO: get the MAE from Gk_all
         # short_Rlist now contains actual R vectors
 
-        # Note: Using Gk_all=None to rely on iterative accumulation in get_GR
-        # to save memory (Optimization 1)
-        GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=None)
-
-        # Save diagonal elements of Green's function for charge and magnetic moment calculation
-        # Only if debug option is enabled
         if self.debug_options.get("compute_charge_moments", False):
+            # The charge and moment diagnostics need the full G(R).
+            GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=None)
             self.save_greens_function_diagonals(GR, e)
+            orb_indices_map = None
+        else:
+            # G(R) only on the magnetic-atom orbitals: exact, all eigenstates kept.
+            indices, orb_indices_map = self._magnetic_orbital_block()
+            GR = self.G.get_GR_block(self.short_Rlist, e, indices)
 
-        # TODO: define the quantities for one energy.
         # Use vectorized method for better performance
         try:
-            #
-            AijR, AijR_orb = self.get_all_A_vectorized(GR)
-            # AijR, AijR_orb = self.get_all_A(GR)
-        except Exception as e:
-            print(f"Vectorized method failed: {e}, falling back to original method")
+            AijR, AijR_orb = self.get_all_A_vectorized(
+                GR, orb_indices_map=orb_indices_map
+            )
+        except Exception as err:
+            print(f"Vectorized method failed: {err}, falling back to original method")
+            if orb_indices_map is not None:
+                # get_all_A indexes the full basis.
+                GR = self.G.get_GR(self.short_Rlist, energy=e, Gk_all=None)
             AijR, AijR_orb = self.get_all_A(GR)
         return dict(AijR=AijR, AijR_orb=AijR_orb, mae=mae)
 
