@@ -6,7 +6,8 @@ From Electrons to Spins: International Online School on Computational Magnetism
 This four-day school connects electronic-structure calculations to magnetic
 interactions and spin models, combining lectures, hands-on tutorials and
 discussion. Sessions are planned for the morning in the US and afternoon in
-Europe. The program and session times are tentative.
+Europe. Participants from around the world are welcome. The program and
+session times are tentative.
 
 `Register for the school <https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=hDvhYmAZYkWMf3JHKVHaj-4EL_rMTTNOvLKEQmTYvCpURURIMUNPOVo1WTRTWlRXNVEzSU8yMEhKTy4u&lang=en-US>`_
 
