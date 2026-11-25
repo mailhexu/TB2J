@@ -23,6 +23,14 @@ def run_siesta2J():
         help="exchange xml file name. default: exchange.xml",
     )
     parser.add_argument(
+        "--sparse_hk",
+        help="build H(k) and S(k) directly from the sparse SIESTA matrices instead of "
+        "the dense real-space H(R) and S(R); saves memory for large cells. Needs a "
+        "HamiltonIO version with SislParser(sparse=...). Default: False",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--split_soc",
         help="whether the SOC part of the Hamiltonian can be read from the output of siesta. Default: False",
         action="store_true",
@@ -70,6 +78,7 @@ def run_siesta2J():
         exclude_orbs=args.exclude_orbs,
         orb_decomposition=args.orb_decomposition,
         read_H_soc=args.split_soc,
+        sparse_hk=args.sparse_hk,
         orth=args.orth,
         index_magnetic_atoms=index_magnetic_atoms,
         use_gpu=args.use_gpu,

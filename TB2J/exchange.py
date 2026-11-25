@@ -46,11 +46,13 @@ class Exchange(ExchangeParams):
             self._is_collinear = True
         self.has_elistc = False
 
-        # Store overlap matrix before cleaning tbmodels
-        if hasattr(self, "tbmodel") and hasattr(self.tbmodel, "SR"):
+        # Store overlap matrix before cleaning tbmodels (models that build H(k)
+        # from sparse matrices do not store S(R))
+        SR = getattr(getattr(self, "tbmodel", None), "SR", None)
+        if SR is not None:
             # Find R=0 index in tbmodel.Rlist
             iR_S0 = np.argmin(np.linalg.norm(self.tbmodel.Rlist, axis=1))
-            self.S_R0 = self.tbmodel.SR[iR_S0]  # R=0 overlap matrix
+            self.S_R0 = SR[iR_S0]  # R=0 overlap matrix
         else:
             self.S_R0 = None
 

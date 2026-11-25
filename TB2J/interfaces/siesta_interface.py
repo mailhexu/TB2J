@@ -1,3 +1,4 @@
+import inspect
 import os
 
 import numpy as np
@@ -23,7 +24,7 @@ def siesta_anisotropy(**kwargs):
 
 
 def gen_exchange_siesta(
-    fdf_fname, read_H_soc=False, use_gpu=False, skip=False, **kwargs
+    fdf_fname, read_H_soc=False, use_gpu=False, skip=False, sparse_hk=False, **kwargs
 ):
     """
     parameters:
@@ -33,6 +34,11 @@ def gen_exchange_siesta(
             Whether to read the SOC Hamiltonian. Default is False.
         use_gpu: bool
             Whether to use GPU acceleration for MAE calculation. Default is False.
+        sparse_hk: bool
+            Build H(k) and S(k) directly from the sparse SIESTA matrices instead of
+            the dense real-space arrays H(R), S(R), which saves memory for large
+            cells. Needs a HamiltonIO version with SislParser(sparse=...); not
+            available with read_H_soc or use_gpu. Default is False.
 
     parameters in **kwargs:
         magnetic_elements: list of str
@@ -103,9 +109,18 @@ def gen_exchange_siesta(
 
     output_path = exargs.pop("output_path")
 
-    parser = SislParser(
+    parser_kwargs = dict(
         fdf_fname=fdf_fname, ispin=None, read_H_soc=read_H_soc, orth=exargs["orth"]
     )
+    if sparse_hk:
+        if read_H_soc or use_gpu:
+            raise ValueError("sparse_hk cannot be combined with read_H_soc or use_gpu.")
+        if "sparse" not in inspect.signature(SislParser).parameters:
+            raise ImportError(
+                "sparse_hk needs a HamiltonIO version with SislParser(sparse=...)."
+            )
+        parser_kwargs["sparse"] = True
+    parser = SislParser(**parser_kwargs)
     if parser.spin.is_colinear:
         print("Reading Siesta hamiltonian: colinear spin.")
         # tbmodel_up = SislWrapper(fdf_fname=None, sisl_hamiltonian=H, spin=0, geom=geom)
