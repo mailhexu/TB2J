@@ -90,7 +90,7 @@ class TestHeaderParsing:
     def test_missing_required_header(self, tmp_path):
         """Test error when required header is missing."""
         sig_file = tmp_path / "test.inp"
-        sig_file.write_text("# T= 0.01\n" "0.0314 1.0 0.1\n")
+        sig_file.write_text("# T= 0.01\n0.0314 1.0 0.1\n")
 
         with pytest.raises(ValueError, match="nom,ncor_orb"):
             SigInpParser(str(sig_file))
@@ -104,7 +104,7 @@ class TestDataParsing:
         frequencies = [(2 * n + 1) * np.pi / beta for n in range(n_freq)]
         lines = [f"# nom,ncor_orb= {n_freq} {n_orb}\n"]
         for freq in frequencies:
-            values = " ".join([f"{i+1}.0 0.{i+1}" for i in range(n_orb)])
+            values = " ".join([f"{i + 1}.0 0.{i + 1}" for i in range(n_orb)])
             lines.append(f"{freq:.6f} {values}\n")
         return "".join(lines)
 
@@ -168,7 +168,7 @@ class TestMatrixExpansion:
         frequencies = [(2 * n + 1) * np.pi / beta for n in range(n_freq)]
         lines = [f"# nom,ncor_orb= {n_freq} {n_orb}\n"]
         for freq in frequencies:
-            values = " ".join([f"{i+1}.0 0.{i+1}" for i in range(n_orb)])
+            values = " ".join([f"{i + 1}.0 0.{i + 1}" for i in range(n_orb)])
             lines.append(f"{freq:.6f} {values}\n")
         return "".join(lines)
 
@@ -225,7 +225,7 @@ class TestParamsParsing:
 
         lines = [f"# nom,ncor_orb= {n_freq} {n_orb}\n"]
         for freq in frequencies:
-            values = " ".join([f"{i+1}.0 0.{i+1}" for i in range(n_orb)])
+            values = " ".join([f"{i + 1}.0 0.{i + 1}" for i in range(n_orb)])
             lines.append(f"{freq:.6f} {values}\n")
 
         sig_file.write_text("".join(lines))
@@ -260,7 +260,7 @@ class TestParamsParsing:
 
         lines = [f"# nom,ncor_orb= {n_freq} {n_orb}\n"]
         for freq in frequencies:
-            values = " ".join([f"{i+1}.0 0.{i+1}" for i in range(n_orb)])
+            values = " ".join([f"{i + 1}.0 0.{i + 1}" for i in range(n_orb)])
             lines.append(f"{freq:.6f} {values}\n")
 
         sig_file.write_text("".join(lines))
@@ -386,7 +386,7 @@ class TestAutoDetection:
 
         lines = [f"# nom,ncor_orb= {n_freq} {n_orb}\n"]
         for freq in frequencies:
-            values = " ".join([f"{i+1}.0 0.{i+1}" for i in range(n_orb)])
+            values = " ".join([f"{i + 1}.0 0.{i + 1}" for i in range(n_orb)])
             lines.append(f"{freq:.6f} {values}\n")
 
         sig_file.write_text("".join(lines))
@@ -653,8 +653,8 @@ class TestGetStaticSigma:
         n_freq = 5
         frequencies = [(2 * n + 1) * np.pi / beta for n in range(n_freq)]
 
-        soo_vdc_vals = " ".join([f"{i+1}.0" for i in range(n_orb)])
-        soo_vals = ", ".join([f"{i+20}.0" for i in range(n_orb)])
+        soo_vdc_vals = " ".join([f"{i + 1}.0" for i in range(n_orb)])
+        soo_vals = ", ".join([f"{i + 20}.0" for i in range(n_orb)])
         vdc_vals = ", ".join(["19.0" for _ in range(n_orb)])
 
         lines = [f"# nom,ncor_orb= {n_freq} {n_orb}\n"]
@@ -663,7 +663,7 @@ class TestGetStaticSigma:
         lines.append(f"# s_oo= [{soo_vals}]\n")
         lines.append(f"# Vdc= [{vdc_vals}]\n")
         for freq in frequencies:
-            values = " ".join([f"{i+1}.0 0.{i % 9 + 1}" for i in range(n_orb)])
+            values = " ".join([f"{i + 1}.0 0.{i % 9 + 1}" for i in range(n_orb)])
             lines.append(f"{freq:.6f} {values}\n")
 
         sig_file = tmp_path / "sig.inp"
@@ -724,9 +724,9 @@ class TestGetStaticSigma:
         parser = SigInpParser(sig_file)
         sigma_static, _ = parser.get_static_sigma()
 
-        assert not np.allclose(
-            sigma_static[0], sigma_static[1]
-        ), "Spin-up and spin-down blocks should differ"
+        assert not np.allclose(sigma_static[0], sigma_static[1]), (
+            "Spin-up and spin-down blocks should differ"
+        )
 
 
 if __name__ == "__main__":

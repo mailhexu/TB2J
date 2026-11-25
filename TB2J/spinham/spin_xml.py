@@ -287,9 +287,9 @@ class SpinXmlParser(BaseSpinModelParser):
             i, j, R0, R1, R2 = ijR
             val = [float(x) for x in exc.find("data").text.strip().split()]
             self._exchange[(i - 1, j - 1, (R0, R1, R2))] = np.array(val) * eV / J
-        assert (
-            len(self._exchange) == n_exch
-        ), "Number of exchange terms different from nterms in xml file"
+        assert len(self._exchange) == n_exch, (
+            "Number of exchange terms different from nterms in xml file"
+        )
 
         dmi = root.find("spin_DMI_list")
         if dmi is not None:
@@ -299,9 +299,9 @@ class SpinXmlParser(BaseSpinModelParser):
                 i, j, R0, R1, R2 = ijR
                 val = [float(x) for x in dm.find("data").text.strip().split()]
                 self._dmi[(i - 1, j - 1, (R0, R1, R2))] = np.array(val) * eV / J
-            assert (
-                len(self._dmi) == n_dmi
-            ), f"Number of dmi terms {len(self._dmi)} different from nterms in xml file {n_dmi}"
+            assert len(self._dmi) == n_dmi, (
+                f"Number of dmi terms {len(self._dmi)} different from nterms in xml file {n_dmi}"
+            )
 
         bil = root.find("spin_bilinear_list")
         if bil is not None:
@@ -313,9 +313,9 @@ class SpinXmlParser(BaseSpinModelParser):
                 self._bilinear[(i - 1, j - 1, (R0, R1, R2))] = (
                     np.array(val).reshape((3, 3)) * eV / J
                 )
-            assert (
-                len(self._bilinear) == n_bil
-            ), f"Number of bilinear terms {len(self._bil)} different from nterms in xml file {n_bil}"
+            assert len(self._bilinear) == n_bil, (
+                f"Number of bilinear terms {len(self._bil)} different from nterms in xml file {n_bil}"
+            )
 
         sia = root.find("spin_sia_tensor_list")
         if sia is not None:
@@ -324,6 +324,6 @@ class SpinXmlParser(BaseSpinModelParser):
                 i = int(si.find("i").text) - 1
                 val = [float(x) for x in si.find("data").text.strip().split()]
                 self._sia_tensor[i] = np.array(val).reshape((3, 3)) * eV / J
-            assert (
-                len(self._sia_tensor) == n_sia
-            ), f"Number of SIA tensor terms {len(self._sia_tensor)} different from nterms in xml file {n_sia}"
+            assert len(self._sia_tensor) == n_sia, (
+                f"Number of SIA tensor terms {len(self._sia_tensor)} different from nterms in xml file {n_sia}"
+            )

@@ -645,7 +645,7 @@ def _prepare_eigen_gpu(tbmodel, kpts, kpt_batch_size=None):
         for i_start in range(0, nkpts, kpt_batch_size):
             i_end = min(i_start + kpt_batch_size, nkpts)
             kpts_chunk = jnp.array(kpts[i_start:i_end])
-            print(f"    Batch {i_start}-{i_end-1}")
+            print(f"    Batch {i_start}-{i_end - 1}")
             ev, evec, sk = _prepare_eigen_pipeline_jax(
                 Rpts_jax, HR_jax, SR_jax, kpts_chunk, R2kfactor
             )

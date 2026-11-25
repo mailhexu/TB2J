@@ -288,12 +288,12 @@ class MAEGreen(ExchangeNCL):
                 for i, (theta, phi, e) in enumerate(
                     zip(self.thetas, self.phis, self.es2)
                 ):
-                    f.write(f"{theta:.5f} {phi:.5f} {e*1e3:.8f}\n")
+                    f.write(f"{theta:.5f} {phi:.5f} {e * 1e3:.8f}\n")
 
         with open(fname, "w") as f:
             f.write("# theta (rad), phi(rad), MAE(total) Unit: meV\n")
             for i, (theta, phi, e) in enumerate(zip(self.thetas, self.phis, self.es)):
-                f.write(f"{theta%np.pi:.5f} {phi%(2*np.pi):.5f} {e*1e3:.8f}\n")
+                f.write(f"{theta % np.pi:.5f} {phi % (2 * np.pi):.5f} {e * 1e3:.8f}\n")
 
         # Write matrix data to MAE_matrix.dat
         with open(fname_matrix, "w") as fmat:
@@ -338,7 +338,7 @@ class MAEGreen(ExchangeNCL):
             for i, (theta, phi, e) in enumerate(zip(self.thetas, self.phis, self.es)):
                 f.write("-" * 60 + "\n")
                 f.write(f"Angle {i:03d}:   theta={theta:.5f} phi={phi:.5f} \n ")
-                f.write(f"E: {e*1e3:.8f} \n")
+                f.write(f"E: {e * 1e3:.8f} \n")
                 for iatom in range(self.natoms):
                     f.write(f"Atom {iatom:03d} orbital matrix:\n")
                     if (i, iatom) in self.es_atom_orb:

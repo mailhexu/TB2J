@@ -82,9 +82,9 @@ def _compare_exchange_out(ref_file: Path, result_file: Path) -> None:
     trimmed_ref = "\n".join(ref_lines[ref_start:])
     trimmed_result = "\n".join(result_lines[result_start:])
 
-    assert (
-        trimmed_ref == trimmed_result
-    ), f"exchange.out mismatch after header stripping: {result_file} != {ref_file}"
+    assert trimmed_ref == trimmed_result, (
+        f"exchange.out mismatch after header stripping: {result_file} != {ref_file}"
+    )
 
 
 def _run_e2e_case(case_dir: Path) -> None:
@@ -144,9 +144,9 @@ def _run_e2e_case(case_dir: Path) -> None:
         if not runner_sh.is_file():
             pytest.fail(f"No runner script found in {runner_dir}")
         proc = _run_subprocess(["bash", str(runner_sh.name)], cwd=runner_dir)
-        assert (
-            proc.returncode == 0
-        ), f"Runner failed for {case_dir.name} with code {proc.returncode}"
+        assert proc.returncode == 0, (
+            f"Runner failed for {case_dir.name} with code {proc.returncode}"
+        )
     else:
         # For real E2E tests, interpret the runner script lines and
         # invoke TB2J directly via Python modules instead of relying on
@@ -320,9 +320,9 @@ def _run_e2e_case(case_dir: Path) -> None:
     check_sh = check_dir / "check.sh"
     if case_dir.name == "1_template" and check_sh.is_file():
         check_proc = _run_subprocess(["bash", str(check_sh.name)], cwd=check_dir)
-        assert (
-            check_proc.returncode == 0
-        ), f"Check failed for {case_dir.name} with code {check_proc.returncode}"
+        assert check_proc.returncode == 0, (
+            f"Check failed for {case_dir.name} with code {check_proc.returncode}"
+        )
 
     # For non-template cases, only compare exchange.out against the
     # references. This avoids brittle comparisons of plots or pickle
@@ -349,12 +349,12 @@ def _run_e2e_case(case_dir: Path) -> None:
                 ref_path = refs_dir / "exchange.out"
                 result_path = result_dir / "exchange.out"
 
-                assert (
-                    ref_path.is_file()
-                ), f"Reference file {ref_path} missing for case {case_dir.name}"
-                assert (
-                    result_path.is_file()
-                ), f"Result file {result_path} missing for case {case_dir.name}"
+                assert ref_path.is_file(), (
+                    f"Reference file {ref_path} missing for case {case_dir.name}"
+                )
+                assert result_path.is_file(), (
+                    f"Result file {result_path} missing for case {case_dir.name}"
+                )
 
                 _compare_exchange_out(ref_path, result_path)
 
