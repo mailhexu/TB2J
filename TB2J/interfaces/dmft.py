@@ -585,7 +585,7 @@ class SigInpParser(DMFTParser):
 
         logger.info(
             f"Validated Matsubara mesh: {len(mesh)} frequencies, "
-            f"β={beta_calculated:.6f} eV⁻¹, T={1/beta_calculated:.6f} eV"
+            f"β={beta_calculated:.6f} eV⁻¹, T={1 / beta_calculated:.6f} eV"
         )
 
     def _parse_params(self) -> dict:

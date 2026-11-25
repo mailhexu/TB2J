@@ -9,7 +9,7 @@ from TB2J.io_exchange import SpinIO
 from TB2J.magnon.magnon3 import Magnon
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-REF_DIR = ROOT_DIR.parent / "Refs" / "SPRKKR_RuO2"
+REF_DIR = ROOT_DIR / "examples" / "sprkkr_magnon"
 STRUCTURE_FILE = REF_DIR / "RuO2.str"
 EXCHANGE_FILE = REF_DIR / "RuO2_JXC_Jij.dat"
 FULL_EXCHANGE_FILE = REF_DIR / "RuO2_JXC_XCPLTEN_Jij.dat"
@@ -92,6 +92,8 @@ def test_read_sprkkr_exchange_table_rejects_missing_tensor_column(tmp_path):
 def test_read_sprkkr_exchange_table_filters_full_table_to_magnetic_sites():
     from TB2J.interfaces.sprkkr import read_sprkkr_exchange_table
 
+    if not FULL_EXCHANGE_FILE.exists():
+        pytest.skip("Full SPRKKR exchange table is not included in the repository")
     table = read_sprkkr_exchange_table(FULL_EXCHANGE_FILE)
     filtered = table.filter_by_sites({1, 2})
 

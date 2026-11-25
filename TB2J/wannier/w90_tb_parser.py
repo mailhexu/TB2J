@@ -64,9 +64,9 @@ def parse_tb_file(filename):
             for n in range(n_wann):
                 for m in range(n_wann):
                     line = ssrline(io)
-                    assert (
-                        m == int(line[0]) - 1 and n == int(line[1]) - 1
-                    ), "Unexpected indices"
+                    assert m == int(line[0]) - 1 and n == int(line[1]) - 1, (
+                        "Unexpected indices"
+                    )
                     reH, imH = float(line[2]), float(line[3])
                     # H[iR][m, n] = reH + 1j * imH
                     H[R][m, n] = (reH + 1j * imH) / 2.0
@@ -85,9 +85,9 @@ def parse_tb_file(filename):
             for n in range(n_wann):
                 for m in range(n_wann):
                     line = ssrline(io)
-                    assert (
-                        m == int(line[0]) - 1 and n == int(line[1]) - 1
-                    ), f"Unexpected indices in line {line}"
+                    assert m == int(line[0]) - 1 and n == int(line[1]) - 1, (
+                        f"Unexpected indices in line {line}"
+                    )
                     pos_operator[iR, m, n, 0] = complex(float(line[2]), float(line[3]))
                     pos_operator[iR, m, n, 1] = complex(float(line[4]), float(line[5]))
                     pos_operator[iR, m, n, 2] = complex(float(line[6]), float(line[7]))

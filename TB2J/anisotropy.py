@@ -96,9 +96,6 @@ class Anisotropy:
             phi = phi * 180 / np.pi
         return theta, phi
 
-    def amplitude(self):
-        return self.amplitude
-
     def is_easy_axis(self):
         return self.amplitude > 0
 

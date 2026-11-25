@@ -420,7 +420,7 @@ class ProjectorGreenData:
             raise ValueError("hij requires explicit units")
         if self.hij.ndim != 4:
             raise ValueError(
-                "hij must have shape (nspin, nsite, nproj_site_max, " "nproj_site_max)"
+                "hij must have shape (nspin, nsite, nproj_site_max, nproj_site_max)"
             )
         if self.hij.shape[0] != 2:
             raise ValueError("collinear spin-resolved hij requires nspin=2")

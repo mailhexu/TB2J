@@ -30,7 +30,7 @@ def rotate_DM(fdf_fname, noncollinear=False):
     rotated = rotate_siesta_DM(DM, noncollinear=noncollinear)
 
     for i, rotated_DM in enumerate(rotated):
-        rotated_DM.write(f"{label}_{i+1}.DM")
+        rotated_DM.write(f"{label}_{i + 1}.DM")
     DM.write(f"{label}_0.DM")
 
     print(

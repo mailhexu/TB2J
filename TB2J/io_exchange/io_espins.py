@@ -177,7 +177,7 @@ def write_espins_input(cls, fname):
                 shell = _get_shell_index(cls, key)
 
                 myfile.write(
-                    f"  f1=    {pos_i[0]:10.6f},    {pos_i[1]:10.6f},    {pos_i[2]:10.6f}:f2=    {pos_jR[0]:10.6f},    {pos_jR[1]:10.6f},    {pos_jR[2]:10.6f}:jij=  {jval*2:10.8f}!:sh=  {shell}!:t1=  {i+1}:t2=  {j+1}\n"
+                    f"  f1=    {pos_i[0]:10.6f},    {pos_i[1]:10.6f},    {pos_i[2]:10.6f}:f2=    {pos_jR[0]:10.6f},    {pos_jR[1]:10.6f},    {pos_jR[2]:10.6f}:jij=  {jval * 2:10.8f}!:sh=  {shell}!:t1=  {i + 1}:t2=  {j + 1}\n"
                 )
 
             myfile.write("End Jij_parameters\n\n")
@@ -270,7 +270,7 @@ def write_espins_input(cls, fname):
                 pos_jR = pos_j + np.dot(R, np.linalg.inv(cls.atoms.get_cell()))
 
                 myfile.write(
-                    f"  f1=    {pos_i[0]:10.6f},    {pos_i[1]:10.6f},    {pos_i[2]:10.6f}:f2=    {pos_jR[0]:10.6f},    {pos_jR[1]:10.6f},    {pos_jR[2]:10.6f}:bij= {bval:10.6f} !t1=  {i+1}:t2=  {j+1}\n"
+                    f"  f1=    {pos_i[0]:10.6f},    {pos_i[1]:10.6f},    {pos_i[2]:10.6f}:f2=    {pos_jR[0]:10.6f},    {pos_jR[1]:10.6f},    {pos_jR[2]:10.6f}:bij= {bval:10.6f} !t1=  {i + 1}:t2=  {j + 1}\n"
                 )
 
             myfile.write("End Bij_parameters\n")

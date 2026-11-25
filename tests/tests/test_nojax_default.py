@@ -56,9 +56,9 @@ def test_default_imports_do_not_pull_gpu_or_jax():
         print("OK")
         """
     )
-    assert (
-        result.returncode == 0
-    ), f"default import pulled JAX/GPU:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"default import pulled JAX/GPU:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
     assert result.stdout.strip() == "OK"
 
 
@@ -81,9 +81,9 @@ def test_gpu_module_imports_without_jax_but_requires_it_at_use():
         print("OK")
         """
     )
-    assert (
-        result.returncode == 0
-    ), f"gpu lazy-import contract broken:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"gpu lazy-import contract broken:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
     assert result.stdout.strip() == "OK"
 
 
@@ -122,9 +122,9 @@ def test_default_exchange_runs_without_jax(tmp_path):
         print("OK")
     """
     result = _run_isolated(script)
-    assert (
-        result.returncode == 0
-    ), f"CPU exchange failed with JAX blocked:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"CPU exchange failed with JAX blocked:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
     # The canonical result must be loadable as a SpinIO.
     pickle_path = out_dir / "TB2J.pickle"
     assert pickle_path.exists(), f"TB2J.pickle not written:\n{result.stdout}"

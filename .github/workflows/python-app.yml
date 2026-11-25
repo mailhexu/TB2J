@@ -30,8 +30,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
+          pip install ruff==0.12.5 pytest
           pip install .
+          # The scientific references and sparse-SIESTA tests require fixes
+          # not yet released in HamiltonIO 0.3.8. Pin the tested development
+          # revision until a release containing them is available.
+          pip install --force-reinstall --no-deps 'git+https://github.com/mailhexu/HamiltonIO.git@0e71cfc88f721c8d15bc945c123d7fb92f96b174'
           # netcdf4 is needed by sisl for reading SIESTA .nc Hamiltonians.
           pip install netcdf4
 

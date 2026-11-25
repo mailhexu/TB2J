@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-REF_DIR = ROOT_DIR.parent / "Refs" / "SPRKKR_RuO2"
+REF_DIR = ROOT_DIR / "examples" / "sprkkr_magnon"
 STRUCTURE_FILE = REF_DIR / "RuO2.str"
 EXCHANGE_FILE = REF_DIR / "RuO2_JXC_Jij.dat"
 
