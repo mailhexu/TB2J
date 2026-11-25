@@ -141,22 +141,31 @@ def _sigma_z_field(B_local) -> np.ndarray:
 def assemble_folded_pencil(state: SpiralState, k_frac) -> tuple[np.ndarray, np.ndarray]:
     """Contract rebuild rule at one k.
 
-    ``Hq(k) = assemble_multisublattice_hq_sq(HR_up, HR_dn, SR, Rlist,
-    config, k) + interleave(B_local x sigma_z) + V_U``, with
-    ``config = MultiSublatticeSpiralConfig(q_frac, taus, phis)``; ``V_U``
-    is a rotating-frame operator added cell-periodically (R=0 block).
+    For tagged ``planar_y`` bundles use the spin-scalar SU(2) fold;
+    untagged v1 bundles retain the legacy collinear fold. Both add
+    the twisted-frame local field and cell-periodic ``V_U``.
     Returns the interleaved spinor pair ``(Hq, Sq)`` of shape
     ``(2 norb, 2 norb)``.
     """
-    from tbupy.generalized_bloch import (
-        MultiSublatticeSpiralConfig,
-        assemble_multisublattice_hq_sq,
-    )
+    if state.metadata.get("provider", {}).get("gauge") == "planar_y":
+        from tbupy.spiral_state import assemble_planar_y_hq_sq
 
-    config = MultiSublatticeSpiralConfig(state.q_frac, state.taus, state.phis)
-    Hq, Sq = assemble_multisublattice_hq_sq(
-        state.HR_up, state.HR_dn, state.SR, state.Rlist, config, k_frac
-    )
+        if not np.array_equal(state.HR_up, state.HR_dn):
+            raise ValueError("planar_y requires identical collinear channels")
+        Hq, Sq = assemble_planar_y_hq_sq(
+            state.HR_up, state.SR, state.Rlist, state.q_frac, state.taus,
+            state.phis, k_frac,
+        )
+    else:
+        from tbupy.generalized_bloch import (
+            MultiSublatticeSpiralConfig,
+            assemble_multisublattice_hq_sq,
+        )
+
+        config = MultiSublatticeSpiralConfig(state.q_frac, state.taus, state.phis)
+        Hq, Sq = assemble_multisublattice_hq_sq(
+            state.HR_up, state.HR_dn, state.SR, state.Rlist, config, k_frac
+        )
     Hq = Hq + _sigma_z_field(state.B_local)
     if state.V_U is not None:
         Hq = Hq + np.asarray(state.V_U, dtype=complex)

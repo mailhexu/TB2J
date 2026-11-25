@@ -426,6 +426,21 @@ def test_gate_hard_fail_and_override():
 # ---------------------------------------------------------------------------
 # E(q) diagnostic table
 # ---------------------------------------------------------------------------
+def test_eq_table_rebuilds_tagged_planar_y_reference():
+    ncell = 6
+    classes = [(0, 0, 1, 1.0), (0, 0, -1, 1.0)]
+    state = make_ring_state(ncell, classes, [0.0], q=Q, b_local=(5.0,), width=WIDTH)
+    meta = {**state.metadata, "provider": {"gauge": "planar_y"}}
+    state = dataclasses.replace(state, metadata_json=json.dumps(meta), efermi=0.0)
+    calc = ExchangeSpiral.from_spiral_state(
+        state, ncell=ncell, eq_table=True, q_set=[[Q, 0.0, 0.0]]
+    )
+    # At half filling the spin-mixing hopping adds in quadrature to B/2.
+    k = 2 * np.pi * (np.arange(ncell) + 0.5) / ncell
+    energy = -np.mean(np.hypot(2.5, 2 * np.sin(k) * np.sin(np.pi * Q)))
+    assert calc.compute_eq_table()["points"][0]["E_frozen_eV"] == pytest.approx(energy)
+
+
 def test_eq_table():
     classes, eps = ring_hopping_classes(6, 74)
     state = make_ring_state(6, classes, eps, q=Q, b_local=(1.5,), width=0.2)
