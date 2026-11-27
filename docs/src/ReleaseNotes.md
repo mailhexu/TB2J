@@ -3,6 +3,10 @@
 ## Current development version (v1.0.0-alpha) 
 These are the new features and changes not yet included in the official release.
 
+- `TB2J_downfold.py --method mryasov` adds an isotropic induced-moment
+  reduction in real space, with an optional independently specified
+  mediated-energy factor `--dressing`.
+
 - Computing MAE and single-ion anisotropy is now possible with the ABACUS and SIESTA interfaces. 
 This currently requires a non-official SIESTA branch which can separate the spin-orbit coupling and the exchange-correlation Hamiltonian. (see this MR: https://gitlab.com/siesta-project/siesta/-/merge\_requests/309)
 

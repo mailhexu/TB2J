@@ -6,6 +6,7 @@ from ase.dft.kpoints import monkhorst_pack
 
 from TB2J.io_exchange import SpinIO
 from TB2J.Jtensor import decompose_J_tensor
+from TB2J.mryasov import mryasov_downfold
 
 
 def ind_to_indn(ind, n=3):
@@ -143,6 +144,11 @@ class JDownfolder_pickle:
         method="lowdin",
         **kwargs,
     ):
+        if method.lower() == "mryasov" and os.path.lexists(outpath):
+            if not os.path.isdir(outpath) or os.listdir(outpath):
+                raise FileExistsError(
+                    "Mryasov output must be a new or empty directory."
+                )
         self.exc = SpinIO.load_pickle(path=inpath, fname="TB2J.pickle")
 
         self.iso_only = (self.exc.dmi_ddict is None) or iso_only
@@ -159,9 +165,75 @@ class JDownfolder_pickle:
         self.natom = len(self.atoms)
         self.Rcut = None
         self._build_atom_index()
+        if method.lower() == "mryasov":
+            self._mryasov_to_exchange(**kwargs)
+            return
         self._prepare_distance()
         Jd, Rlist = self._downfold(**kwargs)
         self._Jd_to_exchange(Jd, Rlist)
+
+    def _mryasov_to_exchange(self, dressing=1.0):
+        if set(self.metals) & set(self.ligands):
+            raise ValueError("Metal and ligand element sets must be disjoint.")
+        if not self.iM or not self.iL or min(self.iM + self.iL) < 0:
+            raise ValueError(
+                "Include all selected metals and ligands in the input exchange."
+            )
+
+        moments = np.asarray(self.exc.spinat, dtype=float)
+        metal = moments[self.ind_mag_atoms]
+        ligand = moments[[self.exc.ind_atoms[i] for i in self.iL]]
+        metal_norm = np.linalg.norm(metal, axis=1)
+        ligand_norm = np.linalg.norm(ligand, axis=1)
+        if not np.isfinite(metal).all() or not np.isfinite(ligand).all():
+            raise ValueError("Selected reference moments must be finite.")
+        if np.any(metal_norm <= 1e-10) or np.any(ligand_norm <= 1e-10):
+            raise ValueError(
+                "Mryasov normalization requires nonzero metal and ligand moments."
+            )
+        axis = metal[0] / metal_norm[0]
+        if not np.allclose(metal / metal_norm[:, None], axis, rtol=0, atol=1e-6):
+            raise ValueError("Mryasov requires parallel metal reference moments.")
+        if not np.allclose(
+            np.cross(ligand / ligand_norm[:, None], axis), 0.0, rtol=0, atol=1e-6
+        ):
+            raise ValueError("Mryasov requires collinear ligand reference moments.")
+
+        exchange = mryasov_downfold(
+            self.exc.exchange_Jdict, self.iM, self.iL, dressing=dressing
+        )
+        if any(not np.isfinite(float(j) * 1e3) for j in exchange.values()):
+            raise ValueError("Downfolded exchange is not representable in meV.")
+        self._prepare_index_spin()
+        remap = {old: new for new, old in enumerate(self.iM)}
+        # TomASD writes one block per consecutive spin pair.
+        self.Jdict = {
+            (R, remap[i], remap[j]): exchange[R, i, j]
+            for R, i, j in sorted(exchange, key=lambda key: (key[1], key[2], key[0]))
+        }
+        # SpinIO infers the saved spin inventory from bond keys.
+        connected = {i for _, a, b in self.Jdict for i in (a, b)}
+        for i in range(len(self.iM)):
+            if i not in connected:
+                self.Jdict[((0, 0, 0), i, i)] = 0.0
+        positions = self.atoms.positions[self.ind_mag_atoms]
+        cell = self.atoms.cell
+        if not np.isfinite(self.atoms.positions).all() or not np.isfinite(cell).all():
+            raise ValueError("Mryasov output requires a finite structure.")
+        self.distance_dict = {}
+        for key in self.Jdict:
+            R, i, j = key
+            vec = R @ cell + positions[j] - positions[i]
+            distance = np.linalg.norm(vec)
+            if not np.isfinite(distance):
+                raise ValueError(f"Non-finite downfolded bond distance: {key}")
+            self.distance_dict[key] = (vec, distance)
+        self.iso_only = True
+        self.DMIdict = self.Janidict = None
+        self._write_exchange(
+            colinear=not np.any(moments[:, :2]),
+            description=f"Mryasov isotropic downfolding (lambda={dressing:g})",
+        )
 
     def _build_atom_index(self):
         self.magnetic_elements = self.metals
@@ -251,16 +323,20 @@ class JDownfolder_pickle:
                                 self.DMIdict[(tuple(R), ispin, jspin)] = DMI.real
                                 self.Janidict[(tuple(R), ispin, jspin)] = Jani.real
 
+        self._write_exchange(colinear=self.iso_only)
+
+    def _write_exchange(self, *, colinear, description=None):
         io = SpinIO(
             atoms=self.atoms,
             spinat=self.exc.spinat,
             charges=self.exc.charges,
             index_spin=self.index_spin,
-            colinear=self.iso_only,
+            colinear=colinear,
             distance_dict=self.distance_dict,
             exchange_Jdict=self.Jdict,
             dmi_ddict=self.DMIdict,
             Jani_dict=self.Janidict,
+            description=description,
         )
 
         io.write_all(self.outpath)
