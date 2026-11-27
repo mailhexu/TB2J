@@ -60,18 +60,28 @@ def main():
 
     parser.add_argument(
         "--method",
-        help="The method to downfold the exchange parameter. Options are Lowdin and PWF (projected Wannier function). ",
-        type=str,
-        default="Lowdin",
+        help="Downfolding method: Lowdin, PWF (projected Wannier function), or Mryasov (isotropic).",
+        type=str.lower,
+        choices=("lowdin", "pwf", "mryasov"),
+        default="lowdin",
+    )
+    parser.add_argument(
+        "--dressing",
+        type=float,
+        help="Mryasov energy enhancement factor lambda (default: 1, bare model).",
     )
 
     args = parser.parse_args()
 
-    if len(args.metals) == []:
-        print("List of magnetic cation elements cannot be empty")
-
-    if len(args.ligands) == []:
-        print("List of ligand elements cannot be empty")
+    if not args.metals:
+        parser.error("List of magnetic metal elements cannot be empty.")
+    if not args.ligands:
+        parser.error("List of ligand elements cannot be empty.")
+    if args.dressing is not None and args.method != "mryasov":
+        parser.error("--dressing is only supported with --method mryasov.")
+    if args.method == "mryasov":
+        args.iso_only = True
+    model_options = {} if args.dressing is None else {"dressing": args.dressing}
 
     print_license()
     print("Input path:", args.inpath)
@@ -90,8 +100,10 @@ def main():
         qmesh=args.qmesh,
         iso_only=args.iso_only,
         method=args.method,
+        **model_options,
     )
     print("Downfolding finished. Results are saved in:", args.outpath)
 
 
-main()
+if __name__ == "__main__":
+    main()
